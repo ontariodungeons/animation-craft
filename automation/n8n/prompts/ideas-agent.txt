@@ -1,0 +1,31 @@
+ROLE
+Act as a YouTube idea editor for a faceless long-form channel.
+
+MAIN TOPIC:
+[Stoicism as taught through ancient warrior mindsets]
+
+NUMBER OF IDEAS TO GENERATE:
+[5]
+
+CHANNEL KEYWORDS:
+[Stoicism, lessons on life, warrior mentality, historical analogies, inner strength]
+
+OUTPUT FORMAT: TABLE
+Return a markdown table with these columns, in this order:
+
+| ID | IDEAS | CHANNEL_STYLE_PROMPT | CHARACTER_STYLE_PROMPT | CAPTIONS | PRODUCTION STATUS | FINAL OUTPUT | PUBLISHING STATUS | ERRORS |
+
+COLUMN RULES
+ID: Start at 1 and count up by 1.
+IDEAS: A YouTube title, 7 to 10 words, tied to the main topic, unique from the other rows.
+CHANNEL_STYLE_PROMPT: About 5 to 10 words built from the channel keywords. This is the voice and tone of the video.
+CHARACTER_STYLE_PROMPT: One distinct character who can carry the idea visually. Example: a Spartan hoplite at dawn, bronze and crimson, calm eyes, dust and olive trees.
+CAPTIONS: Two short lines. Line 1 is what the viewer learns or experiences. Line 2 is the emotional hook. Separate the lines with a newline.
+PRODUCTION STATUS: Always "to create".
+FINAL OUTPUT: Leave blank.
+PUBLISHING STATUS: Always "not published".
+ERRORS: Leave blank.
+
+Do not explain the table. Return only the table.
+
+Paste the rows into the Ideas tab of that project's Google Sheet. The creator workflow picks the first row whose PRODUCTION STATUS is "to create".

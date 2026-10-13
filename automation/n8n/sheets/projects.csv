@@ -1,0 +1,3 @@
+project_id,enabled,sheet_id,ideas_sheet,assets_sheet,template_id,voice_model,voice_id,image_model,youtube_privacy,youtube_region,youtube_category,text_provider
+demo,yes,REPLACE_WITH_CONTENT_SHEET_ID,Ideas,Assets,REPLACE_WITH_JSON2VIDEO_TEMPLATE_ID,elevenlabs,ODq5zmih8GrVes37Dizd,flux-pro,unlisted,US,24,openai
+second-show,no,REPLACE_WITH_SECOND_SHEET_ID,Ideas,Assets,REPLACE_WITH_JSON2VIDEO_TEMPLATE_ID,azure,en-US-AndrewNeural,flux-schnell,unlisted,US,24,claude

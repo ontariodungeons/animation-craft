@@ -1,0 +1,326 @@
+{
+  "resolution": "full-hd",
+  "quality": "high",
+  "comment": "Long-form creator. Variable names match the n8n Create Movie body.",
+  "elements": [
+    {
+      "type": "audio",
+      "src": "{{audioURL}}",
+      "volume": 0.15,
+      "duration": -1
+    }
+  ],
+  "scenes": [
+    {
+      "comment": "intro",
+      "duration": 4,
+      "elements": [
+        {
+          "type": "video",
+          "src": "{{introVideo}}",
+          "resize": "cover"
+        },
+        {
+          "type": "text",
+          "text": "{{introText}}",
+          "style": "001",
+          "duration": 4
+        }
+      ]
+    },
+    {
+      "comment": "scene 0",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.0.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.0.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.0.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 1",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.1.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.1.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.1.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 2",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.2.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.2.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.2.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 3",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.3.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.3.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.3.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 4",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.4.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.4.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.4.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 5",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.5.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.5.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.5.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 6",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.6.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.6.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.6.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 7",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.7.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.7.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.7.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 8",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.8.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.8.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.8.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 9",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.9.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.9.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.9.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 10",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.10.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.10.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.10.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 11",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.11.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.11.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.11.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 12",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.12.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.12.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.12.voiceText}}",
+          "style": "002"
+        }
+      ]
+    },
+    {
+      "comment": "scene 13",
+      "elements": [
+        {
+          "type": "image",
+          "model": "{{imageModel}}",
+          "prompt": "{{clips.13.image_prompt}}"
+        },
+        {
+          "type": "voice",
+          "model": "{{voiceModel}}",
+          "voice": "{{voiceID}}",
+          "text": "{{clips.13.voiceText}}"
+        },
+        {
+          "type": "text",
+          "text": "{{clips.13.voiceText}}",
+          "style": "002"
+        }
+      ]
+    }
+  ]
+}
