@@ -95,64 +95,12 @@ pub(super) fn help(response: Response, what: &str, why: &str, how: &str) -> Resp
     })
 }
 
-/// Compact, keyboard-editable property row. Native DragValue supports drag and direct entry.
-pub(super) fn number_row<T: egui::emath::Numeric>(
+/// Visible range control with a quiet readout, preserving native slider interaction.
+pub(super) fn slider_row<T: egui::emath::Numeric>(
     ui: &mut Ui,
     label: &str,
     value: &mut T,
     range: std::ops::RangeInclusive<T>,
-    suffix: &str,
-    accent: Color32,
-    explanation: (&str, &str, &str),
-) -> Response {
-    ui.push_id(label, |ui| {
-        ui.horizontal(|ui| {
-            let width = ui.available_width();
-            let number_width = (width * 0.4).clamp(44.0, 72.0);
-            let label_width = (width - number_width - ui.spacing().item_spacing.x).max(1.0);
-            help(
-                ui.add_sized(
-                    [label_width, 28.0],
-                    egui::Label::new(RichText::new(label).size(12.0).color(MUTED)).wrap(),
-                ),
-                explanation.0,
-                explanation.1,
-                explanation.2,
-            );
-            let response = ui
-                .scope(|ui| {
-                    ui.style_mut().visuals.override_text_color = Some(accent);
-                    ui.add_sized(
-                        [number_width, 28.0],
-                        egui::DragValue::new(value)
-                            .range(range)
-                            .speed(0.5)
-                            .max_decimals(1)
-                            .suffix(suffix),
-                    )
-                })
-                .inner;
-            help(
-                response,
-                explanation.0,
-                explanation.1,
-                &format!(
-                    "Drag sideways or click the value to type. {}",
-                    explanation.2
-                ),
-            )
-        })
-        .inner
-    })
-    .inner
-}
-
-/// Visible range control with a quiet readout, preserving native slider interaction.
-pub(super) fn slider_row(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut f32,
-    range: std::ops::RangeInclusive<f32>,
     suffix: &str,
     accent: Color32,
     explanation: (&str, &str, &str),
@@ -167,7 +115,7 @@ pub(super) fn slider_row(
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new(format!("{:.1}{}", *value, suffix))
+                    RichText::new(if T::INTEGRAL { format!("{:.0}{suffix}", value.to_f64()) } else { format!("{:.1}{suffix}", value.to_f64()) })
                         .monospace()
                         .size(11.0)
                         .color(accent),
