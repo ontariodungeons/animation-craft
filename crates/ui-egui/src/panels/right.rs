@@ -17,30 +17,12 @@ const MESH: Color32 = Color32::from_rgb(240, 190, 112);
 const EXPORT: Color32 = Color32::from_rgb(100, 215, 194);
 const READY: Color32 = Color32::from_rgb(128, 218, 154);
 
-fn slider<T: egui::emath::Numeric>(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut T,
-    range: std::ops::RangeInclusive<T>,
-    suffix: &str,
-    explanation: (&str, &str, &str),
-) {
-    let (what, why, how) = explanation;
-    help(ui.label(label), what, why, how);
-    // Keep labels above controls: long names must not disappear off a narrow inspector.
-    ui.spacing_mut().slider_width = (ui.available_width() - 66.0).max(32.0);
-    help(
-        ui.add(egui::Slider::new(value, range).suffix(suffix)),
-        what,
-        why,
-        how,
-    );
-    ui.add_space(4.0);
-}
-
 pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    // Reserve a real scrollbar gutter so full-width cards never sit under the thumb.
+    ui.spacing_mut().scroll.floating = false;
     egui::ScrollArea::vertical()
         .id_salt("right_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.spacing_mut().item_spacing.y = 6.0;
@@ -90,7 +72,16 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .ui_state
                         .selected_track_idx
                         .min(tracks.len().saturating_sub(1));
-                    ui.horizontal_wrapped(|ui| {
+                    let selected = if app.ui_state.anim_mode == AnimMode::Static {
+                        "Rest pose".to_string()
+                    } else {
+                        tracks.get(cur_idx).map(|(id, duration)| format!("{id} ({duration:.1}s)")).unwrap_or_else(|| "No tracks".to_string())
+                    };
+                    let selector = egui::ComboBox::from_id_salt("inspector_motion_track")
+                        .selected_text(selected)
+                        .width(ui.available_width())
+                        .truncate()
+                        .show_ui(ui, |ui| {
                         for (idx, (tid, tdur)) in tracks.iter().enumerate() {
                             let label = format!("{tid} ({tdur:.1}s)");
                             let selected =
@@ -126,6 +117,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             &resp_static,
                         );
                     });
+                    app.automation.add_response("motion.track_selector", "combobox", "Choose motion track", &selector.response);
                 } else {
                     ui.horizontal_wrapped(|ui| {
                         for (mode, label) in [
@@ -171,10 +163,13 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .id_salt("2. Pose Motion Range (0–100%)")
                 .default_open(true)
                 .show(ui, |ui| {
-                    slider(ui, "Playback speed", &mut app.ui_state.anim_speed, 0.25..=2.25, "×",
-                        ("Changes how quickly the preview plays.", "Slow down to inspect joints; speed up to judge the rhythm.", "Drag the slider or edit its number. 1× is normal speed; 0.5× is half speed. This is a preview setting."));
-                    slider(ui, "Motion amount", &mut app.ui_state.pose_range_pct, 0.0..=100.0, "%",
+                    let response = chrome::slider_row(ui, "Playback speed", &mut app.ui_state.anim_speed, 0.25..=2.25, "×", MOTION,
+                        ("Changes how quickly the preview plays.", "Slow down to inspect joints; speed up to judge the rhythm.", "Drag the slider or use the arrow keys when focused. 1× is normal speed; 0.5× is half speed. This is a preview setting."));
+                    app.automation.add_response("motion.speed", "slider", "Playback speed", &response);
+                    let response = chrome::slider_row(ui, "Motion amount", &mut app.ui_state.pose_range_pct, 0.0..=100.0, "%", MOTION,
                         ("Scales the preview motion and displayed motion estimates.", "Use a smaller amount to inspect subtle movement and reduce exaggerated offsets.", "Start at 35%, then increase while watching the artwork. 100% is the configured range, not a guarantee that the rig is safe."));
+
+                    app.automation.add_response("motion.amount", "slider", "Motion amount", &response);
 
                     ui.horizontal_wrapped(|ui| {
                         for (label, pct) in [
@@ -331,16 +326,12 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         (spec_path, tracks)
                     };
                     if let Some(ref tracks) = layered_spec_tracks {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(
-                                RichText::new("Preview track:")
-                                    .size(11.0)
-                                    .color(MOTION),
-                            );
-                            let cur_idx = app
-                                .ui_state
-                                .selected_track_idx
-                                .min(tracks.len().saturating_sub(1));
+                        let cur_idx = app.ui_state.selected_track_idx.min(tracks.len().saturating_sub(1));
+                        let selector = egui::ComboBox::from_id_salt("export_preview_track")
+                            .selected_text(tracks.get(cur_idx).map(|(id, _)| id.as_str()).unwrap_or("No tracks"))
+                            .width(ui.available_width())
+                        .truncate()
+                            .show_ui(ui, |ui| {
                             for (idx, (tid, dur)) in tracks.iter().enumerate() {
                                 let resp = ui
                                     .selectable_label(
@@ -361,6 +352,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 }
                             }
                         });
+                    app.automation.add_response("layered_motion.track_selector", "combobox", "Preview track", &selector.response);
                     }
                     let r_lm = widgets::action_card(
                         ui,
@@ -461,7 +453,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             });
                         }
                     }
-                    let r_fc = widgets::action_card(ui, "FilmCraft", "Open rendered video in an editing project.", "Currently uses the default Hopper video", "Import video", app.ui_state.busy_command.is_none(), ("Imports media into a FilmCraft project.", "Continue editing a rendered animation on a timeline.", "This button currently uses the pipeline default Hopper video. For other media, use export.filmcraft with an explicit media path."));
+                    let r_fc = widgets::action_card(ui, "FilmCraft", "Open rendered video in an editing project.", "Requires rendered video for this asset", "Import video", app.ui_state.busy_command.is_none(), ("Imports media into a FilmCraft project.", "Continue editing a rendered animation on a timeline.", "Render this asset first, then import its video. To choose other media, use export.filmcraft with an explicit media path."));
                     app.automation.add_response(
                         "export.filmcraft",
                         "button",
@@ -818,23 +810,23 @@ fn shape_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
     chrome::card().show(ui, |ui| {
 ui.set_width(ui.available_width());
 ui.label(RichText::new("Form & resolution").strong().color(MESH));
-ui.add(egui::Label::new(RichText::new("Drag a value, or click to enter an exact amount.").small().color(chrome::MUTED)).wrap());
-let response = chrome::number_row(ui, "Depth", &mut app.ui_state.inflation_depth_pct, 10..=100, "%", MESH, ("Controls how thick the generated volume is.", "Give a flat silhouette depth without making it excessively round.", "Start near 58%. Compare the side view and rebuild the mesh after adjusting."));
-app.automation.add_response("shape.inflation_depth_pct", "number", "Depth", &response);
-let response = chrome::number_row(ui, "Mesh detail", &mut app.ui_state.mesh_res, 12..=64, "", MESH, ("Controls the number of height slices and radial segments.", "Higher values create a smoother mesh but increase geometry and processing cost.", "Start at 32. Raise only if the exported silhouette looks faceted; rebuild to apply."));
-app.automation.add_response("shape.mesh_res", "number", "Mesh detail", &response);
-let response = chrome::number_row(ui, "View blending", &mut app.ui_state.proj_blend_pct, 0.0..=100.0, "%", MESH, ("Weights the front and quarter-view silhouette spans used during mesh generation.", "Adjust how much the quarter view contributes to the shape.", "Compare low and high values on a rebuilt mesh. This does not generate missing views."));
-app.automation.add_response("shape.proj_blend_pct", "number", "View blending", &response);
+ui.add(egui::Label::new(RichText::new("Drag a slider to adjust the shape.").small().color(chrome::MUTED)).wrap());
+let response = chrome::slider_row(ui, "Depth", &mut app.ui_state.inflation_depth_pct, 10..=100, "%", MESH, ("Controls how thick the generated volume is.", "Give a flat silhouette depth without making it excessively round.", "Start near 58%. Compare the side view and rebuild the mesh after adjusting."));
+app.automation.add_response("shape.inflation_depth_pct", "slider", "Depth", &response);
+let response = chrome::slider_row(ui, "Mesh detail", &mut app.ui_state.mesh_res, 12..=64, "", MESH, ("Controls the number of height slices and radial segments.", "Higher values create a smoother mesh but increase geometry and processing cost.", "Start at 32. Raise only if the exported silhouette looks faceted; rebuild to apply."));
+app.automation.add_response("shape.mesh_res", "slider", "Mesh detail", &response);
+let response = chrome::slider_row(ui, "View blending", &mut app.ui_state.proj_blend_pct, 0.0..=100.0, "%", MESH, ("Weights the front and quarter-view silhouette spans used during mesh generation.", "Adjust how much the quarter view contributes to the shape.", "Compare low and high values on a rebuilt mesh. This does not generate missing views."));
+app.automation.add_response("shape.proj_blend_pct", "slider", "View blending", &response);
 });
     ui.add_space(5.0);
     chrome::card().show(ui, |ui| {
 ui.set_width(ui.available_width());
 ui.label(RichText::new("Surface").strong().color(MESH));
 ui.add(egui::Label::new(RichText::new("Generated relief, not recovered image detail.").small().color(chrome::MUTED)).wrap());
-let response = chrome::number_row(ui, "Surface relief", &mut app.ui_state.relief_detail_pct, 0..=100, "%", MESH, ("Adds procedural surface variation to the volume.", "Break up a perfectly smooth surface.", "Start low and increase gradually. This is generated relief, not detail recovered from the artwork."));
-app.automation.add_response("shape.relief_detail_pct", "number", "Surface relief", &response);
-let response = chrome::number_row(ui, "Surface bump", &mut app.ui_state.bump_strength, 0.0..=100.0, "%", MESH, ("Adds to the procedural relief amplitude during mesh export.", "Introduce more surface variation when a smooth result looks too plain.", "Use small values first. This is geometric variation, not a physically based felt material."));
-app.automation.add_response("shape.bump_strength", "number", "Surface bump", &response);
+let response = chrome::slider_row(ui, "Surface relief", &mut app.ui_state.relief_detail_pct, 0..=100, "%", MESH, ("Adds procedural surface variation to the volume.", "Break up a perfectly smooth surface.", "Start low and increase gradually. This is generated relief, not detail recovered from the artwork."));
+app.automation.add_response("shape.relief_detail_pct", "slider", "Surface relief", &response);
+let response = chrome::slider_row(ui, "Surface bump", &mut app.ui_state.bump_strength, 0.0..=100.0, "%", MESH, ("Adds to the procedural relief amplitude during mesh export.", "Introduce more surface variation when a smooth result looks too plain.", "Use small values first. This is geometric variation, not a physically based felt material."));
+app.automation.add_response("shape.bump_strength", "slider", "Surface bump", &response);
 });
     ui.add_space(5.0);
     ui.add(

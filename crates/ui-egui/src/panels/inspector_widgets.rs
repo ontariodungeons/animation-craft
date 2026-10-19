@@ -116,10 +116,8 @@ pub(super) fn action_card(
     card()
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).size(14.0).strong().color(TEXT));
-            ui.add(egui::Label::new(RichText::new(description).size(12.0).color(MUTED)).wrap());
-            ui.add(egui::Label::new(RichText::new(detail).size(10.0).color(super::MESH)).wrap());
-            ui.add_space(4.0);
+            ui.label(RichText::new(title).size(12.0).strong().color(TEXT))
+                .on_hover_text(description);
             // Native buttons preserve focus/keyboard behavior; only this explicit CTA is clickable.
             let response = ui
                 .scope(|ui| {
@@ -134,10 +132,10 @@ pub(super) fn action_card(
                     visuals.widgets.active.weak_bg_fill = Color32::from_rgb(23, 66, 67);
                     ui.add_enabled_ui(enabled, |ui| {
                         ui.add_sized(
-                            [ui.available_width(), 34.0],
+                            [ui.available_width(), 28.0],
                             egui::Button::new(
                                 RichText::new(button)
-                                    .font(FontId::proportional(13.0))
+                                    .font(FontId::proportional(12.0))
                                     .strong()
                                     .color(TEXT),
                             )
@@ -147,6 +145,7 @@ pub(super) fn action_card(
                     .inner
                 })
                 .inner;
+            ui.add(egui::Label::new(RichText::new(detail).size(11.0).color(MUTED)).wrap());
             let response = if enabled {
                 response.on_hover_cursor(egui::CursorIcon::PointingHand)
             } else {

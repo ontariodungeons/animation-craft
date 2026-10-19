@@ -1092,8 +1092,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
     painter.rect_filled(rect, 8.0, bg_color);
 
     // Stage grid lines + optional Reference Planes
-    let cols = if app.ui_state.show_ref_planes { 12 } else { 8 };
-    for c in 1..cols {
+    let cols = 12;
+    for c in 1..if app.ui_state.show_ref_planes { cols } else { 1 } {
         let x = rect.left() + rect.width() * (c as f32 / cols as f32);
         painter.line_segment(
             [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
@@ -1142,13 +1142,15 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
     );
 
     if !is_layered_spec {
-        painter.line_segment(
-            [
-                Pos2::new(rect.left() + 16.0, baseline_y),
-                Pos2::new(rect.right() - 16.0, baseline_y),
-            ],
-            Stroke::new(2.0, Color32::from_rgb(72, 185, 130)),
-        );
+        if app.ui_state.show_ref_planes {
+            painter.line_segment(
+                [
+                    Pos2::new(rect.left() + 16.0, baseline_y),
+                    Pos2::new(rect.right() - 16.0, baseline_y),
+                ],
+                Stroke::new(2.0, Color32::from_rgb(72, 185, 130)),
+            );
+        }
 
         // Compute live stage lift in screen pixels so the contact shadow and baseline telemetry reflect Jump height
         let approx_char_h = (rect.height() - 110.0).clamp(150.0, 420.0);
@@ -1166,15 +1168,17 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             (measured_lift_px, measured_lift_summary)
         };
 
-        painter.text(
-            Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
-            egui::Align2::LEFT_TOP,
-            format!(
-                "GROUND BASELINE · Drift: {drift_summary} · Pose: {pose_label} · Lift: {lift_summary}"
-            ),
-            egui::FontId::monospace(11.0),
-            Color32::from_rgb(110, 220, 165),
-        );
+        if app.ui_state.show_ref_planes {
+            painter.text(
+                Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "GROUND BASELINE · Drift: {drift_summary} · Pose: {pose_label} · Lift: {lift_summary}"
+                ),
+                egui::FontId::monospace(11.0),
+                Color32::from_rgb(110, 220, 165),
+            );
+        }
 
         // Ground contact shadow (tracks stage_offset_x, narrows with airborne lift, widens slightly on crouch)
         let shadow_w = (120.0 - effective_lift_px * 0.7 + jump_kin.crouch_fraction * 18.0).clamp(48.0, 142.0);
@@ -1447,7 +1451,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             }
         }
 
-        if is_layered_spec {
+        if is_layered_spec && app.ui_state.show_ref_planes {
             let track_id = rig_eval.track_id.as_deref().unwrap_or("hover-idle");
             let visible_count = rendered_parts.len();
             painter.text(
@@ -1882,7 +1886,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         }
     });
 
-    if !is_layered_spec {
+    if !is_layered_spec && app.ui_state.show_ref_planes {
         painter.text(
             Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
             egui::Align2::LEFT_TOP,
