@@ -19,6 +19,7 @@
 )]
 
 pub mod commands;
+pub mod control_bindings;
 pub mod session;
 
 pub use commands::{CommandSpec, command_specs, find as find_command};
