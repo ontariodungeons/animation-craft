@@ -1189,11 +1189,18 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
     let frame_count = loaded_manifest.frames.len();
     let status = loaded_manifest.status.clone();
     let needs_review = status != "ready";
-    let warnings = std::fs::read_to_string(&manifest_path)
+    let manifest_json = std::fs::read_to_string(&manifest_path)
         .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let warnings = manifest_json
+        .as_ref()
         .and_then(|value| value.get("warnings").cloned())
         .unwrap_or_else(|| json!([]));
+    // Found vs expected counts and frames with cut issues (overlaps, size outliers, detached pieces).
+    let review = manifest_json
+        .as_ref()
+        .and_then(|value| value.get("review").cloned())
+        .unwrap_or(Value::Null);
 
     if let Some(asset_mut) = s.assets.get_mut(&asset_id) {
         if sheet_type == "turnaround" {
@@ -1214,6 +1221,7 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
         "status": status,
         "needs_review": needs_review,
         "warnings": warnings,
+        "review": review,
         "frame_count": frame_count,
         "frame_labels": frame_labels,
         "part_names": part_names,

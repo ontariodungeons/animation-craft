@@ -442,6 +442,78 @@ def gpu_env(gpu: bool) -> dict[str, str]:
     return env
 
 
+def opacity_series(track, lid, fps):
+    """Opacity (0..100) of one layer at every frame of a track."""
+    terms = track.get('motion', {}).get(lid, {}).get('opacity', [])
+    out = []
+    for i in range(max(1, int(round(track['duration'] * fps)))):
+        t, value = i / fps, 100.0
+        for term in terms:
+            value += (oscillate_at(term, t, 1) if term['kind'] == 'oscillate' else sampled_term(term, t, 1))[0]
+        out.append(max(0.0, min(100.0, value)))
+    return out
+
+
+def layer_checks(spec):
+    """Checks the rendered clip cannot make: which layers are on screen together.
+
+    Two layers are alternates (open and closed eyes, two mouth shapes) when neither is the other's ancestor,
+    they are of similar scale, and most of the smaller one lies on the larger one at rest; showing two at once
+    draws one over the other. Also reports layers a track lists but never shows, and layers no track uses."""
+    cw, ch = spec['canvas']
+    masks = {}
+    for lid, layer in spec['layers'].items():
+        with Image.open(layer['path']) as image:
+            alpha = np.array(image.convert('RGBA'))[:, :, 3] > 16
+        x0, y0 = int(round(layer['crop_origin'][0])), int(round(layer['crop_origin'][1]))
+        mask = np.zeros((ch, cw), bool)
+        h, w = min(alpha.shape[0], ch - y0), min(alpha.shape[1], cw - x0)
+        mask[y0:y0 + h, x0:x0 + w] = alpha[:h, :w]
+        masks[lid] = mask
+    ids = list(masks)
+
+    def ancestors(lid):
+        out, cur = set(), spec['layers'][lid].get('parent')
+        while cur:
+            out.add(cur)
+            cur = spec['layers'][cur].get('parent')
+        return out
+
+    alternates = []
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            if a in ancestors(b) or b in ancestors(a):
+                continue
+            small, large = sorted((int(masks[a].sum()), int(masks[b].sum())))
+            if not small or small / large < 0.15:
+                continue
+            shared = float(np.logical_and(masks[a], masks[b]).sum() / small)
+            if shared >= 0.6:
+                alternates.append((a, b, round(shared, 3)))
+    issues = []
+    used = set()
+    for track in spec['tracks']:
+        names = track.get('layers') or ids
+        used.update(names)
+        opacity = {lid: opacity_series(track, lid, spec['fps']) for lid in names}
+        visible = {lid: [o > 50 for o in series] for lid, series in opacity.items()}
+        for lid in names:
+            if not any(o > 1 for o in opacity[lid]):
+                issues.append({'level': 'warning', 'track': track['id'], 'layer': lid,
+                               'message': f'layer {lid} is listed but never visible in this track'})
+        for a, b, shared in alternates:
+            if a in visible and b in visible:
+                together = [f for f, (va, vb) in enumerate(zip(visible[a], visible[b])) if va and vb]
+                if together:
+                    issues.append({'level': 'error', 'track': track['id'], 'layer': f'{a}+{b}',
+                                   'message': f'{a} and {b} overlap ({shared:.0%} of the smaller) but are both visible in '
+                                              f'{len(together)} frame(s), first at frame {together[0]}'})
+    for lid in ids:
+        if lid not in used:
+            issues.append({'level': 'info', 'track': None, 'layer': lid, 'message': f'layer {lid} is not used by any track'})
+    return {'alternates': [{'layers': [a, b], 'overlap': shared} for a, b, shared in alternates], 'issues': issues}
+
+
 def run(spec_path, out_dir, only=None, stills=0, video=True, gpu=True, crf=24, resolution='full', quality='best'):
     if resolution not in RESOLUTIONS:
         raise ValueError(f'resolution must be one of {sorted(RESOLUTIONS)}, got {resolution!r}')
@@ -451,11 +523,13 @@ def run(spec_path, out_dir, only=None, stills=0, video=True, gpu=True, crf=24, r
     work = out_dir / 'work'
     work.mkdir(parents=True, exist_ok=True)
     spec = load_spec(spec_path, work)
+    layers_report = layer_checks(spec)  # on the whole spec, so "unused layer" is not judged from a subset
     if only:
         unknown = sorted(set(only) - {t['id'] for t in spec['tracks']})
         if unknown:
             raise ValueError(f'unknown track(s): {unknown}')
         spec['tracks'] = [t for t in spec['tracks'] if t['id'] in only]
+        layers_report['issues'] = [i for i in layers_report['issues'] if i['track'] is None or i['track'] in only]
     blur_spec = spec.get('motionBlur')
     blur = None
     if blur_spec:
@@ -519,11 +593,14 @@ def run(spec_path, out_dir, only=None, stills=0, video=True, gpu=True, crf=24, r
                                   for mode, suffix in (('path', ''), ('detail', '_detail'))]
         outputs.append({**entry, 'file': str(target), 'validation': {'ok': report['ok'], 'metrics': report['metrics'],
                                                                      'checks': report['checks'],
+                                                                     'not_measured': report['not_measured'],
                                                                      'failed': [c for c in report['checks'] if not c['ok']]}})
     lint = lint_spec(json.loads(Path(spec_path).read_text()))
     problems = [o['track'] for o in outputs if 'validation' in o and not o['validation']['ok']]
+    problems += sorted({i['track'] for i in layers_report['issues'] if i['level'] == 'error'} - set(problems))
     return {'ok': True, 'spec': str(Path(spec_path).resolve()), 'project': str(project), 'outputs': outputs,
-            'spec_lint': lint, 'validation_ok': not problems and not any(i['level'] == 'error' for i in lint),
+            'spec_lint': lint, 'layer_checks': layers_report,
+            'validation_ok': not problems and not any(i['level'] == 'error' for i in lint),
             'validation_failed_tracks': problems}
 
 

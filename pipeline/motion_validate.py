@@ -155,6 +155,9 @@ def analyze(path, expected_frames=None, expected_fps=None, loop=False, reference
                     'visible_area_min': int(areas_np.min()), 'visible_area_max': int(areas_np.max()),
                     'loop_iou': None if loop_iou is None else round(loop_iou, 4), 'reference': reference_report},
         'checks': checks,
+        # A check that could not run is not a pass: name it so a reader does not assume it was verified.
+        'not_measured': [] if reference else ['colors_match_reference (no reference image)',
+                                              'size_matches_reference (no reference image)'],
         'ok': all(c['ok'] for c in checks),
     }
 

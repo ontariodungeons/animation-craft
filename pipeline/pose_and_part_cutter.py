@@ -206,6 +206,32 @@ def _components(mask: np.ndarray, kind: str) -> list[tuple[int, int, int, int]]:
     return [b for row in rows for b in sorted(row, key=lambda b: b[0])]
 
 
+def _frame_review(crop: Image.Image, index: int, boxes: list, median_area: float) -> list[str]:
+    """Evidence that one cut frame may be wrong (empty list = nothing suspicious found)."""
+    issues = []
+    x0, y0, x1, y1 = boxes[index]
+    overlaps = [j for j, (a0, b0, a1, b1) in enumerate(boxes)
+                if j != index and min(x1, a1) > max(x0, a0) and min(y1, b1) > max(y0, b0)]
+    if overlaps:
+        issues.append(f'box overlaps frame(s) {overlaps}: crop may contain part of a neighbour')
+    area = (x1 - x0) * (y1 - y0)
+    if median_area and area > 1.8 * median_area:
+        issues.append(f'box is {area / median_area:.1f}x the median frame: may hold more than one figure')
+    elif median_area and area < 0.45 * median_area:
+        issues.append(f'box is {area / median_area:.2f}x the median frame: may be a fragment or partial figure')
+    labels, count = ndi.label(np.array(crop)[:, :, 3] > 20, structure=np.ones((3, 3)))
+    if count > 1:
+        areas = np.bincount(labels.ravel())[1:]
+        main = int(areas.argmax())
+        # Detached pieces big enough to see: printed numbers/captions, neighbour fragments, loose props.
+        pieces = [k for k in range(count) if k != main and areas[k] >= max(40, 0.002 * areas[main])]
+        stray_pct = 100.0 * (areas.sum() - areas[main]) / areas.sum()
+        if pieces:
+            issues.append(f'{len(pieces)} detached piece(s) besides the figure, {stray_pct:.1f}% of visible pixels '
+                          'outside it: check for source text, background residue or neighbour fragments')
+    return issues
+
+
 def _ocr_labels(source: Path) -> list[dict]:
     if not shutil.which('tesseract'):
         return []
@@ -475,6 +501,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
             layout = preset
     w,h = image.size
     warnings = list((layout or {}).get('warnings', []))
+    caption_count = None  # independent evidence of how many frames the sheet holds (OCR captions)
     definitions = (layout or {}).get('frames')
     if definitions is None:
         if kind == 'single':
@@ -551,6 +578,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                         labels = _ocr_labels(source)
                     except (subprocess.SubprocessError, OSError) as exc:
                         warnings.append(f'OCR unavailable: {type(exc).__name__}; supply labels via --layout')
+                    caption_count = len(labels) or None
                 for i,b in enumerate(boxes):
                     # Margin only 3px: avoid neighboring labels and adjacent characters.
                     box = [max(0,b[0]-3),max(0,b[1]-3),min(w,b[2]+3),min(h,b[3]+3)]
@@ -619,6 +647,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
     (output/'parts').mkdir(exist_ok=True)
     frames = []
     editable = {'frames':[], 'puppet':(layout or {}).get('puppet',{})}
+    boxes = [b for _,b,_ in crops]
+    median_area = float(np.median([(b[2]-b[0])*(b[3]-b[1]) for b in boxes]))
     for i,(item,box,crop) in enumerate(crops):
         ox,oy = (cw-crop.width)//2, ch-padding-crop.height
         # Preserve source vertical location for jumping/action poses when requested.
@@ -644,7 +674,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         alpha = np.array(crop)[:,:,3]
         touches = bool(alpha[0].any() or alpha[-1].any() or alpha[:,0].any() or alpha[:,-1].any())
         frames.append({'index':i,'label':item.get('label',name),'file':file,'size':[cw,ch],
-            'qa': {'touchesCropBoundary':touches,'alphaReviewRequired':True},
+            'qa': {'touchesCropBoundary':touches,'alphaReviewRequired':True,
+                   'issues': _frame_review(crop, i, boxes, median_area) if kind != 'exploded' else []},
             'sourceBox':list(box),'sourceOffset':[ox,oy], 'anchor':[cw/2,ch-padding],
             'atlasRect':[ax,ay,cw,ch],'uv':[ax/atlas.width,1-(ay+ch)/atlas.height,cw/atlas.width,ch/atlas.height],
             'labelSource':item.get('labelSource','explicit' if layout or kind=='exploded' else 'unlabelled'),
@@ -654,6 +685,16 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
     (output/'runtime.mjs').write_text(RUNTIME)
     (output/'layout.review.json').write_text(json.dumps(editable,indent=2))
     present = {f['label'] for f in frames}
+    # Recognised captions are a lower bound: OCR only counts captions it can match to known actions.
+    review = {'found': len(frames), 'expected': 5 if kind == 'turnaround' else None,
+              'expectedAtLeast': caption_count,
+              'flaggedFrames': [f['index'] for f in frames if f['qa']['issues']]}
+    if kind == 'action' and layout is None and caption_count is None:
+        warnings.append(f'Found {len(frames)} frames; the expected count is unknown (no OCR captions or layout), so missing figures cannot be detected.')
+    elif caption_count is not None and len(frames) < caption_count:
+        warnings.append(f'Found {len(frames)} frames but recognised {caption_count} captions; some figures were missed or merged.')
+    if review['flaggedFrames']:
+        warnings.append(f'Frames {review["flaggedFrames"]} have cut issues; see frames[].qa.issues.')
     missing = [a for a in ACTIONS if a not in present] if kind=='action' else []
     if kind=='action':
         warnings.append('Static action references are not sequential walk/run cycle frames.')
@@ -674,7 +715,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         'frames':frames,'atlas':{'file':'atlas.png','size':list(atlas.size),'columns':columns,'rows':rows,'padding':padding},
         'coordinates':'top-left pixel origin; sourceBox right/bottom exclusive; anatomical L/R; Three UV origin bottom-left',
         'alignment':'common scale; centered x, bottom aligned; explicit per-frame offsets supported',
-        'partsStatus':'needs_review', 'missingActions':missing, 'missingParts':missing_parts,
+        'partsStatus':'needs_review', 'missingActions':missing, 'missingParts':missing_parts, 'review':review,
         'animation':{'continuousCycle':False,'actions':{name:[f['index'] for f in frames if f['label']==name] for name in sorted(present)}},
         'warnings':warnings,'contactSheet':'contact_sheet.jpg','editableLayout':'layout.review.json',
         'explodedTemplate':str(TEMPLATE)}
