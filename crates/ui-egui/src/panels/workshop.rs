@@ -90,8 +90,18 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let mut col = ui.new_child(egui::UiBuilder::new().max_rect(column));
     col.set_clip_rect(left);
     egui::ScrollArea::vertical().id_salt("workshop.column").auto_shrink([false, false]).show(&mut col, |ui| {
-        ui.label(RichText::new(format!("{title} — Magic Workshop")).size(24.0).color(TEXT));
-        ui.label(RichText::new(status["brand"].as_str().unwrap_or_default()).size(11.5).italics().color(MUTED));
+        // The studio's name and intent come from its own files (intent.md / STUDIO.md), not the app.
+        let studio_name = status["studio"]["name"].as_str().unwrap_or("Workshop");
+        ui.label(RichText::new(format!("{title} — {studio_name}")).size(24.0).color(TEXT));
+        match status["studio"]["intent"].as_str() {
+            Some(intent) => {
+                let r = ui.add(egui::Label::new(RichText::new(intent.lines().next().unwrap_or_default()).size(11.5).italics().color(MUTED)).truncate());
+                r.on_hover_text(format!("{intent}\n\n{}", status["studio"]["source"].as_str().unwrap_or_default()));
+            }
+            None => {
+                ui.label(RichText::new("Add intent.md to this song's folder, or STUDIO.md beside your projects, to tell agents your audience, style and rules.").size(11.5).italics().color(MUTED));
+            }
+        }
         ui.add_space(12.0);
         let stages = status["stages"].as_array().cloned().unwrap_or_default();
         for (i, stage) in stages.iter().enumerate() {
@@ -385,6 +395,18 @@ fn stage_actions(app: &mut AnimationCraftApp, ui: &mut Ui, id: &str, stage: &Val
             let label = if stage["done"] == json!(true) { "Transcribe again" } else { "Transcribe" };
             if button(app, ui, "transcript.run", label, has_audio) {
                 run(app, "audio.transcribe", json!({"overwrite": true}));
+            }
+            if button(app, ui, "transcript.import", "Import transcript…", true)
+                && let Some(file) = rfd::FileDialog::new().set_title("Transcript (.transcript.json)").add_filter("Transcript", &["json"]).pick_file()
+            {
+                // Bring the FilmCraft project made with it, when it sits beside the transcript.
+                let name = file.file_name().and_then(|n| n.to_str()).unwrap_or_default().replace(".transcript.json", ".fcproj");
+                let fcproj = file.with_file_name(name);
+                let mut params = json!({"path": file});
+                if fcproj.is_file() {
+                    params["filmcraft_project"] = json!(fcproj);
+                }
+                run(app, "workshop.import_transcript", params);
             }
         }
         "reference" => {
