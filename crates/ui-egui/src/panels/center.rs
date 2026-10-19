@@ -2489,6 +2489,7 @@ mod tests {
                 source_size: None,
                 frames: vec![
                     ManifestFrame {
+                        qa_issues: Vec::new(),
                         index: 0,
                         label: "standing".into(),
                         file: "frames/00_standing.png".into(),
@@ -2499,6 +2500,7 @@ mod tests {
                         parts: BTreeMap::new(),
                     },
                     ManifestFrame {
+                        qa_issues: Vec::new(),
                         index: 1,
                         label: "walking".into(),
                         file: "frames/01_walking.png".into(),
@@ -2509,6 +2511,7 @@ mod tests {
                         parts: BTreeMap::new(),
                     },
                     ManifestFrame {
+                        qa_issues: Vec::new(),
                         index: 2,
                         label: "running".into(),
                         file: "frames/02_running.png".into(),
@@ -2761,6 +2764,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, label)| ManifestFrame {
+                        qa_issues: Vec::new(),
                 index,
                 label: (*label).to_string(),
                 file: format!("frames/{index:02}_{label}.png"),

@@ -765,6 +765,8 @@ pub struct ManifestPart {
 /// One frame entry from `manifest.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ManifestFrame {
+    #[serde(default)]
+    pub qa_issues: Vec<String>,
     pub index: usize,
     pub label: String,
     /// Relative file path inside `manifest_dir` (e.g. `frames/00_standing.png`).
@@ -1008,6 +1010,7 @@ impl LoadedManifest {
                     }
                 }
                 frames.push(ManifestFrame {
+                    qa_issues: item.pointer("/qa/issues").and_then(Value::as_array).map(|v| v.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),
                     index,
                     label,
                     file,
@@ -1287,6 +1290,7 @@ impl MeasuredTurnaroundRegistration {
                     [x, y]
                 });
                 frames.push(ManifestFrame {
+                    qa_issues: item.pointer("/qa/issues").and_then(Value::as_array).map(|v| v.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),
                     index,
                     label,
                     file,
