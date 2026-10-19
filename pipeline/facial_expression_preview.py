@@ -27,7 +27,7 @@ except ImportError as exc:
     sys.exit(f'Facial preview needs numpy and Pillow ({exc}); install them in the Python that runs this script')
 
 # Bump when the warp recipe, regions or validation change so older cached frames are never reused.
-RECIPE_VERSION = 3
+RECIPE_VERSION = 4
 EXPRESSIONS = {'smile': (1, 1), 'laugh': (1.12, 1.38), 'ooh': (.62, 1.18), 'mbp': (1.08, .22), 'talk': (.95, 1.15)}
 LANDMARKS = ('leftEye', 'rightEye', 'nose', 'mouthLeft', 'mouthRight')
 CALL_TIMEOUT = 45
@@ -84,8 +84,10 @@ def tool_call(binary, source, commands, deadline, output=None):
             except ValueError:
                 continue
     for row in rows:
-        if row.get('error') or row.get('result') == {'ok': False}:
-            raise RuntimeError(f"PhotoCraft reported a failed operation: {row.get('error') or row.get('command')}")
+        result = row.get('result')
+        if row.get('error') or (isinstance(result, dict) and result.get('ok') is False):
+            detail = row.get('error') or (result.get('error') if isinstance(result, dict) else None) or row.get('command')
+            raise RuntimeError(f'PhotoCraft reported a failed operation: {detail}')
     return rows
 
 
@@ -244,12 +246,17 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
         width, height = image.size
 
     identity = sha(source_hash, RECIPE_VERSION, version, expression, opening, blink, gaze, explicit)[:24]
-    final = root / identity
-    manifest = final / 'preview.json'
-    if manifest.is_file():
-        cached = json.loads(manifest.read_text())
-        if all(Path(p).is_file() for p in cached['frames']):
-            return cached
+    # Frame folders are unique per job and never modified or deleted once published, so another
+    # app instance can keep using a result while this one renders. Only the small pointer file
+    # (identity -> newest result) is replaced, atomically.
+    pointer = root / f'{identity}.json'
+    if pointer.is_file():
+        try:
+            cached = json.loads(pointer.read_text())
+            if all(Path(p).is_file() for p in cached['frames']):
+                return cached
+        except (ValueError, KeyError, TypeError):
+            pass
 
     face, face_source = locate_face(binary, source, sha(source_hash, version, 'detect')[:24], face_json, width, height, root, deadline)
     boxes, mouth = regions(face, width, height)
@@ -260,7 +267,7 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
     select = selection(boxes)
     mask = region_mask(boxes, width, height)
 
-    work = Path(tempfile.mkdtemp(dir=root, prefix='.work-'))
+    work = Path(tempfile.mkdtemp(dir=root, prefix=f'{identity}-'))
     try:
         baseline = work / 'baseline.png'
         tool_call(binary, source, select, deadline, baseline)
@@ -274,9 +281,7 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
             changed_pixels.append(inside)
             outline_pixels.append(outline)
         baseline.unlink()
-        if final.exists():
-            shutil.rmtree(final)
-        os.replace(work, final)
+        final = work
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
@@ -300,7 +305,10 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
         'verified': False,
         'audio_driven': False,
     }
-    manifest.write_text(json.dumps(result, indent=2))
+    descriptor, staged = tempfile.mkstemp(dir=root, prefix='.pointer-')
+    with os.fdopen(descriptor, 'w') as handle:
+        handle.write(json.dumps(result, indent=2))
+    os.replace(staged, pointer)
     return result
 
 
