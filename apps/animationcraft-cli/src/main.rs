@@ -301,7 +301,12 @@ fn main() {
                 s.execute(id, params).map_err(|e| e.to_string())
             };
             match res {
-                Ok(v) => outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default()),
+                Ok(v) => {
+                    if v.get("ok").and_then(Value::as_bool) == Some(false) {
+                        fail(format!("{id}: command returned ok:false: {v}"));
+                    }
+                    outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                }
                 Err(e) => fail(format!("{id}: {e}")),
             }
         }
@@ -334,10 +339,24 @@ fn main() {
                     s.execute(id, params).map_err(|e| e.to_string())
                 };
                 match res {
-                    Ok(r) => outln!(
-                        "{}",
-                        json!({"line": n + 1, "id": id, "ok": true, "result": r})
-                    ),
+                    Ok(r) => {
+                        let cmd_ok = r.get("ok").and_then(Value::as_bool) == Some(true);
+                        if !cmd_ok {
+                            outln!(
+                                "{}",
+                                json!({"line": n + 1, "id": id, "ok": false, "result": r})
+                            );
+                            failed += 1;
+                            if !a.flag_keep_going {
+                                fail(format!("{id}: command returned ok:false: {r}"));
+                            }
+                            continue;
+                        }
+                        outln!(
+                            "{}",
+                            json!({"line": n + 1, "id": id, "ok": true, "result": r})
+                        );
+                    }
                     Err(e) => {
                         outln!(
                             "{}",

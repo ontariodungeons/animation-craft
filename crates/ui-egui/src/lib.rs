@@ -1082,7 +1082,7 @@ impl UiCommand {
             ),
             UiCommand::ExportEffectcraft { output } => (
                 "export.effectcraft",
-                serde_json::json!({ "script": output }),
+                serde_json::json!({ "output": output }),
             ),
             UiCommand::ExportFilmcraft { output } => {
                 ("export.filmcraft", serde_json::json!({ "output": output }))

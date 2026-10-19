@@ -219,7 +219,7 @@ pub(super) fn parts(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 ] {
                                     let mut value = current;
                                     let response = chrome::help(ui.checkbox(&mut value, label), what, why, how);
-                                    app.automation.add_response(format!("part.{kind}.{}", part.name), "checkbox", &format!("{}: {label}", part.name), &response);
+                                    app.automation.add_response(format!("part.{kind}.{}", part.name), "checkbox", format!("{}: {label}", part.name), &response);
                                     if response.changed() {
                                         app.exec_ui_command(UiCommand::SetPartState {
                                             part: part.name.clone(), visible: (kind == "visible").then_some(value),

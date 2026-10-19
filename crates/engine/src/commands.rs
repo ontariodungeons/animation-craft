@@ -2628,6 +2628,7 @@ fn cmd_export_effectcraft(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
+#[allow(dead_code)]
 fn cmd_export_threejs(s: &mut Session, params: &Value) -> Result<Value> {
     let (asset_id, plan_path) = resolve_active_cutout_plan(s)?;
     let default_js = format!("exports/{asset_id}_threejs_puppet.js");
@@ -2677,6 +2678,7 @@ fn cmd_export_threejs(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
+#[allow(dead_code)]
 fn cmd_export_react_motion(s: &mut Session, params: &Value) -> Result<Value> {
     let (asset_id, plan_path) = resolve_active_cutout_plan(s)?;
     let default_tsx = format!("exports/{asset_id}_react_motion.tsx");
@@ -2729,6 +2731,7 @@ fn cmd_export_react_motion(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
+#[allow(dead_code)]
 fn cmd_export_blender_script(s: &mut Session, params: &Value) -> Result<Value> {
     let (asset_id, plan_path) = resolve_active_cutout_plan(s)?;
     let default_py = format!("exports/{asset_id}_blender_rig.py");
@@ -3866,85 +3869,104 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     };
     std::fs::create_dir_all(&out_dir)?;
 
-    // Build per-part Photocraft commands: layer via copy + vector mask for each named part.
+    // Build per-part Photocraft commands: duplicate the source onto a part layer, then
+    // convert its background to transparency. An optional `regions` map of
+    // part -> polygon path params adds a region mask before rasterizing.
     // Default part set covers the typical felt-puppet anatomy seen in Scout/Hopper sheets.
-    let default_parts: Vec<(&str, &str)> = vec![
-        ("head", "head"),
-        ("ears", "ears"),
-        ("torso", "torso"),
-        ("arm_L", "arm_left"),
-        ("arm_R", "arm_right"),
-        ("leg_L", "leg_left"),
-        ("leg_R", "leg_right"),
+    let default_parts: Vec<&str> = vec![
+        "head", "ears", "torso", "arm_L", "arm_R", "leg_L", "leg_R",
     ];
-    let parts_param = params.get("parts").and_then(Value::as_array).map(|arr| {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect::<Vec<_>>()
-    });
-    let parts: Vec<(String, String)> = match parts_param {
-        Some(names) => names
-            .iter()
-            .map(|n| (n.clone(), n.clone()))
-            .collect(),
-        None => default_parts.iter().map(|(n, l)| (n.to_string(), l.to_string())).collect(),
-    };
+    let parts: Vec<String> = params
+        .get("parts")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .filter(|names: &Vec<String>| !names.is_empty())
+        .unwrap_or_else(|| default_parts.iter().map(|n| n.to_string()).collect());
+
+    let tolerance = params
+        .get("tolerance")
+        .and_then(Value::as_u64)
+        .map(|v| v.clamp(1, 100) as u32)
+        .unwrap_or(25);
+    let bin = resolve_craft_cli("photocraft-cli");
 
     let mut produced_parts: Vec<Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
-    for (part_id, label) in &parts {
+    for part_id in &parts {
         let part_out = out_dir.join(format!("{part_id}.png"));
-        // Step 1: Duplicate source content onto a new layer named after the part.
+
+        // Step 1: Duplicate source content onto a new part layer.
         let step1_args = build_photocraft_run_args(
             &source_path.to_string_lossy(),
             "layer.new.layerViaCopy",
             Some(&json!({"layer": part_id}).to_string()),
             &part_out.to_string_lossy(),
         );
-        // Step 2: Add a vector mask to isolate only this part's region.
-        let step2_args = build_photocraft_run_args(
-            &part_out.to_string_lossy(),
-            "layer.vectorMask.fromPath",
-            Some(&json!({"layer": part_id, "shape": label}).to_string()),
-            &part_out.to_string_lossy(),
-        );
-        // Step 3: Rasterize the vector mask so the part becomes a standalone PNG.
-        let step3_args = build_photocraft_run_args(
-            &part_out.to_string_lossy(),
-            "layer.rasterize.vectorMask",
-            Some(&json!({"layer": part_id}).to_string()),
-            &part_out.to_string_lossy(),
-        );
-
-        let bin = resolve_craft_cli("photocraft-cli");
-        let mut step_ok = true;
-        for args in [&step1_args, &step2_args, &step3_args] {
-            match run_tool_in(&root, &bin, args) {
-                Ok(_) => {}
-                Err(e) => {
-                    step_ok = false;
-                    errors.push(format!("{part_id}: {e}"));
-                }
-            }
+        if let Err(e) = run_tool_in(&root, &bin, &step1_args) {
+            errors.push(format!("{part_id}: {e}"));
+            continue;
         }
 
-        if step_ok && part_out.is_file() {
-            if let Ok((w, h)) = image::image_dimensions(&part_out) {
-                produced_parts.push(json!({
-                    "part": part_id,
-                    "label": label,
-                    "file": part_out.to_string_lossy(),
-                    "width": w,
-                    "height": h,
-                }));
+        // Step 2 (optional): isolate a region via a polygon path mask when provided.
+        let region = params
+            .get("regions")
+            .and_then(|r| r.get(part_id.as_str()))
+            .cloned();
+        let effective_input = if let Some(region_points) = region {
+            let masked_out = out_dir.join(format!("{part_id}_masked.png"));
+            let mask_args = build_photocraft_run_args(
+                &part_out.to_string_lossy(),
+                "path.fromPoints",
+                Some(&json!({"points": region_points}).to_string()),
+                &part_out.to_string_lossy(),
+            );
+            if run_tool_in(&root, &bin, &mask_args).is_ok() {
+                let vec_args = build_photocraft_run_args(
+                    &part_out.to_string_lossy(),
+                    "layer.vectorMask.fromPath",
+                    Some(&json!({"replace": true}).to_string()),
+                    &masked_out.to_string_lossy(),
+                );
+                if run_tool_in(&root, &bin, &vec_args).is_ok() {
+                    masked_out
+                } else {
+                    part_out.clone()
+                }
             } else {
-                produced_parts.push(json!({
-                    "part": part_id,
-                    "label": label,
-                    "file": part_out.to_string_lossy(),
-                }));
+                part_out.clone()
             }
+        } else {
+            part_out.clone()
+        };
+
+        // Final step: convert remaining background color to transparency.
+        let alpha_args = build_photocraft_run_args(
+            &effective_input.to_string_lossy(),
+            "filter.other.colorToAlpha",
+            Some(&json!({"color": "#FFFFFF", "tolerance": tolerance, "dither": false}).to_string()),
+            &part_out.to_string_lossy(),
+        );
+        if let Err(e) = run_tool_in(&root, &bin, &alpha_args) {
+            errors.push(format!("{part_id}: {e}"));
+            continue;
+        }
+
+        if part_out.is_file() {
+            let (w, h) = image::image_dimensions(&part_out).unwrap_or((0, 0));
+            produced_parts.push(json!({
+                "part": part_id,
+                "label": part_id,
+                "file": part_out.to_string_lossy(),
+                "width": w,
+                "height": h,
+            }));
+        } else {
+            errors.push(format!("{part_id}: no output file written"));
         }
     }
 
@@ -4170,7 +4192,8 @@ fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value
         fill_params.insert("color".to_string(), json!(c));
     }
 
-    let fill_params_json = serde_json::to_string(&fill_params).unwrap();
+    let fill_params_json = serde_json::to_string(&fill_params)
+        .map_err(|e| EngineError::InvalidParams(format!("cannot serialize fill params: {e}")))?;
     let args = build_photocraft_run_args(
         &source_path.to_string_lossy(),
         "edit.fill",
@@ -4472,6 +4495,7 @@ fn build() -> Vec<CommandSpec> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
@@ -5275,8 +5299,18 @@ elif argv[0] == "compare-reference":
         let result = s.execute("image.break_apart", json!({"asset": "break_test"})).unwrap();
         assert_eq!(result["command"], "image.break_apart");
         assert_eq!(result["asset_id"], "break_test");
-        assert!(result["parts_produced"].is_number());
+        // Must actually produce parts, not just echo a count of 0
+        assert!(result["ok"].as_bool().unwrap_or(false), "break_apart should succeed: {result:?}");
+        assert!(result["parts_produced"].as_u64().unwrap_or(0) > 0, "should produce at least one part: {result:?}");
         assert!(result["parts"].is_array());
+        // Every produced part must have a part id, label, and file path
+        for part in result["parts"].as_array().unwrap() {
+            assert!(part.get("part").is_some());
+            assert!(part.get("label").is_some());
+            assert!(part.get("file").is_some());
+            let file = part.get("file").and_then(Value::as_str).unwrap();
+            assert!(std::path::Path::new(file).is_file(), "part file {file} must exist");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -5300,6 +5334,12 @@ elif argv[0] == "compare-reference":
         assert_eq!(result["asset_id"], "alpha_test");
         assert_eq!(result["color"], "#FFFFFF");
         assert!(result["tolerance"].is_number());
+        assert!(result["ok"].as_bool().unwrap_or(false), "color_to_alpha should succeed: {result:?}");
+        // Output file must exist and have real content
+        let out_path = result["output"].as_str().unwrap();
+        assert!(std::path::Path::new(out_path).is_file(), "output file {out_path} must exist");
+        let meta = std::fs::metadata(out_path).unwrap();
+        assert!(meta.len() > 0, "output file {out_path} must not be empty");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
