@@ -4162,6 +4162,11 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         preview_files.push(png);
     }
     let titles: Vec<String> = scene_list.iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect();
+    let full_prompts: Vec<Option<String>> = panels
+        .iter()
+        .map(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok().map(|t| t.trim().to_string()))
+        .collect();
+    write_backlot_mirror(&dir, &title, &scene_list, &panels, &full_prompts, &asset_images, total)?;
     std::fs::write(previews.join("layout.json"), json!({"page_size": [pw, ph], "images": layout, "scene_titles": titles}).to_string())?;
     s.draft_approved = false;
     write_project_file(s)?;
@@ -4178,6 +4183,62 @@ fn scene_label(i: usize, scene: &Value) -> String {
         Some("verse") => format!("Scene {} · Verse {} · {range}", i + 1, scene["verse"]),
         _ => format!("Scene {} · Instrumental · {range}", i + 1),
     }
+}
+
+/// Mirrors the storyboard into OpenMontage backlot's documents (artifacts/scene_plan.json,
+/// script.json, asset_manifest.json, plus project.json when missing), so the backlot board shows the
+/// same scenes, lyrics, panels and prompts as AnimationCraft. Regenerated on every storyboard build.
+fn write_backlot_mirror(
+    dir: &Path,
+    title: &str,
+    scene_list: &[Value],
+    panels: &[PathBuf],
+    prompts: &[Option<String>],
+    assets: &[PathBuf],
+    total: Option<f64>,
+) -> Result<()> {
+    let art = dir.join("artifacts");
+    std::fs::create_dir_all(&art)?;
+    let rel = |p: &Path| p.strip_prefix(dir).map(|r| r.display().to_string()).unwrap_or_else(|_| p.display().to_string());
+    let mut scenes = Vec::new();
+    let mut sections = Vec::new();
+    let mut manifest = Vec::new();
+    for (i, scene) in scene_list.iter().enumerate() {
+        let (id, section) = (format!("scene-{}", i + 1), format!("section-{}", i + 1));
+        let lines = scene["lines"].as_array().cloned().unwrap_or_default();
+        let text = lines.iter().map(|l| format!("{}  {}", clock(l["start"].as_f64().unwrap_or(0.0)), l["text"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+        scenes.push(json!({"id": id, "type": scene["kind"], "description": scene_label(i, scene),
+            "start_seconds": scene["start"], "end_seconds": scene["end"], "script_section_id": section}));
+        sections.push(json!({"id": section, "start_seconds": scene["start"], "end_seconds": scene["end"],
+            "text": if text.is_empty() { "(instrumental)".to_string() } else { text }}));
+        // Panel N illustrates line N of every verse, so each verse lists the panels it uses.
+        for (j, _) in lines.iter().enumerate() {
+            if let Some(panel) = panels.get(j) {
+                let stem = panel.file_stem().and_then(|n| n.to_str()).unwrap_or("panel");
+                manifest.push(json!({"id": format!("{stem}@{id}"), "type": "image", "scene_id": id, "path": rel(panel),
+                    "prompt": prompts.get(j).cloned().flatten(), "source_tool": "animationcraft"}));
+            }
+        }
+    }
+    for a in assets {
+        let stem = a.file_stem().and_then(|n| n.to_str()).unwrap_or("asset");
+        manifest.push(json!({"id": stem, "type": "image", "scene_id": null, "path": rel(a),
+            "prompt": std::fs::read_to_string(a.with_extension("prompt.md")).ok(), "source_tool": "animationcraft"}));
+    }
+    let write = |name: &str, v: Value| -> Result<()> {
+        let text = serde_json::to_string_pretty(&v).map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        std::fs::write(art.join(name), text)?;
+        Ok(())
+    };
+    write("scene_plan.json", json!({"scenes": scenes, "metadata": {"total_duration_seconds": total, "source": "animationcraft workshop.build_storyboard"}}))?;
+    write("script.json", json!({"title": title, "sections": sections}))?;
+    write("asset_manifest.json", json!({"assets": manifest}))?;
+    let project_json = dir.join("project.json");
+    if !project_json.is_file() {
+        let id = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+        std::fs::write(&project_json, json!({"version": "1.0", "project_id": id, "title": title, "pipeline_type": "animation"}).to_string())?;
+    }
+    Ok(())
 }
 
 /// Newest change among the files the storyboard is built from (panels, prompts, assets, liner
