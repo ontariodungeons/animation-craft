@@ -18,6 +18,28 @@ class TestPoseAndPartCutter(unittest.TestCase):
         image.save(path)
         return cut_sheet(path, self.root / 'output', use_ocr=False, **kwargs)
 
+    def test_image_without_part_layout_preserves_pixels_without_inventing_parts(self):
+        image = Image.new('RGBA', (160, 100))
+        draw = ImageDraw.Draw(image)
+        draw.ellipse((10, 10, 65, 85), fill=(60, 180, 150, 255))
+        draw.polygon([(110, 10), (150, 85), (80, 85)], fill=(220, 140, 60, 255))
+        for layout in (None, {'frames': [{'box': [0, 0, 160, 100], 'parts': {}}]}):
+            with self.subTest(explicit_empty_layout=layout is not None):
+                result = self.cut(image, kind='single', layout=layout, use_photocraft=False)
+                frame = result['frames'][0]
+                self.assertEqual(frame['parts'], {})
+                self.assertIsNone(frame['vectorMaskSvg'])
+                self.assertFalse(any((self.root / 'output' / 'parts').iterdir()))
+                editable = json.loads((self.root / 'output' / 'layout.review.json').read_text())
+                self.assertEqual(editable['frames'][0]['parts'], {})
+                with Image.open(self.root / 'output' / frame['file']) as rendered:
+                    x, y = frame['sourceOffset']
+                    restored = rendered.crop((x, y, x + image.width, y + image.height))
+                    self.assertEqual(restored.getchannel('A').tobytes(), image.getchannel('A').tobytes())
+                    background = Image.new('RGBA', image.size, (25, 35, 45, 255))
+                    self.assertEqual(Image.alpha_composite(background, restored).tobytes(),
+                                     Image.alpha_composite(background, image).tobytes())
+
     def test_two_rows_keep_all_ten_characters_and_pale_interiors(self):
         im = Image.new('RGB', (1000, 500), '#f5efdf')
         d = ImageDraw.Draw(im)
