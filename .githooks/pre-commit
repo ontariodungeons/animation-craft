@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 1. Block accidental staging of local agent configs or generated media
+FORBIDDEN_STAGED=$(git diff --cached --name-only | grep -E '^(\.claude/|\.commandcode/|\.hermes/|\.mcp\.json$|exports/[^t])' || true)
+if [ -n "$FORBIDDEN_STAGED" ]; then
+    echo "ERROR: Refusing to commit local agent config or generated exports:" >&2
+    echo "$FORBIDDEN_STAGED" >&2
+    exit 1
+fi
+
+# 2. If Rust files are staged, run workspace compile check + test suite on commit
+RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
+if [ -n "$RUST_STAGED" ]; then
+    echo "[pre-commit] Rust changes staged — running cargo check & cargo test..."
+    cargo check --workspace --all-targets --quiet
+    cargo test --workspace --quiet
+fi

@@ -40,6 +40,10 @@ UI, engine, pipeline, and test work from overwriting one another.
 - Run checks appropriate to your changes. Identify inherited failures against the
   base revision and report their owner; do not hide them or duplicate another
   agent's active fix. Do not bypass required PR checks.
+- During editing, use `cargo check --workspace` to verify compilation. Do not run
+  `cargo test` manually in a loop; `.githooks/pre-commit` (`git config core.hooksPath .githooks`)
+  runs the Rust check and test suite automatically when you `git commit`. Never
+  bypass hooks with `--no-verify`.
 
 ## Commit before handing work to another agent
 
