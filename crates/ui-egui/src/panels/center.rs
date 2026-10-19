@@ -643,6 +643,45 @@ fn original_info(app: &mut AnimationCraftApp, ui: &mut Ui) {
     });
 }
 
+fn apply_stage_pan_and_zoom(ui: &Ui, resp: &egui::Response, ui_state: &mut crate::UiState) {
+    if resp.dragged_by(egui::PointerButton::Primary)
+        || resp.dragged_by(egui::PointerButton::Middle)
+    {
+        let delta = resp.drag_delta();
+        ui_state.stage_offset_x = (ui_state.stage_offset_x + delta.x).clamp(-720.0, 720.0);
+        ui_state.stage_offset_y = (ui_state.stage_offset_y + delta.y).clamp(-480.0, 480.0);
+    }
+    if resp.double_clicked() {
+        fit_viewport_state(ui_state);
+    }
+    if resp.hovered() {
+        let scroll_y = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+        let zoom_delta = ui.ctx().input(|i| i.zoom_delta());
+        if scroll_y.abs() > 0.5 {
+            let factor = (1.0 + scroll_y * 0.0025).clamp(0.8, 1.25);
+            ui_state.preview_zoom = sanitize_zoom(ui_state.preview_zoom * factor);
+        } else if (zoom_delta - 1.0).abs() > 0.005 {
+            ui_state.preview_zoom = sanitize_zoom(ui_state.preview_zoom * zoom_delta);
+        }
+    }
+}
+
+fn point_in_quad(pt: Pos2, q: &[Pos2; 4]) -> bool {
+    let mut pos = 0usize;
+    let mut neg = 0usize;
+    for i in 0..4 {
+        let a = q[i];
+        let b = q[(i + 1) % 4];
+        let cross = (b.x - a.x) * (pt.y - a.y) - (b.y - a.y) * (pt.x - a.x);
+        if cross > 0.0 {
+            pos += 1;
+        } else if cross < 0.0 {
+            neg += 1;
+        }
+    }
+    pos == 0 || neg == 0
+}
+
 fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let (orig_path, cutout_rig_opt, attached_refs) = {
         let Some(asset) = app.session.current_asset() else {
@@ -660,8 +699,11 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
     let avail = ui.available_size();
     let stage_h = (avail.y - 96.0).max(220.0);
-    let (rect, _resp) =
-        ui.allocate_exact_size(Vec2::new(avail.x.max(120.0), stage_h), egui::Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(
+        Vec2::new(avail.x.max(120.0), stage_h),
+        egui::Sense::click_and_drag(),
+    );
+    apply_stage_pan_and_zoom(ui, &resp, &mut app.ui_state);
     let painter = ui.painter_at(rect);
 
     paint_transparent_checkerboard(&painter, rect, app.ui_state.light_backdrop);
@@ -1038,7 +1080,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
     let avail = ui.available_size();
     let canvas_size = Vec2::new(avail.x.max(80.0), (avail.y - 8.0).max(220.0));
-    let (rect, _resp) = ui.allocate_exact_size(canvas_size, egui::Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
+    apply_stage_pan_and_zoom(ui, &resp, &mut app.ui_state);
 
     let painter = ui.painter_at(rect);
     let bg_color = if app.ui_state.light_backdrop {
@@ -1167,6 +1210,14 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         ShadingMode::Wireframe => Color32::from_rgb(150, 225, 255),
         ShadingMode::Normals => Color32::from_rgb(175, 160, 255),
     };
+
+    #[derive(Clone, Debug)]
+    struct RenderedStagePart {
+        id: String,
+        corners: [Pos2; 4],
+        pivot: Pos2,
+    }
+    let mut rendered_parts: Vec<RenderedStagePart> = Vec::new();
 
     if let Some(rig) = cutout_rig_opt {
         let ctx = ui.ctx().clone();
@@ -1318,9 +1369,23 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 tint.b(),
                 ((tint.a() as f32) * part_opacity).round() as u8,
             );
+            let screen_corners = [
+                transform_canvas_pt(corners_canvas[0], &part.id),
+                transform_canvas_pt(corners_canvas[1], &part.id),
+                transform_canvas_pt(corners_canvas[2], &part.id),
+                transform_canvas_pt(corners_canvas[3], &part.id),
+            ];
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
             let mut mesh = egui::Mesh::with_texture(ptex.id());
             for i in 0..4 {
-                let screen_pt = transform_canvas_pt(corners_canvas[i], &part.id);
+                let screen_pt = screen_corners[i];
+                min_x = min_x.min(screen_pt.x);
+                min_y = min_y.min(screen_pt.y);
+                max_x = max_x.max(screen_pt.x);
+                max_y = max_y.max(screen_pt.y);
                 mesh.vertices.push(egui::epaint::Vertex {
                     pos: screen_pt,
                     uv: uvs[i],
@@ -1331,9 +1396,22 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             mesh.add_triangle(0, 2, 3);
             painter.add(egui::Shape::mesh(mesh));
 
+            let piv_screen =
+                transform_canvas_pt(Pos2::new(part.pivot[0], part.pivot[1]), &part.id);
+            let part_bounds = Rect::from_min_max(Pos2::new(min_x, min_y), Pos2::new(max_x, max_y));
+            app.automation.add(
+                format!("stage.part.{}", part.id),
+                "part",
+                &part.id,
+                part_bounds,
+            );
+            rendered_parts.push(RenderedStagePart {
+                id: part.id.clone(),
+                corners: screen_corners,
+                pivot: piv_screen,
+            });
+
             if app.ui_state.show_topology_numbers {
-                let piv_screen =
-                    transform_canvas_pt(Pos2::new(part.pivot[0], part.pivot[1]), &part.id);
                 let badge_pos = piv_screen + Vec2::new(0.0, -12.0);
                 painter.circle_filled(badge_pos, 9.0, Color32::from_rgb(35, 95, 165));
                 painter.text(
@@ -1371,17 +1449,17 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
         if is_layered_spec {
             let track_id = rig_eval.track_id.as_deref().unwrap_or("hover-idle");
+            let visible_count = rendered_parts.len();
             painter.text(
                 Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
                 egui::Align2::LEFT_TOP,
                 format!(
-                    "LAYERED MOTION SPEC · Track: {} ({:.2}s / {:.1}s) · Layers: {} · Bounds: {}×{} px",
+                    "LAYERED MOTION SPEC · Track: {} ({:.2}s / {:.1}s) · Visible Layers: {}/{} · Drag: pan · Scroll: zoom · Right-click: part menu",
                     track_id,
                     rig_eval.track_time,
                     rig_eval.track_duration,
+                    visible_count,
                     rig.parts.len(),
-                    bbox_w as u32,
-                    bbox_h as u32,
                 ),
                 egui::FontId::monospace(11.0),
                 Color32::from_rgb(130, 210, 255),
@@ -1509,6 +1587,26 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                     tint,
                 );
+                let piv_pos = Pos2::new(
+                    part_rect.left() + part.pivot[0] * scale,
+                    part_rect.top() + part.pivot[1] * scale,
+                );
+                app.automation.add(
+                    format!("stage.part.{}", part.name),
+                    "part",
+                    &part.name,
+                    part_rect,
+                );
+                rendered_parts.push(RenderedStagePart {
+                    id: part.name.clone(),
+                    corners: [
+                        part_rect.left_top(),
+                        part_rect.right_top(),
+                        part_rect.right_bottom(),
+                        part_rect.left_bottom(),
+                    ],
+                    pivot: piv_pos,
+                });
                 if app.ui_state.shading_mode == ShadingMode::Wireframe {
                     painter.rect_stroke(
                         part_rect,
@@ -1529,10 +1627,6 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     );
                 }
                 if app.ui_state.show_pivot_markers {
-                    let piv_pos = Pos2::new(
-                        part_rect.left() + part.pivot[0] * scale,
-                        part_rect.top() + part.pivot[1] * scale,
-                    );
                     painter.circle_filled(piv_pos, 4.0, Color32::from_rgb(255, 200, 60));
                     painter.circle_stroke(
                         piv_pos,
@@ -1594,6 +1688,199 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             Color32::from_rgb(220, 175, 120),
         );
     }
+
+    // Per-part hit testing, selection, hover highlight, and right-click context menu
+    let pointer_pos = resp.hover_pos().or_else(|| ui.ctx().pointer_interact_pos());
+    let hovered_part_id: Option<String> = pointer_pos.and_then(|pt| {
+        if !rect.contains(pt) {
+            return None;
+        }
+        rendered_parts
+            .iter()
+            .rev()
+            .find(|rp| point_in_quad(pt, &rp.corners))
+            .map(|rp| rp.id.clone())
+    });
+
+    if resp.clicked() {
+        let shift = ui.ctx().input(|i| i.modifiers.shift || i.modifiers.command);
+        if let Some(ref pid) = hovered_part_id {
+            if shift {
+                if !app.ui_state.selected_parts.remove(pid) {
+                    app.ui_state.selected_parts.insert(pid.clone());
+                }
+            } else {
+                app.ui_state.selected_parts.clear();
+                app.ui_state.selected_parts.insert(pid.clone());
+            }
+        } else if !shift {
+            app.ui_state.selected_parts.clear();
+        }
+    }
+    if resp.secondary_clicked() {
+        app.ui_state.context_menu_part = hovered_part_id.clone();
+        if let Some(ref pid) = hovered_part_id
+            && !app.ui_state.selected_parts.contains(pid)
+        {
+            app.ui_state.selected_parts.clear();
+            app.ui_state.selected_parts.insert(pid.clone());
+        }
+    }
+
+    let draw_quad = |corners: &[Pos2; 4], stroke: Stroke| {
+        for i in 0..4 {
+            painter.line_segment([corners[i], corners[(i + 1) % 4]], stroke);
+        }
+    };
+
+    for rp in &rendered_parts {
+        if app.ui_state.selected_parts.contains(&rp.id) {
+            draw_quad(
+                &rp.corners,
+                Stroke::new(2.0, Color32::from_rgb(255, 205, 65)),
+            );
+            painter.circle_filled(rp.pivot, 4.5, Color32::from_rgb(255, 205, 65));
+        }
+    }
+
+    if let Some(ref hid) = hovered_part_id
+        && let Some(rp) = rendered_parts.iter().find(|p| &p.id == hid)
+    {
+        draw_quad(
+            &rp.corners,
+            Stroke::new(2.2, Color32::from_rgb(75, 225, 255)),
+        );
+        painter.circle_stroke(
+            rp.pivot,
+            6.5,
+            Stroke::new(1.8, Color32::from_rgb(75, 225, 255)),
+        );
+        let badge_text = format!(
+            "Part: {}  (Click: select · Shift+Click: multi · Right-click: remove/options)",
+            rp.id
+        );
+        let badge_pos = Pos2::new(rect.left() + 14.0, rect.top() + 32.0);
+        painter.text(
+            badge_pos,
+            egui::Align2::LEFT_TOP,
+            badge_text,
+            egui::FontId::monospace(11.0),
+            Color32::from_rgb(105, 235, 255),
+        );
+    }
+
+    resp.context_menu(|ui| {
+        ui.set_min_width(220.0);
+        let target_part = app
+            .ui_state
+            .context_menu_part
+            .clone()
+            .or_else(|| app.ui_state.selected_parts.iter().next().cloned());
+        let selected_list: Vec<String> = app.ui_state.selected_parts.iter().cloned().collect();
+
+        if let Some(ref pid) = target_part {
+            ui.label(
+                egui::RichText::new(format!("Layer / Part: {pid}"))
+                    .strong()
+                    .color(Color32::from_rgb(130, 215, 255)),
+            );
+            if ui
+                .button(format!("Hide / Remove \"{pid}\""))
+                .on_hover_text("Hide this layer in the current session so it does not render")
+                .clicked()
+            {
+                if let Some(asset) = app.session_mut().current_asset_mut()
+                    && let Some(st) = asset.parts.iter_mut().find(|p| p.name == *pid)
+                {
+                    st.visible = false;
+                }
+                app.ui_state.selected_parts.remove(pid);
+                app.ui_state.status_line = format!(
+                    "Hidden part '{pid}' from stage (use right-click -> Show All Parts to restore)."
+                );
+                ui.close();
+            }
+            if ui
+                .button(format!("Solo \"{pid}\""))
+                .on_hover_text("Isolate only this part on the stage")
+                .clicked()
+            {
+                if let Some(asset) = app.session_mut().current_asset_mut() {
+                    for st in &mut asset.parts {
+                        st.solo = st.name == *pid;
+                    }
+                }
+                app.ui_state.status_line = format!("Soloing part '{pid}' on stage.");
+                ui.close();
+            }
+            ui.separator();
+        }
+
+        if selected_list.len() > 1 {
+            if ui
+                .button(format!(
+                    "Hide / Remove {} Selected Parts",
+                    selected_list.len()
+                ))
+                .clicked()
+            {
+                if let Some(asset) = app.session_mut().current_asset_mut() {
+                    for st in &mut asset.parts {
+                        if selected_list.contains(&st.name) {
+                            st.visible = false;
+                        }
+                    }
+                }
+                let removed = selected_list.join(", ");
+                app.ui_state.selected_parts.clear();
+                app.ui_state.status_line = format!("Hidden selected parts: {removed}");
+                ui.close();
+            }
+            ui.separator();
+        }
+
+        let any_hidden_or_solo = app
+            .session()
+            .current_asset()
+            .map(|a| a.parts.iter().any(|p| !p.visible || p.solo))
+            .unwrap_or(false);
+        if any_hidden_or_solo
+            && ui
+                .button("Show All Parts (Restore Hidden)")
+                .on_hover_text("Restore all hidden or soloed layers back to visible")
+                .clicked()
+        {
+            if let Some(asset) = app.session_mut().current_asset_mut() {
+                for st in &mut asset.parts {
+                    st.visible = true;
+                    st.solo = false;
+                }
+            }
+            app.ui_state.status_line = "Restored all hidden parts to visible.".to_string();
+            ui.close();
+        }
+
+        ui.menu_button("Toggle Parts / Sacks / Wings", |ui| {
+            if let Some(asset) = app.session_mut().current_asset_mut() {
+                for st in &mut asset.parts {
+                    ui.checkbox(&mut st.visible, &st.name);
+                }
+            }
+        });
+
+        ui.separator();
+        ui.checkbox(&mut app.ui_state.show_pivot_markers, "Show Joint Anchors");
+        ui.checkbox(&mut app.ui_state.show_topology_numbers, "Show Part Numbers");
+        ui.separator();
+        if ui.button("Fit & Center in Viewport").clicked() {
+            fit_viewport_state(&mut app.ui_state);
+            ui.close();
+        }
+        if ui.button("Actual Size (100%)").clicked() {
+            actual_size_viewport_state(&mut app.ui_state);
+            ui.close();
+        }
+    });
 
     if !is_layered_spec {
         painter.text(

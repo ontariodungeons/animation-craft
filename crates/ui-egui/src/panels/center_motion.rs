@@ -966,6 +966,46 @@ fn eval_layer_pos_at(motion_obj: &Value, layer_id: &str, t: f32) -> [f32; 2] {
     [dx, dy]
 }
 
+fn eval_follow_lean_at(
+    motion_obj: &Value,
+    target_lid: &str,
+    gain: f32,
+    limit: f32,
+    smooth: f32,
+    fps: f32,
+    duration: f32,
+    t: f32,
+) -> f32 {
+    let fps = fps.max(1.0);
+    let frames = ((duration * fps).round() as usize).max(1) + 1;
+    let mut xs = Vec::with_capacity(frames);
+    for i in 0..frames {
+        let ti = (i as f32) / fps;
+        xs.push(eval_layer_pos_at(motion_obj, target_lid, ti)[0]);
+    }
+    let alpha = if smooth <= 0.0 {
+        1.0
+    } else {
+        1.0 - (-1.0 / (fps * smooth)).exp()
+    };
+    let mut leans = Vec::with_capacity(frames);
+    let mut lean = 0.0f32;
+    for i in 0..frames {
+        let i_next = (i + 1).min(frames - 1);
+        let i_prev = i.saturating_sub(1);
+        let span = (i_next - i_prev).max(1) as f32;
+        let v = (xs[i_next] - xs[i_prev]) * fps / span;
+        let target = (gain * v).clamp(-limit, limit);
+        lean += (target - lean) * alpha;
+        leans.push(lean);
+    }
+    let f_idx = (t * fps).clamp(0.0, (frames - 1) as f32);
+    let i0 = (f_idx.floor() as usize).min(frames - 1);
+    let i1 = (i0 + 1).min(frames - 1);
+    let frac = f_idx - (i0 as f32);
+    leans[i0] + (leans[i1] - leans[i0]) * frac
+}
+
 fn evaluate_layered_motion_spec(
     rig: &LoadedCutoutRigPlan,
     ui_state: &UiState,
@@ -976,6 +1016,11 @@ fn evaluate_layered_motion_spec(
     let mut scale_xy = BTreeMap::new();
     let mut opacity = BTreeMap::new();
 
+    let fps = rig
+        .effectcraft
+        .get("fps")
+        .and_then(Value::as_f64)
+        .unwrap_or(30.0) as f32;
     let tracks = rig.effectcraft.get("tracks").and_then(Value::as_array);
     let track_opt = tracks.and_then(|arr| {
         if arr.is_empty() {
@@ -1020,6 +1065,12 @@ fn evaluate_layered_motion_spec(
         .and_then(Value::as_f64)
         .unwrap_or(5.0)
         .max(0.1) as f32;
+    let track_layers: Option<Vec<&str>> = track
+        .get("layers")
+        .and_then(Value::as_array)
+        .filter(|arr| !arr.is_empty())
+        .map(|arr| arr.iter().filter_map(Value::as_str).collect());
+
     let range_factor = (ui_state.pose_range_pct / 100.0).clamp(0.0, 1.0);
     let motion_active = (ui_state.playing || ui_state.playback_phase.abs() > 1e-6)
         && ui_state.anim_mode != AnimMode::Static
@@ -1034,9 +1085,21 @@ fn evaluate_layered_motion_spec(
 
     for part in &rig.parts {
         let lid = part.id.as_str();
+        // Match pipeline/layered_motion.py:389 — layers omitted from track.layers are not rendered.
+        if let Some(ref allowed) = track_layers
+            && !allowed.contains(&lid)
+        {
+            opacity.insert(part.id.clone(), 0.0);
+            pos_offset.insert(part.id.clone(), [0.0, 0.0]);
+            scale_xy.insert(part.id.clone(), [1.0, 1.0]);
+            angles_deg.insert(part.id.clone(), 0.0);
+            angles_rad.insert(part.id.clone(), 0.0);
+            continue;
+        }
+
         let layer_m = motion_obj.get(lid).unwrap_or(&Value::Null);
 
-        // 1. Opacity (evaluated even at t=0 so hidden blink layers stay hidden at rest)
+        // 1. Opacity (evaluated even at t=0 so hidden blink/viseme layers stay hidden at rest)
         let mut op_delta = 0.0f32;
         if let Some(op_terms) = layer_m.get("opacity").and_then(Value::as_array) {
             for term in op_terms {
@@ -1093,7 +1156,7 @@ fn evaluate_layered_motion_spec(
             ],
         );
 
-        // 4. Rotation offset (keys, oscillate, follow)
+        // 4. Rotation offset (keys, oscillate, follow with frame-stepped smoothing matching layered_motion.py)
         let mut rot_deg = 0.0f32;
         if let Some(rot_terms) = layer_m.get("rotation").and_then(Value::as_array) {
             for term in rot_terms {
@@ -1111,11 +1174,14 @@ fn evaluate_layered_motion_spec(
                             .and_then(Value::as_f64)
                             .unwrap_or(45.0)
                             .abs() as f32;
-                        let dt_vel = 0.03f32;
-                        let x0 = eval_layer_pos_at(motion_obj, target_lid, (t - dt_vel).max(0.0))[0];
-                        let x1 = eval_layer_pos_at(motion_obj, target_lid, (t + dt_vel).min(duration))[0];
-                        let vx = (x1 - x0) / (2.0 * dt_vel);
-                        rot_deg += (vx * gain).clamp(-limit, limit);
+                        let smooth = term
+                            .get("smooth")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.15)
+                            .max(0.0) as f32;
+                        rot_deg += eval_follow_lean_at(
+                            motion_obj, target_lid, gain, limit, smooth, fps, duration, t,
+                        );
                     }
                     _ => {}
                 }

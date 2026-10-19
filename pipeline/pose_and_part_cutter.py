@@ -50,8 +50,12 @@ def exploded_prompt(character: str, description: str = '') -> str:
 
 
 import os
+import sys
 import tempfile
 
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 from pipeline.craft_cli import find_craft_cli
 
 def _find_photocraft_cli() -> str | None:
@@ -120,17 +124,25 @@ def _matte(image: Image.Image, tolerance: int = 25, use_photocraft: bool = False
         bg_cand = candidates
 
     exterior_bg = ndi.binary_propagation(seeds, mask=bg_cand)
-    # Also clear any enclosed studio-background holes (e.g. between legs/arms) that are neutral studio gray/white
-    strict_hole_bg = (color_diff <= eff_tol) & (chroma <= 8) & (warmth <= 8)
-    # Protect small interior highlights (eyes, shirt collar) by only clearing enclosed holes in the lower 55% or > 80 px
+    # Also clear any enclosed studio-background or soft floor-shadow holes between legs/feet
+    strict_hole_bg = (color_diff <= max(eff_tol, 45)) & (chroma <= 14) & (warmth <= 14)
     enclosed = strict_hole_bg & (~exterior_bg)
     enc_labs, n_enc = ndi.label(enclosed)
     for cid in range(1, n_enc + 1):
-        pts_y, _ = np.where(enc_labs == cid)
-        if len(pts_y) >= 55 and pts_y.mean() > h * 0.48:
-            exterior_bg |= (enc_labs == cid)
+        pts_y, pts_x = np.where(enc_labs == cid)
+        if len(pts_y) >= 35 and pts_y.mean() > h * 0.52 and (w * 0.20 < pts_x.mean() < w * 0.80):
+            hole_mask = enc_labs == cid
+            # Trim 1px neutral studio-halo ring around the between-legs cutout hole
+            halo_ring = ndi.binary_dilation(hole_mask, iterations=2) & (~hole_mask) & (chroma <= 16) & (color_diff <= 52)
+            exterior_bg |= hole_mask | halo_ring
 
     flood_mask = ~exterior_bg
+    # Protect bright interior facial/beard features in the upper half (y < 0.50*h) from narrow-neck flood leaks
+    upper_h = int(h * 0.50)
+    if upper_h > 8:
+        upper_closed = ndi.binary_closing(flood_mask[:upper_h, :], structure=np.ones((5, 5), dtype=bool))
+        upper_filled = ndi.binary_fill_holes(upper_closed)
+        flood_mask[:upper_h, :] |= upper_filled
 
     pc_bin = _find_photocraft_cli() if use_photocraft and min(h, w) >= 48 else None
     if pc_bin and flood_mask.any():
@@ -566,15 +578,17 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         try:
             crop = _clean_crop(image,box,tolerance,use_photocraft=bool(pc_bin))
             if not item.get('parts'):
-                ca = np.array(crop)[:, :, 3] > 20
-                bx0, by0, bx1, by1 = box
-                expanded = (
-                    max(0, bx0 - (4 if ca[:, 0].any() else 0)),
-                    max(0, by0 - (4 if ca[0, :].any() else 0)),
-                    min(w, bx1 + (4 if ca[:, -1].any() else 0)),
-                    min(h, by1 + (4 if ca[-1, :].any() else 0)),
-                )
-                if expanded != box:
+                for _ in range(3):
+                    ca = np.array(crop)[:, :, 3] > 20
+                    bx0, by0, bx1, by1 = box
+                    expanded = (
+                        max(0, bx0 - (6 if ca[:, :2].any() else 0)),
+                        max(0, by0 - (6 if ca[:2, :].any() else 0)),
+                        min(w, bx1 + (6 if ca[:, -2:].any() else 0)),
+                        min(h, by1 + (6 if ca[-2:, :].any() else 0)),
+                    )
+                    if expanded == box:
+                        break
                     box = expanded
                     crop = _clean_crop(image, box, tolerance, use_photocraft=bool(pc_bin))
         except ValueError:

@@ -301,12 +301,67 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         app.ui_state.last_export = Some(out.clone());
                         app.exec_ui_command(UiCommand::ExportEffectcraft { output: out });
                     }
-                    let active_layered_spec = app
-                        .session()
-                        .current_asset()
-                        .and_then(|a| a.cutout_rig.as_ref())
-                        .filter(|r| r.rig_type == "layered_motion")
-                        .map(|r| r.plan_path.to_string_lossy().into_owned());
+                    let (active_layered_spec, layered_spec_tracks): (
+                        Option<String>,
+                        Option<Vec<(String, f32)>>,
+                    ) = {
+                        let rig = app
+                            .session()
+                            .current_asset()
+                            .and_then(|a| a.cutout_rig.as_ref())
+                            .filter(|r| r.rig_type == "layered_motion");
+                        let spec_path = rig.map(|r| r.plan_path.to_string_lossy().into_owned());
+                        let tracks = rig
+                            .and_then(|r| r.effectcraft.get("tracks"))
+                            .and_then(serde_json::Value::as_array)
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|t| {
+                                        let id = t.get("id")?.as_str()?.to_string();
+                                        let dur = t
+                                            .get("duration")
+                                            .and_then(serde_json::Value::as_f64)
+                                            .unwrap_or(2.0)
+                                            as f32;
+                                        Some((id, dur))
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .filter(|v| !v.is_empty());
+                        (spec_path, tracks)
+                    };
+                    if let Some(ref tracks) = layered_spec_tracks {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new("Preview track:")
+                                    .size(11.0)
+                                    .color(MOTION),
+                            );
+                            let cur_idx = app
+                                .ui_state
+                                .selected_pose_idx
+                                .min(tracks.len().saturating_sub(1));
+                            for (idx, (tid, dur)) in tracks.iter().enumerate() {
+                                let resp = ui
+                                    .selectable_label(
+                                        cur_idx == idx,
+                                        format!("{tid} ({dur:.1}s)"),
+                                    )
+                                    .on_hover_text(format!("Switch live stage preview to track '{tid}'"));
+                                app.automation.add_response(
+                                    format!("layered_motion.track.{tid}"),
+                                    "toggle",
+                                    tid,
+                                    &resp,
+                                );
+                                if resp.clicked() {
+                                    app.ui_state.selected_pose_idx = idx;
+                                    app.ui_state.playback_phase = 0.0;
+                                    app.ui_state.playing = true;
+                                }
+                            }
+                        });
+                    }
                     let r_lm = widgets::action_card(
                         ui,
                         "Layered motion",

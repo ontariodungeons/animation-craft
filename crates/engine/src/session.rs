@@ -450,6 +450,7 @@ impl LoadedCutoutRigPlan {
             .or_else(|| parts.first().map(|p| p.full_layer_path.clone()))
             .unwrap_or_default();
 
+        let mut cutout_asset_sheet = None;
         if has_composite_pixels {
             let pad = 12u32;
             let cx0 = character_bbox[0].saturating_sub(pad);
@@ -464,6 +465,10 @@ impl LoadedCutoutRigPlan {
                 if comp_crop.save(&comp_dest).is_ok() {
                     source_image = comp_dest;
                 }
+                let sheet_dest = cache_dir.join(format!("{character_id}_layer_contact_sheet.png"));
+                if render_layer_contact_sheet(&comp_crop, [cx0, cy0], &parts, &sheet_dest) {
+                    cutout_asset_sheet = Some(sheet_dest);
+                }
             }
         }
 
@@ -475,12 +480,157 @@ impl LoadedCutoutRigPlan {
             canvas_size: [cw, ch],
             character_bbox,
             photocraft_psd: None,
-            cutout_asset_sheet: None,
+            cutout_asset_sheet,
             parts,
             pose_library: Value::Null,
             effectcraft: raw.clone(),
         })
     }
+}
+
+fn render_layer_contact_sheet(
+    comp_crop: &image::RgbaImage,
+    comp_origin: [u32; 2],
+    parts: &[CutoutRigPart],
+    dest: &Path,
+) -> bool {
+    let sw = 1440u32;
+    let sh = 900u32;
+    let mut sheet = image::RgbaImage::from_pixel(sw, sh, image::Rgba([20, 24, 32, 255]));
+
+    let draw_rect_border =
+        |img: &mut image::RgbaImage, x0: u32, y0: u32, x1: u32, y1: u32, col: [u8; 4]| {
+            let x1 = x1.min(img.width().saturating_sub(1));
+            let y1 = y1.min(img.height().saturating_sub(1));
+            if x1 <= x0 || y1 <= y0 {
+                return;
+            }
+            for x in x0..=x1 {
+                img.put_pixel(x, y0, image::Rgba(col));
+                img.put_pixel(x, y1, image::Rgba(col));
+            }
+            for y in y0..=y1 {
+                img.put_pixel(x0, y, image::Rgba(col));
+                img.put_pixel(x1, y, image::Rgba(col));
+            }
+        };
+
+    let draw_pivot_dot = |img: &mut image::RgbaImage, px: i32, py: i32| {
+        for dy in -5i32..=5 {
+            for dx in -5i32..=5 {
+                let x = px + dx;
+                let y = py + dy;
+                if x >= 0 && y >= 0 && (x as u32) < img.width() && (y as u32) < img.height() {
+                    let d2 = dx * dx + dy * dy;
+                    if d2 <= 16 {
+                        img.put_pixel(x as u32, y as u32, image::Rgba([255, 85, 85, 255]));
+                    } else if d2 <= 25 {
+                        img.put_pixel(x as u32, y as u32, image::Rgba([255, 220, 90, 255]));
+                    }
+                }
+            }
+        }
+    };
+
+    // 1. Left composite overview panel (x: 24..504, y: 24..876)
+    let lx0 = 24u32;
+    let ly0 = 24u32;
+    let lw = 480u32;
+    let lh = 852u32;
+    for y in ly0..(ly0 + lh) {
+        for x in lx0..(lx0 + lw) {
+            sheet.put_pixel(x, y, image::Rgba([28, 34, 46, 255]));
+        }
+    }
+    draw_rect_border(&mut sheet, lx0, ly0, lx0 + lw - 1, ly0 + lh - 1, [68, 84, 112, 255]);
+
+    let cw = comp_crop.width().max(1) as f32;
+    let ch = comp_crop.height().max(1) as f32;
+    let comp_scale = ((lw - 48) as f32 / cw).min((lh - 48) as f32 / ch).clamp(0.1, 2.5);
+    let dw = (cw * comp_scale).round().max(1.0) as u32;
+    let dh = (ch * comp_scale).round().max(1.0) as u32;
+    let resized_comp =
+        image::imageops::resize(comp_crop, dw, dh, image::imageops::FilterType::Triangle);
+    let ox = lx0 + (lw.saturating_sub(dw)) / 2;
+    let oy = ly0 + (lh.saturating_sub(dh)) / 2;
+    image::imageops::overlay(&mut sheet, &resized_comp, ox as i64, oy as i64);
+
+    for part in parts {
+        let bx0 = ox as i32
+            + (((part.crop_box[0] as i32 - comp_origin[0] as i32) as f32) * comp_scale).round()
+                as i32;
+        let by0 = oy as i32
+            + (((part.crop_box[1] as i32 - comp_origin[1] as i32) as f32) * comp_scale).round()
+                as i32;
+        let bx1 = ox as i32
+            + (((part.crop_box[2] as i32 - comp_origin[0] as i32) as f32) * comp_scale).round()
+                as i32;
+        let by1 = oy as i32
+            + (((part.crop_box[3] as i32 - comp_origin[1] as i32) as f32) * comp_scale).round()
+                as i32;
+        draw_rect_border(
+            &mut sheet,
+            bx0.max(lx0 as i32) as u32,
+            by0.max(ly0 as i32) as u32,
+            bx1.max(0) as u32,
+            by1.max(0) as u32,
+            [80, 190, 245, 210],
+        );
+        let px = ox as i32 + ((part.pivot[0] - comp_origin[0] as f32) * comp_scale).round() as i32;
+        let py = oy as i32 + ((part.pivot[1] - comp_origin[1] as f32) * comp_scale).round() as i32;
+        draw_pivot_dot(&mut sheet, px, py);
+    }
+
+    // 2. Right grid of individual layer cards (x: 524..1416, y: 24..876)
+    let gx0 = 524u32;
+    let gy0 = 24u32;
+    let gw = 892u32;
+    let gh = 852u32;
+    let cols = 3u32;
+    let rows = ((parts.len() as u32).div_ceil(cols)).max(1);
+    let pad = 12u32;
+    let cell_w = (gw.saturating_sub(pad * (cols - 1))) / cols;
+    let cell_h = (gh.saturating_sub(pad * (rows - 1))) / rows;
+
+    for (idx, part) in parts.iter().enumerate() {
+        let col = (idx as u32) % cols;
+        let row = (idx as u32) / cols;
+        let cx0 = gx0 + col * (cell_w + pad);
+        let cy0 = gy0 + row * (cell_h + pad);
+        for y in cy0..(cy0 + cell_h).min(sh) {
+            for x in cx0..(cx0 + cell_w).min(sw) {
+                sheet.put_pixel(x, y, image::Rgba([30, 36, 48, 255]));
+            }
+        }
+        draw_rect_border(
+            &mut sheet,
+            cx0,
+            cy0,
+            cx0 + cell_w - 1,
+            cy0 + cell_h - 1,
+            [72, 92, 124, 255],
+        );
+        if let Ok(pimg) = image::open(&part.cropped_path) {
+            let prgba = pimg.to_rgba8();
+            let pw = prgba.width().max(1) as f32;
+            let ph = prgba.height().max(1) as f32;
+            let pscale = (((cell_w.saturating_sub(28)) as f32 / pw)
+                .min((cell_h.saturating_sub(28)) as f32 / ph))
+            .clamp(0.1, 2.2);
+            let tdw = (pw * pscale).round().max(1.0) as u32;
+            let tdh = (ph * pscale).round().max(1.0) as u32;
+            let resized_part =
+                image::imageops::resize(&prgba, tdw, tdh, image::imageops::FilterType::Triangle);
+            let pox = cx0 + (cell_w.saturating_sub(tdw)) / 2;
+            let poy = cy0 + (cell_h.saturating_sub(tdh)) / 2;
+            image::imageops::overlay(&mut sheet, &resized_part, pox as i64, poy as i64);
+            let piv_x = pox as i32 + (part.pivot_uv[0] * tdw as f32).round() as i32;
+            let piv_y = poy as i32 + (part.pivot_uv[1] * tdh as f32).round() as i32;
+            draw_pivot_dot(&mut sheet, piv_x, piv_y);
+        }
+    }
+
+    sheet.save(dest).is_ok()
 }
 
 fn compute_alpha_bounds(rgba: &image::RgbaImage, threshold: u8) -> Option<[u32; 4]> {

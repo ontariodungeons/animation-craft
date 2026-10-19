@@ -309,15 +309,30 @@ fn surface() -> egui::Frame {
         .inner_margin(10)
 }
 
+fn default_viewer_state_for_asset(asset: Option<&Asset>) -> ViewerState {
+    let mut st = ViewerState::default();
+    if let Some(a) = asset
+        && a.pose_manifest.is_none()
+        && a.cutout_rig.is_some()
+    {
+        st.mode = Mode::Parts;
+        st.rig_parts = true;
+        st.anchors = true;
+        st.labels = true;
+    }
+    st
+}
+
 pub(super) fn navigation(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let Some(asset_id) = app.session().active_asset.clone() else {
         return;
     };
+    let default_st = default_viewer_state_for_asset(app.session().current_asset());
     let state_id = egui::Id::new(("pose_viewer", &asset_id));
     let mut state = ui
         .ctx()
         .data_mut(|d| d.get_temp::<ViewerState>(state_id))
-        .unwrap_or_default();
+        .unwrap_or(default_st);
     // Sidebar selection is consumed by show(); reflect that destination in this header too.
     if ui
         .ctx()
@@ -359,11 +374,12 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .map(|m| m.frames.as_slice())
         .unwrap_or(&[]);
     app.ui_state.selected_pose_idx = navigate(app.ui_state.selected_pose_idx, 0, frames.len());
+    let default_st = default_viewer_state_for_asset(Some(&asset));
     let state_id = egui::Id::new(("pose_viewer", &asset.id));
     let mut state = ui
         .ctx()
         .data_mut(|d| d.get_temp::<ViewerState>(state_id))
-        .unwrap_or_default();
+        .unwrap_or(default_st);
     if ui
         .ctx()
         .data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset.id))))

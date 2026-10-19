@@ -128,6 +128,8 @@ pub struct UiState {
     pub busy_command: Option<String>,
     pub last_export: Option<String>,
     pub last_motion_validation: Option<Value>,
+    pub selected_parts: std::collections::BTreeSet<String>,
+    pub context_menu_part: Option<String>,
     pub status_line: String,
 }
 
@@ -194,6 +196,8 @@ impl Default for UiState {
             busy_command: None,
             last_export: None,
             last_motion_validation: None,
+            selected_parts: std::collections::BTreeSet::new(),
+            context_menu_part: None,
             status_line:
                 "Hopper active — PhotoCraft transparent import + Attached Reference Sheets ready"
                     .to_string(),
@@ -580,8 +584,63 @@ impl AnimationCraftApp {
                 if let Some(mode) = params.get("mode").and_then(Value::as_str) {
                     self.apply_mode_str(mode);
                 }
-                if let Some(preset) = params.get("preset").and_then(Value::as_str) {
+                if let Some( preset ) = params.get("preset").and_then(Value::as_str) {
                     self.dispatch("asset.load_manifest", json!({ "preset": preset }))?;
+                }
+                if let Some(track_val) = params.get("track") {
+                    if let Some(idx) = track_val.as_u64() {
+                        self.ui_state.selected_pose_idx = idx as usize;
+                        self.ui_state.playback_phase = 0.0;
+                    } else if let Some(tid) = track_val.as_str() {
+                        let found_idx = self
+                            .session
+                            .current_asset()
+                            .and_then(|a| a.cutout_rig.as_ref())
+                            .and_then(|r| r.effectcraft.get("tracks"))
+                            .and_then(Value::as_array)
+                            .and_then(|arr| {
+                                arr.iter().position(|t| {
+                                    t.get("id").and_then(Value::as_str) == Some(tid)
+                                })
+                            });
+                        if let Some(idx) = found_idx {
+                            self.ui_state.selected_pose_idx = idx;
+                            self.ui_state.playback_phase = 0.0;
+                        }
+                    }
+                }
+                if let Some(t_sec) = params.get("phase_sec").and_then(Value::as_f64) {
+                    self.ui_state.playback_phase = t_sec.max(0.0) * 4.2;
+                }
+                if let Some(hide_id) = params.get("hide_part").and_then(Value::as_str)
+                    && let Some(asset) = self.session.current_asset_mut()
+                {
+                    for st in &mut asset.parts {
+                        if st.name == hide_id {
+                            st.visible = false;
+                        }
+                    }
+                    self.ui_state.selected_parts.remove(hide_id);
+                }
+                if let Some(show_id) = params.get("show_part").and_then(Value::as_str)
+                    && let Some(asset) = self.session.current_asset_mut()
+                {
+                    for st in &mut asset.parts {
+                        if st.name == show_id {
+                            st.visible = true;
+                        }
+                    }
+                }
+                if params
+                    .get("restore_parts")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    && let Some(asset) = self.session.current_asset_mut()
+                {
+                    for st in &mut asset.parts {
+                        st.visible = true;
+                        st.solo = false;
+                    }
                 }
                 self.ui_state.status_line = format!(
                     "CLI updated view: asset={:?}, tab={:?}, mode={:?}, yaw={:.0}°, range={:.0}%",
@@ -596,6 +655,8 @@ impl AnimationCraftApp {
                     "active_asset": self.session.active_asset,
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
+                    "selected_pose_idx": self.ui_state.selected_pose_idx,
+                    "playback_phase": self.ui_state.playback_phase,
                     "yaw_deg": self.ui_state.yaw_deg,
                     "pose_range_pct": self.ui_state.pose_range_pct,
                 }));
@@ -677,6 +738,8 @@ impl AnimationCraftApp {
                     self.ui_state.playback_phase = 0.0;
                     self.ui_state.stage_offset_x = 0.0;
                     self.ui_state.stage_offset_y = 0.0;
+                    self.ui_state.selected_parts.clear();
+                    self.ui_state.context_menu_part = None;
                 }
                 self.ui_state.selected_pose_idx = 0;
                 self.ui_state.status_line = format!(
