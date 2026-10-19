@@ -612,7 +612,7 @@ impl AnimationCraftApp {
                     }
                 }
                 if let Some(t_sec) = params.get("phase_sec").and_then(Value::as_f64) {
-                    self.ui_state.playback_phase = t_sec.max(0.0) * 4.2;
+                    self.ui_state.playback_phase = t_sec.max(0.0) * 3.2;
                 }
                 if let Some(hide_id) = params.get("hide_part").and_then(Value::as_str)
                     && let Some(asset) = self.session.current_asset_mut()
