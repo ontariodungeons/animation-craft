@@ -1798,13 +1798,14 @@ mod tests {
     }
 
     #[test]
-    fn narrow_layout_and_all_eleven_presets_render_without_clipping_or_stale_selection() {
+    fn narrow_layout_and_eleven_assets_render_without_clipping_or_stale_selection() {
         let (root, mut app) = fixture("narrow_presets");
         let ctx = egui::Context::default();
         let narrow = Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 560.0));
 
-        for (idx, preset) in crate::panels::header::PRESETS.iter().enumerate() {
-            let slug = preset.slug();
+        for idx in 0..11 {
+            let slug = format!("asset_{idx}");
+            let slug = slug.as_str();
             let frame_count = if idx % 2 == 0 { 3 } else { 1 };
             let frames = (0..frame_count)
                 .map(|i| ManifestFrame {

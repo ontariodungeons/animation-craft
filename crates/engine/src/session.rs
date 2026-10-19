@@ -20,6 +20,8 @@ pub struct Session {
     pub assets: HashMap<String, Asset>,
     /// Ordered connections in this project, separate from decoded/cached assets.
     pub project_assets: Vec<ProjectAsset>,
+    /// The open `.acproj` file; `None` until `project.new` or `project.open`.
+    pub project_path: Option<PathBuf>,
     /// Currently active asset id in the session.
     pub active_asset: Option<String>,
     /// Active 2D preview mode (`idle`, `walk`, `run`, `jump`, `wave`, `static`).
@@ -40,13 +42,8 @@ impl Default for Session {
         Self {
             cwd,
             assets: HashMap::new(),
-            project_assets: vec![ProjectAsset {
-                id: "hopper".into(),
-                name: "Hopper".into(),
-                preset: Some("hopper".into()),
-                path: None,
-                kind: "auto".into(),
-            }],
+            project_assets: Vec::new(),
+            project_path: None,
             active_asset: None,
             preview_mode: "walk".to_string(),
             preview_speed: 1.0,

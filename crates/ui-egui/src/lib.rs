@@ -79,6 +79,12 @@ pub struct UiState {
     pub rename_asset: Option<(String, String)>,
     pub image_path: Option<String>,
     pub demo_preset: Option<DemoPreset>,
+    /// Home screen "Recent" list (newest first), kept in the user's config folder.
+    pub recent_projects: Vec<String>,
+    /// Where Recent is kept; `None` (tests, headless use) keeps it in memory only.
+    pub recent_file: Option<std::path::PathBuf>,
+    /// The project the recent list last recorded, to notice opens from any caller.
+    pub recorded_project: Option<std::path::PathBuf>,
     pub archetype: String,
     pub q1_motion: String,
     pub q2_parts: String,
@@ -147,7 +153,10 @@ impl Default for UiState {
             connect_asset_kind: "auto".into(),
             rename_asset: None,
             image_path: None,
-            demo_preset: Some(DemoPreset::Hopper),
+            demo_preset: None,
+            recent_projects: Vec::new(),
+            recent_file: None,
+            recorded_project: None,
             archetype: "humanoid_biped".to_string(),
             q1_motion: "walk_jump_talk".to_string(),
             q2_parts: String::new(),
@@ -204,9 +213,7 @@ impl Default for UiState {
             selected_parts: std::collections::BTreeSet::new(),
             context_menu_part: None,
             selected_track_idx: 0,
-            status_line:
-                "Hopper active — PhotoCraft transparent import + Attached Reference Sheets ready"
-                    .to_string(),
+            status_line: "Ready".to_string(),
         }
     }
 }
@@ -316,10 +323,10 @@ impl DemoPreset {
 }
 
 impl AnimationCraftApp {
-    /// Create a new app and load the default Hopper manifest if present in the workspace.
+    /// Create a new app with no project open; the Home screen offers New and Open.
     pub fn new() -> Self {
         let (job_tx, job_rx) = mpsc::channel();
-        let mut app = Self {
+        let app = Self {
             session: Session::default(),
             ui_state: UiState::default(),
             textures: HashMap::new(),
@@ -335,9 +342,15 @@ impl AnimationCraftApp {
             job_tx,
             job_rx,
         };
-        // Load Hopper's real manifests and measured telemetry if available on disk.
-        let _ = app.dispatch("project.load_asset", json!({ "id": "hopper" }));
         app
+    }
+
+    /// Keep the Home screen's Recent list in the user's config folder (the desktop app).
+    pub fn use_recent_projects_file(&mut self) {
+        if let Some(file) = panels::start::user_recent_file() {
+            self.ui_state.recent_projects = panels::start::load_recent(&file);
+            self.ui_state.recent_file = Some(file);
+        }
     }
 
     /// Start a localhost JSON-lines TCP control server (`--control <port>`).
@@ -876,6 +889,19 @@ impl AnimationCraftApp {
             ],
             stroke,
         );
+
+        crate::panels::start::shortcuts(self, ui.ctx());
+        crate::panels::start::record_open_project(self);
+        if !crate::panels::start::project_open(self) {
+            for rect in [left_rect, right_rect] {
+                let mut side = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(6.0)));
+                crate::panels::start::empty_panel(&mut side);
+            }
+            let mut home = ui.new_child(egui::UiBuilder::new().max_rect(center_rect));
+            home.set_clip_rect(center_rect);
+            crate::panels::start::start_screen(self, &mut home);
+            return;
+        }
 
         {
             let inner = left_rect.shrink(6.0);
@@ -1710,6 +1736,9 @@ mod tests {
     #[test]
     fn headless_control_tick_services_commands_and_times_out_screenshots_when_window_suspended() {
         let mut app = AnimationCraftApp::new();
+        // The workspace tabs show once a project is open (Home shows before that).
+        let project = std::env::temp_dir().join(format!("ac_headless_{}.acproj", std::process::id()));
+        app.dispatch("project.new", json!({"path": project, "overwrite": true})).unwrap();
         let ctx = egui::Context::default();
         let (tx, rx) = mpsc::channel();
         app.control_rx = Some(rx);
@@ -1771,6 +1800,7 @@ mod tests {
         let screenshot_res = reply_rx4.recv_timeout(Duration::from_millis(500)).unwrap();
         assert!(screenshot_res.is_err());
         assert!(screenshot_res.unwrap_err().contains("timed out"));
+        let _ = std::fs::remove_file(&project);
     }
 }
 

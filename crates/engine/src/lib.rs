@@ -81,6 +81,7 @@ impl Session {
         let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         check_param_types(spec.params, &params)?;
         (spec.enabled)(self).map_err(|e| EngineError::CommandFailed(id.to_string(), e))?;
+        let assets_before = serde_json::to_value(&self.project_assets).ok();
         let out = (spec.run)(self, &params)?;
         // Older import/load callers also appear in the shared project outliner.
         if matches!(id, "intake.validate" | "asset.load_manifest")
@@ -101,6 +102,12 @@ impl Session {
                     .map(|path| commands::resolve_workspace_path(self, path)),
                 kind: "auto".into(),
             });
+        }
+        // Keep the open project file in step with its asset connections.
+        if self.project_path.is_some()
+            && serde_json::to_value(&self.project_assets).ok() != assets_before
+        {
+            commands::write_project_file(self)?;
         }
         if spec.journal {
             self.record(out.clone());

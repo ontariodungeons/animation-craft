@@ -1,5 +1,5 @@
 //! Desktop menus use the same project/workflow commands as the toolbar and CLI.
-use crate::panels::header::{action_button, command, export_mp4, preset_picker, reload};
+use crate::panels::header::{action_button, command, export_mp4, reload};
 use crate::{AnimationCraftApp, CenterTab, UiCommand};
 use egui::Ui;
 use serde_json::json;
@@ -13,7 +13,33 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .is_some_and(|a| a.cutout_rig.is_some());
     egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if action_button(app, ui, "menu.import", "+ Import Asset…", ready) {
+            let project = crate::panels::start::project_open(app);
+            let new_label = format!("New Project…   {}", crate::panels::start::shortcut_text(ui.ctx(), egui::Key::N));
+            if action_button(app, ui, "menu.new_project", &new_label, ready) {
+                ui.close();
+                crate::panels::start::new_project(app);
+            }
+            let open_label = format!("Open Project…   {}", crate::panels::start::shortcut_text(ui.ctx(), egui::Key::O));
+            if action_button(app, ui, "menu.open_project", &open_label, ready) {
+                ui.close();
+                crate::panels::start::open_project(app);
+            }
+            ui.add_enabled_ui(ready && !app.ui_state.recent_projects.is_empty(), |ui| {
+                ui.menu_button("Open Recent", |ui| {
+                    for path in app.ui_state.recent_projects.clone() {
+                        if ui.button(&path).clicked() {
+                            crate::panels::start::open_recent(app, &path);
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            if action_button(app, ui, "menu.close_project", "Close Project", ready && project) {
+                command(app, "project.close", json!({}));
+                ui.close();
+            }
+            ui.separator();
+            if action_button(app, ui, "menu.import", "+ Import Asset…", ready && project) {
                 app.ui_state.connect_asset_open = true;
                 ui.close();
             }
@@ -27,12 +53,11 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
             }
         });
         ui.menu_button("Project Assets", |ui| {
-            if action_button(app, ui, "menu.connect", "+ Add / Connect Asset…", true) {
+            if action_button(app, ui, "menu.connect", "+ Add / Connect Asset…", crate::panels::start::project_open(app)) {
                 app.ui_state.connect_asset_open = true;
                 ui.close();
             }
             ui.add_enabled_ui(ready, |ui| {
-                ui.menu_button("Connect Preset", |ui| preset_picker(app, ui));
                 let entries = app.session.project_assets.clone();
                 ui.separator();
                 for entry in entries {

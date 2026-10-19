@@ -3202,7 +3202,107 @@ fn project_index(s: &Session, params: &Value) -> Result<usize> {
 }
 
 fn cmd_project_list_assets(s: &mut Session, _: &Value) -> Result<Value> {
-    Ok(json!({"assets": s.project_assets, "active_asset": s.active_asset}))
+    Ok(json!({"assets": s.project_assets, "active_asset": s.active_asset, "project": s.project_path}))
+}
+
+/// Identifies an AnimationCraft project file (`.acproj`, JSON).
+const PROJECT_FORMAT: &str = "animationcraft.project";
+
+fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
+    let raw = params
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|p| !p.trim().is_empty())
+        .ok_or_else(|| EngineError::InvalidParams("missing project 'path'".into()))?;
+    let mut path = resolve_workspace_path(s, raw);
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("acproj")) {
+        path.as_mut_os_string().push(".acproj");
+    }
+    Ok(path)
+}
+
+/// Writes the open project's asset connections to its `.acproj` file.
+pub(crate) fn write_project_file(s: &Session) -> Result<()> {
+    let Some(path) = &s.project_path else { return Ok(()) };
+    let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
+    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": s.project_assets});
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let text = serde_json::to_string_pretty(&doc)
+        .map_err(|e| EngineError::InvalidParams(format!("cannot encode project: {e}")))?;
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
+/// A fresh session for a project: no assets loaded, nothing active.
+fn reset_for_project(s: &mut Session, path: PathBuf, assets: Vec<crate::ProjectAsset>) {
+    *s = Session {
+        cwd: s.cwd.clone(),
+        blender_available: s.blender_available,
+        project_assets: assets,
+        project_path: Some(path),
+        ..Session::default()
+    };
+}
+
+fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
+    let path = project_file_path(s, params)?;
+    let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    if path.exists() && !overwrite {
+        return Err(EngineError::InvalidParams(format!(
+            "project already exists: {} (pass \"overwrite\": true to replace it)",
+            path.display()
+        )));
+    }
+    reset_for_project(s, path.clone(), Vec::new());
+    write_project_file(s)?;
+    Ok(json!({"ok": true, "project": path, "assets": s.project_assets}))
+}
+
+fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
+    let path = project_file_path(s, params)?;
+    let text = std::fs::read_to_string(&path)?;
+    let doc: Value = serde_json::from_str(&text)
+        .map_err(|e| EngineError::InvalidParams(format!("invalid project file: {e}")))?;
+    if doc.get("format").and_then(Value::as_str) != Some(PROJECT_FORMAT) {
+        return Err(EngineError::InvalidParams(format!(
+            "{} is not an AnimationCraft project",
+            path.display()
+        )));
+    }
+    let assets: Vec<crate::ProjectAsset> =
+        serde_json::from_value(doc.get("assets").cloned().unwrap_or_else(|| json!([])))
+            .map_err(|e| EngineError::InvalidParams(format!("invalid project assets: {e}")))?;
+    // Report connections whose source files have moved instead of dropping them.
+    let missing: Vec<&str> = assets
+        .iter()
+        .filter(|a| a.path.as_ref().is_some_and(|p| !p.exists()))
+        .map(|a| a.id.as_str())
+        .collect::<Vec<_>>();
+    let missing = json!(missing);
+    reset_for_project(s, path.clone(), assets);
+    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing}))
+}
+
+fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
+    if params.get("path").is_some() {
+        s.project_path = Some(project_file_path(s, params)?);
+    }
+    if s.project_path.is_none() {
+        return Err(EngineError::InvalidParams("no project is open; use project.new".into()));
+    }
+    write_project_file(s)?;
+    Ok(json!({"ok": true, "project": s.project_path}))
+}
+
+fn cmd_project_close(s: &mut Session, _: &Value) -> Result<Value> {
+    *s = Session {
+        cwd: s.cwd.clone(),
+        blender_available: s.blender_available,
+        ..Session::default()
+    };
+    Ok(json!({"ok": true}))
 }
 
 fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
@@ -4134,6 +4234,42 @@ fn build() -> Vec<CommandSpec> {
             cmd_project_list_assets
         ),
         cmd!(
+            "project.new",
+            "New Project",
+            ["File"],
+            Some("Cmd+N"),
+            "{\"path\":\"folder/name.acproj\",\"overwrite\":false}",
+            always,
+            cmd_project_new
+        ),
+        cmd!(
+            "project.open",
+            "Open Project",
+            ["File"],
+            Some("Cmd+O"),
+            "{\"path\":\"folder/name.acproj\"}",
+            always,
+            cmd_project_open
+        ),
+        cmd!(
+            "project.save",
+            "Save Project",
+            ["File"],
+            Some("Cmd+S"),
+            "{\"path\":\"optional_save_as.acproj\"}",
+            always,
+            cmd_project_save
+        ),
+        cmd!(
+            "project.close",
+            "Close Project",
+            ["File"],
+            None,
+            "{}",
+            always,
+            cmd_project_close
+        ),
+        cmd!(
             "project.add_asset",
             "Connect Project Asset",
             ["Project Assets"],
@@ -4425,9 +4561,13 @@ mod tests {
         image::RgbaImage::new(12, 20).save(&path).unwrap();
         let mut s = Session::default();
         let initial = s.execute("project.list_assets", json!({})).unwrap();
-        assert_eq!(initial["assets"].as_array().unwrap().len(), 1);
-        assert_eq!(initial["assets"][0]["id"], "hopper");
+        assert!(initial["assets"].as_array().unwrap().is_empty());
         assert!(s.last_result.is_none());
+        let project = dir.join("demo.acproj");
+        s.execute("project.new", json!({"path": dir.join("demo")})).unwrap();
+        assert!(s.execute("project.new", json!({"path": project})).is_err());
+        s.execute("project.add_asset", json!({"id": "first", "path": path}))
+            .unwrap();
         s.execute("project.add_asset", json!({"id": "custom", "path": path}))
             .unwrap();
         assert!(
@@ -4441,7 +4581,7 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(s.project_assets[0].id, "hopper");
+        assert_eq!(s.project_assets[0].id, "first");
         s.execute(
             "project.update_asset",
             json!({"id": "custom", "name": "My Character", "index": 0}),
@@ -4449,6 +4589,10 @@ mod tests {
         .unwrap();
         assert_eq!(s.project_assets[0].name, "My Character");
         assert_eq!(s.project_assets[0].id, "custom");
+        // The project file follows every connection change and reopens with nothing loaded.
+        s.execute("project.open", json!({"path": project})).unwrap();
+        assert_eq!(s.project_assets[0].name, "My Character");
+        assert!(s.active_asset.is_none());
         s.execute("project.load_asset", json!({"id": "custom"}))
             .unwrap();
         assert_eq!(s.current_asset().unwrap().width, 12);
@@ -4529,7 +4673,7 @@ mod tests {
                 assert!(asset.pose_manifest.is_some());
             }
         }
-        assert_eq!(s.project_assets.len(), 3);
+        assert_eq!(s.project_assets.len(), 2);
         assert!(
             s.execute("project.add_asset", json!({"path": "missing.png"}))
                 .is_err()

@@ -27,6 +27,7 @@ fn main() -> eframe::Result {
     }
 
     let mut app = AnimationCraftApp::new();
+    app.use_recent_projects_file();
 
     if let Some(port) = args.control_port {
         app.start_control_server(port);

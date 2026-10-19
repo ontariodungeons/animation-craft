@@ -1,22 +1,8 @@
 //! Project connections and workflow actions shared by the menus and toolbar.
 use super::chrome;
-use crate::{AnimationCraftApp, CenterTab, DemoPreset, UiCommand};
+use crate::{AnimationCraftApp, CenterTab, UiCommand};
 use egui::{RichText, Ui};
 use serde_json::{Value, json};
-
-pub(crate) const PRESETS: [DemoPreset; 11] = [
-    DemoPreset::Hopper,
-    DemoPreset::Whiskers,
-    DemoPreset::Puddles,
-    DemoPreset::Jenny,
-    DemoPreset::Rusty,
-    DemoPreset::MissHayley,
-    DemoPreset::OldMac,
-    DemoPreset::Scout,
-    DemoPreset::MrPuddles,
-    DemoPreset::Sam,
-    DemoPreset::Maisy,
-];
 
 pub(crate) fn command(app: &mut AnimationCraftApp, id: &'static str, params: Value) {
     app.exec_ui_command(UiCommand::Engine { id, params });
@@ -28,35 +14,6 @@ pub(crate) fn connect(app: &mut AnimationCraftApp, params: Value) {
     {
         command(app, "project.load_asset", json!({"id": id}));
         app.ui_state.center_tab = CenterTab::OriginalView;
-    }
-}
-
-pub(crate) fn preset_picker(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    for preset in PRESETS {
-        let response = ui.button(preset.label());
-        app.automation.add_response(
-            format!("preset.{}", preset.slug()),
-            "button",
-            preset.label(),
-            &response,
-        );
-        if response.clicked() {
-            let existing = app
-                .session
-                .project_assets
-                .iter()
-                .find(|a| a.preset.as_deref() == Some(preset.slug()))
-                .map(|a| a.id.clone());
-            if let Some(id) = existing {
-                command(app, "project.load_asset", json!({"id": id}));
-            } else {
-                connect(
-                    app,
-                    json!({"preset": preset.slug(), "name": preset.label()}),
-                );
-            }
-            ui.close();
-        }
     }
 }
 
@@ -157,7 +114,7 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .color(chrome::TEXT),
                 );
                 ui.separator();
-                if action_button(app, ui, "toolbar.import", "+ Import Asset", true) {
+                if action_button(app, ui, "toolbar.import", "+ Import Asset", super::start::project_open(app)) {
                     app.ui_state.connect_asset_open = true;
                 }
                 if action_button(
@@ -210,8 +167,6 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
         egui::Window::new("Add / Connect Asset").open(&mut open).collapsible(false)
             .default_width(460.0).show(ctx, |ui| {
                 ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
-                    ui.menu_button("Connect a preset", |ui| preset_picker(app, ui));
-                    ui.separator();
                     ui.label("Image, pose sheet, turnaround, or cutout rig manifest");
                     ui.horizontal(|ui| {
                         ui.label("Path");
