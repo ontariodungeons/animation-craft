@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from PIL import Image, ImageDraw
 
@@ -101,6 +102,29 @@ class TestPoseAndPartCutter(unittest.TestCase):
             ox,oy=f['sourceOffset']
             self.assertEqual(cut.getpixel((ox+50,oy+70)),(80,100,130,255))
 
+    def test_runtime_template_is_versioned_and_missing_template_fails(self):
+        from pipeline import pose_and_part_cutter as cutter
+        # The runtime template ships with the package, not the gitignored exports/ tree.
+        self.assertTrue(cutter.TEMPLATE.is_file(), f'missing runtime template: {cutter.TEMPLATE}')
+        self.assertNotIn('exports', cutter.TEMPLATE.parts)
+
+        # An exploded cut works with no exports/ directory present (fresh checkout).
+        im = Image.new('RGBA', (900, 900))
+        d = ImageDraw.Draw(im)
+        for i in range(8):
+            x, y = i % 3 * 300, i // 3 * 300
+            d.ellipse((x + 90, y + 70, x + 210, y + 230), fill=(170, 70, 35, 255))
+        result = self.cut(im, kind='exploded')
+        self.assertEqual(len(result['frames']), 8)
+        for frame in result['frames']:
+            with Image.open(self.root / 'output' / frame['file']) as img:
+                self.assertGreater(img.getchannel('A').getextrema()[1], 0)
+
+        # If the runtime dependency cannot be resolved, cutting fails clearly.
+        with mock.patch.object(cutter, 'TEMPLATE', self.root / 'missing_template.json'):
+            with self.assertRaises(FileNotFoundError):
+                cutter.cut_sheet(self.root / 'input.png', self.root / 'output2', kind='exploded', use_ocr=False)
+
     def test_blank_and_invalid_layout_fail(self):
         with self.assertRaisesRegex(ValueError, 'foreground|characters'):
             self.cut(Image.new('RGB', (300,200), 'white'), kind='action')
@@ -108,8 +132,10 @@ class TestPoseAndPartCutter(unittest.TestCase):
             self.cut(Image.new('RGB', (300,200), 'white'), layout={'frames':[{'box':[-1,0,300,200]}]})
 
     def test_exploded_template_has_exact_slots_and_prompt(self):
-        from pipeline.pose_and_part_cutter import exploded_prompt
-        spec = json.loads(Path('exports/templates/exploded_part_sheet_spec.json').read_text())
+        from pipeline.pose_and_part_cutter import exploded_prompt, TEMPLATE
+        self.assertTrue(TEMPLATE.is_file(), f'runtime template must be versioned: {TEMPLATE}')
+        self.assertNotIn('exports', TEMPLATE.parts, 'runtime template must not live in gitignored exports/')
+        spec = json.loads(TEMPLATE.read_text())
         self.assertEqual(len(spec['slots']), 8)
         prompt = exploded_prompt('Hopper', 'cream rabbit with orange vest')
         self.assertIn('Hopper', prompt)

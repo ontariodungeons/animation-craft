@@ -22,8 +22,12 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 from scipy import ndimage as ndi
 
-TEMPLATE = Path(__file__).resolve().parents[1] / 'exports/templates/exploded_part_sheet_spec.json'
-VAULT_LAYOUTS = TEMPLATE.with_name('vault_sheet_layouts.json')
+# The exploded-sheet runtime template is versioned with the package (not the
+# gitignored exports/ tree) so sheet cutting works from a clean checkout.
+TEMPLATE = Path(__file__).resolve().parent / 'templates' / 'exploded_part_sheet_spec.json'
+# Optional user/vault-specific layouts stay at the legacy export location and are
+# not required; sheets without a preset layout fall back to auto-detection.
+VAULT_LAYOUTS = Path(__file__).resolve().parents[1] / 'exports' / 'templates' / 'vault_sheet_layouts.json'
 ACTIONS = ['standing', 'walking', 'running', 'jumping', 'dancing', 'waving',
            'clapping', 'looking_up', 'looking_down', 'arms_wide']
 VIEWS = ['front', 'quarter_front', 'side', 'opposite_quarter', 'back']
