@@ -5233,28 +5233,28 @@ elif argv[0] == "compare-reference":
     fn image_break_apart_requires_asset() {
         let mut s = Session::default();
         let err = s.execute("image.break_apart", json!({})).unwrap_err();
-        assert!(matches!(err, EngineError::CommandFailed(_, _)));
+        assert!(matches!(err, EngineError::InvalidParams(_)));
     }
 
     #[test]
     fn image_puppet_warp_requires_asset() {
         let mut s = Session::default();
         let err = s.execute("image.puppet_warp", json!({})).unwrap_err();
-        assert!(matches!(err, EngineError::CommandFailed(_, _)));
+        assert!(matches!(err, EngineError::InvalidParams(_)));
     }
 
     #[test]
     fn image_color_to_alpha_requires_asset() {
         let mut s = Session::default();
         let err = s.execute("image.color_to_alpha", json!({})).unwrap_err();
-        assert!(matches!(err, EngineError::CommandFailed(_, _)));
+        assert!(matches!(err, EngineError::InvalidParams(_)));
     }
 
     #[test]
     fn image_content_aware_fill_requires_asset() {
         let mut s = Session::default();
         let err = s.execute("image.content_aware_fill", json!({})).unwrap_err();
-        assert!(matches!(err, EngineError::CommandFailed(_, _)));
+        assert!(matches!(err, EngineError::InvalidParams(_)));
     }
 
     #[test]
