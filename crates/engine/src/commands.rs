@@ -4658,6 +4658,150 @@ fn cmd_storyboard_approve(s: &mut Session, params: &Value) -> Result<Value> {
     cmd_storyboard_edit(s, &json!({"scene": params.get("scene"), "field": "status", "value": status}))
 }
 
+// ---------------------------------------------------------------------------------------------
+// Asset fix list: before any asset is repaired, every problem asset is listed with one decision:
+// "clean" (a tool call fixes it; the exact command is recorded) or "recreate" (it must be made
+// again). All "recreate" items go to the image agent as ONE asset-sheet request.
+
+const FIXLIST: &str = "asset-fixes.json";
+
+fn fixlist_path(s: &Session) -> Result<PathBuf> {
+    Ok(project_dir(s)?.join(FIXLIST))
+}
+
+fn read_fixlist(s: &Session) -> Result<Vec<Value>> {
+    let path = fixlist_path(s)?;
+    Ok(std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("assets").and_then(Value::as_array).cloned())
+        .unwrap_or_default())
+}
+
+fn fixlist_next(items: &[Value]) -> Vec<String> {
+    let clean = items.iter().filter(|i| i["decision"] == json!("clean") && i["status"] != json!("done")).count();
+    let recreate = items.iter().filter(|i| i["decision"] == json!("recreate") && i["status"] != json!("done")).count();
+    let mut next = Vec::new();
+    if recreate > 0 {
+        next.push(format!("{recreate} asset(s) to recreate: run assets.request_sheet, then give the brief it writes to the image agent (one asset sheet, one pass)"));
+    }
+    if clean > 0 {
+        next.push(format!("{clean} asset(s) to clean: run each item's recorded `tool` command, check the result at full size, then assets.fixlist_add asset=<id> status=done"));
+    }
+    if next.is_empty() {
+        next.push("Nothing open. Assess new or changed assets with assets.assess path=<png>".into());
+    }
+    next
+}
+
+/// Measures one image layer and suggests clean vs recreate with the evidence. The decision is
+/// recorded by the reviewer with assets.fixlist_add; this only measures.
+fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
+    let path = params.get("path").and_then(Value::as_str).map(|p| resolve_workspace_path(s, p)).ok_or_else(|| EngineError::InvalidParams("missing 'path'".into()))?;
+    let img = image::open(&path)?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let alpha = |x: u32, y: u32| img.get_pixel(x, y)[3];
+    let opaque = img.pixels().filter(|p| p[3] > 128).count() as f64;
+    let partial = img.pixels().filter(|p| p[3] > 8 && p[3] < 247).count() as f64;
+    // Opaque pixels on the image border: the shape runs into its box (clipped).
+    let border: Vec<(u32, u32)> = (0..w).flat_map(|x| [(x, 0), (x, h - 1)]).chain((0..h).flat_map(|y| [(0, y), (w - 1, y)])).collect();
+    let touching = border.iter().filter(|(x, y)| alpha(*x, *y) > 128).count() as f64 / border.len().max(1) as f64;
+    // Edge pixels: opaque pixels with a transparent neighbour; ragged edges have many of them.
+    let mut edge = 0usize;
+    for y in 1..h.saturating_sub(1) {
+        for x in 1..w.saturating_sub(1) {
+            if alpha(x, y) > 128 && [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)].iter().any(|(a, b)| alpha(*a, *b) <= 128) {
+                edge += 1;
+            }
+        }
+    }
+    let raggedness = edge as f64 / opaque.max(1.0).sqrt();
+    // Dark band: share of opaque pixels much darker than the asset's median brightness.
+    let mut lum: Vec<f64> = img.pixels().filter(|p| p[3] > 128).map(|p| 0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2])).collect();
+    lum.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = lum.get(lum.len() / 2).copied().unwrap_or(0.0);
+    let dark = lum.iter().filter(|l| **l < median * 0.45).count() as f64 / lum.len().max(1) as f64;
+    let mut reasons = Vec::new();
+    if touching > 0.15 { reasons.push(format!("{:.0}% of the outline runs into the box edge (clipped)", touching * 100.0)); }
+    if raggedness > 9.0 { reasons.push(format!("ragged edge ({raggedness:.1} edge px per sqrt(area))")); }
+    if dark > 0.08 { reasons.push(format!("{:.0}% of the asset is a dark band (smeared hidden overlap?)", dark * 100.0)); }
+    if opaque == 0.0 { reasons.push("no opaque pixels".into()); }
+    // Clipping takes source pixels that no tool can bring back; edge and smear problems are cleanable.
+    let suggestion = if opaque == 0.0 || touching > 0.35 { "recreate" } else if reasons.is_empty() { "ok" } else { "clean" };
+    Ok(json!({"ok": true, "path": path, "size": [w, h], "suggestion": suggestion, "reasons": reasons,
+        "measures": {"clipped_border": touching, "raggedness": raggedness, "dark_band": dark, "soft_edge_pixels": partial / opaque.max(1.0)},
+        "next": [match suggestion {
+            "recreate" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=recreate problem=<what is wrong>".to_string(),
+            "clean" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=clean problem=<what> tool=<exact command that fixes it>".to_string(),
+            _ => "Looks fine by measure; still check it at full size before using it.".to_string(),
+        }]}))
+}
+
+fn cmd_assets_fixlist(s: &mut Session, _: &Value) -> Result<Value> {
+    let items = read_fixlist(s)?;
+    Ok(json!({"ok": true, "file": fixlist_path(s)?, "assets": items, "next": fixlist_next(&items)}))
+}
+
+/// Adds or updates one asset on the fix list (keyed by `asset`).
+fn cmd_assets_fixlist_add(s: &mut Session, params: &Value) -> Result<Value> {
+    let asset = params.get("asset").and_then(Value::as_str).filter(|a| !a.trim().is_empty()).ok_or_else(|| EngineError::InvalidParams("missing 'asset' (a short id)".into()))?;
+    let mut items = read_fixlist(s)?;
+    let idx = items.iter().position(|i| i["asset"] == json!(asset));
+    let mut item = idx.map(|i| items[i].clone()).unwrap_or_else(|| json!({"asset": asset, "status": "open"}));
+    for key in ["path", "problem", "tool", "evidence", "reference", "status"] {
+        if let Some(v) = params.get(key) {
+            item[key] = v.clone();
+        }
+    }
+    if let Some(d) = params.get("decision").and_then(Value::as_str) {
+        if !["clean", "recreate"].contains(&d) {
+            return Err(EngineError::InvalidParams("decision must be clean or recreate".into()));
+        }
+        item["decision"] = json!(d);
+    }
+    if item.get("decision").is_none() {
+        return Err(EngineError::InvalidParams("new entries need decision=clean|recreate".into()));
+    }
+    if item["decision"] == json!("clean") && item.get("tool").is_none() {
+        return Err(EngineError::InvalidParams("decision=clean needs tool=<the exact command that fixes it>".into()));
+    }
+    match idx {
+        Some(i) => items[i] = item,
+        None => items.push(item),
+    }
+    let text = serde_json::to_string_pretty(&json!({"assets": items})).map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+    std::fs::write(fixlist_path(s)?, text)?;
+    cmd_assets_fixlist(s, &json!({}))
+}
+
+/// Writes ONE asset-sheet brief for the image agent covering every open "recreate" item.
+fn cmd_assets_request_sheet(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let items: Vec<Value> = read_fixlist(s)?.into_iter().filter(|i| i["decision"] == json!("recreate") && i["status"] != json!("done")).collect();
+    if items.is_empty() {
+        return Err(EngineError::InvalidParams("no open 'recreate' items on the fix list".into()));
+    }
+    let studio = studio(&dir);
+    let mut brief = format!("# Asset sheet request — {} item(s), ONE pass\n\n", items.len());
+    if let Some(intent) = studio.intent {
+        brief.push_str(&format!("Studio intent:\n{intent}\n\n"));
+    }
+    brief.push_str("Make ONE asset sheet image containing every asset below, each separated on a plain background with space around it, so each can be cut out cleanly (AnimationCraft cuts them with PhotoCraft). Match each asset's reference exactly in character, colour and material. Keep every part whole: nothing touching the sheet edge or another asset. No text on the sheet.\n\n## Assets\n");
+    for (n, i) in items.iter().enumerate() {
+        brief.push_str(&format!("{}. **{}** — problem: {}. Current file: {}. Reference: {}\n", n + 1,
+            i["asset"].as_str().unwrap_or_default(), i["problem"].as_str().unwrap_or("(not given)"),
+            i["path"].as_str().unwrap_or("(none)"), i["reference"].as_str().unwrap_or("match the current file")));
+    }
+    brief.push_str("\nSave the sheet as `assets/asset-sheet-<date>.png` with its exact prompt as `.prompt.md` beside it, then stop and report.\n");
+    let out = dir.join("briefs");
+    std::fs::create_dir_all(&out)?;
+    let path = out.join("ASSET-SHEET-request.md");
+    std::fs::write(&path, &brief)?;
+    Ok(json!({"ok": true, "brief": path, "items": items.len(), "next": [
+        format!("Send the image agent: follow {} exactly", path.display()),
+        "When the sheet exists: cut each asset out (PhotoCraft via animationcraft-cli), check at full size, assets.fixlist_add asset=<id> status=done".to_string()]}))
+}
+
 /// FilmCraft time base: ticks per second.
 const FILMCRAFT_TICKS_PER_SECOND: f64 = 254_016_000_000.0;
 
@@ -5908,6 +6052,11 @@ fn build() -> Vec<CommandSpec> {
         query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
         query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
+        query!("assets.assess", "Assess Asset (clean or recreate?)", "{\"path\": \"layer.png\"}", cmd_assets_assess),
+        query!("assets.fixlist", "Asset Fix List", "{}", cmd_assets_fixlist),
+        cmd!("assets.fixlist_add", "Add to Asset Fix List", ["Workshop"], None,
+            "{\"asset\": \"id\", \"path\": \"png\", \"decision\": \"clean|recreate\", \"problem\": \"what is wrong\", \"tool\": \"exact command (clean)\", \"reference\": \"optional\", \"status\": \"open|done\"}", always, cmd_assets_fixlist_add),
+        cmd!("assets.request_sheet", "Request Asset Sheet (one pass)", ["Workshop"], None, "{}", always, cmd_assets_request_sheet),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
         query!("storyboard.toc", "Storyboard Chapters", "{}", cmd_storyboard_toc),
         query!("storyboard.read", "Read Scene", "{\"scene\": 1}", cmd_storyboard_read),
