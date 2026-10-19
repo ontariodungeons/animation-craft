@@ -103,6 +103,32 @@ another agent's instance or reuse its port. See
 [`.agents/skills/craft-app-lifecycle/SKILL.md`](.agents/skills/craft-app-lifecycle/SKILL.md)
 for the equivalent PhotoCraft, EffectCraft, VectorCraft and FilmCraft commands.
 
+## Song workflow commands (one line each — for you and for agents)
+
+Every command is the same in the app, `animationcraft-cli` and MCP. Open the project first, e.g.
+`animationcraft-cli run -` with one JSON per line, starting `{"id":"project.open","params":{"path":"<song>/<Song>.acproj"}}`.
+Each result includes `next` steps for an agent.
+
+| Job | One line |
+|---|---|
+| New song project (audio referenced, not copied) | `animationcraft-cli exec project.new path=<projects>/<song>/<Song>.acproj audio=<song.wav>` |
+| Transcribe with FilmCraft (also makes `<song>.fcproj`) | `animationcraft-cli exec audio.transcribe` |
+| Use an existing transcript (checked first) | `animationcraft-cli exec workshop.import_transcript path=<song>.transcript.json` |
+| Create the storyboard template | `animationcraft-cli exec storyboard.init` |
+| Import scenes from an OpenMontage project | `animationcraft-cli exec storyboard.import_openmontage path=<old project>` |
+| List chapters (scenes) | `animationcraft-cli exec storyboard.toc` |
+| Read one scene | `animationcraft-cli exec storyboard.read scene=1` |
+| Search lyrics, prompts, notes | `animationcraft-cli exec storyboard.search query=bell` |
+| Edit a scene (lyric, prompt, panel, note, time, reference, packet section) | `animationcraft-cli exec storyboard.edit scene=1 field=note value="bell too high"` |
+| Split a storyboard grid into panels (PhotoCraft) | `animationcraft-cli exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>` |
+| Rebuild the storyboard PDF | `animationcraft-cli exec workshop.build_storyboard` |
+| Approve a scene (user only) | `animationcraft-cli exec storyboard.approve scene=1` |
+| Assess an asset: clean or recreate? | `animationcraft-cli exec assets.assess path=<layer.png>` |
+| Add to the asset fix list | `animationcraft-cli exec assets.fixlist_add asset=<id> path=<png> decision=recreate problem="torn edge"` |
+| Show the fix list | `animationcraft-cli exec assets.fixlist` |
+| One-pass asset sheet brief for the image agent | `animationcraft-cli exec assets.request_sheet` |
+| Place storyboard panels in FilmCraft at their lines | `animationcraft-cli exec video.place_references` |
+
 ## Current functional boundaries
 
 - Original images, pose sheets, part sheets and turnarounds are distinct inputs.

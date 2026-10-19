@@ -4046,7 +4046,9 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     for (i, scene) in scene_list.iter().enumerate() {
         let y = 202.0 + i as f64 * 44.0;
         steps.push(image(1, &card_dark, [m, y, pw - m, y + 38.0]));
-        let first_panel = scene["lines"].as_array().filter(|l| !l.is_empty()).and_then(|_| panels.first());
+        // The scene's reference panel, else the first line's panel.
+        let reference = scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file());
+        let first_panel = reference.as_ref().or_else(|| scene["lines"].as_array().filter(|l| !l.is_empty()).and_then(|_| panels.first()));
         // Every row keeps the thumbnail column so the labels line up.
         let x = m + 14.0 + 56.0;
         if let Some(p) = first_panel {
@@ -4065,17 +4067,52 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     for (i, scene) in scene_list.iter().enumerate() {
         let page = i + 2;
         let range = format!("{} – {}", clock(scene["start"].as_f64().unwrap_or(0.0)), clock(scene["end"].as_f64().unwrap_or(0.0)));
-        let heading = match scene["kind"].as_str() {
-            Some("verse") => format!("Verse {}", scene["verse"]),
+        let heading = match (scene["title"].as_str().filter(|t| !t.starts_with("Scene ")), scene["kind"].as_str()) {
+            (Some(title), _) => title.to_string(),
+            (None, Some("verse")) => format!("Verse {}", scene["verse"]),
             _ => "Instrumental".into(),
         };
         let status = scene["status"].as_str().unwrap_or("draft").to_uppercase();
         steps.extend(header(page, format!("SCENE {} · {range} · {status}", i + 1), heading));
         let notes: Vec<String> = scene["notes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|n| format!("• {n}")).collect();
-        if !notes.is_empty() {
+        let has_reference = scene["reference"].as_str().is_some_and(|p| Path::new(p).is_file());
+        if !notes.is_empty() && !has_reference {
             steps.push(block(page, [m, ph - 18.0 - 12.0 * notes.len().min(3) as f64, pw - m, ph - 6.0], format!("NOTES  {}", notes.join("   ")), 8.0, "courier", AMBER));
         }
         let lines = scene["lines"].as_array().cloned().unwrap_or_default();
+        if let Some(reference) = scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file()) {
+            // Scene packet: the approved reference framed as film on the left, timed lyrics on the
+            // right, the packet sections (skills, prompts, layer stack, checks) below.
+            let frame = [m, 74.0, m + 360.0, 74.0 + 230.0];
+            let window = [frame[0] + 18.0, frame[1] + 22.0, frame[2] - 18.0, frame[3] - 22.0];
+            let r = fit(&reference, window)?;
+            steps.push(image(page, &reference, r));
+            layout.push(json!({"page": page, "path": reference, "rect": r}));
+            let lyric_text = if lines.is_empty() { "Instrumental — no sung words.".to_string() } else {
+                lines.iter().map(|l| format!("{}  {}", clock(l["start"].as_f64().unwrap_or(0.0)), l["text"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n")
+            };
+            steps.push(image(page, &card_cream, [frame[2] + 12.0, 74.0, pw - m, 74.0 + 230.0]));
+            steps.push(block(page, [frame[2] + 28.0, 84.0, pw - m - 10.0, 74.0 + 224.0], lyric_text, 9.0, "courier", INK));
+            let sections = scene["sections"].as_object().cloned().unwrap_or_default();
+            // pdfcraft does not clip text to its box, so each section is shortened to fit the page;
+            // the full text stays in the scene file.
+            let short = |t: &str| {
+                let flat = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                if flat.chars().count() > 330 { format!("{}…", flat.chars().take(330).collect::<String>()) } else { flat }
+            };
+            let mut packet: Vec<String> = Vec::new();
+            if !notes.is_empty() {
+                packet.push(format!("NOTES: {}", short(&notes.join("  "))));
+            }
+            packet.extend(SCENE_SECTIONS.iter().filter_map(|(k, label)| {
+                sections.get(*k).and_then(Value::as_str).map(|t| format!("{}: {}", label.to_uppercase(), short(t)))
+            }));
+            if !packet.is_empty() {
+                packet.push(format!("Full packet: storyboard/scene-{}.md", i + 1));
+                steps.push(block(page, [m, 316.0, pw - m, ph - 16.0], packet.join("\n\n"), 7.0, "courier", CREAM));
+            }
+            continue;
+        }
         if lines.is_empty() {
             steps.push(image(page, &card_cream, [m, 90.0, pw - m, 150.0]));
             steps.push(text(page, [m + 20.0, 104.0], pw - m, format!("INSTRUMENTAL · {range}"), 12.0, "courier", INK, true));
@@ -4189,6 +4226,9 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
 
 fn scene_label(i: usize, scene: &Value) -> String {
     let range = format!("{}–{}", clock(scene["start"].as_f64().unwrap_or(0.0)), clock(scene["end"].as_f64().unwrap_or(0.0)));
+    if let Some(title) = scene["title"].as_str().filter(|t| !t.starts_with("Scene ")) {
+        return format!("Scene {} · {title} · {range}", i + 1);
+    }
     match scene["kind"].as_str() {
         Some("verse") => format!("Scene {} · Verse {} · {range}", i + 1, scene["verse"]),
         _ => format!("Scene {} · Instrumental · {range}", i + 1),
@@ -4442,11 +4482,28 @@ fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> 
 
 const SCENE_STATUSES: &[&str] = &["draft", "needs review", "approved"];
 
+/// A scene's packet sections (what an approved scene review holds), in the order they print.
+const SCENE_SECTIONS: &[(&str, &str)] = &[
+    ("skills", "Skills"),
+    ("reference_prompt", "Reference prompt"),
+    ("animation_prompt", "Animation prompt"),
+    ("layer_stack", "Layer stack"),
+    ("build_steps", "Build steps"),
+    ("acceptance_checks", "Acceptance checks"),
+    ("plan_vs_actual", "Plan vs actual"),
+];
+
 #[derive(Default)]
 struct SceneDoc {
+    title: Option<String>,
     status: String,
+    /// Explicit song interval (seconds); when every scene file has one, these replace the automatic split.
+    time: Option<(f64, f64)>,
+    /// The scene's approved reference image, relative to the project folder.
+    reference: Option<String>,
     notes: Vec<String>,
     lyrics: std::collections::BTreeMap<usize, String>,
+    sections: std::collections::BTreeMap<String, String>,
 }
 
 fn scene_doc_path(dir: &Path, n: usize) -> PathBuf {
@@ -4456,27 +4513,61 @@ fn scene_doc_path(dir: &Path, n: usize) -> PathBuf {
 fn read_scene_doc(dir: &Path, n: usize) -> SceneDoc {
     let mut doc = SceneDoc { status: "draft".into(), ..SceneDoc::default() };
     let Ok(text) = std::fs::read_to_string(scene_doc_path(dir, n)) else { return doc };
-    let mut section = "";
+    let mut section = String::new();
     for line in text.lines() {
         let t = line.trim();
-        if let Some(st) = t.strip_prefix("status:") {
-            doc.status = st.trim().to_string();
+        if let Some(h) = t.strip_prefix("# ") {
+            if doc.title.is_none() {
+                doc.title = Some(h.trim().to_string());
+            }
         } else if let Some(h) = t.strip_prefix("## ") {
-            section = if h.eq_ignore_ascii_case("notes") { "notes" } else if h.eq_ignore_ascii_case("lyrics") { "lyrics" } else { "" };
-        } else if section == "notes" && let Some(note) = t.strip_prefix("- ") {
-            doc.notes.push(note.to_string());
-        } else if section == "lyrics"
-            && let Some((n, words)) = t.split_once(':')
-            && let Ok(n) = n.trim().parse::<usize>()
-        {
-            doc.lyrics.insert(n, words.trim().to_string());
+            section = SCENE_SECTIONS.iter().find(|(_, label)| label.eq_ignore_ascii_case(h.trim())).map(|(k, _)| (*k).to_string())
+                .unwrap_or_else(|| h.trim().to_lowercase());
+        } else if section.is_empty() {
+            if let Some(st) = t.strip_prefix("status:") {
+                doc.status = st.trim().to_string();
+            } else if let Some(r) = t.strip_prefix("reference:") {
+                doc.reference = Some(r.trim().to_string()).filter(|r| !r.is_empty());
+            } else if let Some(tm) = t.strip_prefix("time:")
+                && let Some((a, b)) = tm.trim().split_once(['-', '–'])
+                && let (Ok(a), Ok(b)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>())
+            {
+                doc.time = Some((a, b));
+            }
+        } else if section == "notes" {
+            if let Some(note) = t.strip_prefix("- ") {
+                doc.notes.push(note.to_string());
+            }
+        } else if section == "lyrics" {
+            if let Some((n, words)) = t.split_once(':')
+                && let Ok(n) = n.trim().parse::<usize>()
+            {
+                doc.lyrics.insert(n, words.trim().to_string());
+            }
+        } else if !t.starts_with("<!--") {
+            let entry = doc.sections.entry(section.clone()).or_default();
+            if !entry.is_empty() {
+                entry.push('\n');
+            }
+            entry.push_str(line);
         }
     }
+    for v in doc.sections.values_mut() {
+        *v = v.trim().to_string();
+    }
+    doc.sections.retain(|_, v| !v.is_empty());
     doc
 }
 
 fn write_scene_doc(dir: &Path, n: usize, label: &str, doc: &SceneDoc) -> Result<()> {
-    let mut out = format!("# {label}\nstatus: {}\n\n## Notes\n", doc.status);
+    let mut out = format!("# {}\nstatus: {}\n", doc.title.as_deref().unwrap_or(label), doc.status);
+    if let Some((a, b)) = doc.time {
+        out.push_str(&format!("time: {a}-{b}\n"));
+    }
+    if let Some(r) = &doc.reference {
+        out.push_str(&format!("reference: {r}\n"));
+    }
+    out.push_str("\n## Notes\n");
     for note in &doc.notes {
         out.push_str(&format!("- {note}\n"));
     }
@@ -4484,21 +4575,43 @@ fn write_scene_doc(dir: &Path, n: usize, label: &str, doc: &SceneDoc) -> Result<
     for (n, words) in &doc.lyrics {
         out.push_str(&format!("{n}: {words}\n"));
     }
+    for (key, heading) in SCENE_SECTIONS {
+        if let Some(text) = doc.sections.get(*key) {
+            out.push_str(&format!("\n## {heading}\n{text}\n"));
+        }
+    }
     std::fs::create_dir_all(dir.join(STORYBOARD_DIR))?;
     std::fs::write(scene_doc_path(dir, n), out)?;
     Ok(())
 }
 
-/// The song's scenes from the transcript with each scene's lyric corrections applied.
+/// The song's scenes: explicit intervals from the scene files when every one has a `time:`,
+/// otherwise the transcript's stanzas and gaps. Lyric lines are placed by time, corrections and
+/// packet sections applied.
 fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
     let transcript = transcript_files(dir).into_iter().next().ok_or_else(|| {
         EngineError::InvalidParams("transcribe or import the transcript first: scenes come from it".into())
     })?;
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript)?)
         .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
-    let mut list = scenes(&doc, song_seconds(dir));
+    let docs: Vec<SceneDoc> = (1..).take_while(|n| scene_doc_path(dir, *n).is_file()).map(|n| read_scene_doc(dir, n)).collect();
+    let explicit = !docs.is_empty() && docs.iter().all(|d| d.time.is_some());
+    let mut list = if explicit {
+        let lines = lyric_lines(&doc);
+        docs.iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let (a, b) = d.time.unwrap_or_default();
+                let sung: Vec<Value> = lines.iter().filter(|(t, _)| *t >= a - 0.01 && *t < b - 0.01).map(|(t, text)| json!({"start": t, "text": text})).collect();
+                let kind = if sung.is_empty() { "instrumental" } else { "scene" };
+                json!({"kind": kind, "verse": i + 1, "start": a, "end": b, "lines": sung})
+            })
+            .collect()
+    } else {
+        scenes(&doc, song_seconds(dir))
+    };
     for (i, scene) in list.iter_mut().enumerate() {
-        let sd = read_scene_doc(dir, i + 1);
+        let sd = docs.get(i).map(|_| read_scene_doc(dir, i + 1)).unwrap_or_else(|| read_scene_doc(dir, i + 1));
         if let Some(lines) = scene["lines"].as_array_mut() {
             for (j, line) in lines.iter_mut().enumerate() {
                 if let Some(words) = sd.lyrics.get(&(j + 1)) {
@@ -4509,6 +4622,9 @@ fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
         }
         scene["status"] = json!(sd.status);
         scene["notes"] = json!(sd.notes);
+        scene["title"] = json!(sd.title);
+        scene["reference"] = json!(sd.reference.as_ref().map(|r| dir.join(r)));
+        scene["sections"] = json!(sd.sections);
     }
     Ok(list)
 }
@@ -4576,7 +4692,8 @@ fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
         })
         .collect();
     Ok(json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
-        "status": scene["status"], "notes": scene["notes"], "lines": lines, "source": scene_doc_path(&dir, n), "page": n + 1}))
+        "status": scene["status"], "notes": scene["notes"], "reference": scene["reference"], "sections": scene["sections"],
+        "lines": lines, "source": scene_doc_path(&dir, n), "page": n + 1}))
 }
 
 fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {
@@ -4639,17 +4756,125 @@ fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
             }
             std::fs::copy(&src, dir.join(STORYBOARD_DIR).join(format!("panel-{l:02}.png")))?;
         }
+        "time" => {
+            let (a, b) = value.split_once(['-', '–']).and_then(|(a, b)| Some((a.trim().parse::<f64>().ok()?, b.trim().parse::<f64>().ok()?)))
+                .filter(|(a, b)| b > a).ok_or_else(|| EngineError::InvalidParams("time is start-end in seconds, e.g. 0-21.3".into()))?;
+            doc.time = Some((a, b));
+        }
+        "reference" => {
+            let src = resolve_workspace_path(s, &value);
+            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
+                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
+            }
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            let rel = format!("{STORYBOARD_DIR}/scene-{n}-reference.{ext}");
+            if src != dir.join(&rel) {
+                std::fs::copy(&src, dir.join(&rel))?;
+            }
+            doc.reference = Some(rel);
+        }
+        key if SCENE_SECTIONS.iter().any(|(k, _)| *k == key) => {
+            doc.sections.insert(key.to_string(), value.clone());
+        }
         "status" => {
             if !SCENE_STATUSES.contains(&value.as_str()) {
                 return Err(EngineError::InvalidParams(format!("status must be one of {SCENE_STATUSES:?}")));
             }
         }
-        _ => return Err(EngineError::InvalidParams("field must be lyric, prompt, panel, note or status".into())),
+        _ => return Err(EngineError::InvalidParams(format!(
+            "field must be lyric, prompt, panel, note, status, time, reference or a section: {}",
+            SCENE_SECTIONS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
+        ))),
     }
     doc.status = if field == "status" { value } else { "needs review".into() };
     write_scene_doc(&dir, n, &scene_label(n - 1, &list[n - 1]), &doc)?;
     cmd_workshop_build_storyboard(s, &json!({}))?;
     cmd_storyboard_read(s, &json!({"scene": n}))
+}
+
+/// Imports an existing OpenMontage-style project's scenes into this storyboard template: scene
+/// intervals and descriptions (artifacts/scene_plan.json), approved reference panels and scene
+/// packets (review/scene-packets.json: skills, prompts, layer stack, build steps, checks, plan vs
+/// actual). Writes storyboard/scene-N.md; existing scene files are replaced only with overwrite=true.
+fn cmd_storyboard_import_openmontage(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let src = params.get("path").and_then(Value::as_str).map(|p| resolve_workspace_path(s, p)).ok_or_else(|| EngineError::InvalidParams("missing 'path' (the existing project folder)".into()))?;
+    let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    let read = |rel: &str| -> Option<Value> { serde_json::from_str(&std::fs::read_to_string(src.join(rel)).ok()?).ok() };
+    let plan = read("artifacts/scene_plan.json").ok_or_else(|| EngineError::InvalidParams(format!("no artifacts/scene_plan.json in {}", src.display())))?;
+    let packets = read("review/scene-packets.json");
+    let plan_scenes = plan.get("scenes").and_then(Value::as_array).cloned().unwrap_or_default();
+    if plan_scenes.is_empty() {
+        return Err(EngineError::InvalidParams("scene_plan.json has no scenes".into()));
+    }
+    if !overwrite && scene_doc_path(&dir, 1).is_file() {
+        return Err(EngineError::InvalidParams("this project already has scene files (pass \"overwrite\": true to replace them)".into()));
+    }
+    let text_of = |v: &Value| -> Option<String> {
+        match v {
+            Value::String(t) => Some(t.clone()),
+            Value::Array(items) => Some(items.iter().map(|i| format!("- {}", i.as_str().map(str::to_owned).unwrap_or_else(|| i.to_string()))).collect::<Vec<_>>().join("\n")),
+            Value::Null => None,
+            other => Some(other.to_string()),
+        }
+    };
+    std::fs::create_dir_all(dir.join(STORYBOARD_DIR))?;
+    let mut written = Vec::new();
+    for (i, sc) in plan_scenes.iter().enumerate() {
+        let n = i + 1;
+        let id = sc.get("id").and_then(Value::as_str).unwrap_or_default();
+        let packet = packets.as_ref().and_then(|p| p.get("scenes")).and_then(Value::as_array).and_then(|list| list.iter().find(|p| p["id"].as_str() == Some(id))).cloned().unwrap_or(Value::Null);
+        let mut doc = SceneDoc { status: "draft".into(), ..SceneDoc::default() };
+        doc.title = packet["title"].as_str().map(str::to_owned).or_else(|| sc.get("description").and_then(Value::as_str).map(|d| d.chars().take(60).collect()));
+        doc.time = sc.get("start_seconds").and_then(Value::as_f64).zip(sc.get("end_seconds").and_then(Value::as_f64));
+        if let Some(reference) = packet["reference"].as_str().map(|r| src.join(r)).filter(|p| p.is_file()) {
+            let ext = reference.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            let rel = format!("{STORYBOARD_DIR}/scene-{n}-reference.{ext}");
+            std::fs::copy(&reference, dir.join(&rel))?;
+            doc.reference = Some(rel);
+        }
+        let skills = packet["skills"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+        let skills = match (skills, packet["combination"].as_str()) {
+            (Some(k), Some(c)) => Some(format!("{k}\n{c}")),
+            (k, c) => k.or(c.map(str::to_owned)),
+        };
+        for (key, value) in [
+            ("skills", skills),
+            ("reference_prompt", text_of(&packet["reference_prompt"])),
+            ("animation_prompt", text_of(&packet["animation_prompt"])),
+            ("layer_stack", text_of(&packet["layer_stack_proposal"])),
+            ("build_steps", text_of(&packet["build_steps"])),
+            ("acceptance_checks", text_of(&packet["output_checks"])),
+            ("plan_vs_actual", text_of(&packet["plan_vs_actual"])),
+        ] {
+            if let Some(v) = value.filter(|v| !v.trim().is_empty()) {
+                doc.sections.insert(key.into(), v);
+            }
+        }
+        if let Some(desc) = sc.get("description").and_then(Value::as_str) {
+            doc.notes.push(format!("Scene plan: {desc}"));
+        }
+        if let Some(status) = packet["status"].as_str() {
+            doc.notes.push(format!("Imported status: {status}"));
+        }
+        write_scene_doc(&dir, n, &format!("Scene {n}"), &doc)?;
+        written.push(scene_doc_path(&dir, n));
+    }
+    // Remove stale scene files beyond the imported ones.
+    for n in plan_scenes.len() + 1.. {
+        let extra = scene_doc_path(&dir, n);
+        if !extra.is_file() {
+            break;
+        }
+        std::fs::remove_file(extra)?;
+    }
+    let mut toc = cmd_storyboard_toc(s, &json!({}))?;
+    toc["imported"] = json!(written);
+    toc["next"] = json!([
+        "workshop.build_storyboard to rebuild the PDF from the imported scenes",
+        "storyboard.read scene=N for each scene: check lyrics against the official lyrics and fill gaps with storyboard.edit",
+        "the user approves each scene with storyboard.approve"]);
+    Ok(toc)
 }
 
 fn cmd_storyboard_approve(s: &mut Session, params: &Value) -> Result<Value> {
@@ -6062,7 +6287,9 @@ fn build() -> Vec<CommandSpec> {
         query!("storyboard.read", "Read Scene", "{\"scene\": 1}", cmd_storyboard_read),
         query!("storyboard.search", "Search Storyboard", "{\"query\": \"text\"}", cmd_storyboard_search),
         cmd!("storyboard.edit", "Edit Scene", ["Storyboard"], None,
-            "{\"scene\": 1, \"field\": \"lyric|prompt|panel|note|status\", \"line\": 1, \"value\": \"text, image path or status\"}", always, cmd_storyboard_edit),
+            "{\"scene\": 1, \"field\": \"lyric|prompt|panel|note|status|time|reference|skills|reference_prompt|animation_prompt|layer_stack|build_steps|acceptance_checks|plan_vs_actual\", \"line\": 1, \"value\": \"text, image path, start-end or status\"}", always, cmd_storyboard_edit),
+        cmd!("storyboard.import_openmontage", "Import Scenes from an OpenMontage Project", ["Storyboard"], None,
+            "{\"path\": \"existing project folder\", \"overwrite\": false}", always, cmd_storyboard_import_openmontage),
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
