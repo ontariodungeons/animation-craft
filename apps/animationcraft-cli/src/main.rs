@@ -92,6 +92,8 @@ LIVE UI CONTROL COMMANDS (via `--bridge <port>`)
   ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
   ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
                                       switch live GUI viewport tab, action cycle, yaw, or pose range
+  app.quit                            close the live GUI window (save the project first)
+  app_quit (MCP tool)                 same, only when the MCP server runs with --bridge
 
 VALUES
   key=value parses value as JSON when it can (3.5, true, [1,2], {\"a\":1}), else as a string.
@@ -299,6 +301,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
     let mut session = Session::default();
+    let mut stop_after_reply = false;
     for line in stdin.lock().lines().map_while(Result::ok) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -323,20 +326,10 @@ fn run_mcp_stdio(bridge: Option<String>) {
                 }
             }),
             "tools/list" => {
-                let tools: Vec<Value> = animationcraft_engine::command_specs()
-                    .iter()
-                    .map(|spec| {
-                        json!({
-                            "name": spec.id.replace('.', "_"),
-                            "description": format!("{} ({})", spec.label, spec.params),
-                            "inputSchema": tool_input_schema(spec.id)
-                        })
-                    })
-                    .collect();
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": tools }
+                    "result": { "tools": mcp_tools() }
                 })
             }
             "tools/call" => {
@@ -352,7 +345,13 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                let res = if let Some(addr) = &bridge {
+                let res = if raw_name == "app_quit" || raw_name == "app.quit" {
+                    let out = call_app_quit(bridge.as_deref(), args);
+                    if out.as_ref().is_ok_and(|v| !is_payload_error(v)) {
+                        stop_after_reply = true;
+                    }
+                    out
+                } else if let Some(addr) = &bridge {
                     bridge_call(addr, cmd_id, args)
                 } else {
                     session.execute(cmd_id, args).map_err(|e| e.to_string())
@@ -386,6 +385,46 @@ fn run_mcp_stdio(bridge: Option<String>) {
             }),
         };
         outln!("{}", resp);
+        if stop_after_reply {
+            break;
+        }
+    }
+}
+
+/// The MCP tool list: every engine command plus the live-window lifecycle tool.
+fn mcp_tools() -> Vec<Value> {
+    let mut tools: Vec<Value> = animationcraft_engine::command_specs()
+        .iter()
+        .map(|spec| {
+            json!({
+                "name": spec.id.replace('.', "_"),
+                "description": format!("{} ({})", spec.label, spec.params),
+                "inputSchema": tool_input_schema(spec.id)
+            })
+        })
+        .collect();
+    tools.push(json!({
+        "name": "app_quit",
+        "description": "Quit the live AnimationCraft window this server is bridged to. \
+            Save the project first; this closes the window without a prompt. \
+            It needs `mcp --bridge <port>` and reports an error in headless mode.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }
+    }));
+    tools
+}
+
+/// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
+fn call_app_quit(bridge: Option<&str>, args: Value) -> Result<Value, String> {
+    match bridge {
+        Some(addr) => bridge_call(addr, "app.quit", args),
+        None => Err(
+            "app_quit needs the native window: start `animationcraft --control <port>` and run this MCP server with `--bridge <port>`; a headless session has no app process to quit"
+                .into(),
+        ),
     }
 }
 
@@ -576,6 +615,25 @@ mod tests {
             parse_value("{\"key\":\"val\"}"),
             serde_json::json!({"key": "val"})
         );
+    }
+
+    #[test]
+    fn app_quit_without_a_bridge_refuses_instead_of_pretending_to_close() {
+        let err = call_app_quit(None, json!({})).unwrap_err();
+        assert!(err.contains("--bridge"), "unexpected error: {err}");
+        assert!(err.contains("no app process"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mcp_tools_lists_the_lifecycle_tool_once_with_no_arguments() {
+        let tools = mcp_tools();
+        let quit: Vec<&Value> = tools
+            .iter()
+            .filter(|t| t.get("name").and_then(Value::as_str) == Some("app_quit"))
+            .collect();
+        assert_eq!(quit.len(), 1, "app_quit must appear exactly once");
+        assert_eq!(quit[0]["inputSchema"]["additionalProperties"], json!(false));
+        assert!(tools.len() >= animationcraft_engine::command_specs().len());
     }
 
     #[test]

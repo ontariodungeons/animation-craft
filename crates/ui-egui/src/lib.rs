@@ -1014,6 +1014,28 @@ impl AnimationCraftApp {
                     ));
                     ctx.request_repaint();
                 }
+            } else if req.id == "app.quit" {
+                // The window is suspended (inactive workspace/occluded) and the UI thread is not
+                // drawing, but the context can still ask the viewport to close.
+                let sent = match self.repaint_ctx.lock() {
+                    Ok(guard) => match guard.as_ref() {
+                        Some(ctx) => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            ctx.request_repaint();
+                            true
+                        }
+                        None => false,
+                    },
+                    Err(_) => false,
+                };
+                let _ = req.reply.send(if sent {
+                    Ok(json!({"closing": true}))
+                } else {
+                    Err(
+                        "app.quit needs the native window: start `animationcraft --control <port>` and use `--bridge <port>`"
+                            .into(),
+                    )
+                });
             } else {
                 let reply_val = self.dispatch(&req.id, req.params);
                 if !self.pending_clicks.is_empty() || req.id == "ui.set_view" {
@@ -1257,6 +1279,11 @@ impl eframe::App for AnimationCraftApp {
                         egui::ViewportCommand::Screenshot(egui::UserData::default()),
                     );
                 ui.ctx().request_repaint();
+            } else if req.id == "app.quit" {
+                // Answer before asking the viewport to close. The instance owns this port and
+                // every other bridge call becomes unreachable once the window is gone.
+                let _ = req.reply.send(Ok(json!({"closing": true})));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             } else {
                 let reply_val = self.dispatch(&req.id, req.params);
                 let _ = req.reply.send(reply_val);
@@ -1771,6 +1798,19 @@ mod tests {
         let screenshot_res = reply_rx4.recv_timeout(Duration::from_millis(500)).unwrap();
         assert!(screenshot_res.is_err());
         assert!(screenshot_res.unwrap_err().contains("timed out"));
+
+        // 5. app.quit without a native window says so instead of returning success and
+        //    leaving an unreachable process behind.
+        let (reply_tx5, reply_rx5) = mpsc::channel();
+        tx.send(ControlRequest {
+            id: "app.quit".into(),
+            params: json!({}),
+            reply: reply_tx5,
+        })
+        .unwrap();
+        app.service_headless_control_tick(&ctx, Duration::from_secs(1));
+        let quit_res = reply_rx5.recv_timeout(Duration::from_millis(500)).unwrap();
+        assert!(quit_res.unwrap_err().contains("needs the native window"));
     }
 }
 
