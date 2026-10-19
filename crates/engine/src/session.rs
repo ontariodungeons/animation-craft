@@ -22,6 +22,12 @@ pub struct Session {
     pub project_assets: Vec<ProjectAsset>,
     /// The open `.acproj` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
+    /// The song this project animates, referenced in place (never copied).
+    pub song_audio: Option<PathBuf>,
+    /// Whether the user approved the workshop draft PDF.
+    pub draft_approved: bool,
+    /// Where the song is edited: `remotion` (default), `filmcraft` or `hyperframes`.
+    pub video_target: String,
     /// Currently active asset id in the session.
     pub active_asset: Option<String>,
     /// Active 2D preview mode (`idle`, `walk`, `run`, `jump`, `wave`, `static`).
@@ -44,6 +50,9 @@ impl Default for Session {
             assets: HashMap::new(),
             project_assets: Vec::new(),
             project_path: None,
+            song_audio: None,
+            draft_approved: false,
+            video_target: "remotion".into(),
             active_asset: None,
             preview_mode: "walk".to_string(),
             preview_speed: 1.0,

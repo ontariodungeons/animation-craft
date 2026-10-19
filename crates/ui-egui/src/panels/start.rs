@@ -66,16 +66,12 @@ pub(crate) fn record_open_project(app: &mut AnimationCraftApp) {
     }
 }
 
+/// New song project: opens the dialog that asks for the song's name and audio.
 pub(crate) fn new_project(app: &mut AnimationCraftApp) {
-    if let Some(path) = rfd::FileDialog::new()
-        .set_title("New Project")
-        .add_filter("AnimationCraft project", &["acproj"])
-        .set_file_name("Untitled.acproj")
-        .save_file()
-    {
-        // The save dialog has already asked before replacing an existing file.
-        run(app, "project.new", json!({"path": path, "overwrite": true}));
+    if app.ui_state.new_project_root.is_empty() {
+        app.ui_state.new_project_root = super::workshop::default_projects_root().display().to_string();
     }
+    app.ui_state.new_project_open = true;
 }
 
 pub(crate) fn open_project(app: &mut AnimationCraftApp) {
@@ -115,18 +111,17 @@ pub(crate) fn shortcut_text(ctx: &egui::Context, key: egui::Key) -> String {
     ctx.format_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key))
 }
 
-/// "No project open", for the side panels while Home is showing.
-pub(crate) fn empty_panel(ui: &mut Ui) {
-    ui.add_space(8.0);
-    ui.label(egui::RichText::new("No project open").size(12.5).color(MUTED));
-}
-
 pub(crate) fn start_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let area = ui.max_rect();
     app.automation.add("home.screen", "panel", "Home", area);
     let recent: Vec<String> = app.ui_state.recent_projects.iter().take(HOME_RECENT).cloned().collect();
     let recent_h = if recent.is_empty() { 0.0 } else { 34.0 + recent.len() as f32 * HOME_RECENT_ROW };
-    let card = Rect::from_center_size(area.center(), vec2(460.0, 330.0 + recent_h));
+    let card_h = 330.0 + recent_h;
+    let strip_h = workflow_height(area.width());
+    // The card sits centred above the workflow strip; both centre together in the body.
+    let top = area.top() + ((area.height() - card_h - 28.0 - strip_h) / 2.0).max(12.0);
+    let card = Rect::from_min_size(pos2(area.center().x - 230.0, top), vec2(460.0, card_h));
+    workflow_strip(app, ui, Rect::from_min_size(pos2(area.left(), card.bottom() + 28.0), vec2(area.width(), strip_h)));
     let new_label = format!("New project…   {}", shortcut_text(ui.ctx(), egui::Key::N));
     let open_label = format!("Open…   {}", shortcut_text(ui.ctx(), egui::Key::O));
     let ready = app.ui_state.busy_command.is_none();
@@ -180,6 +175,143 @@ pub(crate) fn start_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
             }
         });
     });
+}
+
+/// One step of the song-to-video workflow on Home: what happens, which app does it, and the exact
+/// instructions an agent needs (copied by clicking the step).
+struct Step {
+    title: &'static str,
+    app: &'static str,
+    /// ArtCraft launcher app id to open, if the step happens in another *craft app.
+    launch: Option<&'static str>,
+    agent: &'static str,
+}
+
+const WORKFLOW: [Step; 6] = [
+    Step {
+        title: "Transcribe the song",
+        app: "FilmCraft",
+        launch: Some("filmcraft"),
+        agent: "Transcribe the song headless with FilmCraft's speech-to-text through AnimationCraft:\n\
+animationcraft-cli exec audio.transcribe audio=<song.wav> out_dir=<project folder> name=<song>\n\
+It writes <song>.transcript.json (timed words and lines) and <song>.fcproj (the song on a FilmCraft sequence).",
+    },
+    Step {
+        title: "Reference images",
+        app: "Codex agent",
+        launch: None,
+        agent: "Ask the Codex agent in herdr for reference images from the transcript: one storyboard grid first,\n\
+no text or numerals in any image, the whole character visible and separate from the background.\n\
+Save the prompt as assets/references/CODEX_PROMPT_*.md next to the result.",
+    },
+    Step {
+        title: "Approve the design",
+        app: "PDFCraft",
+        launch: Some("pdfcraft"),
+        agent: "Assemble a design PDF with pdfcraft-cli (tools doc_create, page_add_image, page_add_text, doc_save):\n\
+storyboard, lyrics with timings, cast and palette. Wait for the user to approve it before animating.",
+    },
+    Step {
+        title: "Crop & transparency",
+        app: "PhotoCraft",
+        launch: Some("photocraft"),
+        agent: "Cut each element out with PhotoCraft through AnimationCraft (no custom matting):\n\
+animationcraft-cli exec intake.validate image=<panel.png> asset=<name>\n\
+Check every cut-out at full size before using it.",
+    },
+    Step {
+        title: "Animate",
+        app: "AnimationCraft",
+        launch: None,
+        agent: "Open the project in AnimationCraft (project.open), one animated subject at a time over its background,\n\
+then render the layered motion: animationcraft-cli exec export.layered_motion spec=<spec.json>",
+    },
+    Step {
+        title: "Edit to the song",
+        app: "FilmCraft",
+        launch: Some("filmcraft"),
+        agent: "Place the rendered clips on the song's sequence headless:\n\
+filmcraft-cli --project <song>.fcproj --save import <clip.mp4>",
+    },
+];
+
+const STEP_W: f32 = 150.0;
+const STEP_H: f32 = 92.0;
+const STEP_GAP: f32 = 26.0;
+
+fn steps_per_row(width: f32) -> usize {
+    if width >= 6.0 * STEP_W + 5.0 * STEP_GAP + 32.0 { 6 } else { 3 }
+}
+
+fn workflow_height(width: f32) -> f32 {
+    let rows = WORKFLOW.len().div_ceil(steps_per_row(width)) as f32;
+    24.0 + rows * STEP_H + (rows - 1.0) * 18.0
+}
+
+/// The app's install path from the ArtCraft launcher (`~/.local/share/artcraft-launcher/installed.json`).
+pub(crate) fn launcher_path(app: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let text = std::fs::read_to_string(home.join(".local/share/artcraft-launcher/installed.json")).ok()?;
+    let installed: serde_json::Value = serde_json::from_str(&text).ok()?;
+    installed.pointer(&format!("/apps/{app}/path")).and_then(|p| p.as_str()).map(PathBuf::from)
+}
+
+fn workflow_strip(app: &mut AnimationCraftApp, ui: &mut Ui, rect: Rect) {
+    let per_row = steps_per_row(rect.width());
+    let row_w = per_row as f32 * STEP_W + (per_row - 1) as f32 * STEP_GAP;
+    let left = rect.center().x - row_w / 2.0;
+    ui.painter().text(
+        pos2(left, rect.top() + 6.0),
+        egui::Align2::LEFT_CENTER,
+        "Song to video — click a step to copy its agent instructions",
+        FontId::proportional(12.5),
+        MUTED,
+    );
+    for (i, step) in WORKFLOW.iter().enumerate() {
+        let (row, col) = (i / per_row, i % per_row);
+        let min = pos2(left + col as f32 * (STEP_W + STEP_GAP), rect.top() + 24.0 + row as f32 * (STEP_H + 18.0));
+        let r = Rect::from_min_size(min, vec2(STEP_W, STEP_H));
+        let resp = ui.interact(r, ui.id().with(("workflow", i)), Sense::click());
+        let hot = resp.hovered();
+        ui.painter().rect_filled(r, 6.0, if hot { HOVER } else { super::chrome::SURFACE });
+        ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, if hot { MUTED } else { super::chrome::BORDER }), StrokeKind::Inside);
+        let badge = pos2(r.left() + 16.0, r.top() + 16.0);
+        ui.painter().circle_filled(badge, 9.0, PRIMARY);
+        ui.painter().text(badge, egui::Align2::CENTER_CENTER, (i + 1).to_string(), FontId::proportional(11.5), TEXT);
+        ui.painter().text(pos2(r.left() + 12.0, r.top() + 42.0), egui::Align2::LEFT_CENTER, step.title, FontId::proportional(13.0), TEXT);
+        ui.painter().text(pos2(r.left() + 12.0, r.top() + 62.0), egui::Align2::LEFT_CENTER, step.app, FontId::proportional(12.0), super::chrome::BLUE);
+        if col + 1 < per_row && i + 1 < WORKFLOW.len() {
+            let y = r.center().y;
+            let (a, b) = (r.right() + 6.0, r.right() + STEP_GAP - 6.0);
+            ui.painter().line_segment([pos2(a, y), pos2(b, y)], Stroke::new(1.4, FAINT));
+            ui.painter().line_segment([pos2(b - 5.0, y - 4.0), pos2(b, y)], Stroke::new(1.4, FAINT));
+            ui.painter().line_segment([pos2(b - 5.0, y + 4.0), pos2(b, y)], Stroke::new(1.4, FAINT));
+        }
+        let resp = resp.on_hover_text(step.agent).on_hover_cursor(egui::CursorIcon::PointingHand);
+        app.automation.add_response(format!("home.workflow.{}", i + 1), "button", step.title, &resp);
+        let mut opened = false;
+        if let Some(id) = step.launch
+            && let Some(path) = launcher_path(id)
+        {
+            let open = Rect::from_min_size(pos2(r.left() + 12.0, r.bottom() - 20.0), vec2(48.0, 14.0));
+            let o = ui.interact(open, ui.id().with(("workflow-open", i)), Sense::click());
+            let color = if o.hovered() { TEXT } else { FAINT };
+            ui.painter().text(open.left_center(), egui::Align2::LEFT_CENTER, "Open", FontId::proportional(11.5), color);
+            let o = o.on_hover_text(format!("Open {} ({})", step.app, path.display()));
+            app.automation.add_response(format!("home.workflow.{}.open", i + 1), "link", &format!("Open {}", step.app), &o);
+            if o.clicked() {
+                opened = true;
+                app.ui_state.status_line = match std::process::Command::new(&path).spawn() {
+                    Ok(_) => format!("Opened {}", step.app),
+                    Err(e) => format!("Could not open {}: {e}", path.display()),
+                };
+            }
+        }
+        if resp.clicked() && !opened {
+            ui.ctx().copy_text(step.agent.to_owned());
+            app.ui_state.status_line = format!("Copied step {} instructions for the agent", i + 1);
+        }
+    }
 }
 
 /// Fully rounded button: primary filled, secondary outlined (the suite's pro-theme buttons).

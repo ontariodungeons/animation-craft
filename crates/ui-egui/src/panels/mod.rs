@@ -5,6 +5,7 @@ pub mod header;
 pub mod left;
 pub mod right;
 pub(crate) mod start;
+pub(crate) mod workshop;
 
 pub(super) mod chrome;
 
