@@ -4644,7 +4644,7 @@ fn build() -> Vec<CommandSpec> {
             "Validate Image Intake",
             ["File", "Import"],
             None,
-            "{\"image\": \"path\", \"asset\": \"optional_id\"}",
+            "{\"image\": \"path\", \"asset\": \"optional_id\", \"slot\": \"auto|original|asset_sheet|turnaround_sheet\", \"attach_to_active\": false, \"auto_cut\": false, \"tolerance\": 25, \"use_ocr\": false}",
             always,
             cmd_intake_validate
         ),

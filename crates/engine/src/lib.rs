@@ -49,10 +49,35 @@ pub enum EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// Rejects a parameter whose JSON type differs from the example value in the command's `params`
+/// description (e.g. `"auto_cut": "true"` where the description says `false`). Every caller (CLI, MCP,
+/// app, bridge) goes through `Session::execute`, so a mistyped value fails the same way everywhere
+/// instead of a handler silently falling back to its default.
+fn check_param_types(description: &str, params: &Value) -> Result<()> {
+    let (Ok(Value::Object(expected)), Some(given)) =
+        (serde_json::from_str::<Value>(description), params.as_object())
+    else {
+        return Ok(());
+    };
+    for (key, value) in given {
+        let wanted = match expected.get(key) {
+            Some(Value::Bool(_)) => "boolean",
+            Some(Value::Number(_)) => "number",
+            _ => continue,
+        };
+        let ok = if wanted == "boolean" { value.is_boolean() } else { value.is_number() };
+        if !ok {
+            return Err(EngineError::InvalidParams(format!("`{key}` must be a {wanted}, got {value}")));
+        }
+    }
+    Ok(())
+}
+
 impl Session {
     /// Execute one command by id with JSON parameters, returning JSON.
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value> {
         let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        check_param_types(spec.params, &params)?;
         (spec.enabled)(self).map_err(|e| EngineError::CommandFailed(id.to_string(), e))?;
         let out = (spec.run)(self, &params)?;
         // Older import/load callers also appear in the shared project outliner.

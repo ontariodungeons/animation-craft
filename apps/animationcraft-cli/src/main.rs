@@ -269,8 +269,30 @@ fn tool_input_schema(id: &str) -> Value {
             },
             "required": ["spec"]
         }),
-        _ => json!({ "type": "object", "properties": {}, "additionalProperties": true }),
+        _ => schema_from_description(id),
     }
+}
+
+/// Typed MCP schema from a command's `params` description: example values give the JSON type
+/// (`false` -> boolean, `25` -> number), so MCP clients send the same types the engine checks.
+fn schema_from_description(id: &str) -> Value {
+    let described = animationcraft_engine::command_specs()
+        .iter()
+        .find(|s| s.id == id)
+        .and_then(|s| serde_json::from_str::<Value>(s.params).ok());
+    let mut properties = serde_json::Map::new();
+    if let Some(Value::Object(fields)) = described {
+        for (key, example) in fields {
+            let prop = match example {
+                Value::Bool(b) => json!({ "type": "boolean", "description": format!("default {b}") }),
+                Value::Number(n) => json!({ "type": "number", "description": format!("default {n}") }),
+                Value::String(hint) => json!({ "type": "string", "description": hint }),
+                other => json!({ "description": other.to_string() }),
+            };
+            properties.insert(key, prop);
+        }
+    }
+    json!({ "type": "object", "properties": properties, "additionalProperties": true })
 }
 
 fn run_mcp_stdio(bridge: Option<String>) {
