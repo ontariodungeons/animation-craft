@@ -9,7 +9,7 @@ pub struct ShapeSettings {
     pub proj_blend_pct: u32,
     pub bump_intensity: u32,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MeshGeometry {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
@@ -57,16 +57,13 @@ pub fn load_views(asset: &Asset) -> Vec<(String, image::RgbaImage)> {
             ));
         }
     }
+    views.retain(|(_, image)| image.pixels().any(|pixel| pixel[3] >= 96));
     views
 }
 
 pub fn build(views: &[(String, image::RgbaImage)], settings: ShapeSettings) -> MeshGeometry {
-    let fallback_img = views
-        .first()
-        .map(|(_, img)| img.clone())
-        .unwrap_or_else(|| {
-            image::RgbaImage::from_pixel(64, 128, image::Rgba([200, 160, 120, 255]))
-        });
+    let Some((_, fallback_img)) = views.first() else { return MeshGeometry::default(); };
+    let fallback_img = fallback_img.clone();
 
     let find_view = |needle: &str| -> &image::RgbaImage {
         views

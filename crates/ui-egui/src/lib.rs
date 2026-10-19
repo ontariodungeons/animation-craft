@@ -21,6 +21,7 @@ mod menus;
 mod face_preview;
 mod preview_export;
 mod control_preview;
+mod control_params;
 mod panels;
 
 use animationcraft_engine::Session;
@@ -419,10 +420,10 @@ impl AnimationCraftApp {
         });
     }
 
-    /// Load or fetch a cached texture from disk, preserving PhotoCraft's transparent RGBA
-    /// directly and only running solid-background stripping on unmatted opaque JPEGs.
+    /// Display source/prepared pixels as authored. Matting belongs to explicit pipeline commands.
     pub fn load_texture(&mut self, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
-        let cache_key = path.to_string();
+        let stamp = std::fs::metadata(path).ok().map(|m| (m.len(), m.modified().ok()));
+        let cache_key = format!("{path}#{stamp:?}");
         if let Some(tex) = self.textures.get(&cache_key) {
             return Some(tex.clone());
         }
@@ -445,6 +446,7 @@ impl AnimationCraftApp {
                 let elements = self.automation.query(filter);
                 return Ok(json!({
                     "active_asset": self.session.active_asset,
+                    "controls": control_params::snapshot(&self.ui_state),
                     "project_assets": self.session.project_assets,
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
@@ -518,6 +520,7 @@ impl AnimationCraftApp {
                         CenterTab::FivePoseLineup => "lineup",
                     },
                     "active_asset": self.session.active_asset,
+                    "controls": control_params::snapshot(&self.ui_state),
                     "attached_asset_sheet": attached_asset_sheet,
                     "attached_turnaround_sheet": attached_turnaround_sheet,
                     "cutout_part_count": cutout_part_count,
@@ -540,6 +543,7 @@ impl AnimationCraftApp {
                 }));
             }
             "ui.set_view" => {
+                self.ui_state = control_params::updated(&self.ui_state, &params)?;
                 if let Some(tab) = params.get("tab").and_then(Value::as_str) {
                     self.ui_state.center_tab = if tab.eq_ignore_ascii_case("original")
                         || tab.eq_ignore_ascii_case("original_view")
@@ -561,25 +565,6 @@ impl AnimationCraftApp {
                     } else {
                         CenterTab::TwoD
                     };
-                }
-                if let Some(yaw) = params.get("yaw").and_then(Value::as_f64) {
-                    self.ui_state.yaw_deg = yaw as f32;
-                }
-                if let Some(range) = params.get("pose_range_pct").and_then(Value::as_f64) {
-                    self.ui_state.pose_range_pct = (range as f32).clamp(0.0, 100.0);
-                }
-                if let Some(height) = params.get("jump_height_pct").and_then(Value::as_f64) {
-                    self.ui_state.jump_height_pct = (height as f32).clamp(0.0, 80.0);
-                }
-                if let Some(expression) = params.get("mouth_expression").and_then(Value::as_str) {
-                    if !["smile", "laugh", "ooh", "mbp", "talk"].contains(&expression) { return Err("Unknown mouth expression".into()); }
-                    self.ui_state.mouth_viseme = expression.into();
-                }
-                for (key, value, low, high) in [("mouth_opening", &mut self.ui_state.smile_open, 0.0, 100.0), ("eye_blink", &mut self.ui_state.eye_blink, 0.0, 100.0), ("eye_gaze", &mut self.ui_state.eye_gaze, -45.0, 45.0)] {
-                    if let Some(number) = params.get(key).and_then(Value::as_f64) { *value = (number as f32).clamp(low, high); }
-                }
-                if let Some(playing) = params.get("playing").and_then(Value::as_bool) {
-                    self.ui_state.playing = playing;
                 }
                 if let Some(mode) = params.get("mode").and_then(Value::as_str) {
                     self.apply_mode_str(mode);
@@ -653,6 +638,7 @@ impl AnimationCraftApp {
                 return Ok(json!({
                     "updated": true,
                     "active_asset": self.session.active_asset,
+                    "controls": control_params::snapshot(&self.ui_state),
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
                     "selected_pose_idx": self.ui_state.selected_pose_idx,
@@ -1217,6 +1203,7 @@ impl eframe::App for AnimationCraftApp {
             if let Some((reply_tx, _)) = self.pending_vision.take() {
                 let _ = reply_tx.send(Ok(json!({
                     "active_asset": self.session.active_asset,
+                    "controls": control_params::snapshot(&self.ui_state),
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
                     "viewport": vision_metrics,

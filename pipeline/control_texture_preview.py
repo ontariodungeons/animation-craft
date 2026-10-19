@@ -32,27 +32,33 @@ def render(source, out_dir, recipe, expression='smile', opening=20, deadline_s=9
             if not (0 <= x < width and 0 <= y < height):
                 raise ValueError('Pin target leaves the cropped layer; enlarge its canvas before deforming')
     changed = any(p['src'] != p['dst'] for p in pins)
-    warnings = []
-    if changed:
-        binary = require_craft_cli('photocraft-cli')
-        work = Path(tempfile.mkdtemp(prefix='pins-', dir=root))
-        baseline, warped = work / 'baseline.png', work / 'warped.png'
-        tool_call(binary, source, [], deadline, baseline)
-        tool_call(binary, source, [('edit.puppetWarp', {'pins': pins, 'mode': 'normal', 'density': 'more', 'expansion': 0})], deadline, warped)
+    # Landmarks are authored in source coordinates. Bake the mouth first, then
+    # deform each resulting frame with pins; never detect against moved coordinates.
+    face = recipe.get('face')
+    if face is not None:
+        result = render_face(source, root, expression, opening, 0, 0, face.get('landmarks'), deadline.left(90))
+    else:
+        result = {'frames': [str(source)], 'warnings': [], 'review_required': changed}
+    if not changed:
+        return result
+    binary = require_craft_cli('photocraft-cli')
+    work = Path(tempfile.mkdtemp(prefix='pins-', dir=root))
+    frames = []
+    for i, frame in enumerate(result['frames']):
+        baseline, warped = work / f'baseline-{i}.png', work / f'warped-{i}.png'
+        tool_call(binary, frame, [], deadline, baseline)
+        tool_call(binary, frame, [('edit.puppetWarp', {'pins': pins, 'mode': 'normal', 'density': 'more', 'expansion': 0})], deadline, warped)
         before, after = rgba(baseline), rgba(warped)
         if before.shape != after.shape:
             raise ValueError('Puppet warp changed the canvas dimensions; preview rejected')
         visible_change = np.any(np.abs(before - after) > 4, axis=2) & ((before[:, :, 3] > 16) | (after[:, :, 3] > 16))
         if int(visible_change.sum()) < 4:
             raise ValueError('Puppet warp did not visibly change the artwork; check pin positions')
-        source = warped
-        warnings.append('Review the mapped pin deformation')
-    face = recipe.get('face')
-    if face is not None:
-        result = render_face(source, root, expression, opening, 0, 0, face.get('landmarks'), deadline.left(90))
-        result['warnings'] = warnings + result.get('warnings', [])
-        return result
-    return {'frames': [str(source)], 'warnings': warnings, 'review_required': changed}
+        frames.append(str(warped))
+    result['frames'] = frames
+    result['warnings'] = result.get('warnings', []) + ['Review the mapped pin deformation']
+    result['review_required'] = True
+    return result
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 //! Cached, per-part deformation jobs shared by native preview and export.
 use crate::{AnimationCraftApp, UiState, face_preview::FacePreview};
-use crate::panels::center::center_motion::control_values;
-use animationcraft_engine::session::{CutoutRigPart, LoadedCutoutRigPlan};
+use crate::panels::center::center_motion::{control_values, is_rig_part_visible};
+use animationcraft_engine::session::{CutoutRigPart, LoadedCutoutRigPlan, PartState};
 use serde_json::{Value, json};
 use std::{collections::{BTreeMap, HashMap}, path::PathBuf};
 
@@ -19,6 +19,18 @@ fn recipe(rig: &LoadedCutoutRigPlan, part: &CutoutRigPart, state: &UiState) -> O
     Some(json!({"pins": pins, "face": face.map(|f| json!({"landmarks": f.landmarks, "revision": f.landmarks.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()).map(|t| format!("{t:?}"))}))}))
 }
 
+pub(crate) fn participates(rig: &LoadedCutoutRigPlan, id: &str, state: &UiState, parts: &[PartState]) -> bool {
+    if !is_rig_part_visible(id, parts) { return false; }
+    if rig.rig_type == "layered_motion" {
+        if let Some(tracks) = rig.effectcraft.get("tracks").and_then(Value::as_array) {
+            if let Some(layers) = tracks.get(state.selected_track_idx.min(tracks.len().saturating_sub(1))).and_then(|t| t.get("layers")).and_then(Value::as_array).filter(|a| !a.is_empty()) {
+                return layers.iter().any(|layer| layer.as_str() == Some(id));
+            }
+        }
+    }
+    true
+}
+
 impl ControlPreview {
     pub(crate) fn path(&mut self, ctx: &egui::Context, rig: &LoadedCutoutRigPlan, part: &CutoutRigPart, state: &UiState) -> (PathBuf, String) {
         let Some(recipe) = recipe(rig, part, state) else { return (part.cropped_path.clone(), String::new()); };
@@ -27,9 +39,10 @@ impl ControlPreview {
         (path, worker.status.clone())
     }
 
-    fn ready(&mut self, rig: &LoadedCutoutRigPlan, state: &UiState) -> Result<BTreeMap<String, Vec<PathBuf>>, String> {
+    fn ready(&mut self, rig: &LoadedCutoutRigPlan, state: &UiState, parts: &[PartState]) -> Result<BTreeMap<String, Vec<PathBuf>>, String> {
         let mut textures = BTreeMap::new();
         for part in &rig.parts {
+            if !participates(rig, &part.id, state, parts) { continue; }
             if let Some(recipe) = recipe(rig, part, state) {
                 let worker = self.jobs.get_mut(&part.id).ok_or_else(|| format!("Preview the deformation on '{}' before exporting", part.label))?;
                 textures.insert(part.id.clone(), worker.ready_recipe(&part.cropped_path, state, &recipe)?);
@@ -43,7 +56,8 @@ impl AnimationCraftApp {
     pub(crate) fn export_control_textures(&mut self) -> Result<BTreeMap<String, Vec<PathBuf>>, String> {
         let rig = self.session().current_asset().and_then(|a| a.cutout_rig.as_ref()).cloned()
             .ok_or("Load a cutout or layered rig before exporting the preview")?;
-        self.control_preview.ready(&rig, &self.ui_state)
+        let parts = self.session().current_asset().map(|a| a.parts.clone()).unwrap_or_default();
+        self.control_preview.ready(&rig, &self.ui_state, &parts)
     }
 }
 
@@ -66,7 +80,7 @@ mod tests {
         state.smile_open = 60.0;
         assert!(recipe(&rig, &part, &state).unwrap()["face"].is_object());
         assert!(recipe(&rig, &other, &state).is_none());
-        assert!(ControlPreview::default().ready(&rig, &state).is_err());
+        assert!(ControlPreview::default().ready(&rig, &state, &[]).is_err());
         state.smile_open = 20.0;
         state.eye_gaze = 20.0;
         assert!(recipe(&rig, &part, &state).is_none());

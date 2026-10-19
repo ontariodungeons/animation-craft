@@ -2172,7 +2172,12 @@ fn cmd_mesh_build_4dir(s: &mut Session, params: &Value) -> Result<Value> {
         clean_turnaround_imgs.push(("front".to_string(), out_file, clean_img));
     }
 
-    let views: Vec<_> = clean_turnaround_imgs.iter().map(|(label, _, img)| (label.clone(), img.clone())).collect();
+    let views: Vec<_> = clean_turnaround_imgs.iter()
+        .filter(|(_, _, image)| image.pixels().any(|pixel| pixel[3] >= 96))
+        .map(|(label, _, img)| (label.clone(), img.clone())).collect();
+    if views.is_empty() {
+        return Err(EngineError::InvalidParams("No readable foreground artwork is available to build a mesh".into()));
+    }
     let crate::mesh_geometry::MeshGeometry { positions, normals, uvs, colors, indices } =
         crate::mesh_geometry::build(&views, crate::mesh_geometry::ShapeSettings {
             inflation_depth_pct, relief_detail_pct, mesh_res, proj_blend_pct, bump_intensity,

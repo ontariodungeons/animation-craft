@@ -13,7 +13,7 @@ use animationcraft_engine::{Asset, ManifestFrame};
 use center_motion::{
     WasdInput, actual_size_viewport_state, center_stage_state, compute_preview_scale,
     desired_labels_for_mode, evaluate_cutout_rig_motion, evaluate_jump, fit_viewport_state,
-    is_rig_part_visible, jump_arc, sanitize_dt, sanitize_zoom, step_playback_phase, step_wasd_roam,
+    jump_arc, sanitize_dt, sanitize_zoom, step_playback_phase, step_wasd_roam,
     stop_motion_state, toggle_sprint_lock_state, trigger_jump_state, zoom_in_state, zoom_out_state,
 };
 use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
