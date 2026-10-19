@@ -75,9 +75,12 @@ def extract_component(src, index, dest):
     with Image.open(src) as image:
         rgba = np.array(image.convert('RGBA'))
     labels, count = ndimage.label(rgba[:, :, 3] > 16, structure=np.ones((3, 3)))
-    if not 0 <= index < count:
-        raise ValueError(f'{src} has {count} separate piece(s); component {index} does not exist')
-    order = sorted(range(1, count + 1), key=lambda k: np.where(labels == k)[1].min())
+    areas = np.bincount(labels.ravel(), minlength=count + 1)
+    # Stray specks are not pieces: only components of a meaningful size count (at least 2% of the largest).
+    pieces = [k for k in range(1, count + 1) if areas[k] >= max(50, 0.02 * areas[1:].max())]
+    if not 0 <= index < len(pieces):
+        raise ValueError(f'{src} has {len(pieces)} separate piece(s); component {index} does not exist')
+    order = sorted(pieces, key=lambda k: np.where(labels == k)[1].min())
     rgba[labels != order[index], 3] = 0
     dest.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(rgba).save(dest)
