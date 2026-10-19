@@ -56,11 +56,15 @@ fn source_sheet_card(
 
 pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
-        .id_salt("left_scroll")
+        .id_salt(if app.ui_state.center_tab == CenterTab::AssetSheet { "left_pose_browser" } else { "left_scroll" })
         .show(ui, |ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
             ui.spacing_mut().item_spacing.y = 6.0;
             super::header::project_assets(app, ui);
+            if app.ui_state.center_tab == CenterTab::AssetSheet {
+                super::center::pose_viewer::sidebar(app, ui);
+                ui.add_space(8.0);
+            }
             ui.label(egui::RichText::new("Source artwork").size(14.0).strong().color(chrome::TEXT));
             // Attached Sheets per Character (Zero Context Switching)
             let (active_char, asset_sheet_name, pose_count, turn_sheet_name, turn_count) = {
@@ -273,7 +277,9 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             ui.add_space(8.0);
 
             super::asset_browser::turnaround(app, ui);
-            super::asset_browser::poses(app, ui);
+            if app.ui_state.center_tab != CenterTab::AssetSheet {
+                super::asset_browser::poses(app, ui);
+            }
             super::asset_browser::parts(app, ui);
         });
 }

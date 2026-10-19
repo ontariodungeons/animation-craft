@@ -146,3 +146,53 @@ pub(super) fn number_row<T: egui::emath::Numeric>(
     })
     .inner
 }
+
+/// Visible range control with a quiet readout, preserving native slider interaction.
+pub(super) fn slider_row(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    suffix: &str,
+    accent: Color32,
+    explanation: (&str, &str, &str),
+) -> Response {
+    ui.push_id(label, |ui| {
+        ui.horizontal(|ui| {
+            help(
+                ui.label(RichText::new(label).size(12.0).color(MUTED)),
+                explanation.0,
+                explanation.1,
+                explanation.2,
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!("{:.1}{}", *value, suffix))
+                        .monospace()
+                        .size(11.0)
+                        .color(accent),
+                );
+            });
+        });
+        let response = ui
+            .scope(|ui| {
+                ui.spacing_mut().slider_width = ui.available_width();
+                ui.spacing_mut().interact_size.y = 18.0;
+                ui.visuals_mut().selection.bg_fill = accent.gamma_multiply(0.65);
+                ui.visuals_mut().widgets.inactive.bg_fill = BORDER;
+                ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(2.0, accent);
+                ui.visuals_mut().widgets.hovered.bg_fill = accent;
+                ui.visuals_mut().widgets.active.bg_fill = accent;
+                ui.add(
+                    egui::Slider::new(value, range)
+                        .show_value(false)
+                        .trailing_fill(true)
+                        .handle_shape(egui::style::HandleShape::Circle),
+                )
+            })
+            .inner;
+        ui.add_space(4.0);
+        help(response, explanation.0, explanation.1, explanation.2)
+    })
+    .inner
+}

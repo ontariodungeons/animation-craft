@@ -23,7 +23,7 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.add(egui::Label::new(egui::RichText::new(&title).size(18.0).strong().color(chrome::TEXT)).truncate());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if app.ui_state.center_tab != CenterTab::AssetSheet { ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().button_padding = egui::vec2(9.0, 6.0);
                 let menu = ui.menu_button("View options ▾", |ui| {
                     ui.set_min_width(210.0);
@@ -54,12 +54,13 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 app.automation.add_response("view.options", "button", "View options", &menu.response);
                 menu.response.on_hover_text("Canvas background, preview style and inspection overlays. These controls do not alter source artwork.");
             });
+            }
         });
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             for (tab, id, label, explanation) in [
                 (CenterTab::OriginalView, "tab.original", "Original", "Inspect the active source image and optional joint overlay."),
-                (CenterTab::AssetSheet, "tab.asset_sheet", "Parts", "Review the connected cutout or pose sheet."),
+                (CenterTab::AssetSheet, "tab.asset_sheet", "Artwork", "Review the connected cutout or pose sheet."),
                 (CenterTab::TurnaroundSheet, "tab.turnaround_sheet", "Turnaround", "Inspect the character reference views."),
                 (CenterTab::TwoD, "tab.2d", "Animate", "Preview the selected action and inspect moving cutout parts."),
                 (CenterTab::ThreeD, "tab.3d", "3D", "Inspect the current 3D turnaround preview."),
@@ -1355,291 +1356,11 @@ fn paint_transparent_checkerboard(painter: &egui::Painter, rect: Rect, light_mod
     }
 }
 
+#[path = "pose_viewer.rs"]
+pub(super) mod pose_viewer;
+
 fn asset_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    let (active_id, sheet_path_opt, frames) = {
-        let asset = app.session().current_asset();
-        let id = app
-            .session()
-            .active_asset
-            .clone()
-            .unwrap_or_else(|| "hopper".to_string());
-        let sheet_p = asset.and_then(|a| {
-            a.attached_asset_sheet.clone().or_else(|| {
-                a.pose_manifest
-                    .as_ref()
-                    .and_then(|m| m.source_image.clone())
-            })
-        });
-        let frs = asset
-            .and_then(|a| a.pose_manifest.as_ref())
-            .map(|m| m.frames.clone())
-            .unwrap_or_default();
-        (id, sheet_p, frs)
-    };
-
-    // Contextual toolbar for the character's Attached Asset / Pose Sheet
-    ui.horizontal_wrapped(|ui| {
-        ui.strong(format!("Attached Asset Sheet ({active_id})"));
-        ui.colored_label(
-            Color32::from_rgb(88, 220, 155),
-            "[OK] Transparent BG (Step 1 Active)",
-        );
-        ui.separator();
-        let r_imp = ui.button("Import / Replace Asset Sheet…");
-        app.automation.add_response(
-            "btn.import_asset_sheet",
-            "button",
-            "Import / Replace Asset Sheet",
-            &r_imp,
-        );
-        if r_imp.clicked()
-            && let Some(file) = rfd::FileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-                .pick_file()
-        {
-            let path_str = file.display().to_string();
-            let tolerance = app.ui_state.bg_tolerance;
-            app.ui_state_mut().image_path = Some(path_str.clone());
-            app.exec_ui_command(UiCommand::IntakeValidate {
-                image_path: path_str,
-                slot: "asset_sheet".to_string(),
-                attach_to_active: true,
-                auto_cut: true,
-                tolerance,
-            });
-        }
-        if ui.button("Re-Cut Sheet").clicked() {
-            let tolerance = app.ui_state.bg_tolerance;
-            let use_ocr = app.ui_state.use_ocr;
-            app.exec_ui_command(UiCommand::AssetCutSheet {
-                asset_id: active_id.clone(),
-                tolerance,
-                use_ocr,
-            });
-        }
-        if ui.button("Open in 2D Gate ->").clicked() {
-            app.ui_state.center_tab = CenterTab::TwoD;
-        }
-        if ui.button("View Turnaround Sheet ->").clicked() {
-            app.ui_state.center_tab = CenterTab::TurnaroundSheet;
-        }
-    });
-
-    // Pose selector strip
-    if !frames.is_empty() {
-        ui.horizontal_wrapped(|ui| {
-            ui.small("Sliced Poses:");
-            for (idx, f) in frames.iter().enumerate() {
-                let selected = app.ui_state.selected_pose_idx == idx;
-                if ui
-                    .selectable_label(selected, format!("#{} {}", idx + 1, f.label))
-                    .clicked()
-                {
-                    app.ui_state.selected_pose_idx = idx;
-                }
-            }
-        });
-    }
-
-    ui.add_space(4.0);
-
-    let ctx = ui.ctx().clone();
-    let sheet_tex = sheet_path_opt.as_ref().and_then(|p| {
-        let s = p.to_string_lossy().into_owned();
-        app.load_texture(&ctx, &s)
-    });
-    let selected_frame = frames
-        .get(app.ui_state.selected_pose_idx)
-        .or_else(|| frames.first())
-        .cloned();
-    let frame_tex = selected_frame.as_ref().and_then(|f| {
-        let s = f.resolved_path.to_string_lossy().into_owned();
-        app.load_texture(&ctx, &s)
-    });
-
-    let avail = ui.available_size();
-    let canvas_size = Vec2::new(avail.x.max(80.0), (avail.y - 8.0).max(220.0));
-    let (rect, resp) = ui.allocate_exact_size(canvas_size, egui::Sense::click());
-
-    // Split top (58% height for the wide landscape 1376x768 Asset Sheet) and bottom (42% height for Selected Pose + Cut Parts)
-    let split_y = rect.top() + rect.height() * 0.58;
-    let top_rect = Rect::from_min_max(rect.min, Pos2::new(rect.max.x, split_y - 3.0));
-    let bot_rect = Rect::from_min_max(Pos2::new(rect.min.x, split_y + 3.0), rect.max);
-
-    let top_painter = ui.painter_at(top_rect);
-    let bot_painter = ui.painter_at(bot_rect);
-
-    paint_transparent_checkerboard(&top_painter, top_rect, app.ui_state.light_backdrop);
-    paint_transparent_checkerboard(&bot_painter, bot_rect, app.ui_state.light_backdrop);
-
-    // Top: Full Attached Asset / Pose Sheet (with transparent background + clickable pose boxes)
-    if let Some(stex) = sheet_tex {
-        let ts = stex.size_vec2();
-        let pad = 14.0;
-        let max_w = (top_rect.width() - pad * 2.0).max(80.0);
-        let max_h = (top_rect.height() - 36.0).max(60.0);
-        let scale = (max_w / ts.x.max(1.0)).min(max_h / ts.y.max(1.0));
-        let draw_size = ts * scale;
-        let sheet_rect = Rect::from_center_size(
-            Pos2::new(top_rect.center().x, top_rect.center().y + 10.0),
-            draw_size,
-        );
-        top_painter.image(
-            stex.id(),
-            sheet_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
-
-        // Draw interactive sourceBox ([x0, y0, x1, y1]) overlays for each sliced pose
-        for (idx, f) in frames.iter().enumerate() {
-            if let Some([bx0, by0, bx1, by1]) = f.source_box {
-                let rx0 = sheet_rect.left() + (bx0 as f32) * scale;
-                let ry0 = sheet_rect.top() + (by0 as f32) * scale;
-                let rx1 = sheet_rect.left() + (bx1 as f32) * scale;
-                let ry1 = sheet_rect.top() + (by1 as f32) * scale;
-                let box_rect = Rect::from_min_max(Pos2::new(rx0, ry0), Pos2::new(rx1, ry1));
-                let is_sel = idx == app.ui_state.selected_pose_idx;
-                let stroke_col = if is_sel {
-                    Color32::from_rgb(75, 195, 255)
-                } else {
-                    Color32::from_rgba_unmultiplied(120, 210, 160, 145)
-                };
-                top_painter.rect_stroke(
-                    box_rect,
-                    3.0,
-                    Stroke::new(if is_sel { 2.0 } else { 1.0 }, stroke_col),
-                    egui::StrokeKind::Inside,
-                );
-                top_painter.text(
-                    Pos2::new(box_rect.left() + 4.0, box_rect.top() + 2.0),
-                    egui::Align2::LEFT_TOP,
-                    format!("#{} {}", idx + 1, f.label),
-                    egui::FontId::monospace(9.5),
-                    stroke_col,
-                );
-                if resp.clicked()
-                    && let Some(pos) = resp.interact_pointer_pos()
-                    && box_rect.contains(pos)
-                {
-                    app.ui_state.selected_pose_idx = idx;
-                }
-            }
-        }
-    } else {
-        top_painter.text(
-            top_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "No Asset Sheet attached — click 'Import / Replace Asset Sheet…' or drag & drop an image",
-            egui::FontId::proportional(13.0),
-            Color32::from_rgb(220, 180, 120),
-        );
-    }
-
-    top_painter.text(
-        Pos2::new(top_rect.left() + 12.0, top_rect.top() + 8.0),
-        egui::Align2::LEFT_TOP,
-        format!(
-            "ATTACHED ASSET / POSE SHEET · {} ({} poses, Transparent Alpha)",
-            sheet_path_opt
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("none"),
-            frames.len()
-        ),
-        egui::FontId::monospace(11.0),
-        Color32::from_rgb(135, 225, 175),
-    );
-
-    // Bottom: Selected Pose Cutout (left 36%) + Extracted Cut Parts 2x4 Grid (right 64%)
-    if let (Some(frame), Some(ftex)) = (selected_frame, frame_tex) {
-        let split_bot_x = bot_rect.left() + bot_rect.width() * 0.36;
-        let pose_box = Rect::from_min_max(bot_rect.min, Pos2::new(split_bot_x, bot_rect.max.y));
-        let parts_box =
-            Rect::from_min_max(Pos2::new(split_bot_x + 8.0, bot_rect.min.y), bot_rect.max);
-
-        let ts = ftex.size_vec2();
-        let max_w = (pose_box.width() - 24.0).max(50.0);
-        let max_h = (pose_box.height() - 36.0).max(60.0);
-        let scale = (max_w / ts.x.max(1.0)).min(max_h / ts.y.max(1.0));
-        let draw_size = ts * scale;
-        let cutout_rect = Rect::from_center_size(
-            Pos2::new(pose_box.center().x, pose_box.center().y + 10.0),
-            draw_size,
-        );
-        bot_painter.image(
-            ftex.id(),
-            cutout_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
-        bot_painter.rect_stroke(
-            cutout_rect,
-            3.0,
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 190, 255, 140)),
-            egui::StrokeKind::Inside,
-        );
-        bot_painter.text(
-            Pos2::new(pose_box.left() + 10.0, pose_box.top() + 8.0),
-            egui::Align2::LEFT_TOP,
-            format!(
-                "POSE #{}: {} ({}x{})",
-                app.ui_state.selected_pose_idx + 1,
-                frame.label,
-                frame.size[0],
-                frame.size[1]
-            ),
-            egui::FontId::monospace(10.0),
-            Color32::from_rgb(150, 215, 255),
-        );
-
-        let part_entries: Vec<(&String, &ManifestPart)> = frame.parts.iter().collect();
-        bot_painter.text(
-            Pos2::new(parts_box.left() + 4.0, parts_box.top() + 8.0),
-            egui::Align2::LEFT_TOP,
-            format!("ISOLATED CUT PARTS ({} layers):", part_entries.len()),
-            egui::FontId::monospace(10.0),
-            Color32::from_rgb(200, 215, 235),
-        );
-        let cols = 4usize;
-        let rows = part_entries.len().max(1).div_ceil(cols).max(1);
-        let cell_w = (parts_box.width() - 12.0) / (cols as f32);
-        let grid_top = parts_box.top() + 26.0;
-        let grid_h = (parts_box.bottom() - 6.0 - grid_top).max(60.0);
-        let cell_h = grid_h / (rows as f32);
-        for (p_idx, (p_name, part)) in part_entries.iter().enumerate() {
-            let col = p_idx % cols;
-            let row = p_idx / cols;
-            let x0 = parts_box.left() + 4.0 + (col as f32) * cell_w;
-            let y0 = grid_top + (row as f32) * cell_h;
-            let slot_rect = Rect::from_min_max(
-                Pos2::new(x0 + 3.0, y0 + 2.0),
-                Pos2::new(x0 + cell_w - 3.0, y0 + cell_h - 16.0),
-            );
-            let p_str = part.resolved_path.to_string_lossy().into_owned();
-            if let Some(ptex) = app.load_texture(&ctx, &p_str) {
-                let pts = ptex.size_vec2();
-                let pscale =
-                    (slot_rect.width() / pts.x.max(1.0)).min(slot_rect.height() / pts.y.max(1.0));
-                let pdraw = pts * pscale;
-                let prect = Rect::from_center_size(slot_rect.center(), pdraw);
-                bot_painter.image(
-                    ptex.id(),
-                    prect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
-            bot_painter.text(
-                Pos2::new(slot_rect.center().x, y0 + cell_h - 14.0),
-                egui::Align2::CENTER_TOP,
-                *p_name,
-                egui::FontId::monospace(9.0),
-                Color32::from_rgb(185, 205, 230),
-            );
-        }
-    }
+    pose_viewer::show(app, ui);
 }
 
 fn turnaround_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {

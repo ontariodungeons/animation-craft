@@ -107,12 +107,6 @@ pub(super) fn turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
     ui.add_space(8.0);
 }
 
-fn inspect_pose(app: &mut AnimationCraftApp, index: usize) {
-    // The sheet view displays the selected source frame directly; a rig preview may use different artwork.
-    app.ui_state.selected_pose_idx = index;
-    app.ui_state.playing = false;
-    app.ui_state.center_tab = CenterTab::AssetSheet;
-}
 
 pub(super) fn poses(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let frames = app
@@ -161,7 +155,7 @@ pub(super) fn poses(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     app.automation.add_response(format!("pose.select.{index}"), "button", &name, &response);
                     let response = chrome::help(response, &format!("{} pose reference. {lift}.", frame.label),
                         "Inspect the actual source artwork before choosing an animation.", "Click to open this frame in Parts and pause playback. Recorded lift is measured from the sheet, not from the animated rig.");
-                    if response.clicked() { inspect_pose(app, index); }
+                    if response.clicked() { super::center::pose_viewer::select_pose(app, ui.ctx(), index); }
                 });
             }
         });
@@ -257,7 +251,7 @@ mod tests {
         let mut app = AnimationCraftApp::new();
         app.session.assets.clear();
         let previous = app.session.last_result.clone();
-        inspect_pose(&mut app, 7);
+        super::super::center::pose_viewer::select_pose(&mut app, &egui::Context::default(), 7);
         assert_eq!(app.ui_state.selected_pose_idx, 7);
         assert!(!app.ui_state.playing);
         assert!(app.ui_state.center_tab == CenterTab::AssetSheet);

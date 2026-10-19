@@ -365,43 +365,43 @@ fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
     chrome::card().show(ui, |ui| {
 ui.set_width(ui.available_width());
 ui.label(RichText::new("Face & head").strong().color(POSE));
-ui.add(egui::Label::new(RichText::new("Drag a value sideways, or click to type.").small().color(chrome::MUTED)).wrap());
-let response = chrome::number_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%", POSE,
+ui.add(egui::Label::new(RichText::new("Drag a slider to shape the expression.").small().color(chrome::MUTED)).wrap());
+let response = chrome::slider_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%", POSE,
                         ("Controls the blink-related preview offset.", "Check the head pose during an expressive moment.", "Drag from 0 to 100. The current layered preview shifts the head; this does not close painted eyelids."));
-app.automation.add_response("pose.eye_blink", "number", "Eye blink", &response);
-let response = chrome::number_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
+app.automation.add_response("pose.eye_blink", "slider", "Eye blink", &response);
+let response = chrome::slider_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
                         ("Controls a gaze-related horizontal head offset.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. This does not redraw eyes or move pupils independently."));
-app.automation.add_response("pose.eye_gaze", "number", "Eye gaze", &response);
-let response = chrome::number_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
+app.automation.add_response("pose.eye_gaze", "slider", "Eye gaze", &response);
+let response = chrome::slider_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
                         ("Stores a mouth-opening value used as a small head offset in the layered preview.", "Record an expression adjustment while inspecting the pose.", "20% is the current neutral value. It does not redraw the mouth or generate lip-sync."));
-app.automation.add_response("pose.smile_open", "number", "Mouth opening", &response);
-let response = chrome::number_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
+app.automation.add_response("pose.smile_open", "slider", "Mouth opening", &response);
+let response = chrome::slider_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
                         ("Adjusts head placement or rotation in supported preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
-app.automation.add_response("pose.head_yaw", "number", "Head turn", &response);
-let response = chrome::number_row(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "", POSE,
+app.automation.add_response("pose.head_yaw", "slider", "Head turn", &response);
+let response = chrome::slider_row(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "", POSE,
                         ("Changes the vertical head offset in the layered preview.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
-app.automation.add_response("pose.head_pitch", "number", "Head tilt", &response);
+app.automation.add_response("pose.head_pitch", "slider", "Head tilt", &response);
 });
     ui.add_space(5.0);
     chrome::card().show(ui, |ui| {
 ui.set_width(ui.available_width());
 ui.label(RichText::new("Body & ears").strong().color(POSE));
 ui.add(egui::Label::new(RichText::new("Preview adjustments; support varies by rig.").small().color(chrome::MUTED)).wrap());
-let response = chrome::number_row(ui, "Arm spread", &mut app.ui_state.arm_spread, -45.0..=90.0, "", POSE,
+let response = chrome::slider_row(ui, "Arm spread", &mut app.ui_state.arm_spread, -45.0..=90.0, "", POSE,
                         ("Moves the arms outward or changes their rotation in supported preview actions.", "Check how far the arms can move without exposing gaps at the shoulders.", "Start near zero and increase gradually; A-Pose sets this to 35."));
-app.automation.add_response("pose.arm_spread", "number", "Arm spread", &response);
-let response = chrome::number_row(ui, "Elbow bend", &mut app.ui_state.elbow_bend, -45.0..=90.0, "", POSE,
+app.automation.add_response("pose.arm_spread", "slider", "Arm spread", &response);
+let response = chrome::slider_row(ui, "Elbow bend", &mut app.ui_state.elbow_bend, -45.0..=90.0, "", POSE,
                         ("Adjusts arm placement in the layered preview.", "Check arm spacing and overlap with the torso.", "Try a small value first. It is not a separate elbow joint solver and may not affect every rig."));
-app.automation.add_response("pose.elbow_bend", "number", "Elbow bend", &response);
-let response = chrome::number_row(ui, "Knee bend", &mut app.ui_state.knee_bend, -45.0..=90.0, "", POSE,
+app.automation.add_response("pose.elbow_bend", "slider", "Elbow bend", &response);
+let response = chrome::slider_row(ui, "Knee bend", &mut app.ui_state.knee_bend, -45.0..=90.0, "", POSE,
                         ("Offsets the legs in the current preview; some cutout actions also use it in leg rotation.", "Explore a crouched or lifted-leg pose and inspect foot placement.", "Increase gradually while watching both feet. Negative values move the adjustment in the opposite direction."));
-app.automation.add_response("pose.knee_bend", "number", "Knee bend", &response);
-let response = chrome::number_row(ui, "Ear spread", &mut app.ui_state.ear_splay, -45.0..=45.0, "", POSE,
+app.automation.add_response("pose.knee_bend", "slider", "Knee bend", &response);
+let response = chrome::slider_row(ui, "Ear spread", &mut app.ui_state.ear_splay, -45.0..=45.0, "", POSE,
                         ("Adjusts ear spacing or rotation, depending on the active preview rig.", "Make an expression more alert and inspect overlap near the head.", "Drag either side of zero and watch the ear bases. Reset Pose restores the default."));
-app.automation.add_response("pose.ear_splay", "number", "Ear spread", &response);
-let response = chrome::number_row(ui, "Ear tilt", &mut app.ui_state.ear_pitch, -45.0..=45.0, "", POSE,
+app.automation.add_response("pose.ear_splay", "slider", "Ear spread", &response);
+let response = chrome::slider_row(ui, "Ear tilt", &mut app.ui_state.ear_pitch, -45.0..=45.0, "", POSE,
                         ("Changes the vertical ear offset in the layered preview.", "Explore the silhouette of raised or lowered ears.", "Use small positive or negative values. This is an approximate offset, not a full 3D ear rotation."));
-app.automation.add_response("pose.ear_pitch", "number", "Ear tilt", &response);
+app.automation.add_response("pose.ear_pitch", "slider", "Ear tilt", &response);
 });
     ui.add_space(5.0);
 }
