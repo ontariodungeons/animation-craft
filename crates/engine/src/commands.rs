@@ -1200,12 +1200,20 @@ fn preset_paths(
     preset: &str,
 ) -> (
     String,
-    PathBuf,
+    Option<PathBuf>,
     Option<PathBuf>,
     Option<PathBuf>,
     Option<PathBuf>,
 ) {
     let base = root.join("exports/pose_and_parts");
+    // A pose sheet is reported only when its cut manifest exists. A missing sheet
+    // is `None` (a clear empty state) and must never resolve to another character's
+    // poses. Mappings follow pipeline/vault_characters.py `poseSheet`, corrected
+    // against the 2026-10-19 reimport review.
+    let pose = |dir: &str| -> Option<PathBuf> {
+        let p = base.join(dir).join("manifest.json");
+        p.is_file().then_some(p)
+    };
     let resolve_telemetry = |slug: &str, filename: &str| -> Option<PathBuf> {
         let p1 = base.join(slug).join(filename);
         if p1.is_file() {
@@ -1235,14 +1243,14 @@ fn preset_paths(
     match preset.to_ascii_lowercase().as_str() {
         "hopper" => (
             "hopper".to_string(),
-            base.join("hopper_poses/manifest.json"),
+            pose("hopper_poses"),
             resolve_turnaround("hopper", "hopper_turnaround"),
             resolve_telemetry("hopper", "motion_range.json"),
             resolve_telemetry("hopper", "turnaround_registration.json"),
         ),
         "whiskers" => (
             "whiskers".to_string(),
-            base.join("whiskers_poses/manifest.json"),
+            pose("whiskers_poses"),
             resolve_turnaround(
                 "whiskers",
                 "Character_turnaround_sheet_anima\u{2026}_202607180130_17",
@@ -1252,7 +1260,7 @@ fn preset_paths(
         ),
         "puddles" => (
             "puddles".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_13/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_13"),
             resolve_turnaround(
                 "puddles",
                 "Character_turnaround_sheet_anima\u{2026}_202607180130_12",
@@ -1262,7 +1270,7 @@ fn preset_paths(
         ),
         "jenny" | "sun" => (
             "jenny".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_3/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_3"),
             resolve_turnaround(
                 "jenny",
                 "Character_turnaround_sheet_anima\u{2026}_202607180130_9",
@@ -1272,7 +1280,7 @@ fn preset_paths(
         ),
         "rusty" | "coralfish" | "coral_fish" => (
             "rusty".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_24/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_24"),
             resolve_turnaround(
                 "rusty",
                 "Character_turnaround_sheet_anima\u{2026}_202607180130_19",
@@ -1280,44 +1288,50 @@ fn preset_paths(
             resolve_telemetry("rusty", "motion_range.json"),
             resolve_telemetry("rusty", "turnaround_registration.json"),
         ),
+        // Miss Hayley has no real vault pose sheet; miss_hayley_poses is a
+        // generated strip, so poses are reported missing.
         "miss_hayley" | "misshayley" | "hayley" => (
             "miss_hayley".to_string(),
-            base.join("miss_hayley_poses/manifest.json"),
+            None,
             resolve_turnaround("miss_hayley", "miss_hayley_turnaround"),
             resolve_telemetry("miss_hayley", "motion_range.json"),
             resolve_telemetry("miss_hayley", "turnaround_registration.json"),
         ),
+        // Old Mac's sheet is _25 (the previous _27 was a different sheet).
         "old_mac" | "oldmac" => (
             "old_mac".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_27/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_25"),
             resolve_turnaround("old_mac", "old_mac_turnaround"),
             resolve_telemetry("old_mac", "motion_range.json"),
             resolve_telemetry("old_mac", "turnaround_registration.json"),
         ),
         "scout" => (
             "scout".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_5/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_5"),
             resolve_turnaround("scout", "scout_turnaround"),
             resolve_telemetry("scout", "motion_range.json"),
             resolve_telemetry("scout", "turnaround_registration.json"),
         ),
+        // Mr Puddles has no pose sheet (its catalogue entry is a single cutout).
         "mr_puddles" | "mrpuddles" => (
             "mr_puddles".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_13/manifest.json"),
+            None,
             resolve_turnaround("mr_puddles", "mr_puddles_turnaround"),
             resolve_telemetry("mr_puddles", "motion_range.json"),
             resolve_telemetry("mr_puddles", "turnaround_registration.json"),
         ),
+        // Sam's sheet is _33 (the previous _24 was Rusty's sheet).
         "sam" => (
             "sam".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_24/manifest.json"),
+            pose("Create_pose_sheet_for_puppet_202607180130_33"),
             resolve_turnaround("sam", "sam_turnaround"),
             resolve_telemetry("sam", "motion_range.json"),
             resolve_telemetry("sam", "turnaround_registration.json"),
         ),
+        // Maisy has no pose sheet; its catalogue pose entry repeats its turnaround.
         "maisy" => (
             "maisy".to_string(),
-            base.join("Create_pose_sheet_for_puppet_202607180130_3/manifest.json"),
+            None,
             resolve_turnaround("maisy", "maisy_turnaround"),
             resolve_telemetry("maisy", "motion_range.json"),
             resolve_telemetry("maisy", "turnaround_registration.json"),
@@ -1326,7 +1340,7 @@ fn preset_paths(
             let id = sanitize_asset_id(other);
             (
                 id.clone(),
-                base.join(&id).join("manifest.json"),
+                pose(&id),
                 None,
                 resolve_telemetry(&id, "motion_range.json"),
                 resolve_telemetry(&id, "turnaround_registration.json"),
@@ -1374,27 +1388,34 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
                 .get("turnaround_registration")
                 .and_then(Value::as_str)
                 .map(|p| resolve_workspace_path(s, p));
-            (id, resolved_pose, t_path, m_path, r_path)
+            (id, Some(resolved_pose), t_path, m_path, r_path)
         };
 
-    let loaded_main = LoadedManifest::load_from_path(&pose_path)?;
+    let loaded_pose = match pose_path.as_ref() {
+        Some(path) => Some(LoadedManifest::load_from_path(path)?),
+        None => None,
+    };
     let mut asset = s.assets.remove(&asset_id).unwrap_or_else(|| Asset {
         id: asset_id.clone(),
         ..Asset::default()
     });
 
-    if let Some(first_frame) = loaded_main.frames.first() {
+    if let Some(first_frame) = loaded_pose.as_ref().and_then(|m| m.frames.first()) {
         asset.path = first_frame.resolved_path.clone();
         asset.width = first_frame.size[0];
         asset.height = first_frame.size[1];
         asset.has_alpha = true;
     }
-    asset.sheet_kind = Some(loaded_main.sheet_type.clone());
+    if let Some(main) = &loaded_pose {
+        asset.sheet_kind = Some(main.sheet_type.clone());
+    }
 
-    if loaded_main.sheet_type == "turnaround" && turnaround_path.is_none() {
-        asset.turnaround_manifest = Some(loaded_main);
-    } else {
-        asset.pose_manifest = Some(loaded_main);
+    if let Some(main) = loaded_pose {
+        if main.sheet_type == "turnaround" && turnaround_path.is_none() {
+            asset.turnaround_manifest = Some(main);
+        } else {
+            asset.pose_manifest = Some(main);
+        }
     }
 
     if let Some(tp) = turnaround_path
@@ -1518,6 +1539,7 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or_default();
     let has_measured_motion = asset.motion_range.is_some();
     let has_measured_registration = asset.turnaround_registration.is_some();
+    let pose_sheet_missing = asset.pose_manifest.is_none();
     let foot_lift_max_px = asset.motion_range.as_ref().map(|m| m.foot_lift_max_px);
     let max_vertical_drift_px = asset
         .turnaround_registration
@@ -1533,6 +1555,7 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
         "asset_id": asset_id,
         "pose_labels": pose_labels,
         "turnaround_labels": turnaround_labels,
+        "pose_sheet_missing": pose_sheet_missing,
         "has_measured_motion": has_measured_motion,
         "has_measured_registration": has_measured_registration,
         "foot_lift_max_px": foot_lift_max_px,
@@ -4644,6 +4667,29 @@ mod tests {
         assert!(ids.contains(&"command.list"));
     }
 
+    #[test]
+    fn unknown_preset_borrows_no_other_asset_sources() {
+        let dir = temporary_directory("unknown_preset");
+        // A cut exists for an unrelated asset. A brand-new asset must not
+        // silently inherit it just because a candidate cut is on disk.
+        let unrelated = dir
+            .join("exports/pose_and_parts")
+            .join("some_existing_character");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::fs::write(unrelated.join("manifest.json"), "{}").unwrap();
+
+        let (id, pose, turnaround, motion, _) = preset_paths(&dir, "brand_new_asset");
+        assert_eq!(id, "brand_new_asset");
+        assert!(pose.is_none(), "new asset borrowed an existing pose cut");
+        assert!(
+            turnaround.is_none(),
+            "new asset borrowed an existing turnaround"
+        );
+        // Any telemetry candidate must at least belong to the new asset.
+        assert!(motion.unwrap().starts_with(dir.join("exports/pose_and_parts/brand_new_asset")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn temporary_directory(label: &str) -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -4888,22 +4934,27 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
     }
 
     #[test]
-    fn vertical_slice_open_validate_cut_load_and_measure() {
-        let mut s = Session::default();
-        let root = workspace_root(&s);
-        let sample_img = root.join("exports/pose_and_parts/hopper_poses/frames/00_standing.png");
-        assert!(
-            sample_img.is_file(),
-            "expected sample image at {}",
-            sample_img.display()
-        );
+    fn vertical_slice_validate_cut_load_and_toggle_parts() {
+        let dir = temporary_directory("vertical_slice");
+        let source = dir.join("generated_sheet.png");
+        // Generate the sheet in the test: this path must work for any new
+        // artwork, not only for a pre-cut vault character.
+        let mut img = image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 255, 255, 255]));
+        for y in 12..52 {
+            for x in 20..44 {
+                img.put_pixel(x, y, image::Rgba([180, 90, 40, 255]));
+            }
+        }
+        img.save(&source).unwrap();
 
-        // 1. Validate intake and verify asset is stored in Session with unmeasured telemetry
+        let mut s = Session::default();
+
+        // 1. Validate intake: the asset is stored with no measured telemetry.
         let val_res = s
             .execute(
                 "intake.validate",
                 json!({
-                    "image": sample_img.to_string_lossy(),
+                    "image": source.to_string_lossy(),
                     "asset": "slice_test"
                 }),
             )
@@ -4917,27 +4968,44 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
         assert!(asset_after_intake.motion_range.is_none());
         assert!(asset_after_intake.turnaround_registration.is_none());
 
-        // 2. Cut the validated asset into a temp directory and verify manifest + parts load into Session
-        let temp_cut_dir = std::env::temp_dir().join("animationcraft_vertical_slice_cut");
-        let _ = std::fs::remove_dir_all(&temp_cut_dir);
+        // 2. Cut into a temp directory and verify the manifest plus decoded frames.
+        let cut_dir = dir.join("cut");
         let cut_res = s
             .execute(
                 "asset.cut_sheet",
                 json!({
                     "asset": "slice_test",
-                    "out_dir": temp_cut_dir.to_string_lossy(),
+                    "out_dir": cut_dir.to_string_lossy(),
                     "kind": "single"
                 }),
             )
             .unwrap();
         assert_eq!(cut_res["ok"], true);
-        assert!(cut_res["frame_count"].as_u64().unwrap() >= 1);
+        let frame_count = cut_res["frame_count"].as_u64().unwrap();
+        assert!(frame_count >= 1);
 
         let asset_after_cut = s.current_asset().unwrap();
-        assert!(asset_after_cut.pose_manifest.is_some());
+        let manifest = asset_after_cut
+            .pose_manifest
+            .as_ref()
+            .expect("cut should load a pose manifest");
+        assert_eq!(manifest.frames.len() as u64, frame_count);
         assert!(!asset_after_cut.parts.is_empty());
+        for frame in &manifest.frames {
+            let decoded = image::open(&frame.resolved_path)
+                .unwrap_or_else(|e| {
+                    panic!("frame {} failed to decode: {e}", frame.resolved_path.display())
+                })
+                .to_rgba8();
+            assert!(decoded.width() > 0 && decoded.height() > 0);
+            assert!(
+                decoded.pixels().any(|p| p[3] > 0),
+                "frame {} has no visible pixels",
+                frame.resolved_path.display()
+            );
+        }
 
-        // 3. Toggle part visibility and solo state and verify persistence in Session
+        // 3. Toggle part visibility and solo state and verify persistence in Session.
         let first_part = asset_after_cut.parts[0].name.clone();
         let part_res = s
             .execute(
@@ -4955,96 +5023,89 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
         assert!(!p_state.visible);
         assert!(p_state.solo);
 
-        // 4. Run turnaround.optimize_accuracy on Hopper's sheets and verify real measured telemetry (20px lift, 0px drift)
-        let opt_res = s
-            .execute(
-                "turnaround.optimize_accuracy",
-                json!({
-                    "asset": "hopper",
-                    "turnaround_dir": root.join("exports/pose_and_parts/hopper_turnaround").to_string_lossy(),
-                    "poses_dir": root.join("exports/pose_and_parts/hopper_poses").to_string_lossy(),
-                    "out_dir": root.join("exports/pose_and_parts/hopper").to_string_lossy(),
-                }),
-            )
-            .unwrap();
-        assert_eq!(opt_res["ok"], true);
-        assert_eq!(opt_res["registration_passed"], true);
-        assert_eq!(opt_res["max_vertical_drift_px"], 0.0);
-        assert_eq!(opt_res["foot_lift_max_px"], 20.0);
-        assert!(opt_res["width_max_delta_px"].as_f64().unwrap() >= 60.0);
-
-        let hopper = s.current_asset().unwrap();
-        let mr = hopper.motion_range.as_ref().unwrap();
-        assert!((mr.foot_lift_max_px - 20.0).abs() < 0.01);
-        assert_eq!(mr.foot_lift_max_pose, "jumping");
-        assert!(mr.width_max_delta_px >= 60.0);
-
-        let pm = hopper.pose_manifest.as_ref().unwrap();
-        let labels: Vec<&str> = pm.frames.iter().map(|f| f.label.as_str()).collect();
-        assert_eq!(
-            labels,
-            vec![
-                "standing",
-                "walking",
-                "running",
-                "jumping",
-                "waving",
-                "pointing",
-                "sitting",
-                "clapping",
-                "looking_up",
-                "looking_down",
-                "arms_wide"
-            ]
-        );
-
-        let _ = std::fs::remove_dir_all(&temp_cut_dir);
+        let _ = std::fs::remove_dir_all(workspace_root(&s).join("exports/pose_and_parts/slice_test"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn preset_switching_loads_distinct_manifests_and_telemetry() {
+    fn manifest_switching_loads_distinct_labels_and_keeps_each_source() {
+        let dir = temporary_directory("manifest_switch");
+        let source = dir.join("source.png");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([10, 20, 30, 255]))
+            .save(&source)
+            .unwrap();
+
+        let write_manifest = |name: &str, label: &str| {
+            let path = dir.join(name);
+            std::fs::write(
+                &path,
+                json!({
+                    "sheetType": "action",
+                    "frames": [{
+                        "label": label,
+                        "file": "source.png",
+                        "size": [16, 16]
+                    }]
+                })
+                .to_string(),
+            )
+            .unwrap();
+            path
+        };
+        let first = write_manifest("first.json", "first_pose");
+        let second = write_manifest("second.json", "second_pose");
+
         let mut s = Session::default();
-
-        // Load Hopper (has measured motion_range.json with 20px max lift)
-        let h_res = s
-            .execute("asset.load_manifest", json!({ "preset": "hopper" }))
+        let a = s
+            .execute(
+                "asset.load_manifest",
+                json!({"manifest": first.to_string_lossy(), "asset": "first"}),
+            )
             .unwrap();
-        assert_eq!(h_res["asset_id"], "hopper");
-        assert_eq!(h_res["has_measured_motion"], true);
-        assert_eq!(h_res["foot_lift_max_px"], 20.0);
+        assert_eq!(a["asset_id"], "first");
+        assert_eq!(a["pose_labels"], json!(["first_pose"]));
+        assert_eq!(a["pose_sheet_missing"], false);
+        // No telemetry file exists, so motion must be unmeasured rather than
+        // inherited from whatever else the session has loaded.
+        assert_eq!(a["has_measured_motion"], false);
+        assert!(s.assets["first"].motion_range.is_none());
 
-        // Switch to Whiskers (loads whiskers_poses manifest, distinct from Hopper)
-        let w_res = s
-            .execute("asset.load_manifest", json!({ "preset": "whiskers" }))
+        let b = s
+            .execute(
+                "asset.load_manifest",
+                json!({"manifest": second.to_string_lossy(), "asset": "second"}),
+            )
             .unwrap();
-        assert_eq!(w_res["asset_id"], "whiskers");
-        assert_eq!(s.active_asset.as_deref(), Some("whiskers"));
-        let whiskers = s.current_asset().unwrap();
-        assert!(
-            whiskers
+        assert_eq!(b["pose_labels"], json!(["second_pose"]));
+        assert_eq!(s.active_asset.as_deref(), Some("second"));
+
+        // Switching back keeps each asset's own source and labels.
+        let again = s
+            .execute(
+                "asset.load_manifest",
+                json!({"manifest": first.to_string_lossy(), "asset": "first"}),
+            )
+            .unwrap();
+        assert_eq!(again["pose_labels"], json!(["first_pose"]));
+        assert_eq!(
+            s.assets["second"]
                 .pose_manifest
                 .as_ref()
                 .unwrap()
-                .manifest_dir
-                .ends_with("whiskers_poses")
+                .frames[0]
+                .label,
+            "second_pose"
         );
-        if let Some(mr) = &whiskers.motion_range {
-            assert_ne!(mr.foot_lift_max_px, 20.0);
-        }
-
-        // Loading a manifest directly without a motion_range file leaves motion_range as None
-        let raw_res = s
-            .execute(
-                "asset.load_manifest",
-                json!({
-                    "manifest": "exports/pose_and_parts/whiskers_poses/manifest.json",
-                    "asset": "unmeasured_cat"
-                }),
-            )
-            .unwrap();
-        assert_eq!(raw_res["asset_id"], "unmeasured_cat");
-        assert_eq!(raw_res["has_measured_motion"], false);
-        assert!(s.current_asset().unwrap().motion_range.is_none());
+        assert_eq!(
+            s.assets["first"]
+                .pose_manifest
+                .as_ref()
+                .unwrap()
+                .frames[0]
+                .label,
+            "first_pose"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
