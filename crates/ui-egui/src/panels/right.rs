@@ -604,12 +604,12 @@ fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
     chrome::card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("Mouth expression").strong().color(POSE));
-                        ui.add(egui::Label::new(RichText::new("PhotoCraft facial preview · requires a detected face").small().color(chrome::MUTED)).wrap());
+                        ui.add(egui::Label::new(RichText::new("PhotoCraft CLI raster warp · requires photocraft-cli & detected face").small().color(chrome::MUTED)).wrap());
                         ui.horizontal_wrapped(|ui| {
                             for (id, label) in [("smile", "Smile"), ("laugh", "Laugh"), ("ooh", "Ooh"), ("mbp", "M/B/P"), ("talk", "Talk")] {
                                 let response = help(chrome::tab(ui, label, app.ui_state.mouth_viseme == id),
-                                    "Deform the detected mouth using PhotoCraft.", "Preview the expression on the actual artwork.",
-                                    "Click to render a preview. Talk loops mouth deformation; it is not audio-driven lip-sync. Review the detected face before export.");
+                                    "Deform the detected mouth region via external photocraft-cli Liquify.", "Preview raster mouth shapes on the artwork without altering source files.",
+                                    "Click to render a PhotoCraft CLI preview. Talk loops 6 deformed frames; it is not audio-driven lip-sync. Review the detected face before export.");
                                 app.automation.add_response(format!("pose.mouth.{id}"), "button", label, &response);
                                 if response.clicked() { app.ui_state.mouth_viseme = id.into(); app.ui_state.center_tab = crate::CenterTab::TwoD; if id == "talk" { app.ui_state.playing = true; } }
                             }
@@ -620,24 +620,24 @@ fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
     chrome::card().show(ui, |ui| {
 ui.set_width(ui.available_width());
 ui.label(RichText::new("Face & head").strong().color(POSE));
-ui.add(egui::Label::new(RichText::new("Drag a slider to shape the expression.").small().color(chrome::MUTED)).wrap());
+ui.add(egui::Label::new(RichText::new("Procedural head posture + PhotoCraft CLI eye/mouth Liquify (when available).").small().color(chrome::MUTED)).wrap());
 let response = chrome::slider_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%", POSE,
-                        ("Controls the blink-related preview offset.", "Check the head pose during an expressive moment.", "Drag from 0 to 100. The current layered preview shifts the head; this does not close painted eyelids."));
+                        ("Applies a procedural head nod offset and, when photocraft-cli is available, warps the eye regions inward.", "Preview blink timing and subtle head posture together.", "Drag from 0 to 100. Procedural head offset is immediate; release the slider to render the PhotoCraft CLI eye warp."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_blink", "slider", "Eye blink", &response);
 let response = chrome::slider_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
-                        ("Controls a gaze-related horizontal head offset.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. This does not redraw eyes or move pupils independently."));
+                        ("Applies a procedural horizontal head/gaze offset and, when photocraft-cli is available, shifts the eye regions.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. Procedural head offset is immediate; release to render the PhotoCraft CLI eye shift."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_gaze", "slider", "Eye gaze", &response);
 let response = chrome::slider_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
-                        ("Deforms the mouth region through PhotoCraft Liquify.", "Adjust expression opening while preserving the original file.", "20% preserves the source opening. Release the slider to render; inspect the result because detected landmarks can need correction."));
+                        ("Deforms the bounded mouth region through external photocraft-cli Liquify while keeping the chin silhouette intact.", "Adjust expression opening while preserving the original file.", "20% preserves the source opening. Release the slider to render; inspect the result because detected landmarks can need correction."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.smile_open", "slider", "Mouth opening", &response);
 let response = chrome::slider_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
-                        ("Adjusts head placement or rotation in supported preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
+                        ("Adjusts procedural head placement or rotation in rig and layered preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
 app.automation.add_response("pose.head_yaw", "slider", "Head turn", &response);
 let response = chrome::slider_row(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "", POSE,
-                        ("Changes the vertical head offset in the layered preview.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
+                        ("Changes the procedural vertical head offset or rotation in rig and layered previews.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
 app.automation.add_response("pose.head_pitch", "slider", "Head tilt", &response);
 });
     ui.add_space(5.0);

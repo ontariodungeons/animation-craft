@@ -1044,9 +1044,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             || app.ui_state.ear_pitch.abs() > 0.5
             || app.ui_state.head_yaw.abs() > 0.5
             || app.ui_state.head_pitch.abs() > 0.5
-            || app.ui_state.eye_gaze.abs() > 0.5
-            || app.ui_state.arm_spread.abs() > 0.5
-            || app.ui_state.eye_blink > 0.5);
+            || app.ui_state.arm_spread.abs() > 0.5);
 
     let tint = match app.ui_state.shading_mode {
         ShadingMode::FeltPbr => Color32::WHITE,
@@ -1261,7 +1259,13 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             let sprite_center = sprite_rect.center();
 
             for (part_idx, part) in visible_layers.iter().enumerate() {
-                let p_str = part.resolved_path.to_string_lossy().into_owned();
+                let resolved = if part.name == "head" || part.name.starts_with("head_") {
+                    app.face_preview
+                        .path(&ctx, &part.resolved_path, &app.ui_state)
+                } else {
+                    part.resolved_path.clone()
+                };
+                let p_str = resolved.to_string_lossy().into_owned();
                 let Some(ptex) = app.load_texture(&ctx, &p_str) else {
                     continue;
                 };
@@ -1277,11 +1281,14 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let rel_y = ((base_center.y - sprite_center.y)
                     / (sprite_rect.height().max(1.0) * 0.5))
                     .clamp(-1.0, 1.0);
-                let (rig_dx, rig_dy) = if rel_y < -0.35 {
+                let (rig_dx, rig_dy) = if rel_y < -0.35 || part.name == "head" {
                     (
                         app.ui_state.head_yaw * 0.3
+                            + app.ui_state.eye_gaze * 0.12
                             + app.ui_state.ear_splay * 0.15 * rel_x.signum(),
-                        app.ui_state.head_pitch * 0.2 + app.ui_state.ear_pitch * 0.2,
+                        app.ui_state.head_pitch * 0.2
+                            + app.ui_state.ear_pitch * 0.2
+                            + app.ui_state.eye_blink * 0.04,
                     )
                 } else if rel_y > 0.35 {
                     (
@@ -1781,6 +1788,7 @@ fn turnaround_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
         {
             let path_str = file.display().to_string();
             let tolerance = app.ui_state.bg_tolerance;
+            let use_ocr = app.ui_state.use_ocr;
             app.ui_state_mut().image_path = Some(path_str.clone());
             app.exec_ui_command(UiCommand::IntakeValidate {
                 image_path: path_str,
@@ -1788,6 +1796,7 @@ fn turnaround_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 attach_to_active: true,
                 auto_cut: true,
                 tolerance,
+                use_ocr,
             });
         }
         if ui.button("0px Drift Register").clicked() {

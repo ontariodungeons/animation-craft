@@ -635,9 +635,66 @@ impl LoadedManifest {
                 .and_then(|p| p.get("parts"))
                 .and_then(Value::as_object)
         {
-            for k in puppet_parts.keys() {
+            let mut parsed_puppet_parts = BTreeMap::new();
+            for (k, pval) in puppet_parts {
                 if !part_set.contains(k) {
                     part_set.push(k.clone());
+                }
+                let pfile = pval
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if pfile.is_empty() {
+                    continue;
+                }
+                let psize = pval
+                    .get("size")
+                    .and_then(Value::as_array)
+                    .map(|s| {
+                        [
+                            s.first().and_then(Value::as_u64).unwrap_or(0) as u32,
+                            s.get(1).and_then(Value::as_u64).unwrap_or(0) as u32,
+                        ]
+                    })
+                    .unwrap_or([0, 0]);
+                let ppivot = pval
+                    .get("pivot")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        [
+                            a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                            a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                        ]
+                    })
+                    .unwrap_or([0.0, 0.0]);
+                let pbind = pval
+                    .get("bindPosition")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        [
+                            a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                            a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32,
+                        ]
+                    })
+                    .unwrap_or([0.0, 0.0]);
+                parsed_puppet_parts.insert(
+                    k.clone(),
+                    ManifestPart {
+                        name: k.clone(),
+                        resolved_path: manifest_dir.join(&pfile),
+                        file: pfile,
+                        size: psize,
+                        pivot: ppivot,
+                        bind_position: pbind,
+                    },
+                );
+            }
+            if !parsed_puppet_parts.is_empty() {
+                for frame in &mut frames {
+                    if frame.parts.is_empty() {
+                        frame.parts = parsed_puppet_parts.clone();
+                    }
                 }
             }
         }

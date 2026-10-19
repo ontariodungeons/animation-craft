@@ -27,17 +27,18 @@ except ImportError as exc:
     sys.exit(f'Facial preview needs numpy and Pillow ({exc}); install them in the Python that runs this script')
 
 # Bump when the warp recipe, regions or validation change so older cached frames are never reused.
-RECIPE_VERSION = 4
+RECIPE_VERSION = 5
 EXPRESSIONS = {'smile': (1, 1), 'laugh': (1.12, 1.38), 'ooh': (.62, 1.18), 'mbp': (1.08, .22), 'talk': (.95, 1.15)}
 LANDMARKS = ('leftEye', 'rightEye', 'nose', 'mouthLeft', 'mouthRight')
 CALL_TIMEOUT = 45
 MARGIN = 6          # px of slack around the regions when checking confinement
 CHANGE_LEVEL = 4    # per-channel difference that counts as a changed pixel
 MIN_CHANGED = 4     # fewer changed pixels than this is treated as a no-op
-MAX_MOUTH_SCALE = 1.8  # keeps pull targets (at half the region height) inside the region
+MAX_MOUTH_SCALE = 2.0   # keeps pull targets inside the mouth region away from the chin
 # Region proportions relative to the detected face rect. These are unverified assumptions, not a
 # property of any particular character; --face-json lets a reviewer set the landmarks explicitly.
-MOUTH_DROP = .08    # mouth centre sits this fraction of face height below the corner midpoint
+MOUTH_DROP = .02    # slight offset from corner midpoint toward the lip parting line
+SILHOUETTE_INSET_FRAC = .035  # inset selection boxes from outer alpha silhouette so chin outline stays intact
 
 
 class Deadline:
@@ -124,6 +125,8 @@ def validate_face(face, width, height):
             raise ValueError(f'Landmark {name} is outside the image. Supply --face-json to set it explicitly.')
     if abs(marks['mouthRight'][0] - marks['mouthLeft'][0]) < .02 * w or abs(marks['rightEye'][0] - marks['leftEye'][0]) < .02 * w:
         raise ValueError('Mouth or eye landmarks coincide, so the regions would be meaningless. Supply --face-json to set them explicitly.')
+    if max(marks['leftEye'][1], marks['rightEye'][1]) >= min(marks['mouthLeft'][1], marks['mouthRight'][1]):
+        raise ValueError('Eye landmarks must be above mouth landmarks. Supply --face-json to set them explicitly.')
     return {'rect': [x, y, w, h], 'landmarks': marks}
 
 
@@ -152,16 +155,80 @@ def locate_face(binary, source, key, face_json, width, height, root, deadline):
     return face, 'detector'
 
 
-def regions(face, width, height):
+def _inset_box_to_silhouette(box, cx, cy, alpha, inset_px):
+    """Clamp a region box so it stays inside the opaque character silhouette around (cx, cy)."""
+    x0, y0, x1, y1 = box
+    if alpha is None:
+        return (x0, y0, x1, y1)
+    h, w = alpha.shape[:2]
+    ix = min(max(0, int(round(cx))), w - 1)
+    iy = min(max(0, int(round(cy))), h - 1)
+    if alpha[iy, ix] <= 16:
+        return (x0, y0, x1, y1)
+    # Scan downward/upward from cy at cx and horizontal span to find silhouette edge
+    bx0 = max(0, int(math.floor(x0)))
+    bx1 = min(w - 1, int(math.ceil(x1)))
+    by0 = max(0, int(math.floor(y0)))
+    by1 = min(h - 1, int(math.ceil(y1)))
+    col_slice = alpha[by0:by1 + 1, bx0:bx1 + 1] > 16
+    if not col_slice.any():
+        return (x0, y0, x1, y1)
+    # Require rows/cols in the box to be predominantly opaque so chin/cheek edges are not dragged
+    row_opaque = col_slice.mean(axis=1) > 0.65
+    col_opaque = col_slice.mean(axis=0) > 0.65
+    if row_opaque.any():
+        valid_rows = np.where(row_opaque)[0]
+        ry0 = by0 + int(valid_rows[0]) + inset_px
+        ry1 = by0 + int(valid_rows[-1]) - inset_px
+        if ry1 > ry0 + 4:
+            y0 = max(y0, float(ry0))
+            y1 = min(y1, float(ry1))
+    if col_opaque.any():
+        valid_cols = np.where(col_opaque)[0]
+        rx0 = bx0 + int(valid_cols[0]) + inset_px
+        rx1 = bx0 + int(valid_cols[-1]) - inset_px
+        if rx1 > rx0 + 4:
+            x0 = max(x0, float(rx0))
+            x1 = min(x1, float(rx1))
+    return (x0, y0, x1, y1)
+
+
+def regions(face, width, height, alpha=None):
     """Mouth and eye rectangles as (x0, y0, x1, y1), plus the mouth geometry the warp uses."""
-    marks, (_, _, fw, fh) = face['landmarks'], face['rect']
+    marks, (fx, fy, fw, fh) = face['landmarks'], face['rect']
     left, right = sorted([marks['mouthLeft'], marks['mouthRight']])
-    mx, my = (left[0] + right[0]) / 2, (left[1] + right[1]) / 2 + fh * MOUTH_DROP
-    mw, mh = max(right[0] - left[0], fw * .24) * 1.5, fh * .22
-    boxes = [(mx - mw, my - mh, mx + mw, my + mh)]
+    corner_y = (left[1] + right[1]) / 2
+    chin_y = min(height - 1.0, fy + fh)
+    mx = (left[0] + right[0]) / 2
+    my = min(corner_y + fh * MOUTH_DROP, corner_y + max(0.0, (chin_y - corner_y) * 0.20))
+    mouth_span = max(right[0] - left[0], fw * .20)
+    mw = min(mouth_span * .68, fw * .34)
+    # Keep mouth half-height well above the chin boundary
+    max_lower_reach = max(4.0, (chin_y - my) * .48)
+    mh = min(fh * .11, max_lower_reach)
+    inset_px = max(3, int(round(min(fw, fh) * SILHOUETTE_INSET_FRAC)))
+    raw_mouth_box = (
+        max(0.0, mx - mw),
+        max(0.0, my - mh),
+        min(width - 1.0, mx + mw),
+        min(height - 1.0, my + mh),
+    )
+    mouth_box = _inset_box_to_silhouette(raw_mouth_box, mx, my, alpha, inset_px)
+    # Update effective (mx, my, mw, mh) to fit within the clamped mouth_box
+    mx = (mouth_box[0] + mouth_box[2]) / 2.0
+    my = (mouth_box[1] + mouth_box[3]) / 2.0
+    mw = max(2.0, (mouth_box[2] - mouth_box[0]) / 2.0)
+    mh = max(2.0, (mouth_box[3] - mouth_box[1]) / 2.0)
+    boxes = [mouth_box]
     for key in ('leftEye', 'rightEye'):
         x, y = marks[key]
-        boxes.append((x - fw * .15, y - fh * .09, x + fw * .15, y + fh * .09))
+        ebox = (
+            max(0.0, x - fw * .14),
+            max(0.0, y - fh * .085),
+            min(width - 1.0, x + fw * .14),
+            min(height - 1.0, y + fh * .085),
+        )
+        boxes.append(_inset_box_to_silhouette(ebox, x, y, alpha, max(2, inset_px // 2)))
     clipped = [(max(0, x0), max(0, y0), min(width - 1, x1), min(height - 1, y1)) for x0, y0, x1, y1 in boxes]
     return clipped, (mx, my, mw, mh)
 
@@ -177,18 +244,21 @@ def strokes_for(frame, expression, opening, blink, gaze, face, mouth):
             strokes.append({'tool': 'forwardWarp', 'size': max(2, size), 'density': 65, 'pressure': 100, 'points': [start, end]})
 
     # Original artwork is the 20% opening baseline used by the existing UI.
-    scale_y = sy * (.2 + opening * .04)
+    scale_y = sy * (.6 + opening * .02)
     if expression == 'talk':
         scale_y *= .55 + .65 * abs(math.sin(frame * math.pi / 5))
     clamped = scale_y > MAX_MOUTH_SCALE
     scale_y = min(scale_y, MAX_MOUTH_SCALE)
-    for dx, dy in [(-mw / 2, 0), (mw / 2, 0), (0, -mh / 2), (0, mh / 2)]:
-        move([mx + dx, my + dy], [mx + dx * sx, my + dy * scale_y], mw * .85)
+    brush_mouth = max(2.0, min(mw * .72, mh * 1.35))
+    for dx, dy in [(-mw * .45, 0), (mw * .45, 0), (0, -mh * .42), (0, mh * .42)]:
+        tx = max(mx - mw * .88, min(mx + mw * .88, mx + dx * sx))
+        ty = max(my - mh * .88, min(my + mh * .88, my + dy * scale_y))
+        move([mx + dx, my + dy], [tx, ty], brush_mouth)
     for key in ('leftEye', 'rightEye'):
         x, y = marks[key]
         ey = fh * .04
         for dy in (-ey, ey):
-            move([x, y + dy], [x + gaze / 45 * fw * .035, y + dy * (1 - blink / 100)], fw * .22)
+            move([x, y + dy], [x + gaze / 45 * fw * .035, y + dy * (1 - blink / 100)], fw * .20)
     return strokes, clamped
 
 
@@ -258,8 +328,9 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
         except (ValueError, KeyError, TypeError):
             pass
 
+    source_pixels = rgba(source)
     face, face_source = locate_face(binary, source, sha(source_hash, version, 'detect')[:24], face_json, width, height, root, deadline)
-    boxes, mouth = regions(face, width, height)
+    boxes, mouth = regions(face, width, height, source_pixels[:, :, 3])
     frames = 6 if expression == 'talk' else 1
     plans = [strokes_for(i, expression, opening, blink, gaze, face, mouth) for i in range(frames)]
     if not any(strokes for strokes, _ in plans):
@@ -271,7 +342,7 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
     try:
         baseline = work / 'baseline.png'
         tool_call(binary, source, select, deadline, baseline)
-        source_pixels, baseline_pixels = rgba(source), rgba(baseline)
+        baseline_pixels = rgba(baseline)
         roundtrip = int(np.abs(source_pixels - baseline_pixels).max()) if source_pixels.shape == baseline_pixels.shape else None
         changed_pixels, outline_pixels = [], []
         for i, (strokes, _) in enumerate(plans):

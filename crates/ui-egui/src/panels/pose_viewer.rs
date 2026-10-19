@@ -482,6 +482,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     attach_to_active: true,
                     auto_cut: false,
                     tolerance: app.ui_state.bg_tolerance,
+                    use_ocr: app.ui_state.use_ocr,
                 });
             }
             let choices = sources(&asset);
@@ -490,7 +491,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let ready = app.ui_state.busy_command.is_none();
                 if button(app, ui, "pose.import_sheet", "Replace pose sheet…", ready, "Replace and slice the active pose sheet. Use Add sheet to keep existing references.")
                     && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png","jpg","jpeg","webp"]).pick_file() {
-                    app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(), slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance }); ui.close();
+                    app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(), slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
                 }
                 ui.separator();
                 ui.label("Slice the open sheet as:");
@@ -503,7 +504,9 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let enabled = ready && state.source_open && selected_source.is_some();
                 let recut = button(app, ui, "pose.recut", "Re-cut this sheet", enabled, "Open a sheet first. Slicing writes a new output revision and preserves previous files.");
                 let layout = if button(app, ui, "pose.apply_layout", "Apply layout…", enabled, "Choose a reviewed JSON layout for this sheet. Previous cutouts remain available if the operation fails.") {
-                    rfd::FileDialog::new().add_filter("Layout JSON", &["json"]).pick_file()
+                    ui.ctx()
+                        .data_mut(|d| d.remove_temp::<PathBuf>(egui::Id::new("pose.apply_layout_path")))
+                        .or_else(|| rfd::FileDialog::new().add_filter("Layout JSON", &["json"]).pick_file())
                 } else { None };
                 if (recut || layout.is_some()) && let Some(source) = selected_source {
                     app.exec_ui_command(UiCommand::CutReviewedSheet { asset_id: asset.id.clone(), source: source.path.to_string_lossy().into_owned(), kind: state.slice_kind.clone(), layout: layout.map(|p|p.to_string_lossy().into_owned()), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
@@ -1625,5 +1628,214 @@ mod tests {
                 == Background::Light
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn wait_for_background_job(app: &mut AnimationCraftApp, ctx: &egui::Context) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.ui_state.busy_command.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for background job {:?}",
+                app.ui_state.busy_command
+            );
+            app.poll_background_jobs_for_test();
+            render(app, ctx, vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+    }
+
+    #[test]
+    fn recut_and_apply_layout_slice_open_source_and_preserve_prior_manifest_on_failure() {
+        let (root, mut app) = fixture("recut_layout");
+        let sheet_path = root.join("sheet.png");
+        let mut sheet_img = image::RgbaImage::from_pixel(160, 100, image::Rgba([255, 255, 255, 255]));
+        for y in 20..80 {
+            for x in 18..68 {
+                sheet_img.put_pixel(x, y, image::Rgba([30, 120, 220, 255]));
+            }
+            for x in 95..145 {
+                sheet_img.put_pixel(x, y, image::Rgba([220, 80, 40, 255]));
+            }
+        }
+        sheet_img.save(&sheet_path).unwrap();
+
+        let valid_layout = root.join("valid_layout.json");
+        std::fs::write(
+            &valid_layout,
+            serde_json::json!({
+                "frames": [
+                    {"label": "orb_alpha", "box": [14, 16, 72, 84]},
+                    {"label": "tri_beta", "box": [90, 16, 150, 84]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let bad_layout = root.join("bad_layout.json");
+        std::fs::write(
+            &bad_layout,
+            serde_json::json!({
+                "frames": [
+                    {"label": "broken", "box": [-10, 0, 9999, 9999]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        app.session
+            .assets
+            .get_mut("fixture")
+            .unwrap()
+            .attached_asset_sheet = Some(sheet_path.clone());
+
+        let ctx = egui::Context::default();
+        click(&mut app, &ctx, "pose.mode.source");
+        click(&mut app, &ctx, "pose.source.0");
+        click(&mut app, &ctx, "pose.tools");
+        click(&mut app, &ctx, "pose.slice_kind.single");
+        click(&mut app, &ctx, "pose.tools");
+        click(&mut app, &ctx, "pose.recut");
+        wait_for_background_job(&mut app, &ctx);
+
+        let first_manifest = app
+            .session
+            .current_asset()
+            .unwrap()
+            .pose_manifest
+            .clone()
+            .expect("recut should attach a pose manifest");
+        assert_eq!(first_manifest.frames.len(), 1);
+        assert_eq!(first_manifest.frames[0].label, "single");
+        let first_dir = first_manifest.manifest_dir.clone();
+        assert!(first_dir.is_dir());
+
+        // Now apply the explicit 2-frame layout via pose.apply_layout
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("pose.apply_layout_path"), valid_layout));
+        click(&mut app, &ctx, "pose.tools");
+        click(&mut app, &ctx, "pose.slice_kind.action");
+        click(&mut app, &ctx, "pose.tools");
+        click(&mut app, &ctx, "pose.apply_layout");
+        wait_for_background_job(&mut app, &ctx);
+
+        let second_manifest = app
+            .session
+            .current_asset()
+            .unwrap()
+            .pose_manifest
+            .clone()
+            .expect("apply_layout should update pose manifest");
+        let labels: Vec<&str> = second_manifest
+            .frames
+            .iter()
+            .map(|f| f.label.as_str())
+            .collect();
+        assert_eq!(labels, vec!["orb_alpha", "tri_beta"]);
+        assert!(
+            first_dir.join("manifest.json").is_file(),
+            "previous revision directory must be preserved on disk"
+        );
+
+        // Now apply an invalid layout and verify the working manifest is preserved
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("pose.apply_layout_path"), bad_layout));
+        click(&mut app, &ctx, "pose.tools");
+        click(&mut app, &ctx, "pose.apply_layout");
+        wait_for_background_job(&mut app, &ctx);
+
+        let after_bad = app
+            .session
+            .current_asset()
+            .unwrap()
+            .pose_manifest
+            .as_ref()
+            .unwrap();
+        let after_labels: Vec<&str> = after_bad.frames.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(after_labels, vec!["orb_alpha", "tri_beta"]);
+        assert!(app.ui_state.status_line.contains("asset.cut_sheet"));
+
+        let _ = std::fs::remove_dir_all(&first_dir);
+        let _ = std::fs::remove_dir_all(&second_manifest.manifest_dir);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn narrow_layout_and_all_eleven_presets_render_without_clipping_or_stale_selection() {
+        let (root, mut app) = fixture("narrow_presets");
+        let ctx = egui::Context::default();
+        let narrow = Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 560.0));
+
+        for (idx, preset) in crate::panels::header::PRESETS.iter().enumerate() {
+            let slug = preset.slug();
+            let frame_count = if idx % 2 == 0 { 3 } else { 1 };
+            let frames = (0..frame_count)
+                .map(|i| ManifestFrame {
+                    index: i,
+                    label: format!("{slug}_pose_{i}"),
+                    resolved_path: root.join("first.png"),
+                    ..Default::default()
+                })
+                .collect();
+            app.session.assets.insert(
+                slug.to_string(),
+                Asset {
+                    id: slug.to_string(),
+                    attached_asset_sheet: Some(root.join("first.png")),
+                    pose_manifest: Some(LoadedManifest {
+                        frames,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            );
+            app.session.active_asset = Some(slug.to_string());
+            app.ui_state.selected_pose_idx = 99;
+
+            app.automation.begin_frame();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(narrow),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut left = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(Rect::from_min_max(Pos2::ZERO, Pos2::new(190.0, 560.0))),
+                    );
+                    sidebar(&mut app, &mut left);
+                    let mut main = ui.new_child(
+                        egui::UiBuilder::new().max_rect(Rect::from_min_max(
+                            Pos2::new(196.0, 0.0),
+                            Pos2::new(900.0, 560.0),
+                        )),
+                    );
+                    navigation(&mut app, &mut main);
+                    show(&mut app, &mut main);
+                },
+            );
+            output.textures_delta.clear();
+
+            assert!(
+                app.ui_state.selected_pose_idx < frame_count,
+                "preset {slug} did not clamp selected_pose_idx"
+            );
+            for control in ["pose.mode.source", "pose.mode.all", "pose.mode.parts"] {
+                let elem = app
+                    .automation
+                    .elements
+                    .iter()
+                    .find(|e| e.id == control)
+                    .unwrap_or_else(|| panic!("missing {control} for preset {slug}"));
+                assert!(
+                    elem.rect[0] >= 0.0
+                        && elem.rect[1] >= 0.0
+                        && elem.rect[0] + elem.rect[2] <= narrow.width() + 1.0
+                        && elem.rect[1] + elem.rect[3] <= narrow.height() + 1.0,
+                    "control {control} out of narrow bounds for {slug}: {:?}",
+                    elem.rect
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

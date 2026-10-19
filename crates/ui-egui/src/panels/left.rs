@@ -50,6 +50,7 @@ fn source_sheet_card(
                     app.exec_ui_command(UiCommand::IntakeValidate {
                         image_path: path, slot: slot.into(), attach_to_active: true,
                         auto_cut: true, tolerance: app.ui_state.bg_tolerance,
+                        use_ocr: app.ui_state.use_ocr,
                     });
                 }
             });
@@ -121,6 +122,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 app.exec_ui_command(UiCommand::IntakeValidate {
                     image_path: path, slot: "auto".into(), attach_to_active: false,
                     auto_cut: true, tolerance: app.ui_state.bg_tolerance,
+                    use_ocr: app.ui_state.use_ocr,
                 });
             }
             ui.add_space(6.0);
@@ -198,12 +200,14 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if r_val.clicked() {
                     let path = app.ui_state.image_path.clone().unwrap_or_default();
                     let tolerance = app.ui_state.bg_tolerance;
+                    let use_ocr = app.ui_state.use_ocr;
                     app.exec_ui_command(UiCommand::IntakeValidate {
                         image_path: path,
                         slot: "auto".to_string(),
                         attach_to_active: true,
                         auto_cut: true,
                         tolerance,
+                        use_ocr,
                     });
                 }
                 let r_3q = chrome::button(ui, "Analyze intake", false);

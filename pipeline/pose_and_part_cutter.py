@@ -465,11 +465,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
     warnings = list((layout or {}).get('warnings', []))
     definitions = (layout or {}).get('frames')
     if definitions is None:
-        if kind == 'exploded':
-            spec = json.loads(TEMPLATE.read_text())
-            definitions = [{'label': s['id'], 'box': [s['cell'][0]*w//3,s['cell'][1]*h//3,
-                            (s['cell'][0]+1)*w//3,(s['cell'][1]+1)*h//3]} for s in spec['slots']]
-        elif kind == 'single':
+        if kind == 'single':
             definitions = [{'label':'single','box':[0,0,w,h]}]
         else:
             raw = np.array(image)
@@ -479,8 +475,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                 # grid-separated panels opaque, collapsing a sheet into one
                 # blob. Only trust the alpha when it separates the figures;
                 # otherwise fall back to colour-based background detection.
-                if kind in ('action', 'turnaround') and (
-                    mask.mean() > 0.5 or not _components(mask, kind)
+                if kind in ('action', 'turnaround', 'exploded') and (
+                    mask.mean() > 0.5 or not _components(mask, 'action' if kind == 'exploded' else kind)
                 ):
                     mask = ndi.binary_opening(
                         mask & ~_background_candidates(raw[:,:,:3], tolerance),
@@ -490,29 +486,73 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                 mask = ~_background_candidates(raw[:,:,:3], tolerance)
                 # Separate characters linked by thin printed grid lines.
                 mask = ndi.binary_opening(mask, iterations=2)
-            boxes = _components(mask, kind)
-            if not boxes:
-                raise ValueError('No foreground characters detected; supply --layout')
-            labels = []
-            if use_ocr and kind == 'action':
-                try:
-                    labels = _ocr_labels(source)
-                except (subprocess.SubprocessError, OSError) as exc:
-                    warnings.append(f'OCR unavailable: {type(exc).__name__}; supply labels via --layout')
-            for i,b in enumerate(boxes):
-                # Margin only 3px: avoid neighboring labels and adjacent characters.
-                box = [max(0,b[0]-3),max(0,b[1]-3),min(w,b[2]+3),min(h,b[3]+3)]
-                candidates = [l for l in labels if abs(l['x']-(b[0]+b[2])/2) < (b[2]-b[0])*.65
-                              and b[3]-8 <= l['y'] <= b[3]+h*.11]
-                match = min(candidates, key=lambda l: abs(l['y']-b[3])+abs(l['x']-(b[0]+b[2])/2), default=None)
-                if match is None and use_ocr and kind == 'action':
-                    caption_crop = image.crop([box[0], box[1], box[2], min(h, int(box[3] + h * 0.11))])
-                    match = _vlm_ocr_label(caption_crop)
-                label = VIEWS[i] if kind == 'turnaround' and len(boxes)==5 else match['label'] if match else f'pose_{i:02d}'
-                definitions = definitions or []
-                definitions.append({'box':box,'label':label,
-                                    'labelSource':'turnaround_order_assumption' if kind=='turnaround' and len(boxes)==5 else 'ocr' if match else 'unlabelled',
-                                    'ocr':match})
+            if kind == 'exploded':
+                spec = json.loads(TEMPLATE.read_text())
+                slot_boxes = [
+                    {'label': s['id'], 'box': [s['cell'][0]*w//3, s['cell'][1]*h//3,
+                                               (s['cell'][0]+1)*w//3, (s['cell'][1]+1)*h//3]}
+                    for s in spec['slots']
+                ]
+                boxes = _components(mask, 'action')
+                core_ids = {'head', 'torso', 'arm_L', 'arm_R', 'leg_L', 'leg_R'}
+                def _cell_has_fitting_component(cell_box):
+                    cx0, cy0, cx1, cy1 = cell_box
+                    cw_cell, ch_cell = cx1 - cx0, cy1 - cy0
+                    for bx0, by0, bx1, by1 in boxes:
+                        mx, my = (bx0 + bx1) * 0.5, (by0 + by1) * 0.5
+                        if (
+                            cx0 <= mx <= cx1
+                            and cy0 <= my <= cy1
+                            and (bx1 - bx0) <= cw_cell * 1.05
+                            and (by1 - by0) <= ch_cell * 1.05
+                        ):
+                            return True
+                    return False
+
+                core_populated = len(boxes) >= 6 and all(
+                    _cell_has_fitting_component(sb['box'])
+                    for sb in slot_boxes if sb['label'] in core_ids
+                )
+                if core_populated:
+                    definitions = slot_boxes
+                else:
+                    if not boxes:
+                        raise ValueError('No foreground parts detected; supply --layout')
+                    warnings.append(
+                        'Exploded sheet does not match the 3x3 biped template; extracted connected components as unlabelled parts (part_00..). Supply --layout to name parts explicitly.'
+                    )
+                    definitions = [
+                        {
+                            'box': [max(0, b[0]-3), max(0, b[1]-3), min(w, b[2]+3), min(h, b[3]+3)],
+                            'label': f'part_{i:02d}',
+                            'labelSource': 'unlabelled',
+                        }
+                        for i, b in enumerate(boxes)
+                    ]
+            else:
+                boxes = _components(mask, kind)
+                if not boxes:
+                    raise ValueError('No foreground characters detected; supply --layout')
+                labels = []
+                if use_ocr and kind == 'action':
+                    try:
+                        labels = _ocr_labels(source)
+                    except (subprocess.SubprocessError, OSError) as exc:
+                        warnings.append(f'OCR unavailable: {type(exc).__name__}; supply labels via --layout')
+                for i,b in enumerate(boxes):
+                    # Margin only 3px: avoid neighboring labels and adjacent characters.
+                    box = [max(0,b[0]-3),max(0,b[1]-3),min(w,b[2]+3),min(h,b[3]+3)]
+                    candidates = [l for l in labels if abs(l['x']-(b[0]+b[2])/2) < (b[2]-b[0])*.65
+                                  and b[3]-8 <= l['y'] <= b[3]+h*.11]
+                    match = min(candidates, key=lambda l: abs(l['y']-b[3])+abs(l['x']-(b[0]+b[2])/2), default=None)
+                    if match is None and use_ocr and kind == 'action':
+                        caption_crop = image.crop([box[0], box[1], box[2], min(h, int(box[3] + h * 0.11))])
+                        match = _vlm_ocr_label(caption_crop)
+                    label = VIEWS[i] if kind == 'turnaround' and len(boxes)==5 else match['label'] if match else f'pose_{i:02d}'
+                    definitions = definitions or []
+                    definitions.append({'box':box,'label':label,
+                                        'labelSource':'turnaround_order_assumption' if kind=='turnaround' and len(boxes)==5 else 'ocr' if match else 'unlabelled',
+                                        'ocr':match})
     if not definitions:
         raise ValueError('No foreground frames specified')
     if len(definitions) > 64:
@@ -634,19 +674,23 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         slots = {s['id']:s for s in json.loads(TEMPLATE.read_text())['slots']}
         for frame in frames:
             name=frame['label']
-            if name not in slots:
-                continue
-            slot=slots[name]
+            slot=slots.get(name)
             with Image.open(output/frame['file']) as part_image:
                 bounds=part_image.getchannel('A').getbbox()
             if bounds is None:
                 continue
-            px,py=slot['pivot']
+            px,py=slot['pivot'] if slot else (.5,.5)
             pivot=[bounds[0]+px*(bounds[2]-bounds[0]),bounds[1]+py*(bounds[3]-bounds[1])]
-            bx,by=defaults[name]
+            if name in defaults:
+                bx,by=defaults[name]
+            else:
+                sb=frame.get('sourceBox',[0,0,w,h])
+                bx=((sb[0]+sb[2])*.5)/max(1,w)
+                by=((sb[1]+sb[3])*.5)/max(1,h)
             override=(layout or {}).get('puppet',{}).get(name,{})
+            parent=override.get('parent', slot['parent'] if slot else None)
             puppet['parts'][name]={'file':frame['file'], 'size':frame['size'],
-                'parent':slot['parent'], 'pivot':override.get('pivot',pivot),
+                'parent':parent, 'pivot':override.get('pivot',pivot),
                 'bindPosition':override.get('bindPosition',[bx*cw,by*ch*2]),
                 'status':'ready' if override.get('complete') else 'needs_review',
                 'visiblePixelsOnly':False, 'inferred':not bool(override.get('complete'))}

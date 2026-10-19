@@ -100,20 +100,43 @@ EXIT STATUS
   0 success · 1 a command failed · 2 usage error
 ";
 
+fn bridge_timeout() -> std::time::Duration {
+    let ms = std::env::var("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30_000);
+    std::time::Duration::from_millis(ms.max(50))
+}
+
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
     use std::io::{BufRead, BufReader};
-    use std::net::TcpStream;
+    use std::net::{TcpStream, ToSocketAddrs};
 
-    let mut stream = TcpStream::connect(addr).map_err(|e| format!("bridge connect {addr}: {e}"))?;
+    let timeout = bridge_timeout();
+    let sock_addr = addr
+        .to_socket_addrs()
+        .map_err(|e| format!("bridge resolve {addr}: {e}"))?
+        .next()
+        .ok_or_else(|| format!("bridge resolve {addr}: no socket address found"))?;
+    let mut stream = TcpStream::connect_timeout(&sock_addr, timeout)
+        .map_err(|e| format!("bridge connect {addr}: {e}"))?;
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
     let payload = json!({ "id": id, "params": params }).to_string();
     writeln!(stream, "{payload}").map_err(|e| format!("bridge write: {e}"))?;
     stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    reader
+    let n = reader
         .read_line(&mut line)
-        .map_err(|e| format!("bridge read: {e}"))?;
+        .map_err(|e| format!("bridge read ({id} on {addr}): {e}"))?;
+    if n == 0 {
+        return Err(format!(
+            "bridge closed connection without replying ({id} on {addr})"
+        ));
+    }
     let resp: Value = serde_json::from_str(line.trim()).map_err(|e| format!("bridge json: {e}"))?;
     if resp.get("ok").and_then(Value::as_bool) == Some(true) {
         Ok(resp.get("result").cloned().unwrap_or(json!({})))
@@ -124,6 +147,10 @@ fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
             .unwrap_or("unknown bridge error");
         Err(err.to_string())
     }
+}
+
+fn is_payload_error(v: &Value) -> bool {
+    v.get("ok").and_then(Value::as_bool) == Some(false)
 }
 
 // The shared positional parser skips dash-prefixed tokens, including stdin's
@@ -309,13 +336,20 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     session.execute(cmd_id, args).map_err(|e| e.to_string())
                 };
                 match res {
-                    Ok(v) => json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "result": {
+                    Ok(v) => {
+                        let is_err = is_payload_error(&v);
+                        let mut result_obj = json!({
                             "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }]
+                        });
+                        if is_err {
+                            result_obj["isError"] = json!(true);
                         }
-                    }),
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": result_obj
+                        })
+                    }
                     Err(e) => json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -399,7 +433,12 @@ fn main() {
                 }
             };
             match res {
-                Ok(v) => outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default()),
+                Ok(v) => {
+                    if is_payload_error(&v) {
+                        fail(format!("vision: command returned ok:false: {v}"));
+                    }
+                    outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                }
                 Err(e) => fail(format!("vision: {e}")),
             }
         }
@@ -416,7 +455,7 @@ fn main() {
             };
             match res {
                 Ok(v) => {
-                    if v.get("ok").and_then(Value::as_bool) == Some(false) {
+                    if is_payload_error(&v) {
                         fail(format!("{id}: command returned ok:false: {v}"));
                     }
                     outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
@@ -546,5 +585,31 @@ mod tests {
         assert!(ids.contains(&"export.filmcraft"));
         assert!(ids.contains(&"export.blender"));
         assert!(ids.contains(&"vision.analyze"));
+        assert!(ids.contains(&"export.layered_motion"));
+        assert!(ids.contains(&"validate.motion"));
+    }
+
+    #[test]
+    fn bridge_call_reports_eof_and_read_timeout_honestly() {
+        use std::net::TcpListener;
+
+        // 1. Server accepts and immediately drops connection -> EOF error
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                drop(stream);
+            }
+        });
+        let err = bridge_call(&addr, "ui.state", json!({})).unwrap_err();
+        assert!(
+            err.contains("without replying") || err.contains("bridge"),
+            "unexpected error: {err}"
+        );
+
+        // 2. Payload ok:false detection
+        assert!(is_payload_error(&json!({ "ok": false, "error": "failed" })));
+        assert!(!is_payload_error(&json!({ "ok": true })));
+        assert!(!is_payload_error(&json!({ "viewport_tab": "2d" })));
     }
 }

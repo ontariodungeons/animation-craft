@@ -53,7 +53,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "AnimationCraft Studio",
         options,
-        Box::new(|_cc| Ok(Box::new(app))),
+        Box::new(|cc| Ok(app.into_native_app(cc.egui_ctx.clone()))),
     )
 }
 

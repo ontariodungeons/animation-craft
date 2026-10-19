@@ -635,6 +635,10 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
         .get("auto_cut")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let use_ocr = params
+        .get("use_ocr")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let auto_cut_result =
         if auto_cut && (resolved_slot == "turnaround_sheet" || resolved_slot == "asset_sheet") {
             let cut_kind = if resolved_slot == "turnaround_sheet" {
@@ -651,7 +655,7 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
                     "out_dir": cut_out_dir.to_string_lossy(),
                     "kind": cut_kind,
                     "tolerance": tolerance,
-                    "use_ocr": false,
+                    "use_ocr": use_ocr,
                 }),
             )?)
         } else {

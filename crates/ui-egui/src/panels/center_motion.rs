@@ -457,7 +457,12 @@ fn pose_library_part_rotation(pose_library: &Value, pose_name: &str, part_id: &s
 
 fn slider_offset_deg(part_id: &str, ui_state: &UiState) -> f32 {
     match part_id {
-        "head" => ui_state.head_yaw * 0.35 + ui_state.head_pitch * 0.25,
+        "head" => {
+            ui_state.head_yaw * 0.35
+                + ui_state.head_pitch * 0.25
+                + ui_state.eye_gaze * 0.12
+                + ui_state.eye_blink * 0.03
+        }
         "ear_left" => -ui_state.ear_splay * 0.35 + ui_state.ear_pitch * 0.25,
         "ear_right" => ui_state.ear_splay * 0.35 + ui_state.ear_pitch * 0.25,
         "arm_left" => ui_state.arm_spread * 0.55 + ui_state.elbow_bend * 0.45,
@@ -659,7 +664,14 @@ pub(crate) fn evaluate_cutout_rig_motion(
         } else {
             match ui_state.anim_mode {
                 AnimMode::Jump => {
-                    let jk = jump_kin.unwrap();
+                    let jk = jump_kin.unwrap_or_else(|| {
+                        evaluate_jump(
+                            ui_state.playback_phase,
+                            ui_state.jump_height_pct,
+                            range_factor,
+                            true,
+                        )
+                    });
                     let (fb_antic, fb_apex) = fallback_jump_poses_deg(pid);
                     let antic = pose_library_part_rotation(&rig.pose_library, "jump_anticipation", pid)
                         .unwrap_or(fb_antic);

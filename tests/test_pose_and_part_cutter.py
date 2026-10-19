@@ -229,16 +229,48 @@ class TestPoseAndPartCutter(unittest.TestCase):
 class TestCutterCLI(unittest.TestCase):
     def test_unified_cut_sheet_command(self):
         import subprocess
+        import sys
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/'input.png'
             im = Image.new('RGBA',(100,180))
             ImageDraw.Draw(im).ellipse((20,10,80,160), fill='red')
             im.save(path)
-            proc = subprocess.run(['python3','studio_pipeline_cli.py','cut-sheet',str(path),
+            proc = subprocess.run([sys.executable,'studio_pipeline_cli.py','cut-sheet',str(path),
                                    '--kind','single','--out-dir',str(Path(tmp)/'out'),'--no-ocr'],
                                   capture_output=True,text=True)
             self.assertEqual(proc.returncode,0,proc.stderr)
             self.assertEqual(json.loads(proc.stdout)['frames'],1)
+
+    def test_exploded_non_template_sheet_extracts_connected_components_and_custom_puppet_parts(self):
+        from pipeline.pose_and_part_cutter import cut_sheet
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'arbitrary_parts.png'
+            im = Image.new('RGBA', (320, 200), (255, 255, 255, 255))
+            draw = ImageDraw.Draw(im)
+            draw.ellipse((24, 30, 120, 160), fill=(40, 140, 220, 255))
+            draw.polygon([(190, 160), (245, 32), (300, 160)], fill=(230, 95, 50, 255))
+            im.save(path)
+
+            out_auto = Path(tmp)/'out_auto'
+            res = cut_sheet(path, out_auto, kind='exploded', use_ocr=False, use_photocraft=False)
+            self.assertEqual([f['label'] for f in res['frames']], ['part_00', 'part_01'])
+            self.assertEqual(set(res['puppet']['parts'].keys()), {'part_00', 'part_01'})
+            self.assertTrue(any('3x3 biped template' in w for w in res['warnings']))
+
+            out_custom = Path(tmp)/'out_custom'
+            layout = {
+                'frames': [
+                    {'label': 'orb_body', 'box': [20, 25, 125, 165]},
+                    {'label': 'fin_top', 'box': [185, 28, 305, 165]},
+                ],
+                'puppet': {
+                    'fin_top': {'parent': 'orb_body', 'pivot': [60, 120], 'complete': True},
+                },
+            }
+            res_custom = cut_sheet(path, out_custom, kind='exploded', layout=layout, use_ocr=False, use_photocraft=False)
+            self.assertEqual(set(res_custom['puppet']['parts'].keys()), {'orb_body', 'fin_top'})
+            self.assertEqual(res_custom['puppet']['parts']['fin_top']['parent'], 'orb_body')
+            self.assertEqual(res_custom['puppet']['parts']['fin_top']['status'], 'ready')
 
 if __name__ == '__main__':
     unittest.main()

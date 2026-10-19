@@ -27,6 +27,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 pub struct ControlRequest {
     pub id: String,
@@ -49,8 +51,9 @@ pub struct AnimationCraftApp {
     pub automation: automation::Registry,
     control_rx: Option<Receiver<ControlRequest>>,
     control_port: Option<u16>,
-    pending_screenshot: Option<(String, Sender<Result<Value, String>>)>,
-    pending_vision: Option<Sender<Result<Value, String>>>,
+    repaint_ctx: Arc<Mutex<Option<egui::Context>>>,
+    pending_screenshot: Option<(String, Sender<Result<Value, String>>, Instant)>,
+    pending_vision: Option<(Sender<Result<Value, String>>, Instant)>,
     pending_clicks: Vec<egui::Pos2>,
     job_tx: Sender<BackgroundJobResult>,
     job_rx: Receiver<BackgroundJobResult>,
@@ -314,6 +317,7 @@ impl AnimationCraftApp {
             automation: automation::Registry::default(),
             control_rx: None,
             control_port: None,
+            repaint_ctx: Arc::new(Mutex::new(None)),
             pending_screenshot: None,
             pending_vision: None,
             pending_clicks: Vec::new(),
@@ -333,6 +337,7 @@ impl AnimationCraftApp {
         self.ui_state.status_line = format!(
             "Live CLI Bridge listening on 127.0.0.1:{port} (`animationcraft-cli --bridge {port} ...`)"
         );
+        let repaint_ctx = Arc::clone(&self.repaint_ctx);
 
         std::thread::spawn(move || {
             let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) else {
@@ -340,6 +345,7 @@ impl AnimationCraftApp {
             };
             for stream in listener.incoming().flatten() {
                 let tx_clone = tx.clone();
+                let repaint_clone = Arc::clone(&repaint_ctx);
                 std::thread::spawn(move || {
                     let Ok(peer) = stream.try_clone() else {
                         return;
@@ -376,6 +382,11 @@ impl AnimationCraftApp {
                             .is_err()
                         {
                             break;
+                        }
+                        if let Ok(guard) = repaint_clone.lock()
+                            && let Some(ctx) = guard.as_ref()
+                        {
+                            ctx.request_repaint();
                         }
                         match reply_rx.recv() {
                             Ok(Ok(res)) => {
@@ -701,145 +712,35 @@ impl AnimationCraftApp {
     pub fn ui_state_mut(&mut self) -> &mut UiState {
         &mut self.ui_state
     }
-}
-
-impl eframe::App for AnimationCraftApp {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
-        // Feed bridge clicks before egui processes input, rather than appending to processed input.
-        for pos in self.pending_clicks.drain(..) {
-            input.events.push(egui::Event::PointerMoved(pos));
-            for pressed in [true, false] {
-                input.events.push(egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                });
-            }
-        }
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Poll completed background subprocess commands so the UI thread never blocks
+    pub fn poll_background_jobs_for_test(&mut self) {
         while let Ok(done) = self.job_rx.try_recv() {
             self.session = done.session;
             self.ui_state.busy_command = None;
             self.sync_ui_after_command(&done.id, &done.result);
         }
+    }
 
-        // Handle drag-and-drop image import directly into the active character's sheet tab
-        let dropped_paths: Vec<String> = ui.ctx().input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().display().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        });
-        for dropped in dropped_paths {
-            let slot = match self.ui_state.center_tab {
-                CenterTab::TurnaroundSheet | CenterTab::ThreeD | CenterTab::FivePoseLineup => {
-                    "turnaround_sheet".to_string()
-                }
-                _ => "asset_sheet".to_string(),
-            };
-            let tolerance = self.ui_state.bg_tolerance;
-            self.ui_state.image_path = Some(dropped.clone());
-            self.exec_ui_command(UiCommand::IntakeValidate {
-                image_path: dropped,
-                slot,
-                attach_to_active: true,
-                auto_cut: true,
-                tolerance,
-            });
+    pub fn expire_stale_screenshots(&mut self, max_age: Duration) {
+        let msg = "Viewport screenshot timed out because the window surface is suspended or unmapped by the compositor; focus the window or use headless vision.analyze";
+        if self
+            .pending_screenshot
+            .as_ref()
+            .is_some_and(|(_, _, t)| t.elapsed() >= max_age)
+            && let Some((_, reply_tx, _)) = self.pending_screenshot.take()
+        {
+            let _ = reply_tx.send(Err(msg.to_string()));
         }
+        if self
+            .pending_vision
+            .as_ref()
+            .is_some_and(|(_, t)| t.elapsed() >= max_age)
+            && let Some((reply_tx, _)) = self.pending_vision.take()
+        {
+            let _ = reply_tx.send(Err(msg.to_string()));
+        }
+    }
 
-        // Check if a requested viewport screenshot event arrived on this frame
-        let screenshot_img = ui.ctx().input(|i| {
-            for ev in &i.raw.events {
-                if let egui::Event::Screenshot { image, .. } = ev {
-                    return Some(image.clone());
-                }
-            }
-            None
-        });
-        if let Some(color_img) = screenshot_img {
-            let w = color_img.width() as u32;
-            let h = color_img.height() as u32;
-            let mut raw = Vec::with_capacity((w * h * 4) as usize);
-            for px in &color_img.pixels {
-                raw.extend_from_slice(&px.to_srgba_unmultiplied());
-            }
-            let bg_rgb = if self.ui_state.light_backdrop {
-                [235, 238, 244]
-            } else {
-                [16, 18, 24]
-            };
-            let vision_metrics =
-                animationcraft_engine::commands::analyze_viewport_region(&raw, w, h, bg_rgb);
-            if let Some(reply_tx) = self.pending_vision.take() {
-                let _ = reply_tx.send(Ok(json!({
-                    "active_asset": self.session.active_asset,
-                    "tab": format!("{:?}", self.ui_state.center_tab),
-                    "anim_mode": format!("{:?}", self.ui_state.anim_mode),
-                    "viewport": vision_metrics,
-                    "element_count": self.automation.elements.len(),
-                })));
-            }
-            if let Some((out_path, reply_tx)) = self.pending_screenshot.take() {
-                let save_res = match image::RgbaImage::from_raw(w, h, raw) {
-                    Some(buf) => buf
-                        .save(&out_path)
-                        .map(|()| {
-                            json!({
-                                "saved": out_path,
-                                "width": w,
-                                "height": h,
-                                "vision": vision_metrics,
-                            })
-                        })
-                        .map_err(|e| e.to_string()),
-                    None => Err("Failed to construct RgbaImage from screenshot buffer".to_string()),
-                };
-                let _ = reply_tx.send(save_res);
-            }
-        }
-
-        // Process any incoming live CLI control commands (`--control <port>`)
-        let mut pending = Vec::new();
-        if let Some(rx) = &self.control_rx {
-            while let Ok(req) = rx.try_recv() {
-                pending.push(req);
-            }
-        }
-        for req in pending {
-            if req.id == "ui.screenshot" {
-                let out_path = req
-                    .params
-                    .get("output")
-                    .and_then(Value::as_str)
-                    .unwrap_or("exports/animationcraft_window.png")
-                    .to_string();
-                self.pending_screenshot = Some((out_path, req.reply));
-                ui.ctx()
-                    .send_viewport_cmd(
-                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
-                    );
-                ui.ctx().request_repaint();
-            } else if req.id == "ui.vision" {
-                self.pending_vision = Some(req.reply);
-                ui.ctx()
-                    .send_viewport_cmd(
-                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
-                    );
-                ui.ctx().request_repaint();
-            } else {
-                let reply_val = self.dispatch(&req.id, req.params);
-                let _ = req.reply.send(reply_val);
-                ui.ctx().request_repaint();
-            }
-        }
-
+    pub fn render_workspace(&mut self, ui: &mut egui::Ui) {
         self.automation.begin_frame();
 
         let full = ui.max_rect();
@@ -946,6 +847,330 @@ impl eframe::App for AnimationCraftApp {
             right_ui.set_clip_rect(inner);
             crate::panels::right::right_panel(self, &mut right_ui);
         }
+    }
+
+    pub fn render_headless_frame(&mut self, ctx: &egui::Context) {
+        let mut events = Vec::new();
+        for pos in self.pending_clicks.drain(..) {
+            events.push(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+        }
+        let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 980.0));
+        if events.is_empty() {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen_rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    self.render_workspace(ui);
+                },
+            );
+            out.textures_delta.clear();
+        } else {
+            for ev in events {
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen_rect),
+                        events: vec![ev],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        self.render_workspace(ui);
+                    },
+                );
+                out.textures_delta.clear();
+            }
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen_rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    self.render_workspace(ui);
+                },
+            );
+            out.textures_delta.clear();
+        }
+    }
+
+    /// Service pending control requests and background jobs when the native window is hidden or
+    /// suspended by the compositor (e.g., on an inactive Wayland workspace).
+    pub fn service_headless_control_tick(
+        &mut self,
+        headless_ctx: &egui::Context,
+        screenshot_timeout: Duration,
+    ) {
+        self.poll_background_jobs_for_test();
+        self.expire_stale_screenshots(screenshot_timeout);
+
+        let mut pending = Vec::new();
+        if let Some(rx) = &self.control_rx {
+            while let Ok(req) = rx.try_recv() {
+                pending.push(req);
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+
+        if self.automation.elements.is_empty() {
+            self.render_headless_frame(headless_ctx);
+        }
+
+        for req in pending {
+            if req.id == "ui.screenshot" {
+                let out_path = req
+                    .params
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("exports/animationcraft_window.png")
+                    .to_string();
+                self.pending_screenshot = Some((out_path, req.reply, Instant::now()));
+                if let Ok(guard) = self.repaint_ctx.lock()
+                    && let Some(ctx) = guard.as_ref()
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                        egui::UserData::default(),
+                    ));
+                    ctx.request_repaint();
+                }
+            } else if req.id == "ui.vision" {
+                self.pending_vision = Some((req.reply, Instant::now()));
+                if let Ok(guard) = self.repaint_ctx.lock()
+                    && let Some(ctx) = guard.as_ref()
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                        egui::UserData::default(),
+                    ));
+                    ctx.request_repaint();
+                }
+            } else {
+                let reply_val = self.dispatch(&req.id, req.params);
+                if !self.pending_clicks.is_empty() || req.id == "ui.set_view" {
+                    self.render_headless_frame(headless_ctx);
+                }
+                let _ = req.reply.send(reply_val);
+                if let Ok(guard) = self.repaint_ctx.lock()
+                    && let Some(ctx) = guard.as_ref()
+                {
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
+
+    /// Wrap this app in a shared native runner that keeps `--control <port>` responsive even when
+    /// the Wayland compositor suspends `eframe::App::ui` on an inactive workspace.
+    pub fn into_native_app(self, ctx: egui::Context) -> Box<dyn eframe::App> {
+        if let Ok(mut guard) = self.repaint_ctx.lock() {
+            *guard = Some(ctx);
+        }
+        let has_control = self.control_port.is_some();
+        let shared = Arc::new(Mutex::new(self));
+        let last_ui_frame = Arc::new(Mutex::new(Instant::now()));
+
+        if has_control {
+            let app_clone = Arc::clone(&shared);
+            let last_frame_clone = Arc::clone(&last_ui_frame);
+            std::thread::spawn(move || {
+                let headless_ctx = egui::Context::default();
+                loop {
+                    std::thread::sleep(Duration::from_millis(25));
+                    let frame_age = last_frame_clone
+                        .lock()
+                        .map(|t| t.elapsed())
+                        .unwrap_or(Duration::ZERO);
+                    if frame_age >= Duration::from_millis(120)
+                        && let Ok(mut app) = app_clone.lock()
+                    {
+                        app.service_headless_control_tick(
+                            &headless_ctx,
+                            Duration::from_millis(1200),
+                        );
+                    }
+                }
+            });
+        }
+
+        Box::new(SharedNativeApp {
+            app: shared,
+            last_ui_frame,
+        })
+    }
+}
+
+struct SharedNativeApp {
+    app: Arc<Mutex<AnimationCraftApp>>,
+    last_ui_frame: Arc<Mutex<Instant>>,
+}
+
+impl eframe::App for SharedNativeApp {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        if let Ok(mut app) = self.app.lock() {
+            app.raw_input_hook(ctx, input);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Ok(mut t) = self.last_ui_frame.lock() {
+            *t = Instant::now();
+        }
+        if let Ok(mut app) = self.app.lock() {
+            app.ui(ui, frame);
+        }
+    }
+}
+
+impl eframe::App for AnimationCraftApp {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        if let Ok(mut guard) = self.repaint_ctx.lock()
+            && guard.is_none()
+        {
+            *guard = Some(ctx.clone());
+        }
+        // Feed bridge clicks before egui processes input, rather than appending to processed input.
+        for pos in self.pending_clicks.drain(..) {
+            input.events.push(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                input.events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Poll completed background subprocess commands so the UI thread never blocks
+        self.poll_background_jobs_for_test();
+        self.expire_stale_screenshots(Duration::from_millis(1200));
+
+        // Handle drag-and-drop image import directly into the active character's sheet tab
+        let dropped_paths: Vec<String> = ui.ctx().input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().display().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+        for dropped in dropped_paths {
+            let slot = match self.ui_state.center_tab {
+                CenterTab::TurnaroundSheet | CenterTab::ThreeD | CenterTab::FivePoseLineup => {
+                    "turnaround_sheet".to_string()
+                }
+                _ => "asset_sheet".to_string(),
+            };
+            let tolerance = self.ui_state.bg_tolerance;
+            let use_ocr = self.ui_state.use_ocr;
+            self.ui_state.image_path = Some(dropped.clone());
+            self.exec_ui_command(UiCommand::IntakeValidate {
+                image_path: dropped,
+                slot,
+                attach_to_active: true,
+                auto_cut: true,
+                tolerance,
+                use_ocr,
+            });
+        }
+
+        // Check if a requested viewport screenshot event arrived on this frame
+        let screenshot_img = ui.ctx().input(|i| {
+            for ev in &i.raw.events {
+                if let egui::Event::Screenshot { image, .. } = ev {
+                    return Some(image.clone());
+                }
+            }
+            None
+        });
+        if let Some(color_img) = screenshot_img {
+            let w = color_img.width() as u32;
+            let h = color_img.height() as u32;
+            let mut raw = Vec::with_capacity((w * h * 4) as usize);
+            for px in &color_img.pixels {
+                raw.extend_from_slice(&px.to_srgba_unmultiplied());
+            }
+            let bg_rgb = if self.ui_state.light_backdrop {
+                [235, 238, 244]
+            } else {
+                [16, 18, 24]
+            };
+            let vision_metrics =
+                animationcraft_engine::commands::analyze_viewport_region(&raw, w, h, bg_rgb);
+            if let Some((reply_tx, _)) = self.pending_vision.take() {
+                let _ = reply_tx.send(Ok(json!({
+                    "active_asset": self.session.active_asset,
+                    "tab": format!("{:?}", self.ui_state.center_tab),
+                    "anim_mode": format!("{:?}", self.ui_state.anim_mode),
+                    "viewport": vision_metrics,
+                    "element_count": self.automation.elements.len(),
+                })));
+            }
+            if let Some((out_path, reply_tx, _)) = self.pending_screenshot.take() {
+                let save_res = match image::RgbaImage::from_raw(w, h, raw) {
+                    Some(buf) => buf
+                        .save(&out_path)
+                        .map(|()| {
+                            json!({
+                                "saved": out_path,
+                                "width": w,
+                                "height": h,
+                                "vision": vision_metrics,
+                            })
+                        })
+                        .map_err(|e| e.to_string()),
+                    None => Err("Failed to construct RgbaImage from screenshot buffer".to_string()),
+                };
+                let _ = reply_tx.send(save_res);
+            }
+        }
+
+        // Process any incoming live CLI control commands (`--control <port>`)
+        let mut pending = Vec::new();
+        if let Some(rx) = &self.control_rx {
+            while let Ok(req) = rx.try_recv() {
+                pending.push(req);
+            }
+        }
+        for req in pending {
+            if req.id == "ui.screenshot" {
+                let out_path = req
+                    .params
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("exports/animationcraft_window.png")
+                    .to_string();
+                self.pending_screenshot = Some((out_path, req.reply, Instant::now()));
+                ui.ctx()
+                    .send_viewport_cmd(
+                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
+                    );
+                ui.ctx().request_repaint();
+            } else if req.id == "ui.vision" {
+                self.pending_vision = Some((req.reply, Instant::now()));
+                ui.ctx()
+                    .send_viewport_cmd(
+                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
+                    );
+                ui.ctx().request_repaint();
+            } else {
+                let reply_val = self.dispatch(&req.id, req.params);
+                let _ = req.reply.send(reply_val);
+                ui.ctx().request_repaint();
+            }
+        }
+
+        self.render_workspace(ui);
 
         // Keep repainting smoothly for live 2D sprite animation and TCP control responsiveness
         ui.ctx()
@@ -966,6 +1191,7 @@ pub enum UiCommand {
         attach_to_active: bool,
         auto_cut: bool,
         tolerance: u32,
+        use_ocr: bool,
     },
     IntakeThreeQuestion {
         archetype: String,
@@ -1048,6 +1274,7 @@ impl UiCommand {
                 attach_to_active,
                 auto_cut,
                 tolerance,
+                use_ocr,
             } => (
                 "intake.validate",
                 serde_json::json!({
@@ -1056,6 +1283,7 @@ impl UiCommand {
                     "attach_to_active": attach_to_active,
                     "auto_cut": auto_cut,
                     "tolerance": tolerance,
+                    "use_ocr": use_ocr,
                 }),
             ),
             UiCommand::IntakeThreeQuestion {
@@ -1298,6 +1526,7 @@ mod tests {
                 attach_to_active: true,
                 auto_cut: true,
                 tolerance: 25,
+                use_ocr: false,
             },
             UiCommand::IntakeThreeQuestion {
                 archetype: "humanoid_biped".into(),
@@ -1368,5 +1597,71 @@ mod tests {
                 "UiCommand mapped to unregistered engine command `{id}`"
             );
         }
+    }
+
+    #[test]
+    fn headless_control_tick_services_commands_and_times_out_screenshots_when_window_suspended() {
+        let mut app = AnimationCraftApp::new();
+        let ctx = egui::Context::default();
+        let (tx, rx) = mpsc::channel();
+        app.control_rx = Some(rx);
+
+        // 1. ui.state works without any active eframe::App::ui calls
+        let (reply_tx, reply_rx) = mpsc::channel();
+        tx.send(ControlRequest {
+            id: "ui.state".into(),
+            params: json!({}),
+            reply: reply_tx,
+        })
+        .unwrap();
+        app.service_headless_control_tick(&ctx, Duration::from_secs(1));
+        let state_res = reply_rx
+            .recv_timeout(Duration::from_millis(500))
+            .unwrap()
+            .unwrap();
+        assert_eq!(state_res["tab"], "original");
+
+        // 2. ui.inspect works via headless layout frame
+        let (reply_tx2, reply_rx2) = mpsc::channel();
+        tx.send(ControlRequest {
+            id: "ui.inspect".into(),
+            params: json!({ "filter": "tab." }),
+            reply: reply_tx2,
+        })
+        .unwrap();
+        app.service_headless_control_tick(&ctx, Duration::from_secs(1));
+        let inspect_res = reply_rx2
+            .recv_timeout(Duration::from_millis(500))
+            .unwrap()
+            .unwrap();
+        assert!(inspect_res["element_count"].as_u64().unwrap_or(0) >= 3);
+
+        // 3. ui.click works via headless layout frame
+        let (reply_tx3, reply_rx3) = mpsc::channel();
+        tx.send(ControlRequest {
+            id: "ui.click".into(),
+            params: json!({ "id": "tab.asset_sheet" }),
+            reply: reply_tx3,
+        })
+        .unwrap();
+        app.service_headless_control_tick(&ctx, Duration::from_secs(1));
+        let click_res = reply_rx3
+            .recv_timeout(Duration::from_millis(500))
+            .unwrap()
+            .unwrap();
+        assert_eq!(click_res["clicked"], "tab.asset_sheet");
+        assert_eq!(app.ui_state.center_tab, CenterTab::AssetSheet);
+
+        // 4. ui.screenshot fails cleanly when window is hidden/suspended instead of hanging forever
+        let (reply_tx4, reply_rx4) = mpsc::channel();
+        app.pending_screenshot = Some((
+            "test.png".into(),
+            reply_tx4,
+            Instant::now() - Duration::from_secs(3),
+        ));
+        app.expire_stale_screenshots(Duration::from_secs(1));
+        let screenshot_res = reply_rx4.recv_timeout(Duration::from_millis(500)).unwrap();
+        assert!(screenshot_res.is_err());
+        assert!(screenshot_res.unwrap_err().contains("timed out"));
     }
 }
