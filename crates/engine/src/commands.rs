@@ -3579,7 +3579,10 @@ fn workshop_status(s: &Session) -> Result<Value> {
     let panels = panel_files(&dir);
     let assets = files_in(&dir.join(ASSETS_DIR), Some(IMAGE_EXTENSIONS));
     let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
-    let approved = pdf.is_file() && s.draft_approved;
+    // Approved when every scene's own status is approved (storyboard/scene-N.md); projects
+    // without scene files fall back to the single storyboard approval.
+    let scene_docs: Vec<SceneDoc> = (1..).map(|n| (n, scene_doc_path(&dir, n))).take_while(|(_, p)| p.is_file()).map(|(n, _)| read_scene_doc(&dir, n)).collect();
+    let approved = pdf.is_file() && if scene_docs.is_empty() { s.draft_approved } else { scene_docs.iter().all(|d| d.status == "approved") };
     // Panel start times come from the transcript only when there is no FilmCraft lookup to make
     // (status runs every second in the app): scenes without the song length are enough here.
     let panel_timing = transcript_files(&dir).first()
@@ -3930,7 +3933,8 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let transcript: Value = serde_json::from_str(&std::fs::read_to_string(&transcript_path)?)
         .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
     let total = song_seconds(&dir);
-    let scene_list = scenes(&transcript, total);
+    let _ = &transcript;
+    let scene_list = storyboard_scenes(&dir)?;
     let panels = panel_files(&dir);
     let prompt_texts: Vec<Option<String>> = panels
         .iter()
@@ -4051,7 +4055,8 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         }
         steps.push(text(1, [x, y + 6.0], pw - m - 120.0, scene_label(i, scene), 12.0, "helvetica", CREAM, true));
         let lines = scene["lines"].as_array().map_or(0, Vec::len);
-        let note = if lines == 0 { "instrumental".to_string() } else { format!("{lines} lines") };
+        let status = scene["status"].as_str().unwrap_or("draft");
+        let note = if lines == 0 { format!("instrumental · {status}") } else { format!("{lines} lines · {status}") };
         steps.push(text(1, [pw - m - 110.0, y + 9.0], pw - m - 8.0, note, 9.0, "courier", AMBER, false));
         steps.push(json!({"tool": "link_add", "args": {"doc": 1, "page": 1, "rect": [m, y, pw - m, y + 38.0], "to_page": i + 2, "visible": false}}));
     }
@@ -4064,7 +4069,12 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
             Some("verse") => format!("Verse {}", scene["verse"]),
             _ => "Instrumental".into(),
         };
-        steps.extend(header(page, format!("SCENE {} · {range}", i + 1), heading));
+        let status = scene["status"].as_str().unwrap_or("draft").to_uppercase();
+        steps.extend(header(page, format!("SCENE {} · {range} · {status}", i + 1), heading));
+        let notes: Vec<String> = scene["notes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|n| format!("• {n}")).collect();
+        if !notes.is_empty() {
+            steps.push(block(page, [m, ph - 18.0 - 12.0 * notes.len().min(3) as f64, pw - m, ph - 6.0], format!("NOTES  {}", notes.join("   ")), 8.0, "courier", AMBER));
+        }
         let lines = scene["lines"].as_array().cloned().unwrap_or_default();
         if lines.is_empty() {
             steps.push(image(page, &card_cream, [m, 90.0, pw - m, 150.0]));
@@ -4423,6 +4433,229 @@ fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> 
     }
     let timing: Vec<Value> = images.iter().zip(&spans).map(|(img, sp)| json!({"panel": img, "begins": sp.iter().map(|(a, _)| clock(*a)).collect::<Vec<_>>()})).collect();
     Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "clips": clips, "timing": timing}))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Storyboard as a document of chapters: one source file per scene (storyboard/scene-N.md) holds
+// its status, notes and lyric corrections; panels and prompts stay in storyboard/panel-NN.*.
+// Commands read and edit those sources; the PDF is always rebuilt from them, never edited.
+
+const SCENE_STATUSES: &[&str] = &["draft", "needs review", "approved"];
+
+#[derive(Default)]
+struct SceneDoc {
+    status: String,
+    notes: Vec<String>,
+    lyrics: std::collections::BTreeMap<usize, String>,
+}
+
+fn scene_doc_path(dir: &Path, n: usize) -> PathBuf {
+    dir.join(STORYBOARD_DIR).join(format!("scene-{n}.md"))
+}
+
+fn read_scene_doc(dir: &Path, n: usize) -> SceneDoc {
+    let mut doc = SceneDoc { status: "draft".into(), ..SceneDoc::default() };
+    let Ok(text) = std::fs::read_to_string(scene_doc_path(dir, n)) else { return doc };
+    let mut section = "";
+    for line in text.lines() {
+        let t = line.trim();
+        if let Some(st) = t.strip_prefix("status:") {
+            doc.status = st.trim().to_string();
+        } else if let Some(h) = t.strip_prefix("## ") {
+            section = if h.eq_ignore_ascii_case("notes") { "notes" } else if h.eq_ignore_ascii_case("lyrics") { "lyrics" } else { "" };
+        } else if section == "notes" && let Some(note) = t.strip_prefix("- ") {
+            doc.notes.push(note.to_string());
+        } else if section == "lyrics"
+            && let Some((n, words)) = t.split_once(':')
+            && let Ok(n) = n.trim().parse::<usize>()
+        {
+            doc.lyrics.insert(n, words.trim().to_string());
+        }
+    }
+    doc
+}
+
+fn write_scene_doc(dir: &Path, n: usize, label: &str, doc: &SceneDoc) -> Result<()> {
+    let mut out = format!("# {label}\nstatus: {}\n\n## Notes\n", doc.status);
+    for note in &doc.notes {
+        out.push_str(&format!("- {note}\n"));
+    }
+    out.push_str("\n## Lyrics\n<!-- corrections only: line number: words (the transcript keeps what was heard) -->\n");
+    for (n, words) in &doc.lyrics {
+        out.push_str(&format!("{n}: {words}\n"));
+    }
+    std::fs::create_dir_all(dir.join(STORYBOARD_DIR))?;
+    std::fs::write(scene_doc_path(dir, n), out)?;
+    Ok(())
+}
+
+/// The song's scenes from the transcript with each scene's lyric corrections applied.
+fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
+    let transcript = transcript_files(dir).into_iter().next().ok_or_else(|| {
+        EngineError::InvalidParams("transcribe or import the transcript first: scenes come from it".into())
+    })?;
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript)?)
+        .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
+    let mut list = scenes(&doc, song_seconds(dir));
+    for (i, scene) in list.iter_mut().enumerate() {
+        let sd = read_scene_doc(dir, i + 1);
+        if let Some(lines) = scene["lines"].as_array_mut() {
+            for (j, line) in lines.iter_mut().enumerate() {
+                if let Some(words) = sd.lyrics.get(&(j + 1)) {
+                    line["heard"] = line["text"].clone();
+                    line["text"] = json!(words);
+                }
+            }
+        }
+        scene["status"] = json!(sd.status);
+        scene["notes"] = json!(sd.notes);
+    }
+    Ok(list)
+}
+
+fn scene_number(params: &Value, count: usize) -> Result<usize> {
+    let n = params.get("scene").and_then(Value::as_u64).map(|n| n as usize).ok_or_else(|| EngineError::InvalidParams("missing 'scene' (1-based, see storyboard.toc)".into()))?;
+    if n == 0 || n > count {
+        return Err(EngineError::InvalidParams(format!("scene must be 1..={count}")));
+    }
+    Ok(n)
+}
+
+fn cmd_storyboard_init(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    for folder in [STORYBOARD_DIR, ASSETS_DIR, "liner-notes"] {
+        std::fs::create_dir_all(dir.join(folder))?;
+    }
+    let list = storyboard_scenes(&dir)?;
+    let mut created = Vec::new();
+    for (i, scene) in list.iter().enumerate() {
+        if !scene_doc_path(&dir, i + 1).is_file() {
+            write_scene_doc(&dir, i + 1, &scene_label(i, scene), &read_scene_doc(&dir, i + 1))?;
+            created.push(scene_doc_path(&dir, i + 1));
+        }
+    }
+    let mut toc = cmd_storyboard_toc(s, &json!({}))?;
+    toc["created"] = json!(created);
+    Ok(toc)
+}
+
+fn cmd_storyboard_toc(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let list = storyboard_scenes(&dir)?;
+    let panels = panel_files(&dir).len();
+    let chapters: Vec<Value> = list
+        .iter()
+        .enumerate()
+        .map(|(i, sc)| {
+            let lines = sc["lines"].as_array().map_or(0, Vec::len);
+            json!({"scene": i + 1, "title": scene_label(i, sc), "page": i + 2, "status": sc["status"], "lines": lines,
+                "panels": lines.min(panels), "notes": sc["notes"].as_array().map_or(0, Vec::len), "source": scene_doc_path(&dir, i + 1)})
+        })
+        .collect();
+    let pages = 1 + list.len() + 2;
+    Ok(json!({"ok": true, "pdf": dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF), "overview_page": 1, "chapters": chapters,
+        "assets_page": list.len() + 2, "brief_page": pages}))
+}
+
+fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let list = storyboard_scenes(&dir)?;
+    let n = scene_number(params, list.len())?;
+    let scene = &list[n - 1];
+    let panels = panel_files(&dir);
+    let lines: Vec<Value> = scene["lines"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(j, l)| {
+            let panel = panels.get(j);
+            json!({"line": j + 1, "start": l["start"], "time": clock(l["start"].as_f64().unwrap_or(0.0)), "lyric": l["text"], "heard": l.get("heard"),
+                "panel": panel, "prompt": panel.and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())})
+        })
+        .collect();
+    Ok(json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
+        "status": scene["status"], "notes": scene["notes"], "lines": lines, "source": scene_doc_path(&dir, n), "page": n + 1}))
+}
+
+fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let query = params.get("query").and_then(Value::as_str).filter(|q| !q.trim().is_empty()).ok_or_else(|| EngineError::InvalidParams("missing 'query'".into()))?.to_lowercase();
+    let list = storyboard_scenes(&dir)?;
+    let panels = panel_files(&dir);
+    let mut hits = Vec::new();
+    for (i, scene) in list.iter().enumerate() {
+        for (j, l) in scene["lines"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+            let lyric = l["text"].as_str().unwrap_or_default();
+            if lyric.to_lowercase().contains(&query) {
+                hits.push(json!({"scene": i + 1, "line": j + 1, "where": "lyric", "text": lyric}));
+            }
+            if let Some(prompt) = panels.get(j).and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())
+                && prompt.to_lowercase().contains(&query)
+            {
+                hits.push(json!({"scene": i + 1, "line": j + 1, "where": "prompt", "text": prompt.chars().take(200).collect::<String>()}));
+            }
+        }
+        for note in scene["notes"].as_array().cloned().unwrap_or_default() {
+            if note.as_str().is_some_and(|t| t.to_lowercase().contains(&query)) {
+                hits.push(json!({"scene": i + 1, "where": "note", "text": note}));
+            }
+        }
+    }
+    Ok(json!({"ok": true, "query": query, "hits": hits}))
+}
+
+/// Changes one scene's source: a lyric correction, a line's panel prompt or image, a note, or
+/// the status. The scene returns to "needs review" (unless the edit sets the status) and the PDF
+/// is rebuilt from the sources.
+fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let list = storyboard_scenes(&dir)?;
+    let n = scene_number(params, list.len())?;
+    let field = params.get("field").and_then(Value::as_str).unwrap_or_default();
+    let value = params.get("value").and_then(Value::as_str).unwrap_or_default().to_string();
+    let line = params.get("line").and_then(Value::as_u64).map(|l| l as usize);
+    let lines = list[n - 1]["lines"].as_array().map_or(0, Vec::len);
+    let need_line = || -> Result<usize> {
+        line.filter(|l| *l >= 1 && *l <= lines).ok_or_else(|| EngineError::InvalidParams(format!("'line' must be 1..={lines} for this scene")))
+    };
+    let mut doc = read_scene_doc(&dir, n);
+    match field {
+        "lyric" => {
+            doc.lyrics.insert(need_line()?, value.clone());
+        }
+        "note" => doc.notes.push(value.clone()),
+        "prompt" => {
+            let l = need_line()?;
+            let panel = dir.join(STORYBOARD_DIR).join(format!("panel-{l:02}.png"));
+            std::fs::write(panel.with_extension("prompt.md"), format!("{value}\n"))?;
+        }
+        "panel" => {
+            let l = need_line()?;
+            let src = resolve_workspace_path(s, &value);
+            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
+                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
+            }
+            std::fs::copy(&src, dir.join(STORYBOARD_DIR).join(format!("panel-{l:02}.png")))?;
+        }
+        "status" => {
+            if !SCENE_STATUSES.contains(&value.as_str()) {
+                return Err(EngineError::InvalidParams(format!("status must be one of {SCENE_STATUSES:?}")));
+            }
+        }
+        _ => return Err(EngineError::InvalidParams("field must be lyric, prompt, panel, note or status".into())),
+    }
+    doc.status = if field == "status" { value } else { "needs review".into() };
+    write_scene_doc(&dir, n, &scene_label(n - 1, &list[n - 1]), &doc)?;
+    cmd_workshop_build_storyboard(s, &json!({}))?;
+    cmd_storyboard_read(s, &json!({"scene": n}))
+}
+
+fn cmd_storyboard_approve(s: &mut Session, params: &Value) -> Result<Value> {
+    let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
+    let status = if approved { "approved" } else { "needs review" };
+    cmd_storyboard_edit(s, &json!({"scene": params.get("scene"), "field": "status", "value": status}))
 }
 
 /// FilmCraft time base: ticks per second.
@@ -5675,6 +5908,13 @@ fn build() -> Vec<CommandSpec> {
         query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
         query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
+        cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
+        query!("storyboard.toc", "Storyboard Chapters", "{}", cmd_storyboard_toc),
+        query!("storyboard.read", "Read Scene", "{\"scene\": 1}", cmd_storyboard_read),
+        query!("storyboard.search", "Search Storyboard", "{\"query\": \"text\"}", cmd_storyboard_search),
+        cmd!("storyboard.edit", "Edit Scene", ["Storyboard"], None,
+            "{\"scene\": 1, \"field\": \"lyric|prompt|panel|note|status\", \"line\": 1, \"value\": \"text, image path or status\"}", always, cmd_storyboard_edit),
+        cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
         cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
