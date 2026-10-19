@@ -3226,7 +3226,7 @@ pub(crate) fn write_project_file(s: &Session) -> Result<()> {
     let Some(path) = &s.project_path else { return Ok(()) };
     let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
     let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": s.project_assets,
-        "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved}});
+        "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target}});
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -3290,6 +3290,9 @@ fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     reset_for_project(s, path.clone(), assets);
     s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
+    if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| VIDEO_TARGETS.contains(t)) {
+        s.video_target = target.into();
+    }
     Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing, "workshop": workshop_status(s)?}))
 }
 
@@ -3305,13 +3308,22 @@ fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Workshop: what a song needs before animation starts. One project folder per song:
-//   <Song>.acproj, liner-notes/, images/, <song>.transcript.json (+ .fcproj), draft.pdf.
-// The song's audio is referenced where it lives and never copied.
+// Workshop: what a song needs before animation starts, in four stages. One folder per song:
+//   <Song>.acproj, liner-notes/, <song>.transcript.json (+ .fcproj), storyboard/ (panel-NN.png,
+//   panel-NN.prompt.md, storyboard.pdf), assets/. The song's audio is referenced, never copied.
 
 const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "flac", "m4a", "aac", "ogg"];
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
-const DRAFT_PDF: &str = "draft.pdf";
+/// Storyboard template inside a song folder: panel-NN.png (+ panel-NN.prompt.md), storyboard.pdf.
+const STORYBOARD_DIR: &str = "storyboard";
+const STORYBOARD_PDF: &str = "storyboard.pdf";
+/// Static images for video tracks (characters, props, backgrounds), ideally transparent.
+const ASSETS_DIR: &str = "assets";
+/// Video targets the song can be edited in; Remotion is the default.
+const VIDEO_TARGETS: &[&str] = &["remotion", "filmcraft", "hyperframes"];
+/// Skill folders an agent reads before working on a stage.
+const OMHAS_SKILLS: &str = "/home/jesse/Work/omhas-animation/.agents/skills";
+const MERRIWEATHER_SKILLS: &str = "/home/jesse/Work/merriweather-videos/.agents/skills";
 
 fn has_extension(path: &Path, allowed: &[&str]) -> bool {
     path.extension()
@@ -3356,30 +3368,12 @@ fn transcript_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn workshop_status(s: &Session) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let audio_ok = s.song_audio.as_ref().is_some_and(|p| p.is_file());
-    let transcripts = transcript_files(&dir);
-    let liner = files_in(&dir.join("liner-notes"), None);
-    let images = files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS));
-    let draft = dir.join(DRAFT_PDF);
-    let items = vec![
-        json!({"id": "audio", "label": "Song audio", "done": audio_ok, "path": s.song_audio,
-            "next": "workshop.set_audio {\"path\": \"<song audio>\"}"}),
-        json!({"id": "transcript", "label": "Transcript", "done": !transcripts.is_empty(), "path": transcripts.first(),
-            "next": "audio.transcribe {} (uses the song audio)"}),
-        json!({"id": "liner_notes", "label": "Liner notes", "done": !liner.is_empty(), "count": liner.len(),
-            "path": dir.join("liner-notes"), "next": "workshop.add {\"kind\": \"liner_notes\", \"paths\": [...]}"}),
-        json!({"id": "images", "label": "Reference images", "done": !images.is_empty(), "count": images.len(),
-            "path": dir.join("images"), "next": "workshop.add {\"kind\": \"images\", \"paths\": [...]}"}),
-        json!({"id": "draft", "label": "Draft PDF approved", "done": draft.is_file() && s.draft_approved,
-            "exists": draft.is_file(), "approved": s.draft_approved, "path": draft,
-            "next": if draft.is_file() { "workshop.approve_draft {\"approved\": true}" } else { "workshop.build_draft {}" }}),
-    ];
-    let complete = items.iter().all(|i| i["done"] == json!(true));
-    // The FilmCraft project audio.transcribe made: the song on a sequence, ready for editing.
-    let video_project = video_project_path(&dir);
-    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "items": items, "video_project": video_project}))
+/// Storyboard panels, in order: `storyboard/panel-NN.<image>`.
+fn panel_files(dir: &Path) -> Vec<PathBuf> {
+    files_in(&dir.join(STORYBOARD_DIR), Some(IMAGE_EXTENSIONS))
+        .into_iter()
+        .filter(|p| p.file_stem().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("panel-")))
+        .collect()
 }
 
 fn video_project_path(dir: &Path) -> Option<PathBuf> {
@@ -3390,69 +3384,208 @@ fn video_project_path(dir: &Path) -> Option<PathBuf> {
     })
 }
 
-/// Puts the project's reference images on the song's FilmCraft sequence as placeholders: back to
-/// back on one video track, sharing the song's length, for the user or an agent to rearrange.
-/// FilmCraft (headless filmcraft-cli) does the import and placement.
-fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> {
+fn file_chip(path: &Path) -> Value {
+    json!({"name": path.file_name().and_then(|n| n.to_str()), "path": path, "exists": path.exists()})
+}
+
+/// One sung phrase per line with its start time: speech-to-text capitalises the first word of each
+/// phrase, so a line starts at a capitalised word (not "I") or after . ! ?
+fn lyric_lines(transcript: &Value) -> Vec<(f64, String)> {
+    let words: Vec<(f64, &str)> = transcript
+        .get("words")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|w| Some((w.get("start")?.as_f64()?, w.get("text")?.as_str()?.trim())))
+        .collect();
+    let mut lines: Vec<(f64, String)> = Vec::new();
+    let mut sentence_end = false;
+    for (start, text) in words {
+        let capital = text.chars().next().is_some_and(char::is_uppercase)
+            && !matches!(text.trim_end_matches([',', '.', '!', '?']), "I" | "I'm" | "I'll" | "I've" | "I'd");
+        match lines.last_mut() {
+            Some((_, line)) if !(capital || sentence_end) => {
+                line.push(' ');
+                line.push_str(text);
+            }
+            _ => lines.push((start, text.to_string())),
+        }
+        sentence_end = text.ends_with(['.', '!', '?']);
+    }
+    lines
+}
+
+/// Scenes from the transcript: each sung stanza (FilmCraft paragraph) is a scene, and the gaps
+/// before, between and after them are instrumental scenes.
+fn scenes(transcript: &Value, song_seconds: Option<f64>) -> Vec<Value> {
+    let lines = lyric_lines(transcript);
+    let stanzas: Vec<(f64, f64)> = transcript
+        .get("paragraphs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p.get("start")?.as_f64()?, p.get("end")?.as_f64()?)))
+        .collect();
+    let mut out = Vec::new();
+    let mut cursor = 0.0;
+    let mut verse = 0;
+    let instrumental = |from: f64, to: f64| json!({"kind": "instrumental", "start": from, "end": to, "lines": []});
+    for (start, end) in &stanzas {
+        if start - cursor >= 2.0 {
+            out.push(instrumental(cursor, *start));
+        }
+        verse += 1;
+        let sung: Vec<Value> = lines
+            .iter()
+            .filter(|(t, _)| *t >= start - 0.01 && *t < end - 0.01)
+            .map(|(t, text)| json!({"start": t, "text": text}))
+            .collect();
+        out.push(json!({"kind": "verse", "verse": verse, "start": start, "end": end, "lines": sung}));
+        cursor = *end;
+    }
+    if let Some(total) = song_seconds
+        && total - cursor >= 2.0
+    {
+        out.push(instrumental(cursor, total));
+    }
+    out
+}
+
+/// When each storyboard panel is on screen: panel N covers line N of every verse, from that line's
+/// start to the next line (or the end of the verse). Returns, per panel, its (start, end) spans.
+fn panel_spans(scene_list: &[Value], panels: usize) -> Vec<Vec<(f64, f64)>> {
+    let mut spans = vec![Vec::new(); panels];
+    for scene in scene_list.iter().filter(|sc| sc["kind"] == json!("verse")) {
+        let lines = scene["lines"].as_array().cloned().unwrap_or_default();
+        let end = scene["end"].as_f64().unwrap_or(0.0);
+        for (j, line) in lines.iter().enumerate().take(panels) {
+            let start = line["start"].as_f64().unwrap_or(0.0);
+            let next = lines.get(j + 1).and_then(|l| l["start"].as_f64()).unwrap_or(end);
+            spans[j].push((start, next));
+        }
+    }
+    spans
+}
+
+/// The transcript's scenes and each panel's spans, or None before transcription.
+fn storyboard_timing(dir: &Path, panels: usize) -> Option<(Vec<Value>, Vec<Vec<(f64, f64)>>)> {
+    let transcript = transcript_files(dir).into_iter().next()?;
+    let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript).ok()?).ok()?;
+    let scene_list = scenes(&doc, song_seconds(dir));
+    let spans = panel_spans(&scene_list, panels);
+    Some((scene_list, spans))
+}
+
+fn song_seconds(dir: &Path) -> Option<f64> {
+    let fcproj = video_project_path(dir)?;
+    let out = run_tool_in(dir, "filmcraft-cli", &["--project".into(), fcproj.to_string_lossy().into_owned(), "inspect".into(), "sequence".into()]).ok()?;
+    let seq: Value = serde_json::from_str(&out).ok()?;
+    seq.get("duration").and_then(Value::as_f64).map(|t| t / FILMCRAFT_TICKS_PER_SECOND)
+}
+
+/// What an agent needs to start a stage: where the project is, the commands, and what to read.
+fn stage_brief(dir: &Path, stage: &str, target: &str) -> String {
+    format!("{}\n{}\n", brief_header(dir), stage_body(dir, stage, target))
+}
+
+fn brief_header(dir: &Path) -> String {
+    let project = dir.display();
+    format!(
+        "Project folder: {project}\nWorkshop state: animationcraft-cli exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
+    )
+}
+
+fn stage_body(dir: &Path, stage: &str, target: &str) -> String {
+    let _ = dir;
+    match stage {
+        "song" => "Stage 1 — Song. Point the project at the song (never copy audio) and add Kathy Reid-Naiman's liner notes.\n  animationcraft-cli exec workshop.set_audio path=<song>\n  animationcraft-cli exec workshop.add kind=liner_notes paths='[\"<file>\"]'".to_string(),
+        "transcript" => format!(
+            "Stage 2 — Transcription & transcoding. FilmCraft speech-to-text, headless; it also writes <song>.fcproj with the song on a sequence.\n  animationcraft-cli exec audio.transcribe\nVideo target: {target}.\nSkills: {MERRIWEATHER_SKILLS}/{} ",
+            match target { "hyperframes" => "hyperframes-cli/SKILL.md", "filmcraft" => "../../AGENT_GUIDE.md", _ => "remotion-best-practices/SKILL.md" }
+        ),
+        "reference" => format!(
+            "Stage 3 — Reference art. Template: {STORYBOARD_DIR}/panel-NN.png (+ panel-NN.prompt.md with the exact prompt), {STORYBOARD_DIR}/{STORYBOARD_PDF}, {ASSETS_DIR}/<name>.png (static, transparent).\nPanel N illustrates line N of each verse. No text or numerals in images.\n  animationcraft-cli exec workshop.split_panels image=<grid.png> columns=3 rows=2\n  animationcraft-cli exec workshop.build_storyboard\nCut-outs with PhotoCraft only: animationcraft-cli exec intake.validate image=<panel> asset=<name>\nSkills: {MERRIWEATHER_SKILLS}/backlot/SKILL.md"
+        ),
+        _ => format!(
+            "Stage 4 — Animate assets. One animated subject at a time over its background; not every asset animates.\nExport layered files for the video target ({target}); never render or encode video.\nSkills: {OMHAS_SKILLS}/layered-motion/SKILL.md, {OMHAS_SKILLS}/character-rigging/SKILL.md, {OMHAS_SKILLS}/image-to-animation/SKILL.md"
+        ),
+    }
+}
+
+fn workshop_status(s: &Session) -> Result<Value> {
     let dir = project_dir(s)?;
-    let fcproj = match params.get("project").and_then(Value::as_str) {
-        Some(p) => resolve_workspace_path(s, p),
-        None => video_project_path(&dir).ok_or_else(|| {
-            EngineError::InvalidParams("no FilmCraft project yet: run audio.transcribe first".into())
-        })?,
+    let target = s.video_target.as_str();
+    let audio_ok = s.song_audio.as_ref().is_some_and(|p| p.is_file());
+    let liner = files_in(&dir.join("liner-notes"), None);
+    let transcripts = transcript_files(&dir);
+    let fcproj = video_project_path(&dir);
+    let panels = panel_files(&dir);
+    let assets = files_in(&dir.join(ASSETS_DIR), Some(IMAGE_EXTENSIONS));
+    let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
+    let approved = pdf.is_file() && s.draft_approved;
+    // Panel start times come from the transcript only when there is no FilmCraft lookup to make
+    // (status runs every second in the app): scenes without the song length are enough here.
+    let panel_timing = transcript_files(&dir).first()
+        .and_then(|t| std::fs::read_to_string(t).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .map(|t| panel_spans(&scenes(&t, None), panels.len()));
+
+    let song_why = match (audio_ok, liner.is_empty()) {
+        (false, _) => "Choose the song's audio.",
+        (true, true) => "Add Kathy Reid-Naiman's liner notes.",
+        (true, false) => "Song and liner notes are in place.",
     };
-    let images: Vec<PathBuf> = match params.get("images").and_then(Value::as_array) {
-        Some(list) => list.iter().filter_map(Value::as_str).map(|p| resolve_workspace_path(s, p)).collect(),
-        None => files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS)),
+    let target_project = match target {
+        "filmcraft" => json!({"target": target, "path": fcproj, "ready": fcproj.is_some()}),
+        _ => json!({"target": target, "path": null, "ready": false, "note": format!("{target} starter project is not built yet")}),
     };
-    if images.is_empty() {
-        return Err(EngineError::InvalidParams("no reference images to place (workshop.add images first)".into()));
-    }
-    let track = params.get("track").and_then(Value::as_str).unwrap_or("V1");
-    let tool = "filmcraft-cli";
-    let failed = |what: &str, detail: String| EngineError::ExternalTool(tool.into(), format!("{what}: {detail}"));
-    let project_arg = fcproj.to_string_lossy().into_owned();
-    let sequence: Value = serde_json::from_str(&run_tool_in(&dir, tool, &["--project".into(), project_arg.clone(), "inspect".into(), "sequence".into()])?)
-        .map_err(|e| failed("inspect", e.to_string()))?;
-    let duration = sequence
-        .get("duration")
-        .and_then(Value::as_u64)
-        .filter(|d| *d > 0)
-        .ok_or_else(|| failed("inspect", "the FilmCraft project has no sequence with a length".into()))?;
-    let imported: Value = serde_json::from_str(&run_tool_in(
-        &dir,
-        tool,
-        &["--project".into(), project_arg.clone(), "--save".into(), "exec".into(), "file.import".into(), json!({"paths": images}).to_string()],
-    )?)
-    .map_err(|e| failed("file.import", e.to_string()))?;
-    let items: Vec<u64> = imported.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
-    if items.len() != images.len() {
-        return Err(failed("file.import", format!("imported {} of {} images: {imported}", items.len(), images.len())));
-    }
-    let share = duration / items.len() as u64;
-    let lines: Vec<String> = items
+    let transcript_why = if transcripts.is_empty() { "Transcribe the song with FilmCraft." } else { "Transcript ready; it lines up the storyboard scenes." };
+    let reference_why = match (panels.is_empty(), pdf.is_file(), approved) {
+        (true, _, _) => "Add storyboard panels (split a storyboard grid or add panel images).",
+        (false, false, _) => "Build the storyboard PDF from the panels and transcript.",
+        (false, true, false) => "Review the storyboard PDF, then approve it.",
+        (false, true, true) => "Storyboard approved.",
+    };
+    let animated: Vec<Value> = s
+        .project_assets
         .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            let start = share * i as u64;
-            let length = if i + 1 == items.len() { duration - start } else { share };
-            json!({"id": "timeline.place", "params": {"item": item, "track": track, "time": start, "duration": length, "insert": false}}).to_string()
+        .map(|a| {
+            let loaded = s.assets.get(&a.id);
+            let parts = loaded.and_then(|x| x.cutout_rig.as_ref()).map(|r| r.parts.len());
+            let controls: Vec<&str> = loaded
+                .and_then(|x| x.cutout_rig.as_ref())
+                .map(|r| crate::control_bindings::CONTROLS.iter().copied().filter(|c| r.control_bindings.supports(c)).collect())
+                .unwrap_or_default();
+            json!({"id": a.id, "name": a.name, "path": a.path, "parts": parts, "controls": controls})
         })
         .collect();
-    let script = dir.join(".place_references.jsonl");
-    std::fs::write(&script, lines.join("\n"))?;
-    let run = run_tool_in(&dir, tool, &["--project".into(), project_arg, "--save".into(), "--compact".into(), "run".into(), script.to_string_lossy().into_owned()]);
-    let _ = std::fs::remove_file(&script);
-    let mut clips = Vec::new();
-    for line in run?.lines().filter(|l| l.trim_start().starts_with('{')) {
-        let entry: Value = serde_json::from_str(line).map_err(|e| failed("run", e.to_string()))?;
-        if entry.get("ok").and_then(Value::as_bool) != Some(true) {
-            return Err(failed("timeline.place", entry.to_string()));
-        }
-        clips.extend(entry.pointer("/result/clips").and_then(Value::as_array).cloned().unwrap_or_default());
-    }
-    Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "placed": images, "clips": clips,
-        "seconds_each": share as f64 / FILMCRAFT_TICKS_PER_SECOND}))
+    let stages = vec![
+        json!({"id": "song", "title": "Song", "done": audio_ok && !liner.is_empty(), "why": song_why,
+            "inputs": s.song_audio.iter().map(|p| file_chip(p)).chain(liner.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
+            "outputs": s.project_path.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
+            "brief": stage_brief(&dir, "song", target)}),
+        json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty(), "why": transcript_why,
+            "inputs": s.song_audio.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
+            "outputs": transcripts.iter().chain(fcproj.iter()).map(|p| file_chip(p)).collect::<Vec<_>>(),
+            "target": target_project, "brief": stage_brief(&dir, "transcript", target)}),
+        json!({"id": "reference", "title": "Reference art", "done": !panels.is_empty() && approved, "why": reference_why,
+            "inputs": panels.iter().enumerate().map(|(i, p)| {
+                let mut chip = file_chip(p);
+                if let Some(spans) = panel_timing.as_ref().and_then(|t| t.get(i)) {
+                    chip["begins"] = json!(spans.iter().map(|(a, _)| clock(*a)).collect::<Vec<_>>());
+                }
+                chip
+            }).collect::<Vec<_>>(),
+            "outputs": std::iter::once(file_chip(&pdf)).chain(assets.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
+            "approved": approved, "pdf": pdf, "brief": stage_brief(&dir, "reference", target)}),
+        json!({"id": "animate", "title": "Animate assets", "done": false, "optional": true,
+            "why": if animated.is_empty() { "Import an asset to animate (only the ones that need motion)." } else { "Pick an asset to animate; the others stay static." },
+            "inputs": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(), "assets": animated,
+            "brief": stage_brief(&dir, "animate", target)}),
+    ];
+    let complete = stages.iter().take(3).all(|st| st["done"] == json!(true));
+    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "video_target": target, "targets": VIDEO_TARGETS,
+        "video_project": fcproj, "stages": stages}))
 }
 
 fn cmd_workshop_status(s: &mut Session, _: &Value) -> Result<Value> {
@@ -3470,13 +3603,25 @@ fn cmd_workshop_set_audio(s: &mut Session, params: &Value) -> Result<Value> {
     workshop_status(s)
 }
 
-/// Copies liner notes or reference images into the project folder (audio is never copied).
+fn cmd_workshop_set_target(s: &mut Session, params: &Value) -> Result<Value> {
+    project_dir(s)?;
+    let target = params.get("target").and_then(Value::as_str).unwrap_or_default();
+    if !VIDEO_TARGETS.contains(&target) {
+        return Err(EngineError::InvalidParams(format!("target must be one of {VIDEO_TARGETS:?}")));
+    }
+    s.video_target = target.into();
+    write_project_file(s)?;
+    workshop_status(s)
+}
+
+/// Copies liner notes, storyboard panels or static assets into the template folders (audio is never copied).
 fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let (folder, only) = match params.get("kind").and_then(Value::as_str) {
         Some("liner_notes") => ("liner-notes", None),
-        Some("images") => ("images", Some(IMAGE_EXTENSIONS)),
-        _ => return Err(EngineError::InvalidParams("kind must be liner_notes or images".into())),
+        Some("panels") => (STORYBOARD_DIR, Some(IMAGE_EXTENSIONS)),
+        Some("assets") => (ASSETS_DIR, Some(IMAGE_EXTENSIONS)),
+        _ => return Err(EngineError::InvalidParams("kind must be liner_notes, panels or assets".into())),
     };
     let paths: Vec<PathBuf> = params
         .get("paths")
@@ -3491,6 +3636,7 @@ fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
     }
     let target = dir.join(folder);
     std::fs::create_dir_all(&target)?;
+    let mut next_panel = panel_files(&dir).len() + 1;
     let mut added = Vec::new();
     for path in &paths {
         if !path.is_file() {
@@ -3501,8 +3647,15 @@ fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
         {
             return Err(EngineError::InvalidParams(format!("not an image: {}", path.display())));
         }
-        let name = path.file_name().ok_or_else(|| EngineError::InvalidParams("bad file name".into()))?;
-        let dest = target.join(name);
+        // Panels follow the template name so their order is their number.
+        let dest = if folder == STORYBOARD_DIR {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            let name = format!("panel-{next_panel:02}.{ext}");
+            next_panel += 1;
+            target.join(name)
+        } else {
+            target.join(path.file_name().ok_or_else(|| EngineError::InvalidParams("bad file name".into()))?)
+        };
         if dest != *path {
             std::fs::copy(path, &dest)?;
         }
@@ -3513,37 +3666,239 @@ fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(status)
 }
 
+/// Cuts a storyboard grid into storyboard/panel-NN.png with PhotoCraft (`image.crop`), reading
+/// order left to right, top to bottom. `inset` trims the gutters between panels.
+fn cmd_workshop_split_panels(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let image = params
+        .get("image")
+        .and_then(Value::as_str)
+        .map(|p| resolve_workspace_path(s, p))
+        .ok_or_else(|| EngineError::InvalidParams("missing storyboard grid 'image'".into()))?;
+    let columns = params.get("columns").and_then(Value::as_u64).unwrap_or(3).max(1) as u32;
+    let rows = params.get("rows").and_then(Value::as_u64).unwrap_or(2).max(1) as u32;
+    let inset = params.get("inset").and_then(Value::as_u64).unwrap_or(8) as u32;
+    let (w, h) = image::image_dimensions(&image)?;
+    let (cw, ch) = (w / columns, h / rows);
+    if cw <= 2 * inset || ch <= 2 * inset {
+        return Err(EngineError::InvalidParams("panels too small for that grid and inset".into()));
+    }
+    let out_dir = dir.join(STORYBOARD_DIR);
+    std::fs::create_dir_all(&out_dir)?;
+    let mut panels = Vec::new();
+    for r in 0..rows {
+        for c in 0..columns {
+            let n = r * columns + c + 1;
+            let out = out_dir.join(format!("panel-{n:02}.png"));
+            let rect = json!({"x": c * cw + inset, "y": r * ch + inset, "width": cw - 2 * inset, "height": ch - 2 * inset});
+            run_tool_in(&dir, "photocraft-cli", &[
+                "run".into(), image.to_string_lossy().into_owned(),
+                "--cmd".into(), "image.crop".into(), "--params".into(), rect.to_string(),
+                "--out".into(), out.to_string_lossy().into_owned(),
+            ])?;
+            panels.push(out);
+        }
+    }
+    let mut status = workshop_status(s)?;
+    status["panels"] = json!(panels);
+    Ok(status)
+}
+
+fn cmd_workshop_approve_draft(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
+    if approved && !dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF).is_file() {
+        return Err(EngineError::InvalidParams("build the storyboard first (workshop.build_storyboard)".into()));
+    }
+    s.draft_approved = approved;
+    write_project_file(s)?;
+    workshop_status(s)
+}
+
+fn clock(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// Builds storyboard/storyboard.pdf with pdfcraft-cli: an overview with a linked scene index, one
+/// page per scene lined up from the transcript (lyrics with times, the panel for each line and its
+/// prompt), and the agent brief. Pages are bookmarked by scene; page previews are rendered for the
+/// app. A rebuilt storyboard needs approving again.
+fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let title = s.project_path.as_ref().and_then(|p| p.file_stem()).and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
+    let transcript_path = transcript_files(&dir).into_iter().next().ok_or_else(|| {
+        EngineError::InvalidParams("transcribe the song first: the storyboard lines scenes up with the transcript".into())
+    })?;
+    let transcript: Value = serde_json::from_str(&std::fs::read_to_string(&transcript_path)?)
+        .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
+    let total = song_seconds(&dir);
+    let scene_list = scenes(&transcript, total);
+    let panels = panel_files(&dir);
+    let prompt_of = |panel: &Path| std::fs::read_to_string(panel.with_extension("prompt.md")).ok().map(|t| t.trim().to_string());
+
+    let (pw, ph, m) = (842.0_f64, 595.0_f64, 36.0_f64);
+    let pages = 2 + scene_list.len();
+    let mut steps = vec![json!({"tool": "doc_create", "args": {"from": "blank", "pages": pages, "width": pw, "height": ph, "name": title}})];
+    // A single text line in a full-width box from `at` (top-left), so pdfcraft never wraps it narrow.
+    let text = |page: usize, at: [f64; 2], t: String, size: f64, bold: bool| {
+        json!({"tool": "page_add_text", "args": {"doc": 1, "page": page, "rect": [at[0], at[1], pw - m, at[1] + size * 1.7],
+            "text": t, "size": size, "bold": bold}})
+    };
+    let block = |page: usize, rect: [f64; 4], t: String, size: f64| {
+        json!({"tool": "page_add_text", "args": {"doc": 1, "page": page, "rect": rect, "text": t, "size": size}})
+    };
+    // Page 1: overview and scene index.
+    steps.push(text(1, [m, 30.0], format!("{title} — storyboard"), 24.0, true));
+    let mut overview = vec![
+        format!("Song: {}", s.song_audio.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "not set".into())),
+        format!("Project: {}", dir.display()),
+        format!("Video target: {}", s.video_target),
+        format!("Transcript: {}", transcript_path.display()),
+        format!("Status: {}", if s.draft_approved { "approved" } else { "draft — needs review" }),
+    ];
+    let liner = files_in(&dir.join("liner-notes"), None);
+    overview.push(format!("Liner notes: {}", if liner.is_empty() { "missing".to_string() } else { liner.iter().filter_map(|p| p.file_name()?.to_str()).collect::<Vec<_>>().join(", ") }));
+    steps.push(block(1, [m, 80.0, pw - m, 200.0], overview.join("\n"), 11.0));
+    steps.push(text(1, [m, 225.0], "Scenes".into(), 14.0, true));
+    for (i, scene) in scene_list.iter().enumerate() {
+        let y = 250.0 + i as f64 * 22.0;
+        let label = scene_label(i, scene);
+        steps.push(text(1, [m + 8.0, y], label, 12.0, false));
+        steps.push(json!({"tool": "link_add", "args": {"doc": 1, "page": 1, "rect": [m, y - 14.0, pw - m, y + 6.0], "to_page": i + 2, "visible": false}}));
+    }
+    // One page per scene.
+    for (i, scene) in scene_list.iter().enumerate() {
+        let page = i + 2;
+    steps.push(text(page, [m, 24.0], scene_label(i, scene), 18.0, true));
+        let lines = scene["lines"].as_array().cloned().unwrap_or_default();
+        if lines.is_empty() {
+            steps.push(text(page, [m, 70.0], "Instrumental — no sung words. Do not invent lyrics.".into(), 12.0, false));
+            continue;
+        }
+        let row_h = ((ph - 90.0 - m) / lines.len() as f64).min(78.0);
+        for (j, line) in lines.iter().enumerate() {
+            let y = 70.0 + j as f64 * row_h;
+            let lyric = format!("{}  {}", clock(line["start"].as_f64().unwrap_or(0.0)), line["text"].as_str().unwrap_or(""));
+            match panels.get(j) {
+                Some(panel) => {
+                    let thumb_h = row_h - 8.0;
+                    let (iw, ih) = image::image_dimensions(panel)?;
+                    let thumb_w = thumb_h * f64::from(iw) / f64::from(ih.max(1));
+                    steps.push(json!({"tool": "page_add_image", "args": {"doc": 1, "page": page, "path": panel, "rect": [m, y, m + thumb_w, y + thumb_h]}}));
+                    let name = panel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                    let prompt = prompt_of(panel).unwrap_or_else(|| "(no prompt recorded for this panel)".into());
+                    let x = m + thumb_w + 12.0;
+                    steps.push(text(page, [x, y], lyric, 12.0, true));
+                    steps.push(block(page, [x, y + 22.0, pw - m, y + row_h - 4.0], format!("{name} · prompt: {prompt}"), 8.0));
+                }
+                None => steps.push(text(page, [m, y], format!("{lyric}    (no panel {})", j + 1), 12.0, false)),
+            }
+        }
+    }
+    // Last page: agent brief.
+    steps.push(text(pages, [m, 24.0], "Agent brief".into(), 18.0, true));
+    let brief = std::iter::once(brief_header(&dir))
+        .chain(["song", "transcript", "reference", "animate"].iter().map(|st| stage_body(&dir, st, &s.video_target)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    steps.push(block(pages, [m, 64.0, pw - m, ph - m], brief, 8.0));
+    // Bookmarks: overview, each scene, brief.
+    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Overview", "page": 1}}));
+    for (i, scene) in scene_list.iter().enumerate() {
+        steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": scene_label(i, scene), "page": i + 2}}));
+    }
+    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Agent brief", "page": pages}}));
+    let out_dir = dir.join(STORYBOARD_DIR);
+    std::fs::create_dir_all(&out_dir)?;
+    let pdf = out_dir.join(STORYBOARD_PDF);
+    steps.push(json!({"tool": "doc_save", "args": {"doc": 1, "path": pdf}}));
+    let script = dir.join(".storyboard.pdfcraft.json");
+    std::fs::write(&script, Value::Array(steps).to_string())?;
+    let run = run_tool_in(&dir, "pdfcraft-cli", &["run".into(), "--script".into(), script.to_string_lossy().into_owned(), "--report".into()]);
+    let _ = std::fs::remove_file(&script);
+    let report: Value = serde_json::from_str(&run?).map_err(|e| EngineError::ExternalTool("pdfcraft-cli".into(), e.to_string()))?;
+    if report.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(EngineError::ExternalTool("pdfcraft-cli".into(), report.to_string()));
+    }
+    // Page previews for the app's Storyboard pane.
+    let previews = out_dir.join(".preview");
+    std::fs::create_dir_all(&previews)?;
+    let mut preview_files = Vec::new();
+    for page in 1..=pages {
+        let png = previews.join(format!("page-{page:02}.png"));
+        run_tool_in(&dir, "pdfcraft-cli", &["render".into(), pdf.to_string_lossy().into_owned(), "--page".into(), page.to_string(), "--dpi".into(), "110".into(), "--out".into(), png.to_string_lossy().into_owned()])?;
+        preview_files.push(png);
+    }
+    s.draft_approved = false;
+    write_project_file(s)?;
+    let mut status = workshop_status(s)?;
+    status["storyboard"] = json!(pdf);
+    status["scenes"] = json!(scene_list);
+    status["previews"] = json!(preview_files);
+    Ok(status)
+}
+
+fn scene_label(i: usize, scene: &Value) -> String {
+    let range = format!("{}–{}", clock(scene["start"].as_f64().unwrap_or(0.0)), clock(scene["end"].as_f64().unwrap_or(0.0)));
+    match scene["kind"].as_str() {
+        Some("verse") => format!("Scene {} · Verse {} · {range}", i + 1, scene["verse"]),
+        _ => format!("Scene {} · Instrumental · {range}", i + 1),
+    }
+}
+
+/// The storyboard's page previews (rendered by workshop.build_storyboard) and its scene titles.
+fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
+    let previews = files_in(&dir.join(STORYBOARD_DIR).join(".preview"), Some(&["png"]));
+    let previews: Vec<PathBuf> = std::fs::read_dir(dir.join(STORYBOARD_DIR).join(".preview"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| has_extension(p, &["png"]))
+        .chain(previews)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let titles = transcript_files(&dir)
+        .first()
+        .and_then(|t| std::fs::read_to_string(t).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .map(|t| scenes(&t, song_seconds(&dir)).iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect::<Vec<_>>())
+        .unwrap_or_default();
+    Ok(json!({"ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews, "scene_titles": titles}))
+}
+
 fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
     let size = std::fs::metadata(path).map(|m| m.len()).ok();
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
     json!({"group": group, "name": name, "path": path, "size": size, "exists": path.exists(), "removable": removable})
 }
 
-/// Every file the workshop knows about, grouped by checklist item, plus anything else at the top of
-/// the project folder (so stray files an agent dropped there can be seen and removed).
+/// Every file the workshop knows about, grouped by stage, plus anything else at the top of the
+/// project folder (so stray files an agent dropped there can be seen and removed).
 fn cmd_workshop_files(s: &mut Session, _: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let mut files = Vec::new();
     if let Some(audio) = &s.song_audio {
         files.push(file_entry("audio", audio, true));
     }
-    let transcripts = transcript_files(&dir);
-    for t in &transcripts {
-        files.push(file_entry("transcript", t, true));
-        let fcproj = t.with_file_name(t.file_name().and_then(|n| n.to_str()).unwrap_or_default().replace(".transcript.json", ".fcproj"));
-        if fcproj.is_file() {
-            files.push(file_entry("transcript", &fcproj, true));
-        }
-    }
     for f in files_in(&dir.join("liner-notes"), None) {
         files.push(file_entry("liner_notes", &f, true));
     }
-    for f in files_in(&dir.join("images"), None) {
-        files.push(file_entry("images", &f, true));
+    for t in &transcript_files(&dir) {
+        files.push(file_entry("transcript", t, true));
     }
-    let draft = dir.join(DRAFT_PDF);
-    if draft.is_file() {
-        files.push(file_entry("draft", &draft, true));
+    if let Some(fcproj) = video_project_path(&dir) {
+        files.push(file_entry("transcript", &fcproj, true));
+    }
+    for f in files_in(&dir.join(STORYBOARD_DIR), None) {
+        files.push(file_entry("storyboard", &f, true));
+    }
+    for f in files_in(&dir.join(ASSETS_DIR), None) {
+        files.push(file_entry("assets", &f, true));
     }
     let listed: Vec<PathBuf> = files.iter().filter_map(|f| f["path"].as_str().map(PathBuf::from)).collect();
     for f in files_in(&dir, None) {
@@ -3578,7 +3933,7 @@ fn cmd_workshop_remove(s: &mut Session, params: &Value) -> Result<Value> {
         )));
     }
     run_tool_in(&dir, "gio", &["trash".into(), path.to_string_lossy().into_owned()])?;
-    if path == dir.join(DRAFT_PDF) {
+    if path == dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF) {
         s.draft_approved = false;
         write_project_file(s)?;
     }
@@ -3587,137 +3942,78 @@ fn cmd_workshop_remove(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(status)
 }
 
-fn cmd_workshop_approve_draft(s: &mut Session, params: &Value) -> Result<Value> {
+/// Puts the storyboard panels on the song's FilmCraft sequence as placeholders: back to back on one
+/// video track, sharing the song's length, for the user or an agent to rearrange.
+/// FilmCraft (headless filmcraft-cli) does the import and placement.
+fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
-    let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
-    if approved && !dir.join(DRAFT_PDF).is_file() {
-        return Err(EngineError::InvalidParams("build the draft first (workshop.build_draft)".into()));
+    let fcproj = match params.get("project").and_then(Value::as_str) {
+        Some(p) => resolve_workspace_path(s, p),
+        None => video_project_path(&dir).ok_or_else(|| {
+            EngineError::InvalidParams("no FilmCraft project yet: run audio.transcribe first".into())
+        })?,
+    };
+    let images: Vec<PathBuf> = match params.get("images").and_then(Value::as_array) {
+        Some(list) => list.iter().filter_map(Value::as_str).map(|p| resolve_workspace_path(s, p)).collect(),
+        None => panel_files(&dir),
+    };
+    if images.is_empty() {
+        return Err(EngineError::InvalidParams("no storyboard panels to place (workshop.add kind=panels first)".into()));
     }
-    s.draft_approved = approved;
-    write_project_file(s)?;
-    workshop_status(s)
-}
-
-/// One sung phrase per line with its start time: speech-to-text capitalises the first word of each
-/// phrase, so a line starts at a capitalised word (not "I") or after . ! ?; paragraphs become stanzas.
-fn lyric_lines(transcript: &Value) -> Vec<String> {
-    let words: Vec<(f64, &str)> = transcript
-        .get("words")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|w| Some((w.get("start")?.as_f64()?, w.get("text")?.as_str()?.trim())))
+    let track = params.get("track").and_then(Value::as_str).unwrap_or("V1");
+    let tool = "filmcraft-cli";
+    let failed = |what: &str, detail: String| EngineError::ExternalTool(tool.into(), format!("{what}: {detail}"));
+    let project_arg = fcproj.to_string_lossy().into_owned();
+    let sequence: Value = serde_json::from_str(&run_tool_in(&dir, tool, &["--project".into(), project_arg.clone(), "inspect".into(), "sequence".into()])?)
+        .map_err(|e| failed("inspect", e.to_string()))?;
+    let duration = sequence
+        .get("duration")
+        .and_then(Value::as_u64)
+        .filter(|d| *d > 0)
+        .ok_or_else(|| failed("inspect", "the FilmCraft project has no sequence with a length".into()))?;
+    let imported: Value = serde_json::from_str(&run_tool_in(
+        &dir,
+        tool,
+        &["--project".into(), project_arg.clone(), "--save".into(), "exec".into(), "file.import".into(), json!({"paths": images}).to_string()],
+    )?)
+    .map_err(|e| failed("file.import", e.to_string()))?;
+    let items: Vec<u64> = imported.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+    if items.len() != images.len() {
+        return Err(failed("file.import", format!("imported {} of {} images: {imported}", items.len(), images.len())));
+    }
+    // Each panel goes where its lyric line is sung (see panel_spans); panels with no line are skipped.
+    let (_, spans) = storyboard_timing(&dir, items.len()).ok_or_else(|| {
+        EngineError::InvalidParams("transcribe the song first: panel times come from the transcript".into())
+    })?;
+    let ticks = |seconds: f64| ((seconds * FILMCRAFT_TICKS_PER_SECOND) as u64).min(duration);
+    let lines: Vec<String> = items
+        .iter()
+        .zip(&spans)
+        .flat_map(|(item, item_spans)| {
+            item_spans.iter().map(move |(a, b)| (item, *a, *b))
+        })
+        .filter(|(_, a, b)| b > a)
+        .map(|(item, a, b)| {
+            json!({"id": "timeline.place", "params": {"item": item, "track": track, "time": ticks(a), "duration": ticks(b) - ticks(a), "insert": false}}).to_string()
+        })
         .collect();
-    let stanza_starts: Vec<f64> = transcript
-        .get("paragraphs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|p| p.get("start")?.as_f64())
-        .collect();
-    let mut lines = Vec::new();
-    let mut current: Option<(f64, String)> = None;
-    let mut sentence_end = false;
-    for (start, text) in words {
-        let capital = text.chars().next().is_some_and(char::is_uppercase)
-            && !matches!(text.trim_end_matches([',', '.', '!', '?']), "I" | "I'm" | "I'll" | "I've" | "I'd");
-        let stanza = stanza_starts.iter().any(|s| (s - start).abs() < 0.01);
-        if current.is_some() && (capital || sentence_end || stanza) {
-            if let Some((t, line)) = current.take() {
-                lines.push(format!("{}  {line}", clock(t)));
-            }
-            if stanza {
-                lines.push(String::new());
-            }
-        }
-        match &mut current {
-            Some((_, line)) => {
-                line.push(' ');
-                line.push_str(text);
-            }
-            None => current = Some((start, text.to_string())),
-        }
-        sentence_end = text.ends_with(['.', '!', '?']);
+    if lines.is_empty() {
+        return Err(EngineError::InvalidParams("no panel lines up with a sung line in the transcript".into()));
     }
-    if let Some((t, line)) = current {
-        lines.push(format!("{}  {line}", clock(t)));
-    }
-    lines
-}
-
-fn clock(seconds: f64) -> String {
-    let total = seconds.max(0.0).round() as u64;
-    format!("{}:{:02}", total / 60, total % 60)
-}
-
-/// Builds `draft.pdf` with pdfcraft-cli: title, timed lyrics and liner notes on page 1, then one
-/// page per reference image. A rebuilt draft needs approving again.
-fn cmd_workshop_build_draft(s: &mut Session, _: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let title = s
-        .project_path
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .and_then(|n| n.to_str())
-        .unwrap_or("Untitled")
-        .to_string();
-    let mut lines = vec![];
-    if let Some(audio) = &s.song_audio {
-        lines.push(format!("Song: {}", audio.display()));
-    }
-    if let Some(transcript) = transcript_files(&dir).first() {
-        let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript)?)
-            .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
-        lines.push(String::new());
-        lines.push("Lyrics (transcript)".into());
-        lines.extend(lyric_lines(&doc));
-    }
-    let liner = files_in(&dir.join("liner-notes"), None);
-    if !liner.is_empty() {
-        lines.push(String::new());
-        lines.push("Liner notes".into());
-        for file in &liner {
-            match has_extension(file, &["md", "txt"]) {
-                true => lines.push(std::fs::read_to_string(file)?.chars().take(2400).collect()),
-                false => lines.push(format!("(see {})", file.display())),
-            }
-        }
-    }
-    let images = files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS));
-    let (page_w, page_h, margin) = (842.0_f64, 595.0_f64, 40.0_f64);
-    let mut steps = vec![
-        json!({"tool": "doc_create", "args": {"from": "blank", "pages": 1 + images.len(), "width": page_w, "height": page_h, "name": title}}),
-        json!({"tool": "page_add_text", "args": {"doc": 1, "page": 1, "at": [margin, 56.0], "text": format!("{title} — draft"), "size": 22, "bold": true}}),
-    ];
-    if !lines.is_empty() {
-        steps.push(json!({"tool": "page_add_text", "args": {"doc": 1, "page": 1,
-            "rect": [margin, 90.0, page_w - margin, page_h - margin], "text": lines.join("\n"), "size": 11}}));
-    }
-    for (i, image) in images.iter().enumerate() {
-        let (w, h) = image::image_dimensions(image)?;
-        // Fit the image inside the page margins, keeping its proportions.
-        let scale = ((page_w - 2.0 * margin) / f64::from(w)).min((page_h - 2.0 * margin) / f64::from(h));
-        let (dw, dh) = (f64::from(w) * scale, f64::from(h) * scale);
-        let (x, y) = ((page_w - dw) / 2.0, (page_h - dh) / 2.0);
-        steps.push(json!({"tool": "page_add_image", "args": {"doc": 1, "page": i + 2, "path": image, "rect": [x, y, x + dw, y + dh]}}));
-    }
-    let draft = dir.join(DRAFT_PDF);
-    steps.push(json!({"tool": "doc_save", "args": {"doc": 1, "path": draft}}));
-    let script = dir.join(".draft.pdfcraft.json");
-    std::fs::write(&script, Value::Array(steps).to_string())?;
-    let run = run_tool_in(&dir, "pdfcraft-cli", &["run".into(), "--script".into(), script.to_string_lossy().into_owned(), "--report".into()]);
+    let script = dir.join(".place_references.jsonl");
+    std::fs::write(&script, lines.join("\n"))?;
+    let run = run_tool_in(&dir, tool, &["--project".into(), project_arg, "--save".into(), "--compact".into(), "run".into(), script.to_string_lossy().into_owned()]);
     let _ = std::fs::remove_file(&script);
-    let report: Value = serde_json::from_str(&run?)
-        .map_err(|e| EngineError::ExternalTool("pdfcraft-cli".into(), e.to_string()))?;
-    if report.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(EngineError::ExternalTool("pdfcraft-cli".into(), report.to_string()));
+    let mut clips = Vec::new();
+    for line in run?.lines().filter(|l| l.trim_start().starts_with('{')) {
+        let entry: Value = serde_json::from_str(line).map_err(|e| failed("run", e.to_string()))?;
+        if entry.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(failed("timeline.place", entry.to_string()));
+        }
+        clips.extend(entry.pointer("/result/clips").and_then(Value::as_array).cloned().unwrap_or_default());
     }
-    s.draft_approved = false;
-    write_project_file(s)?;
-    let mut status = workshop_status(s)?;
-    status["draft"] = json!(draft);
-    status["pages"] = json!(1 + images.len());
-    Ok(status)
+    let timing: Vec<Value> = images.iter().zip(&spans).map(|(img, sp)| json!({"panel": img, "begins": sp.iter().map(|(a, _)| clock(*a)).collect::<Vec<_>>()})).collect();
+    Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "clips": clips, "timing": timing}))
 }
 
 /// FilmCraft time base: ticks per second.
@@ -4960,62 +5256,25 @@ fn build() -> Vec<CommandSpec> {
             has_asset,
             cmd_export_cutout_mp4
         ),
-        query!("workshop.status", "Workshop Checklist", "{}", cmd_workshop_status),
-        cmd!(
-            "workshop.set_audio",
-            "Set Song Audio",
-            ["Workshop"],
-            None,
-            "{\"path\": \"song audio file (referenced, not copied)\"}",
-            always,
-            cmd_workshop_set_audio
-        ),
-        cmd!(
-            "workshop.add",
-            "Add Liner Notes / Images",
-            ["Workshop"],
-            None,
-            "{\"kind\": \"liner_notes|images\", \"paths\": [\"file\"]}",
-            always,
-            cmd_workshop_add
-        ),
+        query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
         query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
-        cmd!(
-            "video.place_references",
-            "Place Reference Images in FilmCraft",
-            ["Workshop"],
-            None,
-            "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the project's images\"], \"track\": \"V1\"}",
-            always,
-            cmd_video_place_references
-        ),
-        cmd!(
-            "workshop.remove",
-            "Remove Workshop File",
-            ["Workshop"],
-            None,
-            "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}",
-            always,
-            cmd_workshop_remove
-        ),
-        cmd!(
-            "workshop.build_draft",
-            "Build Draft PDF",
-            ["Workshop"],
-            None,
-            "{}",
-            always,
-            cmd_workshop_build_draft
-        ),
-        cmd!(
-            "workshop.approve_draft",
-            "Approve Draft PDF",
-            ["Workshop"],
-            None,
-            "{\"approved\": true}",
-            always,
-            cmd_workshop_approve_draft
-        ),
+        query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
+        cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
+            "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
+        cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
+            "{\"target\": \"remotion|filmcraft|hyperframes\"}", always, cmd_workshop_set_target),
+        cmd!("workshop.add", "Add Liner Notes / Panels / Assets", ["Workshop"], None,
+            "{\"kind\": \"liner_notes|panels|assets\", \"paths\": [\"file\"]}", always, cmd_workshop_add),
+        cmd!("workshop.split_panels", "Split Storyboard Grid (PhotoCraft)", ["Workshop"], None,
+            "{\"image\": \"storyboard grid\", \"columns\": 3, \"rows\": 2, \"inset\": 8}", always, cmd_workshop_split_panels),
+        cmd!("workshop.build_storyboard", "Build Storyboard PDF", ["Workshop"], None,
+            "{}", always, cmd_workshop_build_storyboard),
+        cmd!("workshop.approve_draft", "Approve Storyboard", ["Workshop"], None,
+            "{\"approved\": true}", always, cmd_workshop_approve_draft),
+        cmd!("workshop.remove", "Remove Workshop File", ["Workshop"], None,
+            "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}", always, cmd_workshop_remove),
+        cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
+            "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
         cmd!(
             "audio.transcribe",
             "Transcribe Song (FilmCraft)",

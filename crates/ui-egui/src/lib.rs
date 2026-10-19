@@ -91,6 +91,10 @@ pub struct UiState {
     pub workshop_files: Vec<Value>,
     /// A file waiting for the user to confirm its removal.
     pub workshop_remove: Option<String>,
+    /// The Workshop's Storyboard pane: shown, current page, and its last `workshop.storyboard`.
+    pub storyboard_open: bool,
+    pub storyboard_page: usize,
+    pub storyboard_info: Option<Value>,
     pub new_project_open: bool,
     pub new_project_name: String,
     pub new_project_audio: String,
@@ -172,6 +176,9 @@ impl Default for UiState {
             workshop_status: None,
             workshop_files: Vec::new(),
             workshop_remove: None,
+            storyboard_open: true,
+            storyboard_page: 0,
+            storyboard_info: None,
             new_project_open: false,
             new_project_name: String::new(),
             new_project_audio: String::new(),
@@ -1592,7 +1599,8 @@ impl UiCommand {
                     | "export.layered_motion"
                     | "validate.motion"
                     | "audio.transcribe"
-                    | "workshop.build_draft"
+                    | "workshop.build_storyboard"
+                    | "workshop.split_panels"
                     | "video.place_references"
             );
         }
