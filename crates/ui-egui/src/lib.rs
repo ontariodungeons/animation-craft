@@ -438,6 +438,7 @@ impl AnimationCraftApp {
 
     /// Dispatch a command synchronously (used by TCP `--control` bridge and fast in-memory mutations).
     pub fn dispatch(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        preview_export::validate_params(id, &params)?;
         match id {
             "ui.inspect" | "ui.elements" => {
                 let filter = params.get("filter").and_then(Value::as_str);
@@ -1551,6 +1552,10 @@ impl AnimationCraftApp {
     /// thread so the egui window and TCP control server never freeze.
     pub fn exec_ui_command(&mut self, cmd: UiCommand) {
         let (id, mut params) = cmd.to_engine_call();
+        if let Err(error) = preview_export::validate_params(id, &params) {
+            self.ui_state.status_line = error;
+            return;
+        }
         if matches!(cmd, UiCommand::AssetCutSheet { .. }) {
             let slot = if self.ui_state.center_tab == CenterTab::TurnaroundSheet { "turnaround_sheet" } else { "asset_sheet" };
             let source = self.session.current_asset().and_then(|a| panels::sheet_path(a, slot));

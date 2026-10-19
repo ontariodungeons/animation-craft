@@ -2,7 +2,8 @@
 use crate::{
     UiState,
     panels::center::center_motion::{
-        evaluate_cutout_rig_motion, is_rig_part_visible, step_playback_phase, transform_rig_point,
+        WALK_PHASE_RATE, evaluate_cutout_rig_motion, is_rig_part_visible, step_playback_phase,
+        transform_rig_point,
     },
 };
 use animationcraft_engine::{
@@ -17,7 +18,7 @@ pub(crate) fn uses_preview(session: &Session, id: &str, params: &Value) -> bool 
     if id == "export.cutout_mp4" {
         return true;
     }
-    if id != "export.layered_motion" {
+    if id != "export.layered_motion" || params.get("tracks").is_some() {
         return false;
     }
     let Some(spec) = params
@@ -38,6 +39,49 @@ pub(crate) fn uses_preview(session: &Session, id: &str, params: &Value) -> bool 
     ) {
         (Ok(requested), Ok(loaded)) => requested == loaded,
         _ => false,
+    }
+}
+
+pub(crate) fn validate_params(id: &str, params: &Value) -> Result<(), String> {
+    if !matches!(id, "export.cutout_mp4" | "export.layered_motion") {
+        return Ok(());
+    }
+    if !params.is_object() {
+        return Err("Export parameters must be an object".into());
+    }
+    let command = animationcraft_engine::find_command(id).ok_or("Unknown export command")?;
+    animationcraft_engine::check_param_types(command.params, params).map_err(|e| e.to_string())?;
+    // Export paths/modes are unambiguous strings; generic command descriptions also contain
+    // union examples, so keep these stricter checks scoped to the export boundary.
+    for field in ["spec", "output", "out_dir", "mode", "resolution", "quality"] {
+        if params.get(field).is_some_and(|value| !value.is_string()) {
+            return Err(format!("Export `{field}` must be a string"));
+        }
+    }
+    if let Some(tracks) = params.get("tracks") {
+        if !tracks.is_string()
+            && !tracks
+                .as_array()
+                .is_some_and(|values| values.iter().all(Value::is_string))
+        {
+            return Err("Export `tracks` must be a string or an array of strings".into());
+        }
+    }
+    Ok(())
+}
+
+fn default_duration(rig: &LoadedCutoutRigPlan, state: &UiState) -> f64 {
+    let track_duration = evaluate_cutout_rig_motion(rig, state).track_duration as f64;
+    if track_duration <= 0.0 {
+        return 3.0;
+    }
+    let dt = 1.0_f32 / 30.0;
+    let phase_per_second =
+        step_playback_phase(0.0, dt, true, state.anim_speed, state.sprint_lock) / dt as f64;
+    if phase_per_second > 0.0 {
+        track_duration * WALK_PHASE_RATE / phase_per_second
+    } else {
+        track_duration
     }
 }
 
@@ -173,6 +217,14 @@ pub(crate) fn export(
     textures: &BTreeMap<String, Vec<PathBuf>>,
     mp4: bool,
 ) -> Result<Value, String> {
+    validate_params(
+        if mp4 {
+            "export.cutout_mp4"
+        } else {
+            "export.layered_motion"
+        },
+        params,
+    )?;
     let mut export_state = state.clone();
     if let Some(speed) = params.get("speed") {
         let speed = speed
@@ -218,21 +270,10 @@ pub(crate) fn export(
     if params.get("duration").is_some_and(|v| v.as_f64().is_none()) {
         return Err("Export duration must be a number".into());
     }
-    let track_duration = evaluate_cutout_rig_motion(rig, state).track_duration;
-    let duration =
-        params
-            .get("duration")
-            .and_then(Value::as_f64)
-            .unwrap_or(if track_duration > 0.0 {
-                track_duration as f64
-                    / if state.anim_speed > 0.0 {
-                        state.anim_speed as f64
-                    } else {
-                        1.0
-                    }
-            } else {
-                3.0
-            });
+    let duration = params
+        .get("duration")
+        .and_then(Value::as_f64)
+        .unwrap_or_else(|| default_duration(rig, state));
     let mut spec = sampled_spec(rig, state, &asset.parts, duration, 30)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -289,7 +330,17 @@ pub(crate) fn export(
         }
         let status = std::process::Command::new("ffmpeg")
             .args([
-                "-nostdin", "-v", "error", "-y", "-i", input, "-c:v", "libx264", "-pix_fmt",
+                "-nostdin",
+                "-v",
+                "error",
+                "-y",
+                "-i",
+                input,
+                "-vf",
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
                 "yuv420p",
             ])
             .arg(&output)
@@ -644,6 +695,11 @@ mod tests {
         assert!(!uses_preview(
             &session,
             "export.layered_motion",
+            &json!({"spec":active,"tracks":["alternate"]})
+        ));
+        assert!(!uses_preview(
+            &session,
+            "export.layered_motion",
             &json!({"spec":external})
         ));
         session.assets.clear();
@@ -653,5 +709,66 @@ mod tests {
             &json!({"spec":external})
         ));
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn explicit_track_selection_keeps_document_export_semantics() {
+        let session = Session::default();
+        for tracks in [json!(["alternate"]), json!("alternate"), json!([])] {
+            assert!(!uses_preview(
+                &session,
+                "export.layered_motion",
+                &json!({"tracks":tracks})
+            ));
+        }
+    }
+
+    #[test]
+    fn default_duration_covers_one_cycle_with_speed_and_sprint() {
+        let rig = rig();
+        let mut state = UiState::default();
+        state.anim_speed = 2.0;
+        for sprint in [false, true] {
+            state.sprint_lock = sprint;
+            let duration = default_duration(&rig, &state);
+            let dt = 1.0_f32 / 30.0;
+            let phase_per_second =
+                step_playback_phase(0.0, dt, true, state.anim_speed, sprint) / dt as f64;
+            assert!((duration * phase_per_second / WALK_PHASE_RATE - 2.0).abs() < 1e-6);
+        }
+        state.anim_speed = 0.0;
+        assert_eq!(default_duration(&rig, &state), 2.0);
+    }
+
+    #[test]
+    fn export_boundary_rejects_mistyped_parameters_before_readiness_or_io() {
+        for params in [
+            json!({"spec":3}),
+            json!({"output":false}),
+            json!({"gpu":"false"}),
+            json!({"tracks":[3]}),
+            json!([]),
+        ] {
+            let error = validate_params("export.layered_motion", &params).unwrap_err();
+            let mut session = Session::default();
+            assert_eq!(
+                export(
+                    &mut session,
+                    &UiState::default(),
+                    &params,
+                    &BTreeMap::new(),
+                    false
+                )
+                .unwrap_err(),
+                error
+            );
+        }
+        assert!(validate_params("export.cutout_mp4", &json!({"speed":"fast"})).is_err());
+        assert!(
+            validate_params(
+                "export.layered_motion",
+                &json!({"spec":"explicit.json","tracks":["one"],"gpu":false})
+            )
+            .is_ok()
+        );
     }
 }

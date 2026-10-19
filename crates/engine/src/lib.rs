@@ -55,7 +55,7 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 /// description (e.g. `"auto_cut": "true"` where the description says `false`). Every caller (CLI, MCP,
 /// app, bridge) goes through `Session::execute`, so a mistyped value fails the same way everywhere
 /// instead of a handler silently falling back to its default.
-fn check_param_types(description: &str, params: &Value) -> Result<()> {
+pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
     let (Ok(Value::Object(expected)), Some(given)) =
         (serde_json::from_str::<Value>(description), params.as_object())
     else {
