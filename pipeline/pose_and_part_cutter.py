@@ -89,6 +89,25 @@ def _background_candidates(rgb, tolerance):
     return np.max(np.abs(smooth-bg), axis=2) <= tolerance
 
 
+def _flatten_untrusted_alpha(image: Image.Image) -> Image.Image:
+    """Make a sheet opaque again when its transparency did not remove the background.
+
+    An import step that erases only the outer margin (e.g. around a white card) leaves most of the sheet
+    opaque. Cropping trusts any existing alpha, so such a sheet would keep its background in every frame.
+    Compositing it onto its own dominant colour lets the colour-based matting remove the background instead."""
+    arr = np.array(image)
+    alpha = arr[:, :, 3]
+    if alpha.min() == 255 or (alpha > 16).mean() <= 0.5:
+        return image
+    opaque = arr[alpha > 16][:, :3]
+    quantized = (opaque // 16).astype(int)
+    values, counts = np.unique(quantized, axis=0, return_counts=True)
+    bg = np.median(opaque[np.all(quantized == values[counts.argmax()], axis=1)], axis=0)
+    a = alpha[:, :, None].astype(np.float32) / 255
+    rgb = arr[:, :, :3] * a + bg * (1 - a)
+    return Image.fromarray(np.dstack([rgb.astype(np.uint8), np.full(alpha.shape, 255, np.uint8)]), 'RGBA')
+
+
 def _matte(image: Image.Image, tolerance: int = 25, use_photocraft: bool = False) -> tuple[Image.Image, np.ndarray]:
     """Step 1 background removal via PhotoCraft 0.10.0 4-corner contiguous magicEraser
     with interior fur/collar preservation and enclosed background hole cleanup.
@@ -497,6 +516,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         raise ValueError('tolerance must be in 1..100')
     with Image.open(source) as src:
         image = ImageOps.exif_transpose(src).convert('RGBA')
+    image = _flatten_untrusted_alpha(image)
     if kind == 'auto':
         kind = 'action' if source.name.startswith('Create_pose_sheet') else 'turnaround' if 'turnaround' in source.name.lower() else 'single'
     if kind not in ('action', 'turnaround', 'single', 'exploded'):
