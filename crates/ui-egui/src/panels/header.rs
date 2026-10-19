@@ -52,9 +52,9 @@ pub(crate) fn action_button(
         .inner;
     let explanation = match id {
         "toolbar.import" | "project.add" => (
-            "Connect an image, sheet, or rig to the project.",
-            "Keep source files together without immediately processing them.",
-            "Click, choose a source and give it a name. Use preparation tools when ready.",
+            "Import an image (with PhotoCraft background removal) or connect a manifest.",
+            "Bring artwork into the project on a transparent background, or connect an existing pose sheet, turnaround, or cutout rig manifest.",
+            "Choose a file and optional name. Images run PhotoCraft background removal via intake.validate; .json manifests connect directly.",
         ),
         "toolbar.transparent" => (
             "Process the active source to remove its background.",
@@ -164,23 +164,24 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
     if app.ui_state.connect_asset_open {
         let mut open = true;
         let mut connected = false;
-        egui::Window::new("Add / Connect Asset").open(&mut open).collapsible(false)
+        egui::Window::new("Import / Connect Asset").open(&mut open).collapsible(false)
             .default_width(460.0).show(ctx, |ui| {
                 ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
-                    ui.label("Image, pose sheet, turnaround, or cutout rig manifest");
+                    ui.label("Image (runs PhotoCraft background removal) or manifest (.json)");
                     ui.horizontal(|ui| {
                         ui.label("Path");
                         let response = ui.text_edit_singleline(&mut app.ui_state.connect_asset_path);
                         app.automation.add_response("project.path", "text", "Asset path", &response);
                         if ui.button("Browse…").clicked()
                             && let Some(path) = rfd::FileDialog::new()
-                                .add_filter("Images / Manifests", &["png", "jpg", "jpeg", "json"])
+                                .add_filter("Images / Manifests", &["png", "jpg", "jpeg", "webp", "json"])
                                 .pick_file()
                         { app.ui_state.connect_asset_path = path.to_string_lossy().into_owned(); }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Name (optional)");
-                        ui.text_edit_singleline(&mut app.ui_state.connect_asset_name);
+                        let name_resp = ui.text_edit_singleline(&mut app.ui_state.connect_asset_name);
+                        app.automation.add_response("project.name", "text", "Asset name", &name_resp);
                     });
                     egui::ComboBox::from_label("Asset type")
                         .selected_text(&app.ui_state.connect_asset_kind).show_ui(ui, |ui| {
@@ -189,16 +190,40 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
                                 ui.selectable_value(&mut app.ui_state.connect_asset_kind, kind.into(), label);
                             }
                         });
-                    if action_button(app, ui, "project.connect", "Connect Asset", !app.ui_state.connect_asset_path.trim().is_empty()) {
-                        let mut params = json!({"path": app.ui_state.connect_asset_path.trim(), "kind": app.ui_state.connect_asset_kind});
-                        if !app.ui_state.connect_asset_name.trim().is_empty() {
-                            params["name"] = json!(app.ui_state.connect_asset_name.trim());
-                        }
+                    if action_button(app, ui, "project.connect", "Import Asset", !app.ui_state.connect_asset_path.trim().is_empty()) {
+                        let path = app.ui_state.connect_asset_path.trim().to_string();
+                        let name = app.ui_state.connect_asset_name.trim().to_string();
+                        let path_ref = std::path::Path::new(&path);
+                        let is_manifest = path_ref.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+                            || path_ref.is_dir();
                         let count = app.session.project_assets.len();
-                        connect(app, params);
-                        connected = app.session.project_assets.len() > count;
+                        if is_manifest {
+                            let mut params = json!({"path": path, "kind": app.ui_state.connect_asset_kind});
+                            if !name.is_empty() {
+                                params["name"] = json!(name);
+                            }
+                            connect(app, params);
+                            connected = app.session.project_assets.len() > count;
+                        } else {
+                            let asset_id = animationcraft_engine::commands::asset_id_for_import(
+                                (!name.is_empty()).then_some(name.as_str()),
+                                path_ref,
+                            );
+                            command(
+                                app,
+                                "intake.validate",
+                                json!({
+                                    "image": path,
+                                    "asset": asset_id,
+                                    "slot": "auto",
+                                    "auto_cut": false
+                                }),
+                            );
+                            connected = app.ui_state.busy_command.is_some()
+                                || app.session.project_assets.len() > count;
+                        }
                     }
-                    ui.small("Connects the source as-is. Use Make Transparent or Build Cutout Rig when ready.");
+                    ui.small("Images run PhotoCraft background removal via intake.validate; .json manifests connect directly.");
                 });
             });
         app.ui_state.connect_asset_open = open && !connected;

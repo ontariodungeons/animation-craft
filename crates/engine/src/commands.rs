@@ -234,7 +234,7 @@ fn run_pipeline(s: &Session, args: &[String]) -> Result<Value> {
     Ok(serde_json::from_str(&stdout).unwrap_or_else(|_| json!({ "raw": stdout })))
 }
 
-fn sanitize_asset_id(raw: &str) -> String {
+fn try_sanitize_asset_id(raw: &str) -> Option<String> {
     let mut out = String::new();
     for ch in raw.chars() {
         if ch.is_ascii_alphanumeric() {
@@ -244,11 +244,24 @@ fn sanitize_asset_id(raw: &str) -> String {
         }
     }
     let trimmed = out.trim_matches('_').to_string();
-    if trimmed.is_empty() {
-        "asset".to_string()
-    } else {
-        trimmed
-    }
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+pub fn sanitize_asset_id(raw: &str) -> String {
+    try_sanitize_asset_id(raw).unwrap_or_else(|| "asset".to_string())
+}
+
+/// Derive a sanitized asset id from an optional user-typed name, falling back to the file stem
+/// only when no name is typed.
+pub fn asset_id_for_import(typed_name: Option<&str>, path: &Path) -> String {
+    typed_name
+        .and_then(try_sanitize_asset_id)
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|st| st.to_str())
+                .and_then(try_sanitize_asset_id)
+        })
+        .unwrap_or_else(|| "asset".to_string())
 }
 
 // ---------- command implementations ----------
@@ -277,10 +290,12 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or(false);
     let slot_param = params.get("slot").and_then(Value::as_str).unwrap_or("auto");
 
-    let asset_id = params
+    let explicit_name = params
         .get("asset")
-        .and_then(Value::as_str)
-        .map(sanitize_asset_id)
+        .or_else(|| params.get("name"))
+        .and_then(Value::as_str);
+    let asset_id = explicit_name
+        .and_then(try_sanitize_asset_id)
         .or_else(|| {
             if attach_to_active {
                 s.active_asset.clone()
@@ -288,13 +303,7 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
                 None
             }
         })
-        .unwrap_or_else(|| {
-            let stem = resolved_path
-                .file_stem()
-                .and_then(|st| st.to_str())
-                .unwrap_or("asset");
-            sanitize_asset_id(stem)
-        });
+        .unwrap_or_else(|| asset_id_for_import(None, &resolved_path));
 
     // STEP 1 OF IMAGE IMPORT: Use photocraft-cli (paint.magicEraser at 4 corners) to strip background to transparent RGBA PNG!
     let root = workspace_root(s);
@@ -3338,18 +3347,6 @@ fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         .as_deref()
         .or_else(|| path.as_ref()?.file_stem()?.to_str())
         .unwrap_or("asset");
-    let base_id = sanitize_asset_id(params.get("id").and_then(Value::as_str).unwrap_or(stem));
-    let mut id = base_id.clone();
-    let mut suffix = 2;
-    while s.project_assets.iter().any(|a| a.id == id) || s.assets.contains_key(&id) {
-        if params.get("id").is_some() {
-            return Err(EngineError::InvalidParams(format!(
-                "asset id '{id}' already exists"
-            )));
-        }
-        id = format!("{base_id}_{suffix}");
-        suffix += 1;
-    }
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -3359,6 +3356,25 @@ fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(EngineError::InvalidParams(
             "asset name cannot be empty".into(),
         ));
+    }
+    let explicit_id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(try_sanitize_asset_id);
+    let base_id = explicit_id
+        .clone()
+        .or_else(|| try_sanitize_asset_id(name))
+        .unwrap_or_else(|| sanitize_asset_id(stem));
+    let mut id = base_id.clone();
+    let mut suffix = 2;
+    while s.project_assets.iter().any(|a| a.id == id) || s.assets.contains_key(&id) {
+        if explicit_id.is_some() {
+            return Err(EngineError::InvalidParams(format!(
+                "asset id '{id}' already exists"
+            )));
+        }
+        id = format!("{base_id}_{suffix}");
+        suffix += 1;
     }
     s.project_assets.push(crate::ProjectAsset {
         id: id.clone(),
@@ -4566,6 +4582,18 @@ mod tests {
         let project = dir.join("demo.acproj");
         s.execute("project.new", json!({"path": dir.join("demo")})).unwrap();
         assert!(s.execute("project.new", json!({"path": project})).is_err());
+        assert_eq!(asset_id_for_import(Some("Hero Name"), &path), "hero_name");
+        assert_eq!(asset_id_for_import(Some("   "), &path), "custom");
+        assert_eq!(asset_id_for_import(None, &path), "custom");
+        let named = s
+            .execute(
+                "project.add_asset",
+                json!({"name": "First Entry", "path": path}),
+            )
+            .unwrap();
+        assert_eq!(named["asset_id"], "first_entry");
+        s.execute("project.remove_asset", json!({"id": "first_entry"}))
+            .unwrap();
         s.execute("project.add_asset", json!({"id": "first", "path": path}))
             .unwrap();
         s.execute("project.add_asset", json!({"id": "custom", "path": path}))

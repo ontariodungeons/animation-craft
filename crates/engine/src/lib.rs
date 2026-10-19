@@ -86,22 +86,46 @@ impl Session {
         // Older import/load callers also appear in the shared project outliner.
         if matches!(id, "intake.validate" | "asset.load_manifest")
             && let Some(asset) = self.current_asset()
-            && !self.project_assets.iter().any(|entry| entry.id == asset.id)
         {
-            self.project_assets.push(ProjectAsset {
-                id: asset.id.clone(),
-                name: asset.id.replace('_', " "),
-                preset: params
-                    .get("preset")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                path: params
+            let asset_id = asset.id.clone();
+            let asset_path = asset.path.clone();
+            let display_name = params
+                .get("name")
+                .or_else(|| params.get("asset"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| asset_id.replace('_', " "));
+            let path = if id == "intake.validate" && !asset_path.as_os_str().is_empty() {
+                Some(asset_path)
+            } else {
+                params
                     .get("manifest")
                     .or_else(|| params.get("image"))
                     .and_then(Value::as_str)
-                    .map(|path| commands::resolve_workspace_path(self, path)),
-                kind: "auto".into(),
-            });
+                    .map(|path| commands::resolve_workspace_path(self, path))
+            };
+            if let Some(existing) = self
+                .project_assets
+                .iter_mut()
+                .find(|entry| entry.id == asset_id)
+            {
+                if id == "intake.validate" && path.is_some() {
+                    existing.path = path;
+                }
+            } else {
+                self.project_assets.push(ProjectAsset {
+                    id: asset_id,
+                    name: display_name,
+                    preset: params
+                        .get("preset")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    path,
+                    kind: "auto".into(),
+                });
+            }
         }
         // Keep the open project file in step with its asset connections.
         if self.project_path.is_some()

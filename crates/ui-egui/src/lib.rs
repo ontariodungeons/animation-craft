@@ -731,14 +731,22 @@ impl AnimationCraftApp {
                     let slot = val
                         .get("slot")
                         .and_then(Value::as_str)
-                        .unwrap_or("asset_sheet");
-                    self.ui_state.center_tab = if slot == "turnaround_sheet" {
+                        .unwrap_or("original");
+                    let has_turnaround = self.session.current_asset().is_some_and(|a| {
+                        a.turnaround_manifest.is_some() || a.attached_turnaround_sheet.is_some()
+                    });
+                    let has_poses = self.session.current_asset().is_some_and(|a| {
+                        a.pose_manifest.is_some() || a.attached_asset_sheet.is_some()
+                    });
+                    self.ui_state.center_tab = if slot == "turnaround_sheet" && has_turnaround {
                         CenterTab::TurnaroundSheet
-                    } else {
+                    } else if slot == "asset_sheet" && has_poses {
                         CenterTab::AssetSheet
+                    } else {
+                        CenterTab::OriginalView
                     };
                 }
-                if matches!(id, "project.load_asset" | "asset.load_manifest") {
+                if matches!(id, "project.load_asset" | "asset.load_manifest" | "intake.validate") {
                     self.ui_state.anim_mode = AnimMode::Idle;
                     self.ui_state.playback_phase = 0.0;
                     self.ui_state.stage_offset_x = 0.0;
@@ -1562,7 +1570,8 @@ impl UiCommand {
         if let UiCommand::Engine { id, .. } = self {
             return matches!(
                 *id,
-                "asset.make_transparent"
+                "intake.validate"
+                    | "asset.make_transparent"
                     | "asset.build_cutout_rig"
                     | "export.cutout_mp4"
                     | "export.layered_motion"

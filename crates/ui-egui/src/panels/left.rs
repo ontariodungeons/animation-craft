@@ -107,24 +107,6 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 CenterTab::AssetSheet, "asset_sheet", "btn.view_asset_sheet", "btn.import_asset_sheet");
             source_sheet_card(app, ui, "Turnaround", &turn_sheet_name, &format!("{turn_count} views"),
                 CenterTab::TurnaroundSheet, "turnaround_sheet", "btn.view_turnaround_sheet", "btn.import_turnaround");
-            let response = ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
-                chrome::help(chrome::button(ui, "+ New character from image…", true),
-                    "Import and process an image as a new character.",
-                    "Start with new artwork rather than replacing a reference on this character.",
-                    "Choose an image. Background processing and classification will run; inspect the result before rigging.")
-            }).inner;
-            app.automation.add_response("btn.new_character", "button", "New character from image", &response);
-            if response.clicked()
-                && let Some(file) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
-            {
-                let path = file.display().to_string();
-                app.ui_state.image_path = Some(path.clone());
-                app.exec_ui_command(UiCommand::IntakeValidate {
-                    image_path: path, slot: "auto".into(), attach_to_active: false,
-                    auto_cut: true, tolerance: app.ui_state.bg_tolerance,
-                    use_ocr: app.ui_state.use_ocr,
-                });
-            }
             ui.add_space(6.0);
             let settings = egui::CollapsingHeader::new(egui::RichText::new("Preparation tools").color(chrome::BLUE))
                 .id_salt("left.preparation_tools").default_open(false).show(ui, |ui| {
