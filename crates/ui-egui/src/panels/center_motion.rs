@@ -1026,7 +1026,7 @@ fn evaluate_layered_motion_spec(
         if arr.is_empty() {
             None
         } else {
-            let idx = ui_state.selected_pose_idx.min(arr.len() - 1);
+            let idx = ui_state.selected_track_idx.min(arr.len() - 1);
             arr.get(idx)
         }
     });

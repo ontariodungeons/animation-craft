@@ -88,7 +88,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if let Some(ref tracks) = layered_spec_tracks {
                     let cur_idx = app
                         .ui_state
-                        .selected_pose_idx
+                        .selected_track_idx
                         .min(tracks.len().saturating_sub(1));
                     ui.horizontal_wrapped(|ui| {
                         for (idx, (tid, tdur)) in tracks.iter().enumerate() {
@@ -109,7 +109,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 &resp,
                             );
                             if resp.clicked() {
-                                app.ui_state.selected_pose_idx = idx;
+                                app.ui_state.selected_track_idx = idx;
                                 app.ui_state.anim_mode = AnimMode::Idle;
                                 app.ui_state.playback_phase = 0.0;
                             }
@@ -339,7 +339,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             );
                             let cur_idx = app
                                 .ui_state
-                                .selected_pose_idx
+                                .selected_track_idx
                                 .min(tracks.len().saturating_sub(1));
                             for (idx, (tid, dur)) in tracks.iter().enumerate() {
                                 let resp = ui
@@ -355,7 +355,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                     &resp,
                                 );
                                 if resp.clicked() {
-                                    app.ui_state.selected_pose_idx = idx;
+                                    app.ui_state.selected_track_idx = idx;
                                     app.ui_state.playback_phase = 0.0;
                                     app.ui_state.playing = true;
                                 }

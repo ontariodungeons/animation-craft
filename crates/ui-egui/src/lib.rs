@@ -130,6 +130,7 @@ pub struct UiState {
     pub last_motion_validation: Option<Value>,
     pub selected_parts: std::collections::BTreeSet<String>,
     pub context_menu_part: Option<String>,
+    pub selected_track_idx: usize,
     pub status_line: String,
 }
 
@@ -198,6 +199,7 @@ impl Default for UiState {
             last_motion_validation: None,
             selected_parts: std::collections::BTreeSet::new(),
             context_menu_part: None,
+            selected_track_idx: 0,
             status_line:
                 "Hopper active — PhotoCraft transparent import + Attached Reference Sheets ready"
                     .to_string(),
@@ -589,7 +591,7 @@ impl AnimationCraftApp {
                 }
                 if let Some(track_val) = params.get("track") {
                     if let Some(idx) = track_val.as_u64() {
-                        self.ui_state.selected_pose_idx = idx as usize;
+                        self.ui_state.selected_track_idx = idx as usize;
                         self.ui_state.playback_phase = 0.0;
                     } else if let Some(tid) = track_val.as_str() {
                         let found_idx = self
@@ -604,7 +606,7 @@ impl AnimationCraftApp {
                                 })
                             });
                         if let Some(idx) = found_idx {
-                            self.ui_state.selected_pose_idx = idx;
+                            self.ui_state.selected_track_idx = idx;
                             self.ui_state.playback_phase = 0.0;
                         }
                     }
@@ -656,6 +658,7 @@ impl AnimationCraftApp {
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
                     "selected_pose_idx": self.ui_state.selected_pose_idx,
+                    "selected_track_idx": self.ui_state.selected_track_idx,
                     "playback_phase": self.ui_state.playback_phase,
                     "yaw_deg": self.ui_state.yaw_deg,
                     "pose_range_pct": self.ui_state.pose_range_pct,
@@ -740,6 +743,7 @@ impl AnimationCraftApp {
                     self.ui_state.stage_offset_y = 0.0;
                     self.ui_state.selected_parts.clear();
                     self.ui_state.context_menu_part = None;
+                    self.ui_state.selected_track_idx = 0;
                 }
                 self.ui_state.selected_pose_idx = 0;
                 self.ui_state.status_line = format!(

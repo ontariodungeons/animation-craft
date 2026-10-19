@@ -340,7 +340,7 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     .unwrap_or_default();
                 let active_idx = app
                     .ui_state
-                    .selected_pose_idx
+                    .selected_track_idx
                     .min(tracks.len().saturating_sub(1));
                 let active_track_label = tracks
                     .get(active_idx)
@@ -350,7 +350,7 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     for (idx, (tid, dur)) in tracks.iter().enumerate() {
                         let lbl = format!("{tid} ({dur:.1}s)");
                         let response =
-                            ui.selectable_label(app.ui_state.selected_pose_idx == idx, &lbl);
+                            ui.selectable_label(app.ui_state.selected_track_idx == idx, &lbl);
                         app.automation.add_response(
                             format!("playback.track.{tid}"),
                             "button",
@@ -358,7 +358,7 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             &response,
                         );
                         if response.clicked() {
-                            app.ui_state.selected_pose_idx = idx;
+                            app.ui_state.selected_track_idx = idx;
                             app.ui_state.playback_phase = 0.0;
                             ui.close();
                         }
