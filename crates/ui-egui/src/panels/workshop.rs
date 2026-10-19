@@ -90,6 +90,10 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
             row(app, ui, item, ready);
             ui.add_space(8.0);
         }
+        if let Some(fcproj) = status["video_project"].as_str() {
+            video_project(app, ui, fcproj, ready);
+            ui.add_space(8.0);
+        }
         ui.add_space(12.0);
         let complete = status["complete"] == json!(true);
         ui.horizontal(|ui| {
@@ -112,6 +116,41 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
       });
     });
     confirm_remove(app, ui.ctx());
+}
+
+/// The song's FilmCraft project (made by audio.transcribe): open it to edit, or drop the reference
+/// images onto its timeline as placeholders. Informational: it does not gate animation.
+fn video_project(app: &mut AnimationCraftApp, ui: &mut Ui, fcproj: &str, ready: bool) {
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Video project").size(14.0).color(TEXT));
+                let mut job = egui::text::LayoutJob::simple_singleline(format!("FilmCraft · {fcproj}"), FontId::proportional(11.5), MUTED);
+                // Leave room for the two buttons on the right.
+                job.wrap = egui::text::TextWrapping::truncate_at_width((ui.available_width() - 300.0).max(80.0));
+                let g = ui.painter().layout_job(job);
+                ui.label(g).on_hover_text(fcproj);
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(ready, |ui| {
+                    let has_images = app.ui_state.workshop_files.iter().any(|f| f["group"] == json!("images"));
+                    if button(app, ui, "video.place", "Place reference images", has_images) {
+                        run(app, "video.place_references", json!({}));
+                    }
+                });
+                let filmcraft = super::start::launcher_path("filmcraft");
+                if button(app, ui, "video.open", "Open in FilmCraft", filmcraft.is_some())
+                    && let Some(exe) = filmcraft
+                {
+                    app.ui_state.status_line = match std::process::Command::new(&exe).arg(fcproj).spawn() {
+                        Ok(_) => format!("Opened {fcproj} in FilmCraft"),
+                        Err(e) => format!("Could not open FilmCraft ({}): {e}", exe.display()),
+                    };
+                }
+            });
+        });
+    });
 }
 
 const GROUPS: [(&str, &str); 6] = [

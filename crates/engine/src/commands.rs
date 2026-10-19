@@ -3377,7 +3377,82 @@ fn workshop_status(s: &Session) -> Result<Value> {
             "next": if draft.is_file() { "workshop.approve_draft {\"approved\": true}" } else { "workshop.build_draft {}" }}),
     ];
     let complete = items.iter().all(|i| i["done"] == json!(true));
-    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "items": items}))
+    // The FilmCraft project audio.transcribe made: the song on a sequence, ready for editing.
+    let video_project = video_project_path(&dir);
+    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "items": items, "video_project": video_project}))
+}
+
+fn video_project_path(dir: &Path) -> Option<PathBuf> {
+    transcript_files(dir).iter().find_map(|t| {
+        let name = t.file_name()?.to_str()?.replace(".transcript.json", ".fcproj");
+        let fcproj = t.with_file_name(name);
+        fcproj.is_file().then_some(fcproj)
+    })
+}
+
+/// Puts the project's reference images on the song's FilmCraft sequence as placeholders: back to
+/// back on one video track, sharing the song's length, for the user or an agent to rearrange.
+/// FilmCraft (headless filmcraft-cli) does the import and placement.
+fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let fcproj = match params.get("project").and_then(Value::as_str) {
+        Some(p) => resolve_workspace_path(s, p),
+        None => video_project_path(&dir).ok_or_else(|| {
+            EngineError::InvalidParams("no FilmCraft project yet: run audio.transcribe first".into())
+        })?,
+    };
+    let images: Vec<PathBuf> = match params.get("images").and_then(Value::as_array) {
+        Some(list) => list.iter().filter_map(Value::as_str).map(|p| resolve_workspace_path(s, p)).collect(),
+        None => files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS)),
+    };
+    if images.is_empty() {
+        return Err(EngineError::InvalidParams("no reference images to place (workshop.add images first)".into()));
+    }
+    let track = params.get("track").and_then(Value::as_str).unwrap_or("V1");
+    let tool = "filmcraft-cli";
+    let failed = |what: &str, detail: String| EngineError::ExternalTool(tool.into(), format!("{what}: {detail}"));
+    let project_arg = fcproj.to_string_lossy().into_owned();
+    let sequence: Value = serde_json::from_str(&run_tool_in(&dir, tool, &["--project".into(), project_arg.clone(), "inspect".into(), "sequence".into()])?)
+        .map_err(|e| failed("inspect", e.to_string()))?;
+    let duration = sequence
+        .get("duration")
+        .and_then(Value::as_u64)
+        .filter(|d| *d > 0)
+        .ok_or_else(|| failed("inspect", "the FilmCraft project has no sequence with a length".into()))?;
+    let imported: Value = serde_json::from_str(&run_tool_in(
+        &dir,
+        tool,
+        &["--project".into(), project_arg.clone(), "--save".into(), "exec".into(), "file.import".into(), json!({"paths": images}).to_string()],
+    )?)
+    .map_err(|e| failed("file.import", e.to_string()))?;
+    let items: Vec<u64> = imported.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+    if items.len() != images.len() {
+        return Err(failed("file.import", format!("imported {} of {} images: {imported}", items.len(), images.len())));
+    }
+    let share = duration / items.len() as u64;
+    let lines: Vec<String> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let start = share * i as u64;
+            let length = if i + 1 == items.len() { duration - start } else { share };
+            json!({"id": "timeline.place", "params": {"item": item, "track": track, "time": start, "duration": length, "insert": false}}).to_string()
+        })
+        .collect();
+    let script = dir.join(".place_references.jsonl");
+    std::fs::write(&script, lines.join("\n"))?;
+    let run = run_tool_in(&dir, tool, &["--project".into(), project_arg, "--save".into(), "--compact".into(), "run".into(), script.to_string_lossy().into_owned()]);
+    let _ = std::fs::remove_file(&script);
+    let mut clips = Vec::new();
+    for line in run?.lines().filter(|l| l.trim_start().starts_with('{')) {
+        let entry: Value = serde_json::from_str(line).map_err(|e| failed("run", e.to_string()))?;
+        if entry.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(failed("timeline.place", entry.to_string()));
+        }
+        clips.extend(entry.pointer("/result/clips").and_then(Value::as_array).cloned().unwrap_or_default());
+    }
+    Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "placed": images, "clips": clips,
+        "seconds_each": share as f64 / FILMCRAFT_TICKS_PER_SECOND}))
 }
 
 fn cmd_workshop_status(s: &mut Session, _: &Value) -> Result<Value> {
@@ -4905,6 +4980,15 @@ fn build() -> Vec<CommandSpec> {
             cmd_workshop_add
         ),
         query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
+        cmd!(
+            "video.place_references",
+            "Place Reference Images in FilmCraft",
+            ["Workshop"],
+            None,
+            "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the project's images\"], \"track\": \"V1\"}",
+            always,
+            cmd_video_place_references
+        ),
         cmd!(
             "workshop.remove",
             "Remove Workshop File",

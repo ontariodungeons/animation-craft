@@ -1593,6 +1593,7 @@ impl UiCommand {
                     | "validate.motion"
                     | "audio.transcribe"
                     | "workshop.build_draft"
+                    | "video.place_references"
             );
         }
         matches!(

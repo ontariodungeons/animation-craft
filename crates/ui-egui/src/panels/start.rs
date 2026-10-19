@@ -249,7 +249,7 @@ fn workflow_height(width: f32) -> f32 {
 }
 
 /// The app's install path from the ArtCraft launcher (`~/.local/share/artcraft-launcher/installed.json`).
-fn launcher_path(app: &str) -> Option<PathBuf> {
+pub(crate) fn launcher_path(app: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let text = std::fs::read_to_string(home.join(".local/share/artcraft-launcher/installed.json")).ok()?;
     let installed: serde_json::Value = serde_json::from_str(&text).ok()?;
