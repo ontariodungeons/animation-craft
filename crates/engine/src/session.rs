@@ -167,96 +167,7 @@ impl LoadedCutoutRigPlan {
             raw.get("canvas").and_then(Value::as_array),
             raw.get("layers").and_then(Value::as_array),
         ) {
-            let cw = canvas_arr
-                .first()
-                .and_then(Value::as_u64)
-                .unwrap_or(1920)
-                .max(1) as u32;
-            let ch = canvas_arr
-                .get(1)
-                .and_then(Value::as_u64)
-                .unwrap_or(1080)
-                .max(1) as u32;
-            let character_id = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("layered_motion")
-                .to_string();
-            let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-            let mut parts = Vec::with_capacity(layers_arr.len());
-            let mut root_file: Option<PathBuf> = None;
-            for (idx, item) in layers_arr.iter().enumerate() {
-                let id = item
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("layer")
-                    .to_string();
-                let file_path = item
-                    .get("file")
-                    .and_then(Value::as_str)
-                    .map(|f| {
-                        let p = PathBuf::from(f);
-                        if p.is_absolute() {
-                            p
-                        } else {
-                            base_dir.join(p)
-                        }
-                    })
-                    .unwrap_or_default();
-                let parent = item
-                    .get("parent")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                if parent.is_none() && root_file.is_none() && !file_path.as_os_str().is_empty() {
-                    root_file = Some(file_path.clone());
-                }
-                let pivot = if let Some(piv_arr) = item.get("pivot").and_then(Value::as_array) {
-                    [
-                        piv_arr
-                            .first()
-                            .and_then(Value::as_f64)
-                            .unwrap_or(cw as f64 * 0.5) as f32,
-                        piv_arr
-                            .get(1)
-                            .and_then(Value::as_f64)
-                            .unwrap_or(ch as f64 * 0.5) as f32,
-                    ]
-                } else {
-                    [cw as f32 * 0.5, ch as f32 * 0.5]
-                };
-                parts.push(CutoutRigPart {
-                    id: id.clone(),
-                    label: id,
-                    kind: "layered".to_string(),
-                    layer: (idx as i32) + 1,
-                    parent,
-                    pivot,
-                    pivot_uv: [pivot[0] / cw as f32, pivot[1] / ch as f32],
-                    joint_radius_px: 14,
-                    completed_overlap_pixels: 0,
-                    rotation: [-45.0, 45.0],
-                    crop_box: [0, 0, cw, ch],
-                    crop_size: [cw, ch],
-                    cropped_path: file_path.clone(),
-                    full_layer_path: file_path,
-                });
-            }
-            let source_image = root_file
-                .or_else(|| parts.first().map(|p| p.full_layer_path.clone()))
-                .unwrap_or_default();
-            return Ok(Self {
-                plan_path: path.to_path_buf(),
-                character_id,
-                rig_type: "layered_motion".to_string(),
-                source_image,
-                canvas_size: [cw, ch],
-                character_bbox: [0, 0, cw, ch],
-                photocraft_psd: None,
-                cutout_asset_sheet: None,
-                parts,
-                pose_library: Value::Null,
-                effectcraft: raw,
-            });
+            return Self::load_layered_motion_spec(path, &raw, canvas_arr, layers_arr);
         }
         let character_id = raw
             .get("character_id")
@@ -331,6 +242,336 @@ impl LoadedCutoutRigPlan {
             pose_library,
             effectcraft,
         })
+    }
+
+    fn load_layered_motion_spec(
+        path: &Path,
+        raw: &Value,
+        canvas_arr: &[Value],
+        layers_arr: &[Value],
+    ) -> Result<Self> {
+        let cw = canvas_arr
+            .first()
+            .and_then(Value::as_u64)
+            .unwrap_or(1920)
+            .max(1) as u32;
+        let ch = canvas_arr
+            .get(1)
+            .and_then(Value::as_u64)
+            .unwrap_or(1080)
+            .max(1) as u32;
+        let character_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("layered_motion")
+            .to_string();
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let cache_dir = base_dir.join(".layered_preview_cache").join(&character_id);
+        let _ = std::fs::create_dir_all(&cache_dir);
+
+        let mut parts = Vec::with_capacity(layers_arr.len());
+        let mut root_file: Option<PathBuf> = None;
+        let mut union_bbox: Option<[u32; 4]> = None;
+        let mut composite_canvas = image::RgbaImage::new(cw, ch);
+        let mut has_composite_pixels = false;
+
+        for (idx, item) in layers_arr.iter().enumerate() {
+            let id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("layer")
+                .to_string();
+            let file_path = item
+                .get("file")
+                .and_then(Value::as_str)
+                .map(|f| {
+                    let p = PathBuf::from(f);
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        base_dir.join(p)
+                    }
+                })
+                .unwrap_or_default();
+            let parent = item
+                .get("parent")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            if parent.is_none() && root_file.is_none() && !file_path.as_os_str().is_empty() {
+                root_file = Some(file_path.clone());
+            }
+
+            let component_idx = item.get("component").and_then(Value::as_u64).map(|v| v as usize);
+            let mut crop_box = [0, 0, cw, ch];
+            let mut alpha_box = [0, 0, cw, ch];
+            let mut cropped_path = file_path.clone();
+
+            if file_path.is_file()
+                && let Ok(dyn_img) = image::open(&file_path)
+            {
+                let mut rgba = dyn_img.into_rgba8();
+                if let Some(comp_i) = component_idx {
+                    isolate_connected_component_left_to_right(&mut rgba, comp_i);
+                }
+                if let Some(ab) = compute_alpha_bounds(&rgba, 16) {
+                    alpha_box = ab;
+                    let pad = 2u32;
+                    let bx0 = ab[0].saturating_sub(pad);
+                    let by0 = ab[1].saturating_sub(pad);
+                    let bx1 = (ab[2] + pad).min(rgba.width());
+                    let by1 = (ab[3] + pad).min(rgba.height());
+                    crop_box = [bx0, by0, bx1.max(bx0 + 1), by1.max(by0 + 1)];
+                    union_bbox = Some(match union_bbox {
+                        Some(u) => [
+                            u[0].min(crop_box[0]),
+                            u[1].min(crop_box[1]),
+                            u[2].max(crop_box[2]),
+                            u[3].max(crop_box[3]),
+                        ],
+                        None => crop_box,
+                    });
+
+                    // Composite rest-pose visible layers (skip blink-closed overlay layers)
+                    if !id.ends_with("closed") && rgba.width() == cw && rgba.height() == ch {
+                        for y in crop_box[1]..crop_box[3] {
+                            for x in crop_box[0]..crop_box[2] {
+                                let src_p = *rgba.get_pixel(x, y);
+                                let sa = src_p[3] as f32 / 255.0;
+                                if sa > 0.004 {
+                                    let dst_p = *composite_canvas.get_pixel(x, y);
+                                    let da = dst_p[3] as f32 / 255.0;
+                                    let out_a = sa + da * (1.0 - sa);
+                                    let blend = |sc: u8, dc: u8| -> u8 {
+                                        (((sc as f32 * sa) + (dc as f32 * da * (1.0 - sa)))
+                                            / out_a.max(1e-5))
+                                        .round()
+                                        .clamp(0.0, 255.0)
+                                            as u8
+                                    };
+                                    composite_canvas.put_pixel(
+                                        x,
+                                        y,
+                                        image::Rgba([
+                                            blend(src_p[0], dst_p[0]),
+                                            blend(src_p[1], dst_p[1]),
+                                            blend(src_p[2], dst_p[2]),
+                                            (out_a * 255.0).round().clamp(0.0, 255.0) as u8,
+                                        ]),
+                                    );
+                                    has_composite_pixels = true;
+                                }
+                            }
+                        }
+                    }
+
+                    let cw_crop = crop_box[2] - crop_box[0];
+                    let ch_crop = crop_box[3] - crop_box[1];
+                    let sub = image::imageops::crop_imm(&rgba, crop_box[0], crop_box[1], cw_crop, ch_crop).to_image();
+                    let safe_id: String = id
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                        .collect();
+                    let dest = cache_dir.join(format!("{idx:02}_{safe_id}_crop.png"));
+                    if sub.save(&dest).is_ok() {
+                        cropped_path = dest;
+                    }
+                }
+            }
+
+            let pivot = if let Some(piv_arr) = item.get("pivot").and_then(Value::as_array) {
+                [
+                    piv_arr
+                        .first()
+                        .and_then(Value::as_f64)
+                        .unwrap_or(cw as f64 * 0.5) as f32,
+                    piv_arr
+                        .get(1)
+                        .and_then(Value::as_f64)
+                        .unwrap_or(ch as f64 * 0.5) as f32,
+                ]
+            } else if let Some(piv_obj) = item.get("pivot").and_then(Value::as_object) {
+                let anchor = piv_obj
+                    .get("anchor")
+                    .and_then(Value::as_str)
+                    .unwrap_or("center");
+                let x0 = alpha_box[0] as f32;
+                let y0 = alpha_box[1] as f32;
+                let x1 = alpha_box[2] as f32;
+                let y1 = alpha_box[3] as f32;
+                let cx = 0.5 * (x0 + x1);
+                let cy = 0.5 * (y0 + y1);
+                match anchor {
+                    "top" => [cx, y0],
+                    "bottom" => [cx, y1],
+                    "left" => [x0, cy],
+                    "right" => [x1, cy],
+                    "topLeft" => [x0, y0],
+                    "topRight" => [x1, y0],
+                    "bottomLeft" => [x0, y1],
+                    "bottomRight" => [x1, y1],
+                    _ => [cx, cy],
+                }
+            } else {
+                [
+                    0.5 * (alpha_box[0] + alpha_box[2]) as f32,
+                    0.5 * (alpha_box[1] + alpha_box[3]) as f32,
+                ]
+            };
+
+            let crop_size = [
+                (crop_box[2] - crop_box[0]).max(1),
+                (crop_box[3] - crop_box[1]).max(1),
+            ];
+            let pivot_uv = [
+                ((pivot[0] - crop_box[0] as f32) / crop_size[0] as f32).clamp(0.0, 1.0),
+                ((pivot[1] - crop_box[1] as f32) / crop_size[1] as f32).clamp(0.0, 1.0),
+            ];
+
+            parts.push(CutoutRigPart {
+                id: id.clone(),
+                label: id,
+                kind: "layered".to_string(),
+                layer: (idx as i32) + 1,
+                parent,
+                pivot,
+                pivot_uv,
+                joint_radius_px: 10,
+                completed_overlap_pixels: 0,
+                rotation: [-60.0, 60.0],
+                crop_box,
+                crop_size,
+                cropped_path,
+                full_layer_path: file_path,
+            });
+        }
+
+        let character_bbox = union_bbox.unwrap_or([0, 0, cw, ch]);
+        let mut source_image = root_file
+            .or_else(|| parts.first().map(|p| p.full_layer_path.clone()))
+            .unwrap_or_default();
+
+        if has_composite_pixels {
+            let pad = 12u32;
+            let cx0 = character_bbox[0].saturating_sub(pad);
+            let cy0 = character_bbox[1].saturating_sub(pad);
+            let cx1 = (character_bbox[2] + pad).min(cw);
+            let cy1 = (character_bbox[3] + pad).min(ch);
+            if cx1 > cx0 && cy1 > cy0 {
+                let comp_crop =
+                    image::imageops::crop_imm(&composite_canvas, cx0, cy0, cx1 - cx0, cy1 - cy0)
+                        .to_image();
+                let comp_dest = cache_dir.join(format!("{character_id}_composite.png"));
+                if comp_crop.save(&comp_dest).is_ok() {
+                    source_image = comp_dest;
+                }
+            }
+        }
+
+        Ok(Self {
+            plan_path: path.to_path_buf(),
+            character_id,
+            rig_type: "layered_motion".to_string(),
+            source_image,
+            canvas_size: [cw, ch],
+            character_bbox,
+            photocraft_psd: None,
+            cutout_asset_sheet: None,
+            parts,
+            pose_library: Value::Null,
+            effectcraft: raw.clone(),
+        })
+    }
+}
+
+fn compute_alpha_bounds(rgba: &image::RgbaImage, threshold: u8) -> Option<[u32; 4]> {
+    let w = rgba.width();
+    let h = rgba.height();
+    let mut min_x = w;
+    let mut min_y = h;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    let mut found = false;
+    for y in 0..h {
+        for x in 0..w {
+            if rgba.get_pixel(x, y)[3] > threshold {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x + 1);
+                max_y = max_y.max(y + 1);
+                found = true;
+            }
+        }
+    }
+    found.then_some([min_x, min_y, max_x, max_y])
+}
+
+fn isolate_connected_component_left_to_right(rgba: &mut image::RgbaImage, index: usize) {
+    let w = rgba.width() as usize;
+    let h = rgba.height() as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut labels = vec![0u32; w * h];
+    let mut comp_areas: Vec<(u32, usize, usize)> = Vec::new(); // (label, area, min_x)
+    let mut current_label = 0u32;
+    let mut stack = Vec::new();
+
+    for sy in 0..h {
+        for sx in 0..w {
+            let idx = sy * w + sx;
+            if labels[idx] != 0 || rgba.get_pixel(sx as u32, sy as u32)[3] <= 16 {
+                continue;
+            }
+            current_label += 1;
+            labels[idx] = current_label;
+            stack.push((sx, sy));
+            let mut area = 0usize;
+            let mut min_x = sx;
+            while let Some((cx, cy)) = stack.pop() {
+                area += 1;
+                min_x = min_x.min(cx);
+                let y_start = cy.saturating_sub(1);
+                let y_end = (cy + 1).min(h - 1);
+                let x_start = cx.saturating_sub(1);
+                let x_end = (cx + 1).min(w - 1);
+                for ny in y_start..=y_end {
+                    for nx in x_start..=x_end {
+                        let nidx = ny * w + nx;
+                        if labels[nidx] == 0 && rgba.get_pixel(nx as u32, ny as u32)[3] > 16 {
+                            labels[nidx] = current_label;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+            }
+            comp_areas.push((current_label, area, min_x));
+        }
+    }
+
+    let max_area = comp_areas.iter().map(|c| c.1).max().unwrap_or(0);
+    if max_area == 0 {
+        return;
+    }
+    let min_area = if max_area < 50 {
+        max_area
+    } else {
+        50.max((max_area as f64 * 0.02) as usize)
+    };
+    let mut valid: Vec<(u32, usize)> = comp_areas
+        .into_iter()
+        .filter(|c| c.1 >= min_area)
+        .map(|(lbl, _, min_x)| (lbl, min_x))
+        .collect();
+    valid.sort_by_key(|c| c.1);
+    let Some(&(keep_label, _)) = valid.get(index) else {
+        return;
+    };
+    for y in 0..h {
+        for x in 0..w {
+            if labels[y * w + x] != keep_label {
+                rgba.put_pixel(x as u32, y as u32, image::Rgba([0, 0, 0, 0]));
+            }
+        }
     }
 }
 

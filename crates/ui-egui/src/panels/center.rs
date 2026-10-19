@@ -309,91 +309,150 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 }
             }
 
-            let menu = ui.menu_button(format!("Action: {:?}", app.ui_state.anim_mode), |ui| {
-                for (mode, name, command) in [
-                    (AnimMode::Idle, "Idle", "idle"),
-                    (AnimMode::Walk, "Walk", "walk"),
-                    (AnimMode::Run, "Run", "run"),
-                    (AnimMode::Jump, "Jump", "jump"),
-                    (AnimMode::Wave, "Wave", "wave"),
-                    (AnimMode::LookScout, "Look / Scout", "look_scout"),
-                    (AnimMode::Static, "Static", "static"),
-                ] {
-                    let response = ui.selectable_label(app.ui_state.anim_mode == mode, name);
-                    app.automation.add_response(
-                        format!("playback.action.{command}"),
-                        "button",
-                        name,
-                        &response,
-                    );
-                    if response.clicked() {
-                        if app.ui_state.anim_mode != mode {
+            let layered_rig = app
+                .session()
+                .current_asset()
+                .and_then(|a| a.cutout_rig.as_ref())
+                .filter(|r| r.rig_type == "layered_motion")
+                .cloned();
+
+            if let Some(ref rig) = layered_rig {
+                let tracks: Vec<(String, f32)> = rig
+                    .effectcraft
+                    .get("tracks")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|t| {
+                                let id = t
+                                    .get("id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("track")
+                                    .to_string();
+                                let dur = t
+                                    .get("duration")
+                                    .and_then(serde_json::Value::as_f64)
+                                    .unwrap_or(5.0) as f32;
+                                (id, dur)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let active_idx = app
+                    .ui_state
+                    .selected_pose_idx
+                    .min(tracks.len().saturating_sub(1));
+                let active_track_label = tracks
+                    .get(active_idx)
+                    .map(|(id, dur)| format!("Track: {id} ({dur:.1}s)"))
+                    .unwrap_or_else(|| "Spec timeline".to_string());
+                let menu = ui.menu_button(active_track_label, |ui| {
+                    for (idx, (tid, dur)) in tracks.iter().enumerate() {
+                        let lbl = format!("{tid} ({dur:.1}s)");
+                        let response =
+                            ui.selectable_label(app.ui_state.selected_pose_idx == idx, &lbl);
+                        app.automation.add_response(
+                            format!("playback.track.{tid}"),
+                            "button",
+                            &lbl,
+                            &response,
+                        );
+                        if response.clicked() {
+                            app.ui_state.selected_pose_idx = idx;
                             app.ui_state.playback_phase = 0.0;
+                            ui.close();
                         }
-                        app.ui_state.anim_mode = mode;
-                        app.exec_ui_command(UiCommand::AnimPreview2d {
-                            mode: command.into(),
-                        });
-                        ui.close();
                     }
-                }
-            });
-            app.automation
-                .add_response("playback.action", "button", "Action", &menu.response);
+                });
+                app.automation
+                    .add_response("playback.action", "button", "Track", &menu.response);
+            } else {
+                let menu = ui.menu_button(format!("Action: {:?}", app.ui_state.anim_mode), |ui| {
+                    for (mode, name, command) in [
+                        (AnimMode::Idle, "Idle", "idle"),
+                        (AnimMode::Walk, "Walk", "walk"),
+                        (AnimMode::Run, "Run", "run"),
+                        (AnimMode::Jump, "Jump", "jump"),
+                        (AnimMode::Wave, "Wave", "wave"),
+                        (AnimMode::LookScout, "Look / Scout", "look_scout"),
+                        (AnimMode::Static, "Static", "static"),
+                    ] {
+                        let response = ui.selectable_label(app.ui_state.anim_mode == mode, name);
+                        app.automation.add_response(
+                            format!("playback.action.{command}"),
+                            "button",
+                            name,
+                            &response,
+                        );
+                        if response.clicked() {
+                            if app.ui_state.anim_mode != mode {
+                                app.ui_state.playback_phase = 0.0;
+                            }
+                            app.ui_state.anim_mode = mode;
+                            app.exec_ui_command(UiCommand::AnimPreview2d {
+                                mode: command.into(),
+                            });
+                            ui.close();
+                        }
+                    }
+                });
+                app.automation
+                    .add_response("playback.action", "button", "Action", &menu.response);
 
-            let jump_resp = toolbar_icon_button(
-                ui,
-                ready,
-                app.ui_state.anim_mode == AnimMode::Jump && running,
-                "Jump",
-                Color32::from_rgb(78, 196, 214),
-                Vec2::new(72.0, 30.0),
-                ToolbarIcon::JumpArrow,
-                "Trigger a full Jump cycle (takeoff crouch -> apex -> landing) driven by Jump height.",
-            );
-            app.automation
-                .add_response("playback.jump", "button", "Jump", &jump_resp);
-            if jump_resp.clicked() {
-                app.ui_state.center_tab = CenterTab::TwoD;
-                trigger_jump_state(&mut app.ui_state);
-            }
-
-            let sprint = app.ui_state.sprint_lock;
-            let run_label = if sprint { "Run: ON" } else { "Run" };
-            let run_resp = toolbar_icon_button(
-                ui,
-                ready,
-                sprint,
-                run_label,
-                Color32::from_rgb(98, 168, 248),
-                Vec2::new(74.0, 30.0),
-                ToolbarIcon::RunChevrons,
-                "Toggle sprint pace for playback and WASD movement.",
-            );
-            app.automation
-                .add_response("playback.run_lock", "button", run_label, &run_resp);
-            if run_resp.clicked() {
-                toggle_sprint_lock_state(&mut app.ui_state);
-            }
-
-            let wasd = app.ui_state.wasd_roam;
-            let wasd_label = if wasd { "WASD: ON" } else { "WASD" };
-            let wasd_resp = toolbar_icon_button(
-                ui,
-                ready,
-                wasd,
-                wasd_label,
-                Color32::from_rgb(168, 142, 245),
-                Vec2::new(78.0, 30.0),
-                ToolbarIcon::WasdCross,
-                "Enable frame-rate-independent WASD / arrow-key stage movement and Space jump.",
-            );
-            app.automation
-                .add_response("playback.wasd", "button", wasd_label, &wasd_resp);
-            if wasd_resp.clicked() {
-                app.ui_state.wasd_roam = !wasd;
-                if app.ui_state.wasd_roam {
+                let jump_resp = toolbar_icon_button(
+                    ui,
+                    ready,
+                    app.ui_state.anim_mode == AnimMode::Jump && running,
+                    "Jump",
+                    Color32::from_rgb(78, 196, 214),
+                    Vec2::new(72.0, 30.0),
+                    ToolbarIcon::JumpArrow,
+                    "Trigger a full Jump cycle (takeoff crouch -> apex -> landing) driven by Jump height.",
+                );
+                app.automation
+                    .add_response("playback.jump", "button", "Jump", &jump_resp);
+                if jump_resp.clicked() {
                     app.ui_state.center_tab = CenterTab::TwoD;
+                    trigger_jump_state(&mut app.ui_state);
+                }
+
+                let sprint = app.ui_state.sprint_lock;
+                let run_label = if sprint { "Run: ON" } else { "Run" };
+                let run_resp = toolbar_icon_button(
+                    ui,
+                    ready,
+                    sprint,
+                    run_label,
+                    Color32::from_rgb(98, 168, 248),
+                    Vec2::new(74.0, 30.0),
+                    ToolbarIcon::RunChevrons,
+                    "Toggle sprint pace for playback and WASD movement.",
+                );
+                app.automation
+                    .add_response("playback.run_lock", "button", run_label, &run_resp);
+                if run_resp.clicked() {
+                    toggle_sprint_lock_state(&mut app.ui_state);
+                }
+
+                let wasd = app.ui_state.wasd_roam;
+                let wasd_label = if wasd { "WASD: ON" } else { "WASD" };
+                let wasd_resp = toolbar_icon_button(
+                    ui,
+                    ready,
+                    wasd,
+                    wasd_label,
+                    Color32::from_rgb(168, 142, 245),
+                    Vec2::new(78.0, 30.0),
+                    ToolbarIcon::WasdCross,
+                    "Enable frame-rate-independent WASD / arrow-key stage movement and Space jump.",
+                );
+                app.automation
+                    .add_response("playback.wasd", "button", wasd_label, &wasd_resp);
+                if wasd_resp.clicked() {
+                    app.ui_state.wasd_roam = !wasd;
+                    if app.ui_state.wasd_roam {
+                        app.ui_state.center_tab = CenterTab::TwoD;
+                    }
                 }
             }
 
@@ -507,7 +566,12 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
             );
         });
 
-        if app.ui_state.anim_mode == AnimMode::Jump {
+        let is_layered_spec = app
+            .session()
+            .current_asset()
+            .and_then(|a| a.cutout_rig.as_ref())
+            .is_some_and(|r| r.rig_type == "layered_motion");
+        if !is_layered_spec && app.ui_state.anim_mode == AnimMode::Jump {
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new("Jump height").strong().color(chrome::TEAL));
@@ -769,6 +833,34 @@ fn resolve_pose_sequence(
             .as_ref()
             .and_then(|mr| mr.poses.get(&f.label))
             .map(|m| m.foot_lift_px);
+        // When the standing pose comes from a low-res pose-sheet cell (<320px tall) and has no
+        // decomposed part layers, prefer the higher-resolution registered turnaround front frame
+        // so Idle/Static previews remain crisp and unclipped.
+        if f.label == "standing" && f.parts.is_empty() && f.size[1] < 320 {
+            let front_opt = asset
+                .turnaround_registration
+                .as_ref()
+                .and_then(|r| r.frames.iter().find(|tf| tf.label == "front"))
+                .or_else(|| {
+                    asset
+                        .turnaround_manifest
+                        .as_ref()
+                        .and_then(|tm| tm.frames.iter().find(|tf| tf.label == "front"))
+                });
+            if let Some(front) = front_opt
+                && front.size[1] > f.size[1]
+                && front.resolved_path.is_file()
+            {
+                return ResolvedPoseFrame {
+                    label: f.label.clone(),
+                    path: front.resolved_path.clone(),
+                    measured_lift_px,
+                    anchor: front.anchor.or(f.anchor),
+                    size: front.size,
+                    parts: f.parts.clone(),
+                };
+            }
+        }
         ResolvedPoseFrame {
             label: f.label.clone(),
             path: f.resolved_path.clone(),
@@ -823,9 +915,17 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
     let raw_dt = ui.ctx().input(|i| i.stable_dt);
 
+    let cutout_rig_opt = app
+        .session()
+        .current_asset()
+        .and_then(|a| a.cutout_rig.clone());
+    let is_layered_spec = cutout_rig_opt
+        .as_ref()
+        .is_some_and(|r| r.rig_type == "layered_motion");
+
     // Frame-rate-independent (dt-scaled) keyboard WASD + Space handling when WASD Move is enabled
     let mut wasd_moved = false;
-    if app.ui_state.wasd_roam {
+    if !is_layered_spec && app.ui_state.wasd_roam {
         let wasd_input = ui.ctx().input(|i| WasdInput {
             left: i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft),
             right: i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight),
@@ -893,11 +993,6 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .current_asset()
         .map(|a| a.parts.clone())
         .unwrap_or_default();
-
-    let cutout_rig_opt = app
-        .session()
-        .current_asset()
-        .and_then(|a| a.cutout_rig.clone());
 
     let (pose_label, tex_opt, measured_lift_px, measured_lift_summary, frame_anchor, frame_size, frame_parts) =
         if let Some(frame) = active_frame {
@@ -975,12 +1070,22 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
     // Calibrated ground baseline
     let baseline_y = rect.bottom() - 64.0;
-    painter.line_segment(
-        [
-            Pos2::new(rect.left() + 16.0, baseline_y),
-            Pos2::new(rect.right() - 16.0, baseline_y),
-        ],
-        Stroke::new(2.0, Color32::from_rgb(72, 185, 130)),
+    // Character area between the header text and the ground baseline; ui.screenshot/ui.vision measure only this.
+    app.automation.add(
+        "stage.viewport_2d",
+        "canvas",
+        "2D stage",
+        Rect::from_min_max(
+            Pos2::new(rect.left() + 2.0, rect.top() + 48.0),
+            Pos2::new(
+                rect.right() - 2.0,
+                if is_layered_spec {
+                    rect.bottom() - 40.0
+                } else {
+                    baseline_y - 2.0
+                },
+            ),
+        ),
     );
 
     let motion_active = (app.ui_state.playing || app.ui_state.playback_phase.abs() > 1e-6)
@@ -990,49 +1095,59 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         app.ui_state.playback_phase,
         app.ui_state.jump_height_pct,
         range_factor,
-        motion_active && app.ui_state.anim_mode == AnimMode::Jump,
+        !is_layered_spec && motion_active && app.ui_state.anim_mode == AnimMode::Jump,
     );
 
-    // Compute live stage lift in screen pixels so the contact shadow and baseline telemetry reflect Jump height
-    let approx_char_h = (rect.height() - 110.0).clamp(150.0, 420.0);
-    let (effective_lift_px, lift_summary) = if app.ui_state.anim_mode == AnimMode::Jump {
-        let live_px = jump_kin.lift_px(approx_char_h);
-        (
-            live_px,
+    if !is_layered_spec {
+        painter.line_segment(
+            [
+                Pos2::new(rect.left() + 16.0, baseline_y),
+                Pos2::new(rect.right() - 16.0, baseline_y),
+            ],
+            Stroke::new(2.0, Color32::from_rgb(72, 185, 130)),
+        );
+
+        // Compute live stage lift in screen pixels so the contact shadow and baseline telemetry reflect Jump height
+        let approx_char_h = (rect.height() - 110.0).clamp(150.0, 420.0);
+        let (effective_lift_px, lift_summary) = if app.ui_state.anim_mode == AnimMode::Jump {
+            let live_px = jump_kin.lift_px(approx_char_h);
+            (
+                live_px,
+                format!(
+                    "+{live_px:.1} px (jump {}, {:.0}% height)",
+                    jump_kin.stage.as_str(),
+                    app.ui_state.jump_height_pct
+                ),
+            )
+        } else {
+            (measured_lift_px, measured_lift_summary)
+        };
+
+        painter.text(
+            Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
+            egui::Align2::LEFT_TOP,
             format!(
-                "+{live_px:.1} px (jump {}, {:.0}% height)",
-                jump_kin.stage.as_str(),
-                app.ui_state.jump_height_pct
+                "GROUND BASELINE · Drift: {drift_summary} · Pose: {pose_label} · Lift: {lift_summary}"
             ),
-        )
-    } else {
-        (measured_lift_px, measured_lift_summary)
-    };
+            egui::FontId::monospace(11.0),
+            Color32::from_rgb(110, 220, 165),
+        );
 
-    painter.text(
-        Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
-        egui::Align2::LEFT_TOP,
-        format!(
-            "GROUND BASELINE · Drift: {drift_summary} · Pose: {pose_label} · Lift: {lift_summary}"
-        ),
-        egui::FontId::monospace(11.0),
-        Color32::from_rgb(110, 220, 165),
-    );
-
-    // Ground contact shadow (tracks stage_offset_x, narrows with airborne lift, widens slightly on crouch)
-    let shadow_w = (120.0 - effective_lift_px * 0.7 + jump_kin.crouch_fraction * 18.0).clamp(48.0, 142.0);
-    let shadow_rect = Rect::from_center_size(
-        Pos2::new(
-            rect.center().x + app.ui_state.stage_offset_x,
-            baseline_y + 2.0 + app.ui_state.stage_offset_y,
-        ),
-        Vec2::new(shadow_w, 14.0),
-    );
-    painter.rect_filled(
-        shadow_rect,
-        7.0,
-        Color32::from_rgba_unmultiplied(10, 12, 18, 175),
-    );
+        // Ground contact shadow (tracks stage_offset_x, narrows with airborne lift, widens slightly on crouch)
+        let shadow_w = (120.0 - effective_lift_px * 0.7 + jump_kin.crouch_fraction * 18.0).clamp(48.0, 142.0);
+        let shadow_rect = Rect::from_center_size(
+            Pos2::new(
+                rect.center().x + app.ui_state.stage_offset_x,
+                baseline_y + 2.0 + app.ui_state.stage_offset_y,
+            ),
+            Vec2::new(shadow_w, 14.0),
+        );
+        painter.rect_filled(
+            shadow_rect,
+            7.0,
+            Color32::from_rgba_unmultiplied(10, 12, 18, 175),
+        );
+    }
 
     let layer_override_active = !frame_parts.is_empty()
         && (part_states.iter().any(|p| !p.visible || p.solo)
@@ -1057,29 +1172,50 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let cw = rig.canvas_size[0].max(1) as f32;
         let ch = rig.canvas_size[1].max(1) as f32;
+        let [cb_x0, cb_y0, cb_x1, cb_y1] = rig.character_bbox;
+        let bbox_w = (cb_x1.saturating_sub(cb_x0)).max(1) as f32;
+        let bbox_h = (cb_y1.saturating_sub(cb_y0)).max(1) as f32;
+        let bbox_cx = cb_x0 as f32 + bbox_w * 0.5;
+        let bbox_cy = cb_y0 as f32 + bbox_h * 0.5;
+
         let max_h = (rect.height() - 105.0).max(160.0);
         let max_w = (rect.width() - 32.0).max(120.0);
-        let headroom = if app.ui_state.anim_mode == AnimMode::Jump {
+        let headroom = if !is_layered_spec && app.ui_state.anim_mode == AnimMode::Jump {
             1.0 + app.ui_state.jump_height_pct / 100.0
+        } else if is_layered_spec {
+            1.28
         } else {
             1.0
         };
+        let (fit_w, fit_h) = if is_layered_spec {
+            (bbox_w, bbox_h)
+        } else {
+            (cw, ch)
+        };
         let scale = compute_preview_scale(
-            cw,
-            ch,
+            fit_w,
+            fit_h,
             max_w,
             max_h,
             headroom,
             app.ui_state.preview_actual_size,
             app.ui_state.preview_zoom,
         );
-        let draw_size = Vec2::new(cw * scale, ch * scale);
         let center_x = rect.center().x + app.ui_state.stage_offset_x;
-        let bottom_y = baseline_y + 18.0 + app.ui_state.stage_offset_y;
-        let canvas_origin = Pos2::new(center_x - draw_size.x * 0.5, bottom_y - draw_size.y);
+        let canvas_origin = if is_layered_spec {
+            let center_y = rect.center().y + app.ui_state.stage_offset_y;
+            Pos2::new(center_x - bbox_cx * scale, center_y - bbox_cy * scale)
+        } else {
+            let draw_size = Vec2::new(cw * scale, ch * scale);
+            let bottom_y = baseline_y + 18.0 + app.ui_state.stage_offset_y;
+            Pos2::new(center_x - draw_size.x * 0.5, bottom_y - draw_size.y)
+        };
 
         let rig_eval = evaluate_cutout_rig_motion(&rig, &app.ui_state);
         let angles_rad = &rig_eval.angles_rad;
+        let pos_offset = &rig_eval.pos_offset;
+        let scale_xy = &rig_eval.scale_xy;
+        let opacity_map = &rig_eval.opacity;
         let root_dy = rig_eval.root_dy_canvas;
 
         let mut parts_by_id: BTreeMap<&str, &animationcraft_engine::session::CutoutRigPart> =
@@ -1089,7 +1225,11 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         }
 
         let explode_factor = (app.ui_state.explode_pct / 100.0) * 0.45;
-        let rig_center_canvas = Pos2::new(cw * 0.5, ch * 0.5);
+        let rig_center_canvas = if is_layered_spec {
+            Pos2::new(bbox_cx, bbox_cy)
+        } else {
+            Pos2::new(cw * 0.5, ch * 0.5)
+        };
 
         let transform_canvas_pt = |pt: Pos2, part_id: &str| -> Pos2 {
             let mut cur = pt;
@@ -1102,9 +1242,14 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if let Some(part) = parts_by_id.get(id) {
                     let piv = Pos2::new(part.pivot[0], part.pivot[1]);
                     let ang = angles_rad.get(id).copied().unwrap_or(0.0);
+                    let [sx, sy] = scale_xy.get(id).copied().unwrap_or([1.0, 1.0]);
+                    let [dx_off, dy_off] = pos_offset.get(id).copied().unwrap_or([0.0, 0.0]);
                     let (s, c) = ang.sin_cos();
-                    let d = cur - piv;
-                    cur = Pos2::new(piv.x + d.x * c - d.y * s, piv.y + d.x * s + d.y * c);
+                    let d = Vec2::new((cur.x - piv.x) * sx, (cur.y - piv.y) * sy);
+                    cur = Pos2::new(
+                        piv.x + d.x * c - d.y * s + dx_off,
+                        piv.y + d.x * s + d.y * c + dy_off,
+                    );
                     if part.parent.is_none() {
                         cur.y += root_dy;
                     }
@@ -1136,7 +1281,15 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         sorted_parts.sort_by_key(|p| p.layer);
 
         for (part_idx, part) in sorted_parts.iter().enumerate() {
-            let path = if part.id == "head" {
+            let part_opacity = opacity_map
+                .get(part.id.as_str())
+                .copied()
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+            if part_opacity <= 0.01 {
+                continue;
+            }
+            let path = if !is_layered_spec && part.id == "head" {
                 app.face_preview
                     .path(&ctx, &part.cropped_path, &app.ui_state)
             } else {
@@ -1159,13 +1312,19 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 Pos2::new(1.0, 1.0),
                 Pos2::new(0.0, 1.0),
             ];
+            let part_tint = Color32::from_rgba_unmultiplied(
+                tint.r(),
+                tint.g(),
+                tint.b(),
+                ((tint.a() as f32) * part_opacity).round() as u8,
+            );
             let mut mesh = egui::Mesh::with_texture(ptex.id());
             for i in 0..4 {
                 let screen_pt = transform_canvas_pt(corners_canvas[i], &part.id);
                 mesh.vertices.push(egui::epaint::Vertex {
                     pos: screen_pt,
                     uv: uvs[i],
-                    color: tint,
+                    color: part_tint,
                 });
             }
             mesh.add_triangle(0, 1, 2);
@@ -1208,6 +1367,37 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     Stroke::new(1.2, Color32::from_rgba_unmultiplied(80, 230, 160, 180)),
                 );
             }
+        }
+
+        if is_layered_spec {
+            let track_id = rig_eval.track_id.as_deref().unwrap_or("hover-idle");
+            painter.text(
+                Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "LAYERED MOTION SPEC · Track: {} ({:.2}s / {:.1}s) · Layers: {} · Bounds: {}×{} px",
+                    track_id,
+                    rig_eval.track_time,
+                    rig_eval.track_duration,
+                    rig.parts.len(),
+                    bbox_w as u32,
+                    bbox_h as u32,
+                ),
+                egui::FontId::monospace(11.0),
+                Color32::from_rgb(130, 210, 255),
+            );
+            painter.text(
+                Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "LAYERED MOTION PREVIEW · Asset: {} · Track: {} · Range: {:.0}%",
+                    app.session().active_asset.as_deref().unwrap_or("none"),
+                    track_id,
+                    app.ui_state.pose_range_pct
+                ),
+                egui::FontId::monospace(11.5),
+                Color32::from_rgb(210, 225, 245),
+            );
         }
     } else if let Some(tex) = tex_opt {
         let tex_size = tex.size_vec2();
@@ -1405,19 +1595,21 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         );
     }
 
-    painter.text(
-        Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
-        egui::Align2::LEFT_TOP,
-        format!(
-            "2D SIDE-PROFILE GATE · Asset: {} · Mode: {:?} · Viseme: {} · Range: {:.0}%",
-            app.session().active_asset.as_deref().unwrap_or("none"),
-            app.ui_state.anim_mode,
-            app.ui_state.mouth_viseme,
-            app.ui_state.pose_range_pct
-        ),
-        egui::FontId::monospace(11.5),
-        Color32::from_rgb(210, 225, 245),
-    );
+    if !is_layered_spec {
+        painter.text(
+            Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
+            egui::Align2::LEFT_TOP,
+            format!(
+                "2D SIDE-PROFILE GATE · Asset: {} · Mode: {:?} · Viseme: {} · Range: {:.0}%",
+                app.session().active_asset.as_deref().unwrap_or("none"),
+                app.ui_state.anim_mode,
+                app.ui_state.mouth_viseme,
+                app.ui_state.pose_range_pct
+            ),
+            egui::FontId::monospace(11.5),
+            Color32::from_rgb(210, 225, 245),
+        );
+    }
 }
 
 fn select_turnaround_frame_for_yaw(asset: Option<&Asset>, yaw_deg: f32) -> Option<ManifestFrame> {

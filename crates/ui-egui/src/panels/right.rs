@@ -48,11 +48,85 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             ui.add(egui::Label::new(RichText::new("Hover any control to learn what, why & how.").small().weak()).wrap());
             ui.separator();
 
+            let layered_spec_tracks: Option<Vec<(String, f32)>> = app
+                .session()
+                .current_asset()
+                .and_then(|a| a.cutout_rig.as_ref())
+                .filter(|r| r.rig_type == "layered_motion")
+                .map(|r| {
+                    r.effectcraft
+                        .get("tracks")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|t| {
+                                    let id = t.get("id").and_then(|v| v.as_str())?.to_string();
+                                    let dur = t
+                                        .get("duration")
+                                        .and_then(|v| v.as_f64())
+                                        .unwrap_or(4.0) as f32;
+                                    Some((id, dur))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                });
+
             // --- 1. Action Mode selector ---
-            CollapsingHeader::new(RichText::new("1 · Choose an action").color(MOTION).strong())
-                .id_salt("1. Action Mode (2D & 3D)")
-                .default_open(true)
-                .show(ui, |ui| {
+            CollapsingHeader::new(
+                RichText::new(if layered_spec_tracks.is_some() {
+                    "1 · Choose a motion track"
+                } else {
+                    "1 · Choose an action"
+                })
+                .color(MOTION)
+                .strong(),
+            )
+            .id_salt("1. Action Mode (2D & 3D)")
+            .default_open(true)
+            .show(ui, |ui| {
+                if let Some(ref tracks) = layered_spec_tracks {
+                    let cur_idx = app
+                        .ui_state
+                        .selected_pose_idx
+                        .min(tracks.len().saturating_sub(1));
+                    ui.horizontal_wrapped(|ui| {
+                        for (idx, (tid, tdur)) in tracks.iter().enumerate() {
+                            let label = format!("{tid} ({tdur:.1}s)");
+                            let selected =
+                                app.ui_state.anim_mode != AnimMode::Static && cur_idx == idx;
+                            let resp = ui.selectable_label(selected, &label);
+                            let resp = help(
+                                resp,
+                                &format!("Preview layered motion track `{tid}` ({tdur:.1}s)."),
+                                "Inspect keyframed path, oscillation, and follow curves defined in the motion spec.",
+                                "Click a track and press Play in the viewport toolbar.",
+                            );
+                            app.automation.add_response(
+                                format!("track.{tid}"),
+                                "button",
+                                tid,
+                                &resp,
+                            );
+                            if resp.clicked() {
+                                app.ui_state.selected_pose_idx = idx;
+                                app.ui_state.anim_mode = AnimMode::Idle;
+                                app.ui_state.playback_phase = 0.0;
+                            }
+                        }
+                        let resp_static = ui.selectable_value(
+                            &mut app.ui_state.anim_mode,
+                            AnimMode::Static,
+                            "Rest pose",
+                        );
+                        app.automation.add_response(
+                            "mode.static",
+                            "button",
+                            "Rest pose",
+                            &resp_static,
+                        );
+                    });
+                } else {
                     ui.horizontal_wrapped(|ui| {
                         for (mode, label) in [
                             (AnimMode::Idle, "Idle"),
@@ -68,10 +142,12 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 mode,
                                 label,
                             );
-                            let resp = help(resp,
+                            let resp = help(
+                                resp,
                                 &format!("Select the {label} action for the viewport preview."),
                                 "Compare motion and silhouette before choosing an animation to export.",
-                                "Click an action, then adjust Speed and Motion amount below. Available artwork and rig determine the visible result; export may use a separate animation.");
+                                "Click an action, then adjust Speed and Motion amount below. Available artwork and rig determine the visible result; export may use a separate animation.",
+                            );
                             app.automation.add_response(
                                 format!("mode.{}", label.to_ascii_lowercase()),
                                 "button",
@@ -85,7 +161,8 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             }
                         }
                     });
-                });
+                }
+            });
 
             ui.separator();
 
@@ -159,13 +236,16 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             ui.separator();
 
             // --- 3. Mouth Visemes & Pose Sliders (from Web App) ---
-            CollapsingHeader::new(RichText::new("3 · Expression & pose").color(POSE).strong())
-                .id_salt("3. Visemes & Pose Sliders")
-                .default_open(false)
-                .show(ui, |ui| { expression_controls(app, ui);
-                });
+            if layered_spec_tracks.is_none() {
+                CollapsingHeader::new(RichText::new("3 · Expression & pose").color(POSE).strong())
+                    .id_salt("3. Visemes & Pose Sliders")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        expression_controls(app, ui);
+                    });
 
-            ui.separator();
+                ui.separator();
+            }
 
             // --- 3b. 3D Volumetric Reconstruction Controls (from Web App) ---
             CollapsingHeader::new(RichText::new("4 · 3D shape").color(MESH).strong())

@@ -432,7 +432,7 @@ pub(crate) fn is_rig_part_visible(part_id: &str, part_states: &[PartState]) -> b
     !any_solo
 }
 
-/// Evaluated joint rotations and root offset for a `LoadedCutoutRigPlan`.
+/// Evaluated joint rotations, per-part transforms, and root offset for a `LoadedCutoutRigPlan`.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EvaluatedRigMotion {
     /// Clamped joint angle in radians for each `part.id`.
@@ -440,8 +440,20 @@ pub(crate) struct EvaluatedRigMotion {
     /// Clamped joint angle in degrees for each `part.id`.
     #[cfg_attr(not(test), allow(dead_code))]
     pub angles_deg: BTreeMap<String, f32>,
+    /// Per-part translation offset in canvas pixels (`[dx, dy]`).
+    pub pos_offset: BTreeMap<String, [f32; 2]>,
+    /// Per-part scale multiplier around pivot (`[sx, sy]`, default `[1.0, 1.0]`).
+    pub scale_xy: BTreeMap<String, [f32; 2]>,
+    /// Per-part opacity multiplier in `[0.0, 1.0]` (default `1.0`).
+    pub opacity: BTreeMap<String, f32>,
     /// Vertical root translation in rig canvas pixels (negative = upward lift, positive = downward crouch).
     pub root_dy_canvas: f32,
+    /// Active layered motion track ID when `rig.rig_type == "layered_motion"`.
+    pub track_id: Option<String>,
+    /// Active layered motion track duration (seconds).
+    pub track_duration: f32,
+    /// Current evaluated time (seconds) along the active track.
+    pub track_time: f32,
 }
 
 fn pose_library_part_rotation(pose_library: &Value, pose_name: &str, part_id: &str) -> Option<f32> {
@@ -590,6 +602,10 @@ pub(crate) fn evaluate_cutout_rig_motion(
     rig: &LoadedCutoutRigPlan,
     ui_state: &UiState,
 ) -> EvaluatedRigMotion {
+    if rig.rig_type == "layered_motion" {
+        return evaluate_layered_motion_spec(rig, ui_state);
+    }
+
     let ch = rig.canvas_size[1].max(1) as f32;
     let range_factor = (ui_state.pose_range_pct / 100.0).clamp(0.0, 1.0);
     let energy_factor = (ui_state.anim_energy / 100.0).clamp(0.2, 1.5);
@@ -772,6 +788,353 @@ pub(crate) fn evaluate_cutout_rig_motion(
     EvaluatedRigMotion {
         angles_rad,
         angles_deg,
+        pos_offset: BTreeMap::new(),
+        scale_xy: BTreeMap::new(),
+        opacity: BTreeMap::new(),
         root_dy_canvas,
+        track_id: None,
+        track_duration: 0.0,
+        track_time: 0.0,
+    }
+}
+
+fn eval_ease(ease_name: &str, u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    match ease_name {
+        "linear" => u,
+        "in" => u * u * u,
+        "out" => {
+            let inv = 1.0 - u;
+            1.0 - inv * inv * inv
+        }
+        _ => u * u * (3.0 - 2.0 * u),
+    }
+}
+
+fn eval_envelope(term: &Value, t: f32) -> f32 {
+    let Some(env_arr) = term.get("envelope").and_then(Value::as_array) else {
+        return 1.0;
+    };
+    let mut pts: Vec<(f32, f32)> = env_arr
+        .iter()
+        .filter_map(|p| {
+            let a = p.as_array()?;
+            Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32))
+        })
+        .collect();
+    if pts.is_empty() {
+        return 1.0;
+    }
+    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if t <= pts[0].0 {
+        return pts[0].1;
+    }
+    for w in pts.windows(2) {
+        let (t0, v0) = w[0];
+        let (t1, v1) = w[1];
+        if t <= t1 {
+            let u = if t1 > t0 { (t - t0) / (t1 - t0) } else { 1.0 };
+            return v0 + (v1 - v0) * u;
+        }
+    }
+    pts.last().map(|p| p.1).unwrap_or(1.0)
+}
+
+fn eval_vec_at(val: &Value, dim: usize) -> Vec<f32> {
+    if let Some(arr) = val.as_array() {
+        (0..dim)
+            .map(|i| arr.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f32)
+            .collect()
+    } else if let Some(n) = val.as_f64() {
+        vec![n as f32; dim]
+    } else {
+        vec![0.0; dim]
+    }
+}
+
+fn eval_keys_term(term: &Value, t: f32, dim: usize) -> Vec<f32> {
+    let Some(keys_arr) = term.get("keys").and_then(Value::as_array) else {
+        return vec![0.0; dim];
+    };
+    let ease_name = term.get("ease").and_then(Value::as_str).unwrap_or("smooth");
+    let mut pairs: Vec<(f32, Vec<f32>)> = keys_arr
+        .iter()
+        .filter_map(|k| {
+            let a = k.as_array()?;
+            let kt = a.first()?.as_f64()? as f32;
+            let kv = eval_vec_at(a.get(1)?, dim);
+            Some((kt, kv))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return vec![0.0; dim];
+    }
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if t <= pairs[0].0 {
+        return pairs[0].1.clone();
+    }
+    for w in pairs.windows(2) {
+        let (t0, ref v0) = w[0];
+        let (t1, ref v1) = w[1];
+        if t <= t1 {
+            let u = if t1 > t0 {
+                eval_ease(ease_name, (t - t0) / (t1 - t0))
+            } else {
+                1.0
+            };
+            return (0..dim).map(|i| v0[i] + (v1[i] - v0[i]) * u).collect();
+        }
+    }
+    pairs.last().map(|p| p.1.clone()).unwrap_or_else(|| vec![0.0; dim])
+}
+
+fn eval_ellipse_term(term: &Value, t: f32) -> [f32; 2] {
+    let t0 = term.get("from").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let t1 = term.get("to").and_then(Value::as_f64).unwrap_or(1.0) as f32;
+    let ease_name = term.get("ease").and_then(Value::as_str).unwrap_or("smooth");
+    let u = if t1 > t0 {
+        eval_ease(ease_name, (t - t0) / (t1 - t0))
+    } else {
+        1.0
+    };
+    let start = term.get("start").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let turns = term.get("turns").and_then(Value::as_f64).unwrap_or(1.0) as f32;
+    let ang = start + std::f32::consts::TAU * turns * u;
+    let centre = term
+        .get("centre")
+        .map(|v| eval_vec_at(v, 2))
+        .unwrap_or_else(|| vec![0.0, 0.0]);
+    let rx = term.get("rx").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let ry = term.get("ry").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let def_orig = [centre[0] + rx * start.cos(), centre[1] + ry * start.sin()];
+    let orig = term
+        .get("relativeTo")
+        .map(|v| {
+            let o = eval_vec_at(v, 2);
+            [o[0], o[1]]
+        })
+        .unwrap_or(def_orig);
+    [
+        centre[0] + rx * ang.cos() - orig[0],
+        centre[1] + ry * ang.sin() - orig[1],
+    ]
+}
+
+fn eval_oscillate_term(term: &Value, t: f32, dim: usize) -> Vec<f32> {
+    let mut out = vec![0.0; dim];
+    let axis = term.get("axis").and_then(Value::as_u64).unwrap_or(0) as usize;
+    if axis >= dim {
+        return out;
+    }
+    let amp = term.get("amplitude").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let hz = term.get("hz").and_then(Value::as_f64).unwrap_or(1.0) as f32;
+    let phase = term.get("phase").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    out[axis] = amp * (std::f32::consts::TAU * hz * t + phase).sin() * eval_envelope(term, t);
+    out
+}
+
+fn eval_layer_pos_at(motion_obj: &Value, layer_id: &str, t: f32) -> [f32; 2] {
+    let Some(terms) = motion_obj
+        .get(layer_id)
+        .and_then(|m| m.get("position"))
+        .and_then(Value::as_array)
+    else {
+        return [0.0, 0.0];
+    };
+    let mut dx = 0.0;
+    let mut dy = 0.0;
+    for term in terms {
+        match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+            "keys" => {
+                let v = eval_keys_term(term, t, 2);
+                dx += v[0];
+                dy += v[1];
+            }
+            "ellipse" => {
+                let v = eval_ellipse_term(term, t);
+                dx += v[0];
+                dy += v[1];
+            }
+            "oscillate" => {
+                let v = eval_oscillate_term(term, t, 2);
+                dx += v[0];
+                dy += v[1];
+            }
+            _ => {}
+        }
+    }
+    [dx, dy]
+}
+
+fn evaluate_layered_motion_spec(
+    rig: &LoadedCutoutRigPlan,
+    ui_state: &UiState,
+) -> EvaluatedRigMotion {
+    let mut angles_rad = BTreeMap::new();
+    let mut angles_deg = BTreeMap::new();
+    let mut pos_offset = BTreeMap::new();
+    let mut scale_xy = BTreeMap::new();
+    let mut opacity = BTreeMap::new();
+
+    let tracks = rig.effectcraft.get("tracks").and_then(Value::as_array);
+    let track_opt = tracks.and_then(|arr| {
+        if arr.is_empty() {
+            None
+        } else {
+            let idx = ui_state.selected_pose_idx.min(arr.len() - 1);
+            arr.get(idx)
+        }
+    });
+
+    let Some(track) = track_opt else {
+        for part in &rig.parts {
+            angles_rad.insert(part.id.clone(), 0.0);
+            angles_deg.insert(part.id.clone(), 0.0);
+            pos_offset.insert(part.id.clone(), [0.0, 0.0]);
+            scale_xy.insert(part.id.clone(), [1.0, 1.0]);
+            opacity.insert(
+                part.id.clone(),
+                if part.id.ends_with("closed") { 0.0 } else { 1.0 },
+            );
+        }
+        return EvaluatedRigMotion {
+            angles_rad,
+            angles_deg,
+            pos_offset,
+            scale_xy,
+            opacity,
+            root_dy_canvas: 0.0,
+            track_id: None,
+            track_duration: 0.0,
+            track_time: 0.0,
+        };
+    };
+
+    let track_id = track
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("track")
+        .to_string();
+    let duration = track
+        .get("duration")
+        .and_then(Value::as_f64)
+        .unwrap_or(5.0)
+        .max(0.1) as f32;
+    let range_factor = (ui_state.pose_range_pct / 100.0).clamp(0.0, 1.0);
+    let motion_active = (ui_state.playing || ui_state.playback_phase.abs() > 1e-6)
+        && ui_state.anim_mode != AnimMode::Static
+        && range_factor > 0.005;
+
+    let t = if motion_active {
+        ((ui_state.playback_phase / WALK_PHASE_RATE).max(0.0) as f32).rem_euclid(duration)
+    } else {
+        0.0
+    };
+    let motion_obj = track.get("motion").unwrap_or(&Value::Null);
+
+    for part in &rig.parts {
+        let lid = part.id.as_str();
+        let layer_m = motion_obj.get(lid).unwrap_or(&Value::Null);
+
+        // 1. Opacity (evaluated even at t=0 so hidden blink layers stay hidden at rest)
+        let mut op_delta = 0.0f32;
+        if let Some(op_terms) = layer_m.get("opacity").and_then(Value::as_array) {
+            for term in op_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => op_delta += eval_keys_term(term, t, 1)[0],
+                    "oscillate" => op_delta += eval_oscillate_term(term, t, 1)[0],
+                    _ => {}
+                }
+            }
+        }
+        let op = ((100.0 + op_delta).clamp(0.0, 100.0)) / 100.0;
+        opacity.insert(part.id.clone(), op);
+
+        if !motion_active {
+            pos_offset.insert(part.id.clone(), [0.0, 0.0]);
+            scale_xy.insert(part.id.clone(), [1.0, 1.0]);
+            angles_deg.insert(part.id.clone(), 0.0);
+            angles_rad.insert(part.id.clone(), 0.0);
+            continue;
+        }
+
+        // 2. Position offset
+        let raw_pos = eval_layer_pos_at(motion_obj, lid, t);
+        pos_offset.insert(
+            part.id.clone(),
+            [raw_pos[0] * range_factor, raw_pos[1] * range_factor],
+        );
+
+        // 3. Scale offset
+        let mut sx_pct = 0.0f32;
+        let mut sy_pct = 0.0f32;
+        if let Some(sc_terms) = layer_m.get("scale").and_then(Value::as_array) {
+            for term in sc_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => {
+                        let v = eval_keys_term(term, t, 2);
+                        sx_pct += v[0];
+                        sy_pct += v[1];
+                    }
+                    "oscillate" => {
+                        let v = eval_oscillate_term(term, t, 2);
+                        sx_pct += v[0];
+                        sy_pct += v[1];
+                    }
+                    _ => {}
+                }
+            }
+        }
+        scale_xy.insert(
+            part.id.clone(),
+            [
+                ((100.0 + sx_pct * range_factor) / 100.0).clamp(0.1, 3.0),
+                ((100.0 + sy_pct * range_factor) / 100.0).clamp(0.1, 3.0),
+            ],
+        );
+
+        // 4. Rotation offset (keys, oscillate, follow)
+        let mut rot_deg = 0.0f32;
+        if let Some(rot_terms) = layer_m.get("rotation").and_then(Value::as_array) {
+            for term in rot_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => rot_deg += eval_keys_term(term, t, 1)[0],
+                    "oscillate" => rot_deg += eval_oscillate_term(term, t, 1)[0],
+                    "follow" => {
+                        let target_lid = term
+                            .get("layer")
+                            .and_then(Value::as_str)
+                            .unwrap_or(lid);
+                        let gain = term.get("gain").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+                        let limit = term
+                            .get("limit")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(45.0)
+                            .abs() as f32;
+                        let dt_vel = 0.03f32;
+                        let x0 = eval_layer_pos_at(motion_obj, target_lid, (t - dt_vel).max(0.0))[0];
+                        let x1 = eval_layer_pos_at(motion_obj, target_lid, (t + dt_vel).min(duration))[0];
+                        let vx = (x1 - x0) / (2.0 * dt_vel);
+                        rot_deg += (vx * gain).clamp(-limit, limit);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let final_deg = rot_deg * range_factor;
+        angles_deg.insert(part.id.clone(), final_deg);
+        angles_rad.insert(part.id.clone(), final_deg.to_radians());
+    }
+
+    EvaluatedRigMotion {
+        angles_rad,
+        angles_deg,
+        pos_offset,
+        scale_xy,
+        opacity,
+        root_dy_canvas: 0.0,
+        track_id: Some(track_id),
+        track_duration: duration,
+        track_time: t,
     }
 }

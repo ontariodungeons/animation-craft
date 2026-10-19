@@ -672,6 +672,12 @@ impl AnimationCraftApp {
                         CenterTab::AssetSheet
                     };
                 }
+                if matches!(id, "project.load_asset" | "asset.load_manifest") {
+                    self.ui_state.anim_mode = AnimMode::Idle;
+                    self.ui_state.playback_phase = 0.0;
+                    self.ui_state.stage_offset_x = 0.0;
+                    self.ui_state.stage_offset_y = 0.0;
+                }
                 self.ui_state.selected_pose_idx = 0;
                 self.ui_state.status_line = format!(
                     "Executed `{id}` (active asset: {})",
@@ -1100,13 +1106,44 @@ impl eframe::App for AnimationCraftApp {
             for px in &color_img.pixels {
                 raw.extend_from_slice(&px.to_srgba_unmultiplied());
             }
-            let bg_rgb = if self.ui_state.light_backdrop {
-                [235, 238, 244]
+            // Window backdrop, 2D stage fill, and 2D stage grid lines.
+            let bg_colors: &[[u8; 3]] = if self.ui_state.light_backdrop {
+                &[[235, 238, 244], [225, 228, 235], [191, 197, 208]]
             } else {
-                [16, 18, 24]
+                &[[16, 18, 24], [20, 24, 32], [31, 37, 49]]
             };
-            let vision_metrics =
-                animationcraft_engine::commands::analyze_viewport_region(&raw, w, h, bg_rgb);
+            // Measure the stage canvas, not the whole window; fall back to the window if no canvas is shown.
+            let ppp = ui.ctx().pixels_per_point();
+            let region = ["stage.viewport_2d", "pose.canvas"].iter().find_map(|id| {
+                let el = self.automation.elements.iter().find(|e| e.id == *id)?;
+                let x0 = ((el.rect[0] * ppp).round().max(0.0) as u32).min(w);
+                let y0 = ((el.rect[1] * ppp).round().max(0.0) as u32).min(h);
+                let x1 = (((el.rect[0] + el.rect[2]) * ppp).round() as u32).min(w);
+                let y1 = (((el.rect[1] + el.rect[3]) * ppp).round() as u32).min(h);
+                (x1 > x0 && y1 > y0).then(|| (*id, [x0, y0, x1 - x0, y1 - y0]))
+            });
+            let mut vision_metrics = match region {
+                Some((id, [x0, y0, rw, rh])) => {
+                    let mut crop = Vec::with_capacity((rw * rh * 4) as usize);
+                    for y in y0..y0 + rh {
+                        let start = ((y * w + x0) * 4) as usize;
+                        crop.extend_from_slice(&raw[start..start + (rw * 4) as usize]);
+                    }
+                    let mut m = animationcraft_engine::commands::analyze_viewport_region(
+                        &crop, rw, rh, bg_colors,
+                    );
+                    m["region"] = json!({ "id": id, "rect_px": [x0, y0, rw, rh] });
+                    m
+                }
+                None => {
+                    let mut m =
+                        animationcraft_engine::commands::analyze_viewport_region(&raw, w, h, bg_colors);
+                    m["region"] = json!({ "id": "window", "rect_px": [0, 0, w, h] });
+                    m
+                }
+            };
+            vision_metrics["note"] =
+                json!("pixel coordinates are relative to region.rect_px within the window screenshot");
             if let Some((reply_tx, _)) = self.pending_vision.take() {
                 let _ = reply_tx.send(Ok(json!({
                     "active_asset": self.session.active_asset,

@@ -125,10 +125,15 @@ pub(crate) fn action_button(
             "Click to perform the labeled action.",
         ),
     };
+    let disabled_hint = if app.ui_state.busy_command.is_some() {
+        "Wait for the active background task to finish."
+    } else if id == "toolbar.export_mp4" && app.session.current_asset().is_some() {
+        "Export MP4 renders a cutout rig — click 'Build Cutout Rig' first, or use 'Create action reel' in the right inspector."
+    } else {
+        "Connect or select an asset first."
+    };
     let response = chrome::help(response, explanation.0, explanation.1, explanation.2)
-        .on_disabled_hover_text(
-            "This action needs an available asset or rig, and no background task running.",
-        );
+        .on_disabled_hover_text(disabled_hint);
     app.automation.add_response(id, "button", label, &response);
     response.clicked()
 }
@@ -174,7 +179,12 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if action_button(app, ui, "toolbar.reload", "Reload Manifest", has_asset) {
                     reload(app);
                 }
-                if action_button(app, ui, "toolbar.export_mp4", "Export MP4", has_rig) {
+                let export_label = if has_asset && !has_rig {
+                    "Export MP4 (Build Rig First)"
+                } else {
+                    "Export MP4"
+                };
+                if action_button(app, ui, "toolbar.export_mp4", export_label, has_rig) {
                     export_mp4(app);
                 }
             });
