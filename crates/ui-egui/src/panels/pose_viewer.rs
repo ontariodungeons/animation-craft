@@ -11,8 +11,8 @@ const SURFACE: Color32 = Color32::from_rgb(25, 30, 39);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Mode {
-    #[default]
     Pose,
+    #[default]
     All,
     Source,
     Parts,
@@ -35,6 +35,7 @@ struct ViewerState {
     labels: bool,
     anchors: bool,
     source_index: usize,
+    source_open: bool,
     rig_parts: bool,
     selected_part: Option<String>,
     last_pose: usize,
@@ -42,7 +43,7 @@ struct ViewerState {
 impl Default for ViewerState {
     fn default() -> Self {
         Self {
-            mode: Mode::Pose,
+            mode: Mode::All,
             background: Background::Checker,
             fit: true,
             zoom: 1.0,
@@ -51,6 +52,7 @@ impl Default for ViewerState {
             labels: false,
             anchors: false,
             source_index: 0,
+            source_open: false,
             rig_parts: false,
             selected_part: None,
             last_pose: usize::MAX,
@@ -75,7 +77,7 @@ impl ViewerState {
 }
 
 struct Source {
-    label: &'static str,
+    label: String,
     path: PathBuf,
 }
 fn sources(asset: &Asset) -> Vec<Source> {
@@ -110,8 +112,16 @@ fn sources(asset: &Asset) -> Vec<Source> {
             && !result.iter().any(|s: &Source| s.path == *path)
         {
             result.push(Source {
-                label,
+                label: label.into(),
                 path: path.clone(),
+            });
+        }
+    }
+    for reference in &asset.attached_references {
+        if !result.iter().any(|s| s.path == reference.path) {
+            result.push(Source {
+                label: reference.label.clone(),
+                path: reference.path.clone(),
             });
         }
     }
@@ -209,45 +219,80 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
     surface().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Pose browser").size(16.0).strong().color(TEXT));
-            ui.label(RichText::new(format!("{} · {} poses", readable(&asset.id), frames.len())).small().color(MUTED));
-            let menu = ui.menu_button("Sheet tools", |ui| {
-                let ready = app.ui_state.busy_command.is_none();
-                if button(app, ui, "pose.import_sheet", "Import / replace sheet…", ready,
-                    "Attach and process a pose sheet for this character. Review the result before rigging.")
-                    && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png","jpg","jpeg","webp"]).pick_file()
-                {
-                    app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(),
-                        slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance }); ui.close();
+            for (mode, id, label) in [
+                (Mode::Source, "source", "Sheets"),
+                (Mode::All, "all", "Poses"),
+                (Mode::Parts, "parts", "Parts"),
+            ] {
+                let active = state.mode == mode || (mode == Mode::All && state.mode == Mode::Pose);
+                let response = super::chrome::tab(ui, label, active);
+                app.automation
+                    .add_response(format!("pose.mode.{id}"), "tab", label, &response);
+                if response.clicked() {
+                    state.select_mode(mode);
+                    if mode == Mode::Source {
+                        state.source_open = false;
+                    }
                 }
-                if button(app, ui, "pose.recut", "Re-cut sheet", ready, "Run the existing cutter on the active asset.") {
-                    app.exec_ui_command(UiCommand::AssetCutSheet { asset_id: asset.id.clone(), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
+            }
+        });
+        if state.mode == Mode::Pose {
+            if button(
+                app,
+                ui,
+                "pose.back",
+                "Back to poses",
+                true,
+                "Return to the complete pose gallery, keeping this pose selected.",
+            ) {
+                state.select_mode(Mode::All);
+            }
+            ui.horizontal_wrapped(|ui| {
+                let index = app.ui_state.selected_pose_idx;
+                if button(
+                    app,
+                    ui,
+                    "pose.previous",
+                    "Previous",
+                    !frames.is_empty() && index > 0,
+                    "Inspect the previous pose. Arrow keys also work when the canvas is focused.",
+                ) {
+                    app.ui_state.selected_pose_idx = navigate(index, -1, frames.len());
+                    app.ui_state.playing = false;
+                    state.fit_image();
                 }
-                if button(app, ui, "pose.animate", "Open animation", true, "Switch to the animation preview; pose references are still artwork.") { app.ui_state.center_tab = CenterTab::TwoD; ui.close(); }
-                if button(app, ui, "pose.turnaround", "Open turnaround", true, "Inspect the turnaround reference sheet.") { app.ui_state.center_tab = CenterTab::TurnaroundSheet; ui.close(); }
+                if let Some(frame) = frames.get(app.ui_state.selected_pose_idx) {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} · {} of {}",
+                            readable(&frame.label),
+                            app.ui_state.selected_pose_idx + 1,
+                            frames.len()
+                        ))
+                        .strong()
+                        .color(TEXT),
+                    );
+                } else {
+                    ui.label("No pose frames loaded");
+                }
+                if button(
+                    app,
+                    ui,
+                    "pose.next",
+                    "Next",
+                    index + 1 < frames.len(),
+                    "Inspect the next pose.",
+                ) {
+                    app.ui_state.selected_pose_idx = navigate(index, 1, frames.len());
+                    app.ui_state.playing = false;
+                    state.fit_image();
+                }
             });
-            app.automation.add_response("pose.tools", "button", "Sheet tools", &menu.response);
-        });
-        ui.horizontal_wrapped(|ui| {
-            for (mode, id, label) in [(Mode::Pose,"selected","Single pose"),(Mode::All,"all","All poses"),(Mode::Source,"source","Source sheet"),(Mode::Parts,"parts","Parts")] {
-                let response = ui.add(egui::Button::selectable(state.mode == mode, label).min_size(Vec2::new(0.0,30.0)));
-                app.automation.add_response(format!("pose.mode.{id}"),"tab",label,&response);
-                if response.clicked() { state.select_mode(mode); }
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            let index = app.ui_state.selected_pose_idx;
-            if button(app,ui,"pose.previous","Previous",!frames.is_empty() && index > 0,"Inspect the previous pose. Arrow keys also work when the canvas is focused.") {
-                app.ui_state.selected_pose_idx = navigate(index,-1,frames.len()); app.ui_state.playing=false; state.fit_image();
-            }
-            if let Some(frame) = frames.get(app.ui_state.selected_pose_idx) {
-                ui.label(RichText::new(format!("{} · {} of {}",readable(&frame.label),app.ui_state.selected_pose_idx+1,frames.len())).strong().color(TEXT));
-            } else { ui.label("No pose frames loaded"); }
-            if button(app,ui,"pose.next","Next",index + 1 < frames.len(),"Inspect the next pose.") {
-                app.ui_state.selected_pose_idx = navigate(index,1,frames.len()); app.ui_state.playing=false; state.fit_image();
-            }
-        });
-        if state.last_pose != app.ui_state.selected_pose_idx { state.last_pose = app.ui_state.selected_pose_idx; state.selected_part=None; }
+        }
+        if state.last_pose != app.ui_state.selected_pose_idx {
+            state.last_pose = app.ui_state.selected_pose_idx;
+            state.selected_part = None;
+        }
     });
     ui.add_space(8.0);
     let current = frames.get(app.ui_state.selected_pose_idx);
@@ -269,11 +314,42 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 empty(
                     ui,
                     "No poses yet",
-                    "Import a pose sheet, or use Source sheet to inspect attached artwork.",
+                    "Import a pose sheet, or open Sheets to inspect attached artwork.",
                 );
             }
         }
         Mode::Source => {
+            if button(
+                app,
+                ui,
+                "pose.add_sheets",
+                "Add sheet…",
+                app.ui_state.busy_command.is_none(),
+                "Attach extra reference sheets without replacing the current pose or turnaround sheet. This processes the images for transparency; it does not slice them.",
+            ) && let Some(path) = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
+                .pick_file()
+            {
+                app.exec_ui_command(UiCommand::IntakeValidate {
+                    image_path: path.to_string_lossy().into_owned(),
+                    slot: "reference".into(),
+                    attach_to_active: true,
+                    auto_cut: false,
+                    tolerance: app.ui_state.bg_tolerance,
+                });
+            }
+            let menu = ui.menu_button("Sheet tools", |ui| {
+                let ready = app.ui_state.busy_command.is_none();
+                if button(app, ui, "pose.import_sheet", "Replace pose sheet…", ready, "Replace and slice the active pose sheet. Use Add sheet to keep existing references.")
+                    && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png","jpg","jpeg","webp"]).pick_file() {
+                    app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(), slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance }); ui.close();
+                }
+                if button(app, ui, "pose.recut", "Re-cut active sheet", ready, "Re-run the cutter for the active asset.") {
+                    app.exec_ui_command(UiCommand::AssetCutSheet { asset_id: asset.id.clone(), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
+                }
+            });
+            app.automation
+                .add_response("pose.tools", "button", "Sheet tools", &menu.response);
             let choices = sources(&asset);
             if choices.is_empty() {
                 empty(
@@ -283,41 +359,69 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 );
             } else {
                 state.source_index = state.source_index.min(choices.len() - 1);
-                ui.horizontal_wrapped(|ui| {
-                    for (i, source) in choices.iter().enumerate() {
-                        let response = ui
-                            .selectable_label(i == state.source_index, source.label)
-                            .on_hover_text(source.path.display().to_string());
-                        app.automation.add_response(
-                            format!("pose.source.{i}"),
-                            "button",
-                            source.label,
-                            &response,
-                        );
-                        if response.clicked() {
-                            state.source_index = i;
-                            state.fit_image();
-                        }
+                if !state.source_open {
+                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("sheet_gallery")
+                        .show(ui, |ui| {
+                            let columns = ((ui.available_width() / 190.0).floor() as usize).max(1);
+                            let width = (ui.available_width()
+                                - ui.spacing().item_spacing.x * (columns - 1) as f32)
+                                / columns as f32;
+                            for (row_index, row) in choices.chunks(columns).enumerate() {
+                                ui.horizontal(|ui| {
+                                    for (column, source) in row.iter().enumerate() {
+                                        let i = row_index * columns + column;
+                                        if tile(
+                                            app,
+                                            ui,
+                                            &format!("pose.source.{i}"),
+                                            &source.label,
+                                            &source.path,
+                                            false,
+                                            width,
+                                        )
+                                        .clicked()
+                                        {
+                                            state.source_index = i;
+                                            state.source_open = true;
+                                            state.fit_image();
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                } else {
+                    if button(
+                        app,
+                        ui,
+                        "pose.sheets.back",
+                        "Back to sheets",
+                        true,
+                        "Show every attached sheet.",
+                    ) {
+                        state.source_open = false;
                     }
-                });
-                let source = &choices[state.source_index];
-                let context = ui.ctx().clone();
-                let maps = app
-                    .load_texture(&context, &source.path.to_string_lossy())
-                    .is_some_and(|t| can_map_crops(&asset, &source.path, t.size()));
-                image_controls(app, ui, &mut state, maps, false);
-                if !maps {
-                    ui.label(RichText::new("Crop overlays unavailable: this image has no matching source coordinates.").small().color(MUTED));
+                    ui.label(RichText::new(&choices[state.source_index].label).strong());
+                    let source = &choices[state.source_index];
+                    let context = ui.ctx().clone();
+                    let maps = app
+                        .load_texture(&context, &source.path.to_string_lossy())
+                        .is_some_and(|t| can_map_crops(&asset, &source.path, t.size()));
+                    image_controls(app, ui, &mut state, maps, false);
+                    if !maps {
+                        ui.label(RichText::new("Crop overlays unavailable: this image has no matching source coordinates.").small().color(MUTED));
+                    }
+                    canvas(
+                        app,
+                        ui,
+                        &source.path,
+                        &mut state,
+                        maps.then_some(frames),
+                        None,
+                        frames.len(),
+                    );
                 }
-                canvas(
-                    app,
-                    ui,
-                    &source.path,
-                    &mut state,
-                    maps.then_some(frames),
-                    None,
-                    frames.len(),
-                );
             }
         }
         Mode::Parts => parts_view(app, ui, &asset, current, &mut state, frames.len()),
@@ -502,9 +606,7 @@ fn canvas(
         path.display().to_string(),
         image_rect.intersect(rect),
     );
-    if state.crop_bounds
-        && let Some(frames) = crops
-    {
+    if let Some(frames) = crops {
         for (index, frame) in frames.iter().enumerate() {
             let Some([x0, y0, x1, y1]) = frame.source_box else {
                 continue;
@@ -517,15 +619,17 @@ fn canvas(
                 image_rect.min + Vec2::new(x1 as f32, y1 as f32) * state.zoom,
             );
             let selected = app.ui_state.selected_pose_idx == index;
-            painter.rect_stroke(
-                bounds,
-                2.0,
-                Stroke::new(
-                    if selected { 2.0 } else { 1.0 },
-                    if selected { ACCENT } else { MUTED },
-                ),
-                egui::StrokeKind::Inside,
-            );
+            if state.crop_bounds || selected {
+                painter.rect_stroke(
+                    bounds,
+                    2.0,
+                    Stroke::new(
+                        if selected { 2.0 } else { 1.0 },
+                        if selected { ACCENT } else { MUTED },
+                    ),
+                    egui::StrokeKind::Inside,
+                );
+            }
             if state.labels {
                 painter.text(
                     bounds.min + Vec2::splat(4.0),
@@ -547,8 +651,22 @@ fn canvas(
                 if clicked.clicked() {
                     app.ui_state.selected_pose_idx = index;
                     app.ui_state.playing = false;
-                    state.select_mode(Mode::Pose);
                 }
+                clicked.context_menu(|ui| {
+                    if button(
+                        app,
+                        ui,
+                        &format!("pose.crop.open.{index}"),
+                        "Open single pose",
+                        true,
+                        "Inspect this crop in the single-pose view.",
+                    ) {
+                        app.ui_state.selected_pose_idx = index;
+                        app.ui_state.playing = false;
+                        state.select_mode(Mode::Pose);
+                        ui.close();
+                    }
+                });
             }
         }
     }
@@ -590,10 +708,20 @@ fn tile(
     path: &Path,
     selected: bool,
     width: f32,
-) -> bool {
+) -> egui::Response {
     let response = ui.add_sized(
         [width, 160.0],
-        egui::Button::new("").selected(selected).corner_radius(6),
+        egui::Button::new("")
+            .fill(SURFACE)
+            .stroke(Stroke::new(
+                if selected { 1.5 } else { 1.0 },
+                if selected {
+                    ACCENT
+                } else {
+                    super::chrome::BORDER
+                },
+            ))
+            .corner_radius(6),
     );
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
@@ -624,8 +752,13 @@ fn tile(
             MUTED,
         );
     }
+    let short_label = if label.chars().count() > 27 {
+        format!("{}…", label.chars().take(26).collect::<String>())
+    } else {
+        label.into()
+    };
     let text = painter.layout(
-        label.into(),
+        short_label,
         egui::FontId::proportional(12.0),
         TEXT,
         width - 10.0,
@@ -636,7 +769,7 @@ fn tile(
         TEXT,
     );
     app.automation.add_response(id, "button", label, &response);
-    response.on_hover_text(path.display().to_string()).clicked()
+    response.on_hover_text(path.display().to_string())
 }
 fn pose_grid(
     app: &mut AnimationCraftApp,
@@ -653,7 +786,7 @@ fn pose_grid(
         return;
     }
     ui.label(
-        RichText::new("Select a thumbnail to inspect that pose.")
+        RichText::new("Click to select · Right-click to open a single pose")
             .small()
             .color(MUTED),
     );
@@ -667,7 +800,7 @@ fn pose_grid(
                 ui.horizontal(|ui| {
                     for (column, frame) in row.iter().enumerate() {
                         let index = row_index * columns + column;
-                        if tile(
+                        let response = tile(
                             app,
                             ui,
                             &format!("pose.tile.{index}"),
@@ -675,11 +808,26 @@ fn pose_grid(
                             &frame.resolved_path,
                             app.ui_state.selected_pose_idx == index,
                             width,
-                        ) {
+                        );
+                        if response.clicked() {
                             app.ui_state.selected_pose_idx = index;
                             app.ui_state.playing = false;
-                            state.select_mode(Mode::Pose);
                         }
+                        response.context_menu(|ui| {
+                            if button(
+                                app,
+                                ui,
+                                &format!("pose.open.{index}"),
+                                "Open single pose",
+                                true,
+                                "Inspect this pose at a larger size.",
+                            ) {
+                                app.ui_state.selected_pose_idx = index;
+                                app.ui_state.playing = false;
+                                state.select_mode(Mode::Pose);
+                                ui.close();
+                            }
+                        });
                     }
                 });
             }
@@ -814,7 +962,9 @@ fn parts_view(
                                 &part.path,
                                 false,
                                 width,
-                            ) {
+                            )
+                            .clicked()
+                            {
                                 state.selected_part = Some(part.id.clone());
                                 state.fit_image();
                             }
@@ -861,7 +1011,7 @@ pub(in crate::panels) fn sidebar(app: &mut AnimationCraftApp, ui: &mut Ui) {
         );
         ui.add(
             egui::Label::new(
-                RichText::new("Select a thumbnail to inspect that pose.")
+                RichText::new("Select a thumbnail to open its single view.")
                     .small()
                     .color(MUTED),
             )
@@ -969,7 +1119,10 @@ mod tests {
         };
         assert_eq!(sources(&asset)[0].path, pose_source);
         assert_eq!(
-            sources(&asset).iter().map(|s| s.label).collect::<Vec<_>>(),
+            sources(&asset)
+                .iter()
+                .map(|s| s.label.as_str())
+                .collect::<Vec<_>>(),
             vec!["Pose sheet", "Exploded parts sheet", "Turnaround reference"]
         );
         assert!(can_map_crops(&asset, &pose_source, [640, 480]));
@@ -1074,6 +1227,15 @@ mod tests {
     }
 
     fn click(app: &mut AnimationCraftApp, ctx: &egui::Context, id: &str) -> egui::Id {
+        pointer_click(app, ctx, id, egui::PointerButton::Primary)
+    }
+
+    fn pointer_click(
+        app: &mut AnimationCraftApp,
+        ctx: &egui::Context,
+        id: &str,
+        mouse_button: egui::PointerButton,
+    ) -> egui::Id {
         render(app, ctx, vec![]);
         let control = app
             .automation
@@ -1093,7 +1255,7 @@ mod tests {
                     egui::Event::PointerMoved(pos),
                     egui::Event::PointerButton {
                         pos,
-                        button: egui::PointerButton::Primary,
+                        button: mouse_button,
                         pressed,
                         modifiers: egui::Modifiers::NONE,
                     },
@@ -1154,11 +1316,38 @@ mod tests {
         let (root, mut app) = fixture("tiles");
         let ctx = egui::Context::default();
         click(&mut app, &ctx, "pose.mode.all");
-        click(&mut app, &ctx, "pose.tile.1");
+        let id = click(&mut app, &ctx, "pose.tile.1");
+        assert!(
+            ctx.data_mut(|d| d.get_temp::<ViewerState>(id))
+                .unwrap()
+                .mode
+                == Mode::All
+        );
+        assert!(
+            !app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "pose.previous")
+        );
+        pointer_click(
+            &mut app,
+            &ctx,
+            "pose.tile.1",
+            egui::PointerButton::Secondary,
+        );
+        click(&mut app, &ctx, "pose.open.1");
         assert_eq!(app.ui_state.selected_pose_idx, 1);
         assert_eq!(
             displayed_image(&app),
             root.join("second.png").to_string_lossy()
+        );
+        click(&mut app, &ctx, "pose.back");
+        assert_eq!(app.ui_state.selected_pose_idx, 1);
+        assert!(
+            ctx.data_mut(|d| d.get_temp::<ViewerState>(id))
+                .unwrap()
+                .mode
+                == Mode::All
         );
         click(&mut app, &ctx, "pose.mode.parts");
         click(&mut app, &ctx, "pose.part.head");
@@ -1177,12 +1366,65 @@ mod tests {
     }
 
     #[test]
+    fn sheets_include_extra_references_and_return_to_gallery() {
+        let (root, mut app) = fixture("sheets");
+        let asset = app.session.assets.get_mut("fixture").unwrap();
+        asset.attached_asset_sheet = Some(root.join("first.png"));
+        asset
+            .attached_references
+            .push(animationcraft_engine::session::AttachedReference {
+                label: "Extra animation poses".into(),
+                kind: "reference".into(),
+                path: root.join("second.png"),
+                raw_path: None,
+                width: 20,
+                height: 20,
+                report: None,
+            });
+        assert_eq!(sources(asset).len(), 2);
+        let ctx = egui::Context::default();
+        click(&mut app, &ctx, "pose.mode.source");
+        assert!(
+            app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "pose.add_sheets")
+        );
+        click(&mut app, &ctx, "pose.source.1");
+        assert_eq!(
+            displayed_image(&app),
+            root.join("second.png").to_string_lossy()
+        );
+        click(&mut app, &ctx, "pose.sheets.back");
+        assert!(
+            app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "pose.source.0")
+        );
+        assert!(
+            app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "pose.source.1")
+        );
+        assert!(
+            !app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "pose.active_image")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn options_keep_overlays_off_until_requested_and_zoom_choices_are_real() {
         let (root, mut app) = fixture("options");
         let ctx = egui::Context::default();
         let id = render(&mut app, &ctx, vec![]);
         let initial = ctx.data_mut(|d| d.get_temp::<ViewerState>(id)).unwrap();
         assert!(!initial.crop_bounds && !initial.labels && !initial.anchors);
+        click(&mut app, &ctx, "pose.select.0");
         click(&mut app, &ctx, "pose.zoom.actual");
         let actual = ctx.data_mut(|d| d.get_temp::<ViewerState>(id)).unwrap();
         assert!(!actual.fit);

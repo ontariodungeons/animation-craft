@@ -23,7 +23,7 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.add(egui::Label::new(egui::RichText::new(&title).size(18.0).strong().color(chrome::TEXT)).truncate());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if app.ui_state.center_tab != CenterTab::AssetSheet { ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().button_padding = egui::vec2(9.0, 6.0);
                 let menu = ui.menu_button("View options ▾", |ui| {
                     ui.set_min_width(210.0);
@@ -54,12 +54,13 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 app.automation.add_response("view.options", "button", "View options", &menu.response);
                 menu.response.on_hover_text("Canvas background, preview style and inspection overlays. These controls do not alter source artwork.");
             });
+            }
         });
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             for (tab, id, label, explanation) in [
                 (CenterTab::OriginalView, "tab.original", "Original", "Inspect the active source image and optional joint overlay."),
-                (CenterTab::AssetSheet, "tab.asset_sheet", "Parts", "Review the connected cutout or pose sheet."),
+                (CenterTab::AssetSheet, "tab.asset_sheet", "Artwork", "Review the connected cutout or pose sheet."),
                 (CenterTab::TurnaroundSheet, "tab.turnaround_sheet", "Turnaround", "Inspect the character reference views."),
                 (CenterTab::TwoD, "tab.2d", "Animate", "Preview the selected action and inspect moving cutout parts."),
                 (CenterTab::ThreeD, "tab.3d", "3D", "Inspect the current 3D turnaround preview."),
