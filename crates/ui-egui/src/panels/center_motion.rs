@@ -115,14 +115,14 @@ pub(crate) fn actual_size_viewport_state(ui_state: &mut UiState) {
 
 /// Step viewport zoom in by `ZOOM_STEP_FACTOR`, clamped to `MAX_PREVIEW_ZOOM`.
 pub(crate) fn zoom_in_state(ui_state: &mut UiState) {
-    ui_state.preview_zoom =
-        (sanitize_zoom(ui_state.preview_zoom) * ZOOM_STEP_FACTOR).clamp(MIN_PREVIEW_ZOOM, MAX_PREVIEW_ZOOM);
+    ui_state.preview_zoom = (sanitize_zoom(ui_state.preview_zoom) * ZOOM_STEP_FACTOR)
+        .clamp(MIN_PREVIEW_ZOOM, MAX_PREVIEW_ZOOM);
 }
 
 /// Step viewport zoom out by `ZOOM_STEP_FACTOR`, clamped to `MIN_PREVIEW_ZOOM`.
 pub(crate) fn zoom_out_state(ui_state: &mut UiState) {
-    ui_state.preview_zoom =
-        (sanitize_zoom(ui_state.preview_zoom) / ZOOM_STEP_FACTOR).clamp(MIN_PREVIEW_ZOOM, MAX_PREVIEW_ZOOM);
+    ui_state.preview_zoom = (sanitize_zoom(ui_state.preview_zoom) / ZOOM_STEP_FACTOR)
+        .clamp(MIN_PREVIEW_ZOOM, MAX_PREVIEW_ZOOM);
 }
 
 /// Advance `playback_phase` proportionally to `dt` when `playing` is true.
@@ -359,7 +359,8 @@ pub(crate) fn evaluate_jump(
         let crouch = (t * std::f32::consts::PI).sin().max(0.0);
         (JumpStage::Takeoff, 0.0, crouch)
     } else if u <= JUMP_LANDING_START {
-        let flight = ((u - JUMP_TAKEOFF_END) / (JUMP_LANDING_START - JUMP_TAKEOFF_END)).clamp(0.0, 1.0);
+        let flight =
+            ((u - JUMP_TAKEOFF_END) / (JUMP_LANDING_START - JUMP_TAKEOFF_END)).clamp(0.0, 1.0);
         let lift = (4.0 * flight * (1.0 - flight)).max(0.0);
         let stage = if (u - 0.50).abs() <= 0.06 {
             JumpStage::Apex
@@ -467,24 +468,24 @@ fn pose_library_part_rotation(pose_library: &Value, pose_name: &str, part_id: &s
         .map(|v| v as f32)
 }
 
-fn slider_offset_deg(part_id: &str, ui_state: &UiState) -> f32 {
-    match part_id {
-        "head" => {
-            ui_state.head_yaw * 0.35
-                + ui_state.head_pitch * 0.25
-                + ui_state.eye_gaze * 0.12
-                + ui_state.eye_blink * 0.03
-        }
-        "ear_left" => -ui_state.ear_splay * 0.35 + ui_state.ear_pitch * 0.25,
-        "ear_right" => ui_state.ear_splay * 0.35 + ui_state.ear_pitch * 0.25,
-        "arm_left" => ui_state.arm_spread * 0.55 + ui_state.elbow_bend * 0.45,
-        "arm_right" => -ui_state.arm_spread * 0.25 - ui_state.elbow_bend * 0.20,
-        "leg_left" => ui_state.knee_bend * 0.45,
-        "foot_left" => ui_state.knee_bend * 0.45,
-        "leg_right" => -ui_state.knee_bend * 0.45,
-        "foot_right" => -ui_state.knee_bend * 0.45,
-        _ => 0.0,
-    }
+pub(crate) fn control_values(
+    ui: &UiState,
+) -> animationcraft_engine::control_bindings::ControlValues {
+    [
+        ("eye_blink", ui.eye_blink),
+        ("eye_gaze", ui.eye_gaze),
+        ("smile_open", ui.smile_open),
+        ("head_yaw", ui.head_yaw),
+        ("head_pitch", ui.head_pitch),
+        ("ear_splay", ui.ear_splay),
+        ("ear_pitch", ui.ear_pitch),
+        ("arm_spread", ui.arm_spread),
+        ("elbow_bend", ui.elbow_bend),
+        ("knee_bend", ui.knee_bend),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect()
 }
 
 fn clamp_part_rotation(part: &CutoutRigPart, deg: f32) -> f32 {
@@ -602,10 +603,35 @@ pub(crate) fn evaluate_cutout_rig_motion(
     rig: &LoadedCutoutRigPlan,
     ui_state: &UiState,
 ) -> EvaluatedRigMotion {
-    if rig.rig_type == "layered_motion" {
-        return evaluate_layered_motion_spec(rig, ui_state);
+    let mut motion = if rig.rig_type == "layered_motion" {
+        evaluate_layered_motion_spec(rig, ui_state)
+    } else {
+        evaluate_procedural_motion(rig, ui_state)
+    };
+    let values = control_values(ui_state);
+    for part in &rig.parts {
+        let adjustment = rig.control_bindings.evaluate_part(&part.id, &values);
+        let dynamic_angle = motion.angles_deg.get(&part.id).copied().unwrap_or(0.0);
+        let angle = if rig.control_bindings.joints.iter().any(|j| j.part == part.id && j.rotation_deg != 0.0) {
+            clamp_part_rotation(part, dynamic_angle + adjustment.rotation_deg)
+        } else {
+            dynamic_angle
+        };
+        motion.angles_deg.insert(part.id.clone(), angle);
+        motion
+            .angles_rad
+            .insert(part.id.clone(), angle.to_radians());
+        let offset = motion
+            .pos_offset
+            .entry(part.id.clone())
+            .or_insert([0.0, 0.0]);
+        offset[0] += adjustment.translation[0];
+        offset[1] += adjustment.translation[1];
     }
+    motion
+}
 
+fn evaluate_procedural_motion(rig: &LoadedCutoutRigPlan, ui_state: &UiState) -> EvaluatedRigMotion {
     let ch = rig.canvas_size[1].max(1) as f32;
     let range_factor = (ui_state.pose_range_pct / 100.0).clamp(0.0, 1.0);
     let energy_factor = (ui_state.anim_energy / 100.0).clamp(0.2, 1.5);
@@ -673,7 +699,6 @@ pub(crate) fn evaluate_cutout_rig_motion(
 
     for part in &rig.parts {
         let pid = part.id.as_str();
-        let slider_deg = slider_offset_deg(pid, ui_state);
 
         let dynamic_deg = if !motion_active {
             0.0
@@ -689,8 +714,9 @@ pub(crate) fn evaluate_cutout_rig_motion(
                         )
                     });
                     let (fb_antic, fb_apex) = fallback_jump_poses_deg(pid);
-                    let antic = pose_library_part_rotation(&rig.pose_library, "jump_anticipation", pid)
-                        .unwrap_or(fb_antic);
+                    let antic =
+                        pose_library_part_rotation(&rig.pose_library, "jump_anticipation", pid)
+                            .unwrap_or(fb_antic);
                     let apex = pose_library_part_rotation(&rig.pose_library, "jump_apex", pid)
                         .unwrap_or(fb_apex);
                     let height_gain = (ui_state.jump_height_pct / 45.0).clamp(0.0, 1.75);
@@ -780,7 +806,7 @@ pub(crate) fn evaluate_cutout_rig_motion(
             }
         };
 
-        let clamped_deg = clamp_part_rotation(part, dynamic_deg + slider_deg);
+        let clamped_deg = clamp_part_rotation(part, dynamic_deg);
         angles_deg.insert(part.id.clone(), clamped_deg);
         angles_rad.insert(part.id.clone(), clamped_deg.to_radians());
     }
@@ -885,7 +911,10 @@ fn eval_keys_term(term: &Value, t: f32, dim: usize) -> Vec<f32> {
             return (0..dim).map(|i| v0[i] + (v1[i] - v0[i]) * u).collect();
         }
     }
-    pairs.last().map(|p| p.1.clone()).unwrap_or_else(|| vec![0.0; dim])
+    pairs
+        .last()
+        .map(|p| p.1.clone())
+        .unwrap_or_else(|| vec![0.0; dim])
 }
 
 fn eval_ellipse_term(term: &Value, t: f32) -> [f32; 2] {
@@ -1039,7 +1068,11 @@ fn evaluate_layered_motion_spec(
             scale_xy.insert(part.id.clone(), [1.0, 1.0]);
             opacity.insert(
                 part.id.clone(),
-                if part.id.ends_with("closed") { 0.0 } else { 1.0 },
+                if part.id.ends_with("closed") {
+                    0.0
+                } else {
+                    1.0
+                },
             );
         }
         return EvaluatedRigMotion {
@@ -1164,10 +1197,7 @@ fn evaluate_layered_motion_spec(
                     "keys" => rot_deg += eval_keys_term(term, t, 1)[0],
                     "oscillate" => rot_deg += eval_oscillate_term(term, t, 1)[0],
                     "follow" => {
-                        let target_lid = term
-                            .get("layer")
-                            .and_then(Value::as_str)
-                            .unwrap_or(lid);
+                        let target_lid = term.get("layer").and_then(Value::as_str).unwrap_or(lid);
                         let gain = term.get("gain").and_then(Value::as_f64).unwrap_or(0.0) as f32;
                         let limit = term
                             .get("limit")
@@ -1202,5 +1232,65 @@ fn evaluate_layered_motion_spec(
         track_id: Some(track_id),
         track_duration: duration,
         track_time: t,
+    }
+}
+
+#[cfg(test)]
+mod control_binding_tests {
+    use super::*;
+    use animationcraft_engine::control_bindings::{ControlBindings, JointBinding};
+
+    #[test]
+    fn manual_controls_use_bindings_and_joint_limits() {
+        let rig = LoadedCutoutRigPlan {
+            canvas_size: [100, 100],
+            parts: vec![CutoutRigPart {
+                id: "arbitrary-layer".into(),
+                rotation: [-15.0, 15.0],
+                ..Default::default()
+            }],
+            control_bindings: ControlBindings {
+                joints: vec![JointBinding {
+                    part: "arbitrary-layer".into(),
+                    control: "elbow_bend".into(),
+                    rotation_deg: 2.0,
+                    translation: [0.0, 0.5],
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut ui = UiState::default();
+        ui.anim_mode = AnimMode::Static;
+        ui.elbow_bend = 20.0;
+        let motion = evaluate_cutout_rig_motion(&rig, &ui);
+        assert_eq!(motion.angles_deg["arbitrary-layer"], 15.0);
+        assert_eq!(motion.pos_offset["arbitrary-layer"], [0.0, 10.0]);
+        ui.elbow_bend = 0.0;
+        ui.eye_blink = 100.0;
+        ui.eye_gaze = 45.0;
+        assert_eq!(
+            evaluate_cutout_rig_motion(&rig, &ui).angles_deg["arbitrary-layer"],
+            0.0
+        );
+    }
+
+    #[test]
+    fn unbound_eye_controls_never_rotate_a_head() {
+        let rig = LoadedCutoutRigPlan {
+            canvas_size: [100, 100],
+            parts: vec![CutoutRigPart {
+                id: "head".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut ui = UiState::default();
+        ui.anim_mode = AnimMode::Static;
+        ui.eye_blink = 100.0;
+        ui.eye_gaze = 45.0;
+        let motion = evaluate_cutout_rig_motion(&rig, &ui);
+        assert_eq!(motion.angles_deg["head"], 0.0);
+        assert_eq!(motion.pos_offset["head"], [0.0, 0.0]);
     }
 }
