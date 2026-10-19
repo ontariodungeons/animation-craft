@@ -504,6 +504,17 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
             raw = np.array(image)
             if raw[:,:,3].min() < 255:
                 mask = raw[:,:,3] > 16
+                # An import/matting derivative can leave the background of
+                # grid-separated panels opaque, collapsing a sheet into one
+                # blob. Only trust the alpha when it separates the figures;
+                # otherwise fall back to colour-based background detection.
+                if kind in ('action', 'turnaround') and (
+                    mask.mean() > 0.5 or not _components(mask, kind)
+                ):
+                    mask = ndi.binary_opening(
+                        mask & ~_background_candidates(raw[:,:,:3], tolerance),
+                        iterations=2,
+                    )
             else:
                 mask = ~_background_candidates(raw[:,:,:3], tolerance)
                 # Separate characters linked by thin printed grid lines.

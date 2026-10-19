@@ -1152,6 +1152,20 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
     if !use_ocr {
         cut_args.push("--no-ocr".to_string());
     }
+    // Bounded correction path: forward an explicit layout file to the existing
+    // cutter when automatic detection is incomplete. A missing file is reported
+    // before any cut runs, so a failed correction never replaces usable output.
+    if let Some(layout) = params.get("layout").and_then(Value::as_str) {
+        let layout_path = resolve_workspace_path(s, layout);
+        if !layout_path.is_file() {
+            return Err(EngineError::InvalidParams(format!(
+                "layout file does not exist: {}",
+                layout_path.display()
+            )));
+        }
+        cut_args.push("--layout".to_string());
+        cut_args.push(layout_path.to_string_lossy().into_owned());
+    }
     let pipeline_out = run_pipeline(s, &cut_args)?;
 
     let manifest_path = pipeline_out
@@ -1169,6 +1183,13 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
     let part_names = loaded_manifest.part_names.clone();
     let sheet_type = loaded_manifest.sheet_type.clone();
     let frame_count = loaded_manifest.frames.len();
+    let status = loaded_manifest.status.clone();
+    let needs_review = status != "ready";
+    let warnings = std::fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| value.get("warnings").cloned())
+        .unwrap_or_else(|| json!([]));
 
     if let Some(asset_mut) = s.assets.get_mut(&asset_id) {
         if sheet_type == "turnaround" {
@@ -1186,6 +1207,9 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
         "asset_id": asset_id,
         "manifest": manifest_path.to_string_lossy(),
         "sheet_type": sheet_type,
+        "status": status,
+        "needs_review": needs_review,
+        "warnings": warnings,
         "frame_count": frame_count,
         "frame_labels": frame_labels,
         "part_names": part_names,
@@ -4404,7 +4428,7 @@ fn build() -> Vec<CommandSpec> {
             "Cut Sheet (PhotoCraft)",
             ["Edit"],
             None,
-            "{\"asset\": \"optional_id\", \"out_dir\": \"optional_dir\", \"kind\": \"auto\"}",
+            "{\"asset\": \"optional_id\", \"out_dir\": \"optional_dir\", \"kind\": \"auto\", \"layout\": \"optional_layout.json\"}",
             has_asset,
             cmd_asset_cut_sheet
         ),
@@ -4931,6 +4955,67 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
         let mut s = Session::default();
         let err = s.execute("asset.cut_sheet", json!({})).unwrap_err();
         assert!(matches!(err, EngineError::CommandFailed(_, _)));
+    }
+
+    #[test]
+    fn cut_sheet_reports_status_and_rejects_a_missing_layout_intact() {
+        let dir = temporary_directory("cut_layout");
+        let source = dir.join("sheet.png");
+        let mut img = image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 255, 255, 255]));
+        for y in 12..52 {
+            for x in 20..44 {
+                img.put_pixel(x, y, image::Rgba([180, 90, 40, 255]));
+            }
+        }
+        img.save(&source).unwrap();
+
+        let mut s = Session::default();
+        s.execute(
+            "intake.validate",
+            json!({"image": source.to_string_lossy(), "asset": "cut_status"}),
+        )
+        .unwrap();
+        let cut = s
+            .execute(
+                "asset.cut_sheet",
+                json!({
+                    "asset": "cut_status",
+                    "out_dir": dir.join("out").to_string_lossy(),
+                    "kind": "single",
+                }),
+            )
+            .unwrap();
+        // The slice count and review status are reported alongside the sheet.
+        assert!(cut["frame_count"].as_u64().unwrap() >= 1);
+        assert!(cut["status"].is_string());
+        assert!(cut["needs_review"].is_boolean());
+        assert!(cut["warnings"].is_array());
+        let before = s.assets["cut_status"]
+            .pose_manifest
+            .as_ref()
+            .map(|m| m.manifest_path.clone());
+
+        // A missing layout file is rejected before cutting, leaving the last
+        // usable cutouts in place.
+        let err = s
+            .execute(
+                "asset.cut_sheet",
+                json!({
+                    "asset": "cut_status",
+                    "kind": "action",
+                    "layout": dir.join("missing_layout.json").to_string_lossy(),
+                }),
+            )
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidParams(_)));
+        let after = s.assets["cut_status"]
+            .pose_manifest
+            .as_ref()
+            .map(|m| m.manifest_path.clone());
+        assert_eq!(before, after);
+
+        let _ = std::fs::remove_dir_all(workspace_root(&s).join("exports/pose_and_parts/cut_status"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

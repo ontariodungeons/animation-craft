@@ -37,6 +37,36 @@ class TestPoseAndPartCutter(unittest.TestCase):
         self.assertEqual(result['partsStatus'], 'needs_review')
         self.assertFalse(result['animation']['continuousCycle'])
 
+    def test_opaque_matted_panels_still_separate_pose_figures(self):
+        # Reproduces an import/matting derivative whose alpha cleared only the
+        # outer border, leaving every grid-separated panel background opaque.
+        # Trusting that alpha collapses the sheet into one blob, so detection
+        # must fall back to colour-based background removal and still find all
+        # figures instead of failing with "supply --layout".
+        count, cell_w, cell_h = 4, 200, 220
+        w, h = cell_w * count, cell_h
+        sheet = Image.new('RGB', (w, h), '#ffffff')
+        draw = ImageDraw.Draw(sheet)
+        for i in range(count):
+            cx = i * cell_w + cell_w // 2
+            draw.ellipse((cx - 45, 55, cx + 45, 150), fill=(40 + i * 20, 90, 170))
+            draw.rectangle((cx - 30, 145, cx + 30, 195), fill=(120, 70 + i * 20, 60))
+            draw.line((i * cell_w, 0, i * cell_w, h), fill='#a0a0a0', width=3)
+        matted = sheet.convert('RGBA')
+        alpha = Image.new('L', (w, h), 255)
+        ad = ImageDraw.Draw(alpha)
+        ad.rectangle((0, 0, w - 1, 6), fill=0)
+        ad.rectangle((0, h - 7, w - 1, h - 1), fill=0)
+        ad.rectangle((0, 0, 6, h - 1), fill=0)
+        ad.rectangle((w - 7, 0, w - 1, h - 1), fill=0)
+        matted.putalpha(alpha)
+
+        result = self.cut(matted, kind='action', use_photocraft=False)
+        self.assertEqual(len(result['frames']), count)
+        for frame in result['frames']:
+            with Image.open(self.root / 'output' / frame['file']) as img:
+                self.assertGreater(img.getchannel('A').getextrema()[1], 0)
+
     def test_five_turnaround_views(self):
         im = Image.new('RGBA', (1000, 400))
         d = ImageDraw.Draw(im)
