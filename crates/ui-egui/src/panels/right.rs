@@ -221,6 +221,111 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         app.ui_state.last_export = Some(out.clone());
                         app.exec_ui_command(UiCommand::ExportEffectcraft { output: out });
                     }
+                    let active_layered_spec = app
+                        .session()
+                        .current_asset()
+                        .and_then(|a| a.cutout_rig.as_ref())
+                        .filter(|r| r.rig_type == "layered_motion")
+                        .map(|r| r.plan_path.to_string_lossy().into_owned());
+                    let r_lm = widgets::action_card(
+                        ui,
+                        "Layered motion",
+                        "Render transparent WebM tracks from a layered motion spec.",
+                        if active_layered_spec.is_some() {
+                            "Active layered spec · WebM RGBA per track"
+                        } else {
+                            "Choose spec JSON · WebM RGBA per track"
+                        },
+                        "Render layered motion",
+                        app.ui_state.busy_command.is_none(),
+                        (
+                            "Builds an EffectCraft project from a generic layered motion spec and renders transparent WebM tracks.",
+                            "Animate any multi-layer rig (oscillate, ellipse, keys, follow) without fixed biped part assumptions.",
+                            "Uses the active asset's layered motion spec if loaded, or prompts for a spec JSON file.",
+                        ),
+                    );
+                    app.automation.add_response(
+                        "export.layered_motion",
+                        "button",
+                        "Export Layered Motion (.webm)",
+                        &r_lm,
+                    );
+                    if r_lm.clicked() {
+                        let chosen_spec = active_layered_spec.clone().or_else(|| {
+                            rfd::FileDialog::new()
+                                .add_filter("Layered Motion Spec", &["json"])
+                                .pick_file()
+                                .map(|p| p.to_string_lossy().into_owned())
+                        });
+                        if let Some(spec_path) = chosen_spec {
+                            app.ui_state.last_export = Some(spec_path.clone());
+                            app.exec_ui_command(UiCommand::ExportLayeredMotion {
+                                spec: spec_path,
+                                out_dir: None,
+                            });
+                        }
+                    }
+                    let recent_clip = app
+                        .ui_state
+                        .last_motion_validation
+                        .as_ref()
+                        .and_then(|v| {
+                            v.get("video")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                                .or_else(|| {
+                                    v.get("tracks")
+                                        .and_then(serde_json::Value::as_array)
+                                        .and_then(|arr| arr.first())
+                                        .and_then(|t| t.get("video"))
+                                        .and_then(serde_json::Value::as_str)
+                                        .map(str::to_owned)
+                                })
+                        });
+                    let r_vm = widgets::action_card(
+                        ui,
+                        "Validate motion",
+                        "Check alpha, clipping, teleports, flicker, loop closure and reference fidelity.",
+                        if recent_clip.is_some() {
+                            "Re-validate latest rendered WebM clip"
+                        } else {
+                            "Choose rendered WebM clip · programmatic checks"
+                        },
+                        "Validate clip",
+                        app.ui_state.busy_command.is_none(),
+                        (
+                            "Runs programmatic motion validation on a rendered transparent WebM clip.",
+                            "Verify alpha channel, empty/clipped frames, teleports, flicker, loop closure, colour/size fidelity vs reference, and Nyquist aliasing.",
+                            "Uses the most recent rendered clip or prompts for a .webm file.",
+                        ),
+                    );
+                    app.automation.add_response(
+                        "validate.motion",
+                        "button",
+                        "Validate Motion Clip (.webm)",
+                        &r_vm,
+                    );
+                    if r_vm.clicked() {
+                        let chosen_video = recent_clip.or_else(|| {
+                            rfd::FileDialog::new()
+                                .add_filter("Rendered Clip", &["webm", "mp4"])
+                                .pick_file()
+                                .map(|p| p.to_string_lossy().into_owned())
+                        });
+                        if let Some(video_path) = chosen_video {
+                            let reference = app
+                                .session()
+                                .current_asset()
+                                .filter(|a| a.path.is_file())
+                                .map(|a| a.path.to_string_lossy().into_owned());
+                            app.exec_ui_command(UiCommand::ValidateMotion {
+                                video: video_path,
+                                reference,
+                                spec: active_layered_spec.clone(),
+                                loop_clip: false,
+                            });
+                        }
+                    }
                     let r_fc = widgets::action_card(ui, "FilmCraft", "Open rendered video in an editing project.", "Currently uses the default Hopper video", "Import video", app.ui_state.busy_command.is_none(), ("Imports media into a FilmCraft project.", "Continue editing a rendered animation on a timeline.", "This button currently uses the pipeline default Hopper video. For other media, use export.filmcraft with an explicit media path."));
                     app.automation.add_response(
                         "export.filmcraft",
@@ -273,8 +378,157 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     if let Some(path) = &app.ui_state.last_export {
                         help(ui.add(egui::Label::new(format!("Requested output: {path}")).wrap()), "The most recently requested output location.", "Find the intended export destination.", "Check the command result and file before treating this path as a completed export.");
                     }
+                    if let Some(report) = app.ui_state.last_motion_validation.clone() {
+                        ui.add_space(4.0);
+                        motion_validation_card(app, ui, &report);
+                    }
                 });
         });
+}
+
+fn motion_validation_card(
+    app: &mut AnimationCraftApp,
+    ui: &mut Ui,
+    report: &serde_json::Value,
+) {
+    let overall_ok = report
+        .get("ok")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let badge_color = if overall_ok {
+        egui::Color32::from_rgb(76, 209, 146)
+    } else {
+        egui::Color32::from_rgb(242, 109, 109)
+    };
+    let rect = chrome::card()
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Motion validation checks")
+                        .strong()
+                        .color(EXPORT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(if overall_ok { "PASS" } else { "ISSUES" })
+                            .small()
+                            .strong()
+                            .color(badge_color),
+                    );
+                });
+            });
+
+            if let Some(tracks) = report.get("tracks").and_then(serde_json::Value::as_array) {
+                for track in tracks {
+                    let tid = track
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("track");
+                    if let Some(val) = track.get("validation") {
+                        render_validation_entry(ui, tid, val);
+                    }
+                }
+            } else {
+                let label = report
+                    .get("video")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("clip");
+                render_validation_entry(ui, label, report);
+            }
+
+            if let Some(lint) = report.get("spec_lint") {
+                let issues = lint
+                    .as_array()
+                    .or_else(|| lint.get("issues").and_then(serde_json::Value::as_array));
+                if let Some(issues) = issues
+                    && !issues.is_empty()
+                {
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(format!("Spec lint: {} aliasing warning(s)", issues.len()))
+                            .small()
+                            .color(egui::Color32::from_rgb(245, 184, 81)),
+                    );
+                }
+            }
+        })
+        .response
+        .rect;
+    app.automation
+        .add("panel.motion_validation", "panel", "Motion Validation Checks", rect);
+}
+
+fn render_validation_entry(ui: &mut Ui, title: &str, val: &serde_json::Value) {
+    let ok = val
+        .get("ok")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let status_color = if ok {
+        egui::Color32::from_rgb(76, 209, 146)
+    } else {
+        egui::Color32::from_rgb(242, 109, 109)
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(if ok { "✓" } else { "✗" })
+                .strong()
+                .color(status_color),
+        );
+        ui.label(RichText::new(title).small().strong());
+        if let Some(metrics) = val.get("metrics") {
+            let cov = metrics
+                .get("coverage_pct")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|a| a.first())
+                .and_then(serde_json::Value::as_f64);
+            let step = metrics
+                .get("max_step_px")
+                .and_then(serde_json::Value::as_f64);
+            if let (Some(c), Some(s)) = (cov, step) {
+                ui.label(
+                    RichText::new(format!("cov {c:.1}% · step {s:.1}px"))
+                        .small()
+                        .color(chrome::MUTED),
+                );
+            }
+        }
+    });
+    if let Some(checks) = val.get("checks").and_then(serde_json::Value::as_object) {
+        ui.horizontal_wrapped(|ui| {
+            for (name, check) in checks {
+                let c_ok = check
+                    .get("ok")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let col = if c_ok {
+                    egui::Color32::from_rgb(76, 209, 146)
+                } else {
+                    egui::Color32::from_rgb(242, 109, 109)
+                };
+                let short = name.replace('_', " ");
+                ui.label(
+                    RichText::new(format!("{} {short}", if c_ok { "✓" } else { "✗" }))
+                        .small()
+                        .color(col),
+                );
+            }
+        });
+    } else if let Some(failed) = val.get("failed").and_then(serde_json::Value::as_array)
+        && !failed.is_empty()
+    {
+        for f in failed {
+            if let Some(s) = f.as_str() {
+                ui.label(
+                    RichText::new(format!("✗ {s}"))
+                        .small()
+                        .color(egui::Color32::from_rgb(242, 109, 109)),
+                );
+            }
+        }
+    }
 }
 
 fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {

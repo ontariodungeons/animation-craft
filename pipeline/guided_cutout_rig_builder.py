@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -1169,16 +1170,17 @@ def export_effectcraft_jsx_script(
     ]
     for part in parts_sorted:
         pid = part["id"]
+        v_pid = re.sub(r"\W", "_", pid)
         px, py = float(part["pivot"][0]), float(part["pivot"][1])
         layer_path = part["full_layer_path"]
         lines.extend([
-            f"var io_{pid} = new ImportOptions(new File({json.dumps(layer_path)}));",
-            f"var item_{pid} = app.project.importFile(io_{pid});",
-            f"var lyr_{pid} = comp.layers.add(item_{pid});",
-            f"lyr_{pid}.name = {json.dumps(pid)};",
-            f"lyr_{pid}.property('Anchor Point').setValue([{px:.1f}, {py:.1f}, 0.0]);",
-            f"lyr_{pid}.property('Position').setValue([{px:.1f}, {py:.1f}, 0.0]);",
-            f"layerMap[{json.dumps(pid)}] = lyr_{pid};",
+            f"var io_{v_pid} = new ImportOptions(new File({json.dumps(layer_path)}));",
+            f"var item_{v_pid} = app.project.importFile(io_{v_pid});",
+            f"var lyr_{v_pid} = comp.layers.add(item_{v_pid});",
+            f"lyr_{v_pid}.name = {json.dumps(pid)};",
+            f"lyr_{v_pid}.property('Anchor Point').setValue([{px:.1f}, {py:.1f}, 0.0]);",
+            f"lyr_{v_pid}.property('Position').setValue([{px:.1f}, {py:.1f}, 0.0]);",
+            f"layerMap[{json.dumps(pid)}] = lyr_{v_pid};",
         ])
 
     for part in parts_sorted:
@@ -1189,14 +1191,15 @@ def export_effectcraft_jsx_script(
 
     for part in parts_sorted:
         pid = part["id"]
+        v_pid = re.sub(r"\W", "_", pid)
         r_min, r_max = part["rotation"]
-        lines.append(f"var rot_{pid} = layerMap[{json.dumps(pid)}].property('Rotation');")
+        lines.append(f"var rot_{v_pid} = layerMap[{json.dumps(pid)}].property('Rotation');")
         for t_sec, pose_name in beat_times:
             pose_parts = poses.get(pose_name, {}).get("parts", {})
             rot_val = 0.0 if mode == "static" else float(pose_parts.get(pid, {}).get("rotation", 0.0))
             rot_clamped = max(float(r_min), min(float(r_max), rot_val))
-            lines.append(f"rot_{pid}.setValueAtTime({t_sec:.4f}, {rot_clamped:.2f});")
-        lines.append(f"rot_{pid}.expression = 'loopOut(\"cycle\")';")
+            lines.append(f"rot_{v_pid}.setValueAtTime({t_sec:.4f}, {rot_clamped:.2f});")
+        lines.append(f"rot_{v_pid}.expression = 'loopOut(\"cycle\")';")
 
     out_jsx_path.parent.mkdir(parents=True, exist_ok=True)
     out_jsx_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2345,7 +2348,7 @@ if __name__ == "__main__":
         plan_path = Path(args.rig_plan).resolve()
         rig_plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
         cid_val = rig_plan_data.get("character_id", args.character)
-        pose_lib_data = build_pose_library(cid_val)
+        pose_lib_data = rig_plan_data.get("pose_library") or build_pose_library(cid_val)
         out_dir_path = Path(args.out_dir).resolve() if args.out_dir else plan_path.parent
         if args.jsx_only:
             jsx_target = Path(args.out_jsx).resolve() if args.out_jsx else (out_dir_path / f"{cid_val}_cutout_rig.jsx")

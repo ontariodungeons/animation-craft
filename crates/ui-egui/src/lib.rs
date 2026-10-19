@@ -124,6 +124,7 @@ pub struct UiState {
     pub show_qa_status: bool,
     pub busy_command: Option<String>,
     pub last_export: Option<String>,
+    pub last_motion_validation: Option<Value>,
     pub status_line: String,
 }
 
@@ -139,7 +140,7 @@ impl Default for UiState {
             demo_preset: Some(DemoPreset::Hopper),
             archetype: "humanoid_biped".to_string(),
             q1_motion: "walk_jump_talk".to_string(),
-            q2_parts: "head,ears,torso,left_arm,right_arm,left_leg,right_leg".to_string(),
+            q2_parts: String::new(),
             strip_costume: false,
             q3_target: "filmcraft_mp4".to_string(),
             bg_tolerance: 25,
@@ -189,6 +190,7 @@ impl Default for UiState {
             show_qa_status: true,
             busy_command: None,
             last_export: None,
+            last_motion_validation: None,
             status_line:
                 "Hopper active — PhotoCraft transparent import + Attached Reference Sheets ready"
                     .to_string(),
@@ -639,6 +641,15 @@ impl AnimationCraftApp {
                     self.ui_state.last_export =
                         val.get("output").and_then(Value::as_str).map(str::to_owned);
                 }
+                if id == "export.layered_motion" {
+                    if let Some(dir) = val.get("out_dir").and_then(Value::as_str) {
+                        self.ui_state.last_export = Some(dir.to_owned());
+                    }
+                    self.ui_state.last_motion_validation = Some(val.clone());
+                }
+                if id == "validate.motion" {
+                    self.ui_state.last_motion_validation = Some(val.clone());
+                }
                 if id == "intake.validate" {
                     let slot = val
                         .get("slot")
@@ -1014,6 +1025,16 @@ pub enum UiCommand {
     ExportCharacterIteration {
         character: String,
     },
+    ExportLayeredMotion {
+        spec: String,
+        out_dir: Option<String>,
+    },
+    ValidateMotion {
+        video: String,
+        reference: Option<String>,
+        spec: Option<String>,
+        loop_clip: bool,
+    },
 }
 
 impl UiCommand {
@@ -1134,6 +1155,31 @@ impl UiCommand {
                 "export.character_iteration",
                 serde_json::json!({ "character": character }),
             ),
+            UiCommand::ExportLayeredMotion { spec, out_dir } => {
+                let mut params = serde_json::json!({ "spec": spec });
+                if let Some(dir) = out_dir {
+                    params["out_dir"] = serde_json::json!(dir);
+                }
+                ("export.layered_motion", params)
+            }
+            UiCommand::ValidateMotion {
+                video,
+                reference,
+                spec,
+                loop_clip,
+            } => {
+                let mut params = serde_json::json!({
+                    "video": video,
+                    "loop": loop_clip,
+                });
+                if let Some(r) = reference {
+                    params["reference"] = serde_json::json!(r);
+                }
+                if let Some(s) = spec {
+                    params["spec"] = serde_json::json!(s);
+                }
+                ("validate.motion", params)
+            }
         }
     }
 
@@ -1141,7 +1187,11 @@ impl UiCommand {
         if let UiCommand::Engine { id, .. } = self {
             return matches!(
                 *id,
-                "asset.make_transparent" | "asset.build_cutout_rig" | "export.cutout_mp4"
+                "asset.make_transparent"
+                    | "asset.build_cutout_rig"
+                    | "export.cutout_mp4"
+                    | "export.layered_motion"
+                    | "validate.motion"
             );
         }
         matches!(
@@ -1156,6 +1206,8 @@ impl UiCommand {
                 | UiCommand::ExportFilmcraft { .. }
                 | UiCommand::ExportBlender { .. }
                 | UiCommand::ExportCharacterIteration { .. }
+                | UiCommand::ExportLayeredMotion { .. }
+                | UiCommand::ValidateMotion { .. }
         )
     }
 }
@@ -1296,6 +1348,16 @@ mod tests {
             },
             UiCommand::ExportCharacterIteration {
                 character: "hopper".into(),
+            },
+            UiCommand::ExportLayeredMotion {
+                spec: "spec.json".into(),
+                out_dir: None,
+            },
+            UiCommand::ValidateMotion {
+                video: "clip.webm".into(),
+                reference: None,
+                spec: None,
+                loop_clip: false,
             },
         ];
 

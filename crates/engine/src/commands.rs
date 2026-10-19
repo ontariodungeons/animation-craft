@@ -3624,7 +3624,10 @@ fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> {
         {
             let raw: Value = serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)
                 .map_err(|e| EngineError::InvalidParams(format!("invalid asset JSON: {e}")))?;
-            if entry.kind == "cutout_rig" || raw.get("rig_type").is_some() {
+            if entry.kind == "cutout_rig"
+                || raw.get("rig_type").is_some()
+                || (raw.get("layers").is_some() && raw.get("canvas").is_some())
+            {
                 let mut plan = crate::session::LoadedCutoutRigPlan::load_from_path(&manifest_path)?;
                 let base = manifest_path.parent().unwrap_or(Path::new("."));
                 let resolve = |p: &Path| {
@@ -3925,7 +3928,7 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
         .filter(|r| !r.is_empty())
         .ok_or_else(|| {
             EngineError::InvalidParams(
-                "image.break_apart requires `regions`: a map of part id to polygon points".into(),
+                "image.break_apart requires `regions`: a map of part id to a polygon, or {polygons, keep}".into(),
             )
         })?;
     let parts: Vec<String> = regions.keys().cloned().collect();
@@ -3938,22 +3941,47 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     for part_id in &parts {
         let part_out = out_dir.join(format!("{part_id}.png"));
 
-        // One PhotoCraft session per part: select the polygon, invert, clear the rest.
-        // The source is already matted at intake, so no background removal happens here.
-        let args = vec![
+        // One PhotoCraft session per part. A region is a polygon ([[x, y], ...]) or an object
+        // {"polygons": [polygon, ...], "keep": "inside" | "outside"}: select the polygon(s), then clear
+        // everything else (inside) or the selection itself (outside). The source is already matted at
+        // intake, so no background removal happens here.
+        let region = &regions[part_id.as_str()];
+        let (polygons, keep_outside): (Vec<Value>, bool) = match region {
+            Value::Object(obj) => (
+                obj.get("polygons")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .or_else(|| obj.get("points").map(|p| vec![p.clone()]))
+                    .unwrap_or_default(),
+                obj.get("keep").and_then(Value::as_str) == Some("outside"),
+            ),
+            other => (vec![other.clone()], false),
+        };
+        if polygons.is_empty() {
+            errors.push(format!("{part_id}: region has no polygon"));
+            continue;
+        }
+        let mut args = vec![
             "run".to_string(),
             source_path.to_string_lossy().into_owned(),
-            "--cmd".to_string(),
-            "select.lasso".to_string(),
-            "--params".to_string(),
-            json!({"points": regions[part_id.as_str()]}).to_string(),
-            "--cmd".to_string(),
-            "select.inverse".to_string(),
+        ];
+        for (i, polygon) in polygons.iter().enumerate() {
+            args.extend([
+                "--cmd".to_string(),
+                "select.lasso".to_string(),
+                "--params".to_string(),
+                json!({"points": polygon, "mode": if i == 0 { "replace" } else { "add" }}).to_string(),
+            ]);
+        }
+        if !keep_outside {
+            args.extend(["--cmd".to_string(), "select.inverse".to_string()]);
+        }
+        args.extend([
             "--cmd".to_string(),
             "edit.clear".to_string(),
             "--out".to_string(),
             part_out.to_string_lossy().into_owned(),
-        ];
+        ]);
         if let Err(e) = run_tool_in(&root, &bin, &args) {
             errors.push(format!("{part_id}: {e}"));
             continue;
@@ -4246,10 +4274,19 @@ fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value
 }
 
 fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
-    let spec_raw = params.get("spec").and_then(Value::as_str).ok_or_else(|| {
-        EngineError::InvalidParams("export.layered_motion requires `spec`: path to a layered motion spec (JSON)".into())
-    })?;
-    let spec_path = resolve_workspace_path(s, spec_raw);
+    let spec_path = if let Some(spec_raw) = params.get("spec").and_then(Value::as_str)
+        && !spec_raw.trim().is_empty()
+    {
+        resolve_workspace_path(s, spec_raw)
+    } else if let Some(rig) = s.current_asset().and_then(|a| a.cutout_rig.as_ref())
+        && rig.rig_type == "layered_motion"
+    {
+        rig.plan_path.clone()
+    } else {
+        return Err(EngineError::InvalidParams(
+            "export.layered_motion requires `spec`: path to a layered motion spec (JSON)".into(),
+        ));
+    };
     if !spec_path.is_file() {
         return Err(EngineError::InvalidParams(format!(
             "layered motion spec not found: {}",
@@ -4259,8 +4296,8 @@ fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
     let stem = spec_path.file_stem().and_then(|v| v.to_str()).unwrap_or("layered_motion");
     let root = workspace_root(s);
     let out_dir = match params.get("out_dir").and_then(Value::as_str) {
-        Some(dir) => resolve_workspace_path(s, dir),
-        None => root.join("exports/layered_motion").join(stem),
+        Some(dir) if !dir.trim().is_empty() => resolve_workspace_path(s, dir),
+        _ => root.join("exports/layered_motion").join(stem),
     };
     let script = root.join("pipeline/layered_motion.py");
     let mut args = vec![
@@ -4285,6 +4322,22 @@ fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
     if params.get("video").and_then(Value::as_bool) == Some(false) {
         args.push("--no-video".into());
     }
+    if params.get("gpu").and_then(Value::as_bool) == Some(false) {
+        args.push("--cpu".into());
+    }
+    if let Some(crf) = params.get("crf").and_then(Value::as_u64) {
+        args.extend(["--crf".into(), crf.to_string()]);
+    }
+    if let Some(res) = params.get("resolution").and_then(Value::as_str)
+        && !res.trim().is_empty()
+    {
+        args.extend(["--resolution".into(), res.to_string()]);
+    }
+    if let Some(qual) = params.get("quality").and_then(Value::as_str)
+        && !qual.trim().is_empty()
+    {
+        args.extend(["--quality".into(), qual.to_string()]);
+    }
     let stdout = run_tool_in(&root, "python3", &args)?;
     let mut result: Value = stdout
         .lines()
@@ -4298,6 +4351,43 @@ fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
         obj.insert("out_dir".into(), json!(out_dir.to_string_lossy()));
     }
     Ok(result)
+}
+
+fn cmd_validate_motion(s: &mut Session, params: &Value) -> Result<Value> {
+    let video_raw = params.get("video").and_then(Value::as_str).ok_or_else(|| {
+        EngineError::InvalidParams("validate.motion requires `video`: a rendered transparent clip".into())
+    })?;
+    let video = resolve_workspace_path(s, video_raw);
+    if !video.is_file() {
+        return Err(EngineError::InvalidParams(format!("clip not found: {}", video.display())));
+    }
+    let root = workspace_root(s);
+    let script = root.join("pipeline/motion_validate.py");
+    let mut args = vec![script.to_string_lossy().into_owned(), "--video".into(), video.to_string_lossy().into_owned()];
+    if let Some(frames) = params.get("frames").and_then(Value::as_u64) {
+        args.extend(["--frames".into(), frames.to_string()]);
+    }
+    if let Some(fps) = params.get("fps").and_then(Value::as_f64) {
+        args.extend(["--fps".into(), fps.to_string()]);
+    }
+    if params.get("loop").and_then(Value::as_bool) == Some(true) {
+        args.push("--loop".into());
+    }
+    for key in ["reference", "spec"] {
+        if let Some(path) = params.get(key).and_then(Value::as_str)
+            && !path.trim().is_empty()
+        {
+            args.extend([format!("--{key}"), resolve_workspace_path(s, path).to_string_lossy().into_owned()]);
+        }
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut report: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok()).ok_or_else(|| {
+        EngineError::CommandFailed("validate.motion".into(), "motion_validate.py returned no result".into())
+    })?;
+    if let Some(obj) = report.as_object_mut() {
+        obj.insert("command".into(), json!("validate.motion"));
+    }
+    Ok(report)
 }
 
 fn build() -> Vec<CommandSpec> {
@@ -4399,11 +4489,20 @@ fn build() -> Vec<CommandSpec> {
             cmd_image_content_aware_fill
         ),
         cmd!(
+            "validate.motion",
+            "Validate Motion Clip",
+            ["Export"],
+            None,
+            "{\"video\":\"clip.webm\",\"frames\":0,\"fps\":30,\"loop\":false,\"reference\":\"optional_image\",\"spec\":\"optional_spec\"}",
+            always,
+            cmd_validate_motion
+        ),
+        cmd!(
             "export.layered_motion",
             "Export Layered Motion Video",
             ["Export"],
             None,
-            "{\"spec\":\"layered_motion_spec.json\",\"out_dir\":\"optional_dir\",\"tracks\":\"optional_csv\",\"stills\":0,\"video\":true}",
+            "{\"spec\":\"layered_motion_spec.json\",\"out_dir\":\"optional_dir\",\"tracks\":\"optional_csv\",\"stills\":0,\"video\":true,\"gpu\":true,\"crf\":24}",
             always,
             cmd_export_layered_motion
         ),
@@ -5091,7 +5190,45 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
         assert!(asset_after_intake.motion_range.is_none());
         assert!(asset_after_intake.turnaround_registration.is_none());
 
-        // 2. Cut into a temp directory and verify the manifest plus decoded frames.
+        // 2. Cut into a temp directory without a layout: verify no parts are invented,
+        // then cut with an explicit generic part layout and verify decoded frames + parts.
+        let unguided_dir = dir.join("cut_unguided");
+        let unguided_res = s
+            .execute(
+                "asset.cut_sheet",
+                json!({
+                    "asset": "slice_test",
+                    "out_dir": unguided_dir.to_string_lossy(),
+                    "kind": "single"
+                }),
+            )
+            .unwrap();
+        assert_eq!(unguided_res["ok"], true);
+        assert!(
+            s.current_asset().unwrap().parts.is_empty(),
+            "single cut without layout must not invent parts"
+        );
+
+        let layout_path = dir.join("layout.json");
+        std::fs::write(
+            &layout_path,
+            json!({
+                "frames": [{
+                    "label": "single",
+                    "box": [0, 0, 64, 64],
+                    "parts": {
+                        "wing-l": {
+                            "polygon": [[20, 12], [44, 12], [44, 52], [20, 52]],
+                            "pivot": [32, 32],
+                            "complete": true
+                        }
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
         let cut_dir = dir.join("cut");
         let cut_res = s
             .execute(
@@ -5099,7 +5236,8 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
                 json!({
                     "asset": "slice_test",
                     "out_dir": cut_dir.to_string_lossy(),
-                    "kind": "single"
+                    "kind": "single",
+                    "layout": layout_path.to_string_lossy()
                 }),
             )
             .unwrap();
@@ -5113,7 +5251,8 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
             .as_ref()
             .expect("cut should load a pose manifest");
         assert_eq!(manifest.frames.len() as u64, frame_count);
-        assert!(!asset_after_cut.parts.is_empty());
+        assert_eq!(asset_after_cut.parts.len(), 1);
+        assert_eq!(asset_after_cut.parts[0].name, "wing-l");
         for frame in &manifest.frames {
             let decoded = image::open(&frame.resolved_path)
                 .unwrap_or_else(|e| {

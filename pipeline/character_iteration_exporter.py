@@ -587,7 +587,10 @@ def _composite_articulated_rig(
         angles["arm_L"] = -14.0 * abs(s)
         angles["arm_R"] = 14.0 * abs(c)
 
-    draw_order = ["leg_L", "leg_R", "torso", "arm_L", "arm_R", "head", "ears"]
+    base_order = ["leg_L", "leg_R", "torso", "arm_L", "arm_R", "head", "ears"]
+    draw_order = [k for k in base_order if k in part_images] + [
+        k for k in part_images if k not in base_order
+    ]
     for pname in draw_order:
         if pname not in part_images:
             continue

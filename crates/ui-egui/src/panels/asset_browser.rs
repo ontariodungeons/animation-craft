@@ -5,15 +5,10 @@ use egui::{Color32, FontId, Pos2, Rect, RichText, Ui, Vec2};
 
 fn readable_name(name: &str) -> String {
     match name {
-        "arm_L" => "Left arm".into(),
-        "arm_R" => "Right arm".into(),
-        "leg_L" => "Left leg".into(),
-        "leg_R" => "Right leg".into(),
-        "prop_backpack" => "Backpack".into(),
         "quarter_front" => "Front ¾".into(),
         "opposite_quarter" => "Back ¾".into(),
         _ => {
-            let text = name.replace('_', " ");
+            let text = name.replace(['_', '-'], " ");
             let mut chars = text.chars();
             match chars.next() {
                 Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),

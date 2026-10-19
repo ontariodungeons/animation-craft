@@ -267,21 +267,12 @@ fn can_map_crops(asset: &Asset, source: &Path, size: [usize; 2]) -> bool {
 }
 
 fn readable(name: &str) -> String {
-    match name {
-        "arm_L" => "Left arm".into(),
-        "arm_R" => "Right arm".into(),
-        "leg_L" => "Left leg".into(),
-        "leg_R" => "Right leg".into(),
-        "prop_backpack" => "Backpack".into(),
-        _ => {
-            let text = name.replace('_', " ");
-            let mut chars = text.chars();
-            chars
-                .next()
-                .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
-                .unwrap_or_else(|| "Unnamed".into())
-        }
-    }
+    let text = name.replace(['_', '-'], " ");
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_else(|| "Unnamed".into())
 }
 
 fn navigate(index: usize, delta: isize, count: usize) -> usize {

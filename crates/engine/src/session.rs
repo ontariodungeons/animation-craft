@@ -163,6 +163,101 @@ impl LoadedCutoutRigPlan {
         let raw: Value = serde_json::from_str(&text).map_err(|e| {
             EngineError::InvalidParams(format!("invalid cutout rig plan JSON: {e}"))
         })?;
+        if let (Some(canvas_arr), Some(layers_arr)) = (
+            raw.get("canvas").and_then(Value::as_array),
+            raw.get("layers").and_then(Value::as_array),
+        ) {
+            let cw = canvas_arr
+                .first()
+                .and_then(Value::as_u64)
+                .unwrap_or(1920)
+                .max(1) as u32;
+            let ch = canvas_arr
+                .get(1)
+                .and_then(Value::as_u64)
+                .unwrap_or(1080)
+                .max(1) as u32;
+            let character_id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("layered_motion")
+                .to_string();
+            let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+            let mut parts = Vec::with_capacity(layers_arr.len());
+            let mut root_file: Option<PathBuf> = None;
+            for (idx, item) in layers_arr.iter().enumerate() {
+                let id = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("layer")
+                    .to_string();
+                let file_path = item
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .map(|f| {
+                        let p = PathBuf::from(f);
+                        if p.is_absolute() {
+                            p
+                        } else {
+                            base_dir.join(p)
+                        }
+                    })
+                    .unwrap_or_default();
+                let parent = item
+                    .get("parent")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+                if parent.is_none() && root_file.is_none() && !file_path.as_os_str().is_empty() {
+                    root_file = Some(file_path.clone());
+                }
+                let pivot = if let Some(piv_arr) = item.get("pivot").and_then(Value::as_array) {
+                    [
+                        piv_arr
+                            .first()
+                            .and_then(Value::as_f64)
+                            .unwrap_or(cw as f64 * 0.5) as f32,
+                        piv_arr
+                            .get(1)
+                            .and_then(Value::as_f64)
+                            .unwrap_or(ch as f64 * 0.5) as f32,
+                    ]
+                } else {
+                    [cw as f32 * 0.5, ch as f32 * 0.5]
+                };
+                parts.push(CutoutRigPart {
+                    id: id.clone(),
+                    label: id,
+                    kind: "layered".to_string(),
+                    layer: (idx as i32) + 1,
+                    parent,
+                    pivot,
+                    pivot_uv: [pivot[0] / cw as f32, pivot[1] / ch as f32],
+                    joint_radius_px: 14,
+                    completed_overlap_pixels: 0,
+                    rotation: [-45.0, 45.0],
+                    crop_box: [0, 0, cw, ch],
+                    crop_size: [cw, ch],
+                    cropped_path: file_path.clone(),
+                    full_layer_path: file_path,
+                });
+            }
+            let source_image = root_file
+                .or_else(|| parts.first().map(|p| p.full_layer_path.clone()))
+                .unwrap_or_default();
+            return Ok(Self {
+                plan_path: path.to_path_buf(),
+                character_id,
+                rig_type: "layered_motion".to_string(),
+                source_image,
+                canvas_size: [cw, ch],
+                character_bbox: [0, 0, cw, ch],
+                photocraft_psd: None,
+                cutout_asset_sheet: None,
+                parts,
+                pose_library: Value::Null,
+                effectcraft: raw,
+            });
+        }
         let character_id = raw
             .get("character_id")
             .and_then(Value::as_str)
@@ -467,14 +562,17 @@ impl LoadedManifest {
                 let mut frame_parts = BTreeMap::new();
                 if let Some(parts_obj) = item.get("parts").and_then(Value::as_object) {
                     for (k, pval) in parts_obj {
-                        if !part_set.contains(k) {
-                            part_set.push(k.clone());
-                        }
                         let pfile = pval
                             .get("file")
                             .and_then(Value::as_str)
                             .unwrap_or("")
                             .to_string();
+                        if pfile.is_empty() {
+                            continue;
+                        }
+                        if !part_set.contains(k) {
+                            part_set.push(k.clone());
+                        }
                         let psize = pval
                             .get("size")
                             .and_then(Value::as_array)
@@ -773,11 +871,12 @@ impl Asset {
     /// while preserving any existing visibility/solo toggles for matching part names.
     pub fn sync_parts_from_manifests(&mut self) {
         let mut names = Vec::new();
-        if self.pose_manifest.is_none()
-            && self.turnaround_manifest.is_none()
-            && let Some(rig) = &self.cutout_rig
-        {
-            names.extend(rig.parts.iter().map(|part| part.id.clone()));
+        if let Some(rig) = &self.cutout_rig {
+            for part in &rig.parts {
+                if !names.contains(&part.id) {
+                    names.push(part.id.clone());
+                }
+            }
         }
         if let Some(pm) = &self.pose_manifest {
             if self.attached_asset_sheet.is_none() {
@@ -870,5 +969,73 @@ impl Session {
     pub fn current_asset_mut(&mut self) -> Option<&mut Asset> {
         let id = self.active_asset.clone()?;
         self.assets.get_mut(&id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn loads_arbitrary_layered_motion_spec_and_syncs_parts_alongside_pose_manifest() {
+        let tmp = std::env::temp_dir().join(format!(
+            "ac_layered_spec_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let spec_path = tmp.join("drone_spec.json");
+        std::fs::write(
+            &spec_path,
+            json!({
+                "canvas": [640, 480],
+                "fps": 24,
+                "layers": [
+                    { "id": "rotor-l", "file": "layers/rotor-l.png", "pivot": [180, 120], "parent": "chassis" },
+                    { "id": "rotor-r", "file": "layers/rotor-r.png", "pivot": [460, 120], "parent": "chassis" },
+                    { "id": "chassis", "file": "layers/chassis.png", "pivot": [320, 240] }
+                ],
+                "tracks": [
+                    { "id": "hover", "duration": 2.0, "motion": {} }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let loaded = LoadedCutoutRigPlan::load_from_path(&spec_path).unwrap();
+        assert_eq!(loaded.rig_type, "layered_motion");
+        assert_eq!(loaded.canvas_size, [640, 480]);
+        assert_eq!(loaded.parts.len(), 3);
+        assert_eq!(loaded.parts[0].id, "rotor-l");
+        assert_eq!(loaded.parts[0].parent.as_deref(), Some("chassis"));
+        assert_eq!(loaded.parts[2].id, "chassis");
+        assert_eq!(loaded.source_image, tmp.join("layers/chassis.png"));
+
+        let mut asset = Asset {
+            id: "drone".into(),
+            pose_manifest: Some(LoadedManifest {
+                manifest_path: tmp.join("pose_manifest.json"),
+                manifest_dir: tmp.clone(),
+                sheet_type: "action".into(),
+                status: "loaded".into(),
+                matting_engine: None,
+                source_image: None,
+                source_size: Some([640, 480]),
+                frames: Vec::new(),
+                part_names: vec!["pose_frame".into()],
+            }),
+            cutout_rig: Some(loaded),
+            ..Asset::default()
+        };
+        asset.sync_parts_from_manifests();
+        let part_names: Vec<&str> = asset.parts.iter().map(|p| p.name.as_str()).collect();
+        assert!(part_names.contains(&"rotor-l"));
+        assert!(part_names.contains(&"rotor-r"));
+        assert!(part_names.contains(&"chassis"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

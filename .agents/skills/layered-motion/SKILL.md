@@ -1,43 +1,52 @@
 ---
 name: layered-motion
-description: Use when animating pre-separated transparent layers (any subject) into transparent video clips with AnimationCraft, for compositing in Remotion or another editor.
+description: Use when animating any set of transparent PNG layers along paths, oscillations, or keyframes and exporting transparent video tracks via EffectCraft, without assuming what the layers are (character, creature, prop, effect).
 ---
 
-# Layered motion
+# Layered Motion
 
-Turns a spec of transparent, same-size layer images into one transparent WebM per track. It assumes nothing about the subject: no anatomy, part names, pose counts or character.
+Drives `export.layered_motion` (`pipeline/layered_motion.py`): takes a JSON spec of transparent PNG layers, pivots and per-track motion, builds an EffectCraft project, and renders one transparent WebM per track. Nothing in the module assumes anatomy, part names or counts.
 
-## Run it through AnimationCraft
-
-From the checkout that holds `pipeline/` (the command finds the script from the working directory):
+## Command
 
 ```bash
-animationcraft-cli exec export.layered_motion spec=<spec.json> out_dir=<folder> \
-  [tracks=<id,id>] [stills=<n>] [video=false]
+animationcraft-cli exec export.layered_motion spec=<spec.json> out_dir=<folder> [tracks=a,b] [stills=4] [video=false] [gpu=true] [crf=24]
 ```
 
 - `stills=N video=false` renders N evenly spaced transparent PNGs per track in seconds. Use it to review motion before a full export.
-- Full export is slow (several minutes for ~600 frames at 1080p); build and check with stills first.
-- Outputs: `<track>.webm` (VP9 with alpha, canvas size, spec fps), `stills/<track>/NN.png`, and `work/` (generated JSX and project).
+- Full export automatically crops sparse full-canvas layers to their tight alpha bounding boxes, renders PNG frames on the discrete GPU (`gpu=false` for CPU), and encodes VP9 with alpha through ffmpeg (`-threads 4`). Build and check with stills first.
+- Outputs: `<track>.webm` (VP9 with alpha, spec fps), `review/<track>.png` (frames across the clip, reference first) and `review/<track>_detail.png` (close-ups), `stills/`, and `work/` (generated JSX, cropped layers, and project).
+- Every exported clip is measured automatically (see Validation); the result has `validation_ok` and per-track `validation`.
+
+## Validation (no vision needed)
+
+`animationcraft-cli exec validate.motion video=<clip.webm> [frames=N fps=30 loop=true reference=<image> spec=<spec.json>]`
+checks frame count and rate, alpha, empty or clipped frames, teleports and flicker, loop closure, colour and size against a
+reference image, and lints the spec for oscillations that alias at its frame rate. It proves "no measurable problem", not that
+the result looks right: also review `review/*_detail.png` visually against the same reference.
 
 ## Spec (JSON)
 
-`canvas` `[w,h]`, `fps`, optional `motionBlur` `{shutterAngle, samples}`, `layers`, `tracks`.
+`canvas` `[w,h]`, `fps`, optional `motionBlur` `{shutterAngle, samples}`, optional `margin` `[left, top, right, bottom]` (enlarges every clip beyond the canvas so wings, paths and edge-touching artwork are never cropped; undo the offset when compositing), optional `reference` (image of the expected look), `layers`, `tracks` (track `loop: true` requires the last frame to match the first).
 
 - layer: `id`, `file` (relative to the spec; must equal the canvas size), `pivot` `[x,y]` or `{"anchor":"top|bottom|left|right|center|topLeft|…","of":"alphaBounds"}`, optional `parent` (layer id), optional `component` N to use only the Nth separate visible piece (left to right) of the image.
 - layers are listed bottom to top. Parent links make a layer follow its parent's motion about the parent's pivot.
-- track: `id`, `duration` (s), optional `layers` (subset, default all), `motion` `{layerId: {position|rotation|scale|opacity: [terms]}}`.
-- Terms add together and are offsets from the resting state (position px from pivot, rotation deg, scale and opacity in percentage points):
-  - `keys` `[[t, value], ...]` with `ease` `smooth|linear|in|out` (value is a number, or `[x,y]` for position/scale)
-  - `ellipse` `centre, rx, ry, start, turns, from, to, ease, relativeTo`
-  - `oscillate` `amplitude, hz, phase, axis, envelope [[t, multiplier]...]` (continuous sine, stays smooth under motion blur)
-  - `follow` `layer, gain, limit, smooth` (rotation leaning with a layer's horizontal velocity)
 
-## Checks before using the clips
+## Motion terms (summed per property: `position`, `rotation`, `scale`, `opacity`)
 
-Inspect actual frames (stills or decoded video on a plain background), not file sizes. Confirm every layer sits where it should relative to its parent, the track length matches the intended window, and the alpha survives import in the editor. Report defects instead of working around them.
+All values are offsets from the resting state (`opacity` -100 hides a layer).
+
+- `{"kind":"keys", "keys":[[t, value], ...], "ease":"smooth|linear|in|out"}` — `value` is a number, or `[dx, dy]` for position/scale.
+- `{"kind":"ellipse", "centre":[dx,dy], "rx":N, "ry":N, "start":rad, "turns":1, "from":t0, "to":t1, "ease":"smooth"}` — position only; relative to the point on the ellipse at `start` unless `"relativeTo":[x,y]` is set.
+- `{"kind":"oscillate", "amplitude":N, "hz":N, "phase":0, "axis":0, "envelope":[[t, mult], ...]}` — written as an EffectCraft expression (`Math.sin(...)`), so high frequencies (e.g. wings) integrate smoothly across the motion-blur shutter instead of aliasing to frame keys.
+- `{"kind":"follow", "layer":"body", "gain":-0.04, "limit":18, "smooth":0.15}` — rotation only; leans with a layer's horizontal velocity (including `keys`, `ellipse`, and horizontal `oscillate` terms) with exponential smoothing.
+
+## Verification
+
+Inspect actual frames (stills or decoded video on a plain background), not file existence: check that parts stay attached at their pivots, transparent background is preserved, and frame-to-frame motion is continuous.
 
 ## Known behaviour
 
-- EffectCraft keeps a child's world position at the moment of linking, so parent links are made before keyframes (done by the module).
+- EffectCraft keeps a child's world position at the moment of linking, so parent links are made before keyframes and every layer starts at the same offset (done by the module).
+- Pieces that must be separate but are not (antennae, a body without them) can be cut with `image.break_apart` regions (`{polygons, keep: "outside"}` clears the polygon instead of keeping it).
 - A baked clip cannot be re-timed per part in the editor; change the spec and re-export, or export parts as separate tracks.

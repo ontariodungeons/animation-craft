@@ -318,7 +318,9 @@ def _clean_crop(source: Image.Image, box, tolerance: int, use_photocraft: bool =
 def _save_parts(image, source_box, frame_offset, definitions, output, index):
     parts = {}
     parents = {s['id']: s['parent'] for s in json.loads(TEMPLATE.read_text())['slots']}
-    for name in PARTS:
+    has_biped_slot = any(k in PARTS for k in definitions)
+    part_names = (list(PARTS) + [k for k in definitions if k not in PARTS]) if has_biped_slot else list(definitions)
+    for name in part_names:
         spec = definitions.get(name)
         if not spec:
             parts[name] = {'status': 'unavailable', 'reason': 'No isolated artwork or explicit mask'}
@@ -347,7 +349,7 @@ def _save_parts(image, source_box, frame_offset, definitions, output, index):
         ox,oy = frame_offset
         parts[name] = {'file': filename, 'size': [bounds[2]-px,bounds[3]-py],
             'status': 'ready' if spec.get('complete') and not spec.get('inferred') else 'needs_review',
-            'parent': parents[name], 'sourcePivot': list(pivot),
+            'parent': spec.get('parent', parents.get(name)), 'sourcePivot': list(pivot),
             'pivot': [pivot[0]-x0-px,pivot[1]-y0-py],
             'bindPosition': [pivot[0]-x0+ox,pivot[1]-y0+oy],
             'sourcePolygon': polygon, 'visiblePixelsOnly': not bool(spec.get('complete')),

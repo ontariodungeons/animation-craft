@@ -718,17 +718,18 @@ fn visible_part_layers(
         }
     };
 
-    let preferred_order = ["leg_L", "leg_R", "torso", "arm_L", "arm_R", "head", "ears"];
     let mut ordered = Vec::new();
-    for key in preferred_order {
-        if let Some(p) = parts.get(key)
-            && is_shown(key)
+    let mut seen = std::collections::BTreeSet::new();
+    for st in part_states {
+        if let Some(p) = parts.get(&st.name)
+            && is_shown(&st.name)
         {
+            seen.insert(st.name.clone());
             ordered.push(p.clone());
         }
     }
     for (k, p) in parts {
-        if !preferred_order.contains(&k.as_str()) && is_shown(k) {
+        if !seen.contains(k) && is_shown(k) {
             ordered.push(p.clone());
         }
     }
@@ -1269,32 +1270,34 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let base_x = sprite_rect.left() + (part.bind_position[0] - part.pivot[0]) * scale;
                 let base_y = sprite_rect.top() + (part.bind_position[1] - part.pivot[1]) * scale;
 
-                let (rig_dx, rig_dy) = match part.name.as_str() {
-                    "ears" => (
-                        app.ui_state.head_yaw * 0.25 + app.ui_state.ear_splay * 0.15,
-                        -app.ui_state.ear_splay.abs() * 0.25 + app.ui_state.ear_pitch * 0.2,
-                    ),
-                    "head" => (app.ui_state.head_yaw * 0.35, app.ui_state.head_pitch * 0.22),
-                    "arm_L" => (
-                        (app.ui_state.arm_spread + app.ui_state.elbow_bend * 0.5) * 0.35,
-                        -app.ui_state.arm_spread * 0.2,
-                    ),
-                    "arm_R" => (
-                        -(app.ui_state.arm_spread + app.ui_state.elbow_bend * 0.5) * 0.35,
-                        -app.ui_state.arm_spread * 0.2,
-                    ),
-                    "leg_L" => (
-                        app.ui_state.knee_bend * 0.2,
-                        -app.ui_state.knee_bend.max(0.0) * 0.35,
-                    ),
-                    "leg_R" => (
-                        -app.ui_state.knee_bend * 0.2,
-                        -app.ui_state.knee_bend.max(0.0) * 0.35,
-                    ),
-                    _ => (0.0, 0.0),
-                };
-
                 let base_center = Pos2::new(base_x + pw * 0.5, base_y + ph * 0.5);
+                let rel_x = ((base_center.x - sprite_center.x)
+                    / (sprite_rect.width().max(1.0) * 0.5))
+                    .clamp(-1.0, 1.0);
+                let rel_y = ((base_center.y - sprite_center.y)
+                    / (sprite_rect.height().max(1.0) * 0.5))
+                    .clamp(-1.0, 1.0);
+                let (rig_dx, rig_dy) = if rel_y < -0.35 {
+                    (
+                        app.ui_state.head_yaw * 0.3
+                            + app.ui_state.ear_splay * 0.15 * rel_x.signum(),
+                        app.ui_state.head_pitch * 0.2 + app.ui_state.ear_pitch * 0.2,
+                    )
+                } else if rel_y > 0.35 {
+                    (
+                        app.ui_state.knee_bend * 0.2 * rel_x.signum(),
+                        -app.ui_state.knee_bend.max(0.0) * 0.35,
+                    )
+                } else if rel_x.abs() > 0.15 {
+                    (
+                        (app.ui_state.arm_spread + app.ui_state.elbow_bend * 0.5)
+                            * 0.35
+                            * rel_x.signum(),
+                        -app.ui_state.arm_spread * 0.2,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
                 let explode_vec = (base_center - sprite_center) * explode_factor;
                 let part_rect = Rect::from_min_size(
                     Pos2::new(

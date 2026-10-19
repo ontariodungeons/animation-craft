@@ -183,6 +183,51 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
             if action_button(
                 app,
                 ui,
+                "menu.export_layered_motion",
+                "Export Layered Motion (.json)…",
+                ready,
+            ) && let Some(path) = rfd::FileDialog::new()
+                .add_filter("Layered Motion Spec", &["json"])
+                .pick_file()
+            {
+                app.exec_ui_command(UiCommand::ExportLayeredMotion {
+                    spec: path.to_string_lossy().into_owned(),
+                    out_dir: None,
+                });
+                ui.close();
+            }
+            if action_button(
+                app,
+                ui,
+                "menu.validate_motion",
+                "Validate Motion Clip (.webm)…",
+                ready,
+            ) && let Some(path) = rfd::FileDialog::new()
+                .add_filter("Rendered Clip", &["webm", "mp4"])
+                .pick_file()
+            {
+                let reference = app
+                    .session
+                    .current_asset()
+                    .filter(|a| a.path.is_file())
+                    .map(|a| a.path.to_string_lossy().into_owned());
+                let spec = app
+                    .session
+                    .current_asset()
+                    .and_then(|a| a.cutout_rig.as_ref())
+                    .filter(|r| r.rig_type == "layered_motion")
+                    .map(|r| r.plan_path.to_string_lossy().into_owned());
+                app.exec_ui_command(UiCommand::ValidateMotion {
+                    video: path.to_string_lossy().into_owned(),
+                    reference,
+                    spec,
+                    loop_clip: false,
+                });
+                ui.close();
+            }
+            if action_button(
+                app,
+                ui,
                 "menu.export_filmcraft",
                 "FilmCraft Project…",
                 has_asset,
