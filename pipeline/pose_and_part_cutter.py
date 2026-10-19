@@ -315,24 +315,6 @@ def _clean_crop(source: Image.Image, box, tolerance: int, use_photocraft: bool =
     return Image.fromarray(arr)
 
 
-def _default_parts(box):
-    x0, y0, x1, y1 = box
-    w, h = x1-x0, y1-y0
-    # Visible-pixel partitions only. Anatomical left is image right in FRONT view.
-    regions = {'ears': (0,0,1,.22), 'head': (0,.22,1,.48),
-               'torso': (.28,.48,.72,.76), 'arm_R': (0,.34,.30,.76),
-               'arm_L': (.70,.34,1,.76), 'leg_R': (0,.76,.5,1),
-               'leg_L': (.5,.76,1,1)}
-    pivots = {'ears':(.5,.21), 'head':(.5,.46), 'torso':(.5,.72),
-              'arm_R':(.24,.50), 'arm_L':(.76,.50),
-              'leg_R':(.40,.76), 'leg_L':(.60,.76)}
-    return {name: {'polygon': [[x0+a*w,y0+b*h],[x0+c*w,y0+b*h],
-                               [x0+c*w,y0+d*h],[x0+a*w,y0+d*h]],
-                   'pivot': [x0+pivots[name][0]*w,y0+pivots[name][1]*h],
-                   'complete': False, 'inferred': True}
-            for name, (a,b,c,d) in regions.items()}
-
-
 def _save_parts(image, source_box, frame_offset, definitions, output, index):
     parts = {}
     parents = {s['id']: s['parent'] for s in json.loads(TEMPLATE.read_text())['slots']}
@@ -599,8 +581,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         cy = i//columns*(ch+28)
         contact.paste(aligned,(ax,cy),aligned.getchannel('A'))
         draw.text((ax+6,cy+ch+5),f'{i}: {name}',fill='#17181a')
-        parts_def = item.get('parts') or (_default_parts(box) if kind != 'exploded' else {})
-        parts = _save_parts(crop,box,(ox,oy),parts_def,output,i)
+        parts_def = item.get('parts') or {}
+        parts = _save_parts(crop,box,(ox,oy),parts_def,output,i) if parts_def else {}
         svg_mask_file = _write_vector_limb_masks_svg(file, (cw, ch), box, (ox, oy), parts_def, output, i) if parts_def else None
         editable['frames'].append({**item,'label':item.get('label',name),'box':list(box),'parts':parts_def})
         alpha = np.array(crop)[:,:,3]
@@ -625,7 +607,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         warnings.append('View order is assumed front, quarter-front, side, opposite-quarter, back; verify directions in contact sheet.')
         if len(frames)!=5:
             warnings.append(f'Expected 5 turnaround views, detected {len(frames)}; supply --layout.')
-    warnings.append('Automatic part masks are visible-pixel estimates. Hidden joint surfaces and removable backpack require explicit masks or a new exploded sheet. L/R assumptions apply only to front views.')
+    if kind != 'exploded' and not any(frame['parts'] for frame in frames):
+        warnings.append('No part masks supplied; frames contain whole artwork. Supply an explicit part layout before articulation.')
     if kind=='exploded':
         warnings.append('Exploded parts retain sheet spacing; set assembled bind positions and review hidden artwork before using as a puppet.')
     result = {'schemaVersion':1,'sourceImage':str(source),'sourceSize':[w,h],
