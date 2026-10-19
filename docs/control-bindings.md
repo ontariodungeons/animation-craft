@@ -62,3 +62,24 @@ An explicitly supplied different layered spec is exported as supplied, without
 applying the active viewport's state. The headless engine has no UI state; its
 explicit spec commands retain their existing behavior. No export edits the source
 rig or original image. Rendering uses EffectCraft; MP4 conversion uses ffmpeg.
+
+## Live CLI and 3D controls
+
+`ui.set_view` accepts the native numeric controls, including `head_pitch`,
+`head_yaw`, `arm_spread`, `elbow_bend`, `knee_bend`, `ear_splay`, `ear_pitch`,
+`eye_blink`, `eye_gaze`, `anim_speed`, and `mouth_opening` (the UI name for
+`smile_open`). It also accepts `inflation_depth_pct`, `relief_detail_pct`,
+`mesh_res`, `proj_blend_pct`, and `bump_strength`. Values use the slider ranges;
+malformed numeric batches fail before modifying control state. `ui.state`
+returns the applied values in `controls`.
+
+All five 3D shape settings now feed shared engine geometry for wireframe preview
+and mesh export. Resolution uses the full 12–64 range. The preview caches decoded
+views and geometry, rebuilding when source metadata or settings change. This is
+silhouette-derived volume, not a recovered anatomical model; missing views retain
+the exporter's existing fallback behavior. Missing foreground artwork fails mesh
+export instead of producing placeholder geometry.
+
+Texture display preserves decoded source pixels, including opaque eyelid layers.
+Background removal is an explicit PhotoCraft operation, never a side effect of
+loading a preview texture. Cached textures track source-file metadata changes.

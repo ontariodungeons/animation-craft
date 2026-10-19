@@ -1773,3 +1773,31 @@ mod tests {
         assert!(screenshot_res.unwrap_err().contains("timed out"));
     }
 }
+
+#[cfg(test)]
+mod texture_loading_tests {
+    use super::*;
+    #[test]
+    fn opaque_layer_pixels_survive_loading_and_replaced_files_invalidate_cache() {
+        let root = std::env::temp_dir().join(format!("animationcraft-texture-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("layer.png");
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([80,120,160,255])).save(&path).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = AnimationCraftApp::new();
+        let mut handle = None;
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            handle = app.load_texture(ui.ctx(), &path.to_string_lossy());
+        });
+        let first = handle.unwrap();
+        let delta = out.textures_delta.set.get(&first.id()).unwrap().first().unwrap();
+        let egui::ImageData::Color(pixels) = &delta.image;
+        assert!(pixels.pixels.iter().all(|pixel| *pixel == egui::Color32::from_rgb(80,120,160)));
+        out.textures_delta.clear();
+        image::RgbaImage::from_pixel(9, 8, image::Rgba([180,20,60,255])).save(&path).unwrap();
+        let replacement = app.load_texture(&ctx, &path.to_string_lossy()).unwrap();
+        assert_ne!(first.id(), replacement.id());
+        assert_eq!(replacement.size(), [9,8]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
