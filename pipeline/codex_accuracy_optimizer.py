@@ -40,6 +40,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 
+from pipeline.craft_cli import find_craft_cli
+
 SCHEMA_VERSION = 1
 DIRECTIONS = ('front', 'quarter_front', 'side', 'opposite_quarter', 'back')
 REQUESTED_POSES = ('standing', 'walking', 'running', 'jumping', 'waving',
@@ -376,19 +378,13 @@ def load_motion_range(path):
 
 def discover_local_tools():
     """Inventory existing candidates only; never install, extract or launch GUIs."""
-    roots=[Path.home()/'.local/bin',Path.home()/'Applications']
     result={}
     for name in ('photocraft','vectorcraft','meshcraft','artcraft','filmcraft','effectcraft'):
-        candidates=[]
-        for root in roots:
-            if root.is_dir():
-                candidates.extend(str(p) for p in sorted(root.glob(f'*{name}*')) if p.is_file())
-        candidates.extend(str(p) for p in sorted(Path('/tmp').glob(f'{name}*/squashfs-root/usr/bin/{name}-cli')) if p.is_file())
-        cli=shutil.which(f'{name}-cli')
-        if cli:candidates.insert(0,cli)
+        cli=find_craft_cli(f'{name}-cli')
+        candidates=[cli] if cli else []
         result[name]={'paths':list(dict.fromkeys(candidates)),'commandProbe':None}
         if name in ('photocraft','vectorcraft'):
-            known=next((p for p in reversed(candidates) if p.endswith(f'{name}-cli')),None)
+            known=cli
             if known:
                 try:
                     args=[known,'commands']+(['--json'] if name=='photocraft' else [])

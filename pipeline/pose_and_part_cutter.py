@@ -52,37 +52,24 @@ def exploded_prompt(character: str, description: str = '') -> str:
 import os
 import tempfile
 
-PHOTOCRAFT_CANDIDATES = [
-    os.environ.get('PHOTOCRAFT_CLI', ''),
-    '/tmp/photocraft-cli-inspect/squashfs-root/usr/bin/photocraft-cli',
-    shutil.which('photocraft-cli') or '',
-]
-VECTORCRAFT_CANDIDATES = [
-    os.environ.get('VECTORCRAFT_CLI', ''),
-    '/tmp/vectorcraft-cli-inspect/squashfs-root/usr/bin/vectorcraft-cli',
-    shutil.which('vectorcraft-cli') or '',
-]
-
+from pipeline.craft_cli import find_craft_cli
 
 def _find_photocraft_cli() -> str | None:
     """Return path to photocraft-cli >= 0.10.0 if available locally."""
-    for cand in PHOTOCRAFT_CANDIDATES:
-        if not cand or not Path(cand).is_file():
-            continue
-        try:
-            proc = subprocess.run([cand, '--version'], capture_output=True, text=True, timeout=5)
-            if '0.10.' in proc.stdout or '0.11.' in proc.stdout or '1.' in proc.stdout:
-                return cand
-        except OSError:
-            continue
+    cand = find_craft_cli('photocraft-cli')
+    if not cand:
+        return None
+    try:
+        proc = subprocess.run([cand, '--version'], capture_output=True, text=True, timeout=5)
+    except OSError:
+        return None
+    if '0.10.' in proc.stdout or '0.11.' in proc.stdout or '1.' in proc.stdout:
+        return cand
     return None
 
 
 def _find_vectorcraft_cli() -> str | None:
-    for cand in VECTORCRAFT_CANDIDATES:
-        if cand and Path(cand).is_file():
-            return cand
-    return None
+    return find_craft_cli('vectorcraft-cli')
 
 
 def _background_candidates(rgb, tolerance):

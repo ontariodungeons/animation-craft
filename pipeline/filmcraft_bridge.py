@@ -2,9 +2,9 @@ import json
 import os
 import subprocess
 
+from pipeline.craft_cli import require_craft_cli
 
-FILMCRAFT_BIN = "/home/jesse/.local/bin/filmcraft-cli"
-EFFECTCRAFT_BIN = "/home/jesse/.local/bin/effectcraft-cli"
+
 
 
 def load_animation_into_filmcraft(
@@ -30,7 +30,7 @@ def load_animation_into_filmcraft(
                 import_files.append(abs_extra)
 
     cmd_import = [
-        FILMCRAFT_BIN,
+        require_craft_cli("filmcraft-cli"),
         "--save-as",
         abs_proj,
         "import",
@@ -41,7 +41,7 @@ def load_animation_into_filmcraft(
     # Create active timeline sequence from the imported clip so Program Monitor & timeline have the clip
     subprocess.run(
         [
-            FILMCRAFT_BIN,
+            require_craft_cli("filmcraft-cli"),
             "--project",
             abs_proj,
             "--save",
@@ -57,14 +57,14 @@ def load_animation_into_filmcraft(
 
     # 2. Inspect the project & sequence
     inspect_raw = subprocess.check_output(
-        [FILMCRAFT_BIN, "--project", abs_proj, "inspect"],
+        [require_craft_cli("filmcraft-cli"), "--project", abs_proj, "inspect"],
         stderr=subprocess.STDOUT,
         timeout=20,
     ).decode("utf-8")
 
     # 3. Render a verification frame from FilmCraft's Program Monitor (or probe the imported media)
     probe_raw = subprocess.check_output(
-        [FILMCRAFT_BIN, "probe", abs_media],
+        [require_craft_cli("filmcraft-cli"), "probe", abs_media],
         stderr=subprocess.STDOUT,
         timeout=20,
     ).decode("utf-8")
@@ -72,7 +72,7 @@ def load_animation_into_filmcraft(
     try:
         subprocess.run(
             [
-                FILMCRAFT_BIN,
+                require_craft_cli("filmcraft-cli"),
                 "--project",
                 abs_proj,
                 "render",
@@ -90,7 +90,7 @@ def load_animation_into_filmcraft(
         if not os.path.exists(abs_frame):
             subprocess.run(
                 [
-                    FILMCRAFT_BIN,
+                    require_craft_cli("filmcraft-cli"),
                     "--project",
                     abs_proj,
                     "exec",
