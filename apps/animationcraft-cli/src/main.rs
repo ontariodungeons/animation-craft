@@ -87,9 +87,9 @@ SUBCOMMANDS
 LIVE UI CONTROL COMMANDS (via `--bridge <port>`)
   ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
   ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
-  ui.click id=<elem_id> | x=.. y=..   click any registered UI button/tab or screen coordinate
-  ui.vision                           analyze live viewport pixel buffer directly (no screenshot download needed)
-  ui.screenshot [output=...]          save window PNG + return inline vision metrics
+  ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
+  ui.vision                           analyze the live stage canvas pixels (no screenshot download needed)
+  ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
   ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
                                       switch live GUI viewport tab, action cycle, yaw, or pose range
 

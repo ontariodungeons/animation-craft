@@ -3338,9 +3338,10 @@ pub fn analyze_rgba_image(img: &image::RgbaImage) -> Value {
     })
 }
 
-/// Analyze a rendered viewport region (comparing pixels against the backdrop color `bg_rgb`)
-/// so agents get immediate bounding-box, centroid, coverage, and color telemetry without downloading a screenshot.
-pub fn analyze_viewport_region(rgba: &[u8], w: u32, h: u32, bg_rgb: [u8; 3]) -> Value {
+/// Analyze a rendered viewport region (a pixel counts as foreground only when it differs from every
+/// backdrop color in `bg_colors`, e.g. the stage fill and its grid lines) so agents get immediate
+/// bounding-box, centroid, coverage, and color telemetry without downloading a screenshot.
+pub fn analyze_viewport_region(rgba: &[u8], w: u32, h: u32, bg_colors: &[[u8; 3]]) -> Value {
     let total_px = (w as u64) * (h as u64);
     if total_px == 0 || rgba.len() < (total_px as usize) * 4 {
         return json!({
@@ -3369,11 +3370,14 @@ pub fn analyze_viewport_region(rgba: &[u8], w: u32, h: u32, bg_rgb: [u8; 3]) -> 
             let r = rgba[idx];
             let g = rgba[idx + 1];
             let b = rgba[idx + 2];
-            let dr = (r as i32 - bg_rgb[0] as i32).abs();
-            let dg = (g as i32 - bg_rgb[1] as i32).abs();
-            let db = (b as i32 - bg_rgb[2] as i32).abs();
-            // Exclude backdrop and subtle grid lines (delta > 36)
-            if dr + dg + db > 36 {
+            // Exclude backdrop and subtle grid lines (delta > 36 from every backdrop color)
+            let is_fg = bg_colors.iter().all(|bg| {
+                (r as i32 - bg[0] as i32).abs()
+                    + (g as i32 - bg[1] as i32).abs()
+                    + (b as i32 - bg[2] as i32).abs()
+                    > 36
+            });
+            if is_fg {
                 fg_px += 1;
                 min_x = min_x.min(x);
                 min_y = min_y.min(y);
