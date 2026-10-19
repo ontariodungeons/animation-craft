@@ -647,11 +647,13 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
                 "action"
             };
             let cut_out_dir = import_dir.join(format!("{resolved_slot}_cut"));
+            // Cut the original: the cutter mattes each frame from its real colours (edge
+            // decontamination, enclosed holes, floor shadows). The step-1 derivative is for display.
             Some(cmd_asset_cut_sheet(
                 s,
                 &json!({
                     "asset": asset_id,
-                    "source": effective_path.to_string_lossy(),
+                    "source": resolved_path.to_string_lossy(),
                     "out_dir": cut_out_dir.to_string_lossy(),
                     "kind": cut_kind,
                     "tolerance": tolerance,

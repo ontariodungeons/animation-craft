@@ -89,115 +89,6 @@ def _background_candidates(rgb, tolerance):
     return np.max(np.abs(smooth-bg), axis=2) <= tolerance
 
 
-def _flatten_untrusted_alpha(image: Image.Image) -> Image.Image:
-    """Make a sheet opaque again when its transparency did not remove the background.
-
-    An import step that erases only the outer margin (e.g. around a white card) leaves most of the sheet
-    opaque. Cropping trusts any existing alpha, so such a sheet would keep its background in every frame.
-    Compositing it onto its own dominant colour lets the colour-based matting remove the background instead."""
-    arr = np.array(image)
-    alpha = arr[:, :, 3]
-    if alpha.min() == 255 or (alpha > 16).mean() <= 0.5:
-        return image
-    opaque = arr[alpha > 16][:, :3]
-    quantized = (opaque // 16).astype(int)
-    values, counts = np.unique(quantized, axis=0, return_counts=True)
-    bg = np.median(opaque[np.all(quantized == values[counts.argmax()], axis=1)], axis=0)
-    a = alpha[:, :, None].astype(np.float32) / 255
-    rgb = arr[:, :, :3] * a + bg * (1 - a)
-    return Image.fromarray(np.dstack([rgb.astype(np.uint8), np.full(alpha.shape, 255, np.uint8)]), 'RGBA')
-
-
-def _matte(image: Image.Image, tolerance: int = 25, use_photocraft: bool = False) -> tuple[Image.Image, np.ndarray]:
-    """Step 1 background removal via PhotoCraft 0.10.0 4-corner contiguous magicEraser
-    with interior fur/collar preservation and enclosed background hole cleanup.
-    """
-    arr = np.array(image.convert('RGBA'))
-    if arr[:, :, 3].min() < 255:
-        return Image.fromarray(arr), arr[:, :, 3] > 16
-    rgb = arr[:, :, :3].astype(np.int16)
-    h, w = rgb.shape[:2]
-
-    # Estimate studio background from the outer border ring
-    border_pixels = np.concatenate([rgb[0, :, :], rgb[-1, :, :], rgb[:, 0, :], rgb[:, -1, :]], axis=0)
-    bg_med = np.median(border_pixels, axis=0)
-    color_diff = np.max(np.abs(rgb.astype(np.float32) - bg_med), axis=2)
-    chroma = np.max(rgb, axis=2) - np.min(rgb, axis=2)
-    warmth = rgb[:, :, 0] - rgb[:, :, 2]
-
-    # Studio backgrounds (white or gray gradient) are neutral (low chroma & warmth),
-    # whereas character cream fur has warmth (R - B >= 12) or chroma >= 12.
-    eff_tol = min(tolerance, 22)
-    bg_cand = (color_diff <= eff_tol) & (chroma <= 10) & (warmth <= 10)
-
-    seeds = np.zeros((h, w), bool)
-    seeds[0, :] = bg_cand[0, :]
-    seeds[-1, :] = bg_cand[-1, :]
-    seeds[:, 0] = bg_cand[:, 0]
-    seeds[:, -1] = bg_cand[:, -1]
-    if not seeds.any():
-        candidates = _background_candidates(rgb, eff_tol)
-        labs, _ = ndi.label(candidates)
-        areas = np.bincount(labs.ravel()); areas[0] = 0
-        seeds = labs == areas.argmax()
-        bg_cand = candidates
-
-    exterior_bg = ndi.binary_propagation(seeds, mask=bg_cand)
-    # Also clear any enclosed studio-background or soft floor-shadow holes between legs/feet
-    strict_hole_bg = (color_diff <= max(eff_tol, 45)) & (chroma <= 14) & (warmth <= 14)
-    enclosed = strict_hole_bg & (~exterior_bg)
-    enc_labs, n_enc = ndi.label(enclosed)
-    for cid in range(1, n_enc + 1):
-        pts_y, pts_x = np.where(enc_labs == cid)
-        if len(pts_y) >= 35 and pts_y.mean() > h * 0.52 and (w * 0.20 < pts_x.mean() < w * 0.80):
-            hole_mask = enc_labs == cid
-            # Trim 1px neutral studio-halo ring around the between-legs cutout hole
-            halo_ring = ndi.binary_dilation(hole_mask, iterations=2) & (~hole_mask) & (chroma <= 16) & (color_diff <= 52)
-            exterior_bg |= hole_mask | halo_ring
-
-    flood_mask = ~exterior_bg
-    # Protect bright interior facial/beard features in the upper half (y < 0.50*h) from narrow-neck flood leaks
-    upper_h = int(h * 0.50)
-    if upper_h > 8:
-        upper_closed = ndi.binary_closing(flood_mask[:upper_h, :], structure=np.ones((5, 5), dtype=bool))
-        upper_filled = ndi.binary_fill_holes(upper_closed)
-        flood_mask[:upper_h, :] |= upper_filled
-
-    pc_bin = _find_photocraft_cli() if use_photocraft and min(h, w) >= 48 else None
-    if pc_bin and flood_mask.any():
-        try:
-            with tempfile.TemporaryDirectory() as tmpd:
-                in_p = Path(tmpd) / 'in.png'
-                out_p = Path(tmpd) / 'out.png'
-                image.save(in_p)
-                pc_tol = 12 if np.mean(bg_med) > 244 else int(eff_tol)
-                proc = subprocess.run(
-                    [
-                        pc_bin, 'run', str(in_p),
-                        '--cmd', 'layer.new.layerFromBackground', '--params', '{"ifPresent":true}',
-                        '--cmd', 'paint.magicEraser', '--params', json.dumps({'x': 1, 'y': 1, 'tolerance': pc_tol, 'antiAlias': True, 'contiguous': True}),
-                        '--cmd', 'paint.magicEraser', '--params', json.dumps({'x': int(w - 2), 'y': 1, 'tolerance': pc_tol, 'antiAlias': True, 'contiguous': True}),
-                        '--cmd', 'paint.magicEraser', '--params', json.dumps({'x': 1, 'y': int(h - 2), 'tolerance': pc_tol, 'antiAlias': True, 'contiguous': True}),
-                        '--cmd', 'paint.magicEraser', '--params', json.dumps({'x': int(w - 2), 'y': int(h - 2), 'tolerance': pc_tol, 'antiAlias': True, 'contiguous': True}),
-                        '--out', str(out_p),
-                    ],
-                    capture_output=True, text=True, timeout=20,
-                )
-                if proc.returncode == 0 and out_p.is_file():
-                    pc_arr = np.array(Image.open(out_p).convert('RGBA'))
-                    if pc_arr.shape[:2] == (h, w):
-                        soft_alpha = np.where(flood_mask, 255, 0).astype(np.uint8)
-                        aa_edge = (pc_arr[:, :, 3] > 0) & (pc_arr[:, :, 3] < 250) & ndi.binary_dilation(flood_mask, iterations=1) & (~ndi.binary_erosion(flood_mask, iterations=1))
-                        soft_alpha[aa_edge] = pc_arr[aa_edge, 3]
-                        arr[:, :, 3] = soft_alpha
-                        return Image.fromarray(arr), soft_alpha > 16
-        except (subprocess.SubprocessError, OSError):
-            pass
-
-    arr[:, :, 3] = flood_mask.astype(np.uint8) * 255
-    return Image.fromarray(arr), flood_mask
-
-
 def _components(mask: np.ndarray, kind: str) -> list[tuple[int, int, int, int]]:
     h, w = mask.shape
     labels, _ = ndi.label(mask)
@@ -334,50 +225,38 @@ def _validate_box(box, size):
     return x0, y0, x1, y1
 
 
-def _clean_crop(source: Image.Image, box, tolerance: int, use_photocraft: bool = False):
-    # Alpha provenance belongs to the source, not the crop: an opaque torso
-    # crop of an already-matted PNG must not be mistaken for a background.
+def _clean_crop(source: Image.Image, box, pc_bin: str) -> Image.Image:
+    """The frame's figure on a transparent background.
+
+    A sheet that already has transparency is cropped as is. An opaque sheet goes through PhotoCraft:
+    Select Subject plus Object Selection aimed at the frame's box, applied as a layer mask. Each one
+    alone can drop a head or limb; together they keep the whole figure."""
     if source.getchannel('A').getextrema()[0] < 255:
         crop = source.crop(box)
         if crop.getchannel('A').getbbox() is None:
             raise ValueError(f'No foreground in frame {box}')
         return crop
-    crop, mask = _matte(source.crop(box), tolerance, use_photocraft=use_photocraft)
-    labels, count = ndi.label(mask)
-    if not count:
-        raise ValueError(f'No foreground in frame {box}')
-    sizes = np.bincount(labels.ravel())
-    sizes[0] = 0
-    # Remove text and crumbs without throwing away detached ears/hands.
-    main = int(sizes.argmax())
-    main_y, main_x = np.where(labels == main)
-    # Captions can be bigger than tiny facial details. Only retain detached
-    # islands within the main character's extent, or substantial separate props.
-    keep = sizes >= max(12, sizes.max()*0.10)
-    for component, obj in enumerate(ndi.find_objects(labels), 1):
-        if obj is None or sizes[component] < max(12, sizes.max()*.008):
-            continue
-        ys,xs = obj
-        if (xs.start >= main_x.min() and xs.stop <= main_x.max()+1 and
-                ys.start >= main_y.min() and ys.stop <= main_y.max()+1):
-            keep[component] = True
-    keep[0] = False
-    mask = keep[labels]
-    if not mask.any():
-        raise ValueError('No foreground after cleanup')
-    arr = np.array(crop)
-    arr[~mask, 3] = 0
-    # Edge decontamination without erosion of thin appendages.
-    core = ndi.binary_erosion(mask, iterations=2)
-    if core.any():
-        _, near = ndi.distance_transform_edt(~core, return_indices=True)
-        ring = mask & ~core
-        arr[ring, :3] = arr[near[0][ring], near[1][ring], :3]
-    if mask.any():
-        dist, near = ndi.distance_transform_edt(~mask, return_indices=True)
-        bleed = (~mask) & (dist <= 3)
-        arr[bleed, :3] = arr[near[0][bleed], near[1][bleed], :3]
-    return Image.fromarray(arr)
+    x0, y0, x1, y1 = box
+    pad = 8
+    px0, py0 = max(0, x0 - pad), max(0, y0 - pad)
+    px1, py1 = min(source.width, x1 + pad), min(source.height, y1 + pad)
+    rect = [x0 - px0, y0 - py0, x1 - x0, y1 - y0]
+    with tempfile.TemporaryDirectory() as tmpd:
+        in_p, out_p = Path(tmpd) / 'in.png', Path(tmpd) / 'out.png'
+        source.crop((px0, py0, px1, py1)).convert('RGB').save(in_p)
+        proc = subprocess.run([pc_bin, 'run', str(in_p),
+                               '--cmd', 'select.subject',
+                               '--cmd', 'select.object', '--params', json.dumps({'rect': rect, 'mode': 'add'}),
+                               '--cmd', 'layer.layerMask.revealSelection', '--out', str(out_p)],
+                              capture_output=True, text=True, timeout=120)
+        if proc.returncode or not out_p.is_file():
+            raise RuntimeError(f'photocraft-cli selection failed for frame {box}: '
+                               + ((proc.stderr or proc.stdout).strip().splitlines() or ['no output'])[-1])
+        with Image.open(out_p) as out:
+            cut = out.convert('RGBA').crop((rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]))
+    if cut.getchannel('A').getbbox() is None:
+        raise ValueError(f'PhotoCraft selection found no figure in frame {box}')
+    return cut
 
 
 def _save_parts(image, source_box, frame_offset, definitions, output, index):
@@ -508,7 +387,7 @@ def _write_vector_limb_masks_svg(frame_file: str, size: tuple[int, int], source_
     return svg_rel
 
 
-def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance=25, use_photocraft=True):
+def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance=25):
     source, output = Path(source).resolve(), Path(out_dir).resolve()
     if not source.is_file():
         raise FileNotFoundError(source)
@@ -516,7 +395,6 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         raise ValueError('tolerance must be in 1..100')
     with Image.open(source) as src:
         image = ImageOps.exif_transpose(src).convert('RGBA')
-    image = _flatten_untrusted_alpha(image)
     if kind == 'auto':
         kind = 'action' if source.name.startswith('Create_pose_sheet') else 'turnaround' if 'turnaround' in source.name.lower() else 'single'
     if kind not in ('action', 'turnaround', 'single', 'exploded'):
@@ -627,12 +505,14 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         raise ValueError('Over 64 frames detected; supply --layout')
     crops = []
     missing_parts = []
-    pc_bin = _find_photocraft_cli() if use_photocraft else None
+    pc_bin = _find_photocraft_cli()
+    if not pc_bin:
+        raise RuntimeError('photocraft-cli >= 0.10.0 is required to remove backgrounds; install it or put it on PATH')
     vc_bin = _find_vectorcraft_cli()
     for item in definitions:
         box = _validate_box(item['box'], image.size)
         try:
-            crop = _clean_crop(image,box,tolerance,use_photocraft=bool(pc_bin))
+            crop = _clean_crop(image, box, pc_bin)
             if not item.get('parts'):
                 for _ in range(3):
                     ca = np.array(crop)[:, :, 3] > 20
@@ -646,7 +526,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                     if expanded == box:
                         break
                     box = expanded
-                    crop = _clean_crop(image, box, tolerance, use_photocraft=bool(pc_bin))
+                    crop = _clean_crop(image, box, pc_bin)
         except ValueError:
             if kind == 'exploded' and item.get('label') in ('ears', 'prop_backpack'):
                 missing_parts.append(item['label'])
@@ -740,7 +620,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         warnings.append('Exploded parts retain sheet spacing; set assembled bind positions and review hidden artwork before using as a puppet.')
     result = {'schemaVersion':1,'sourceImage':str(source),'sourceSize':[w,h],
         'sheetType':kind,'status':'needs_review', 'spriteStatus':'exported',
-        'mattingEngine': 'photocraft-0.10.0+floodfill_core' if pc_bin else 'floodfill_decontaminate',
+        'mattingEngine': 'photocraft-select.subject+object',
         'vectorCraftAvailable': bool(vc_bin),
         'frames':frames,'atlas':{'file':'atlas.png','size':list(atlas.size),'columns':columns,'rows':rows,'padding':padding},
         'coordinates':'top-left pixel origin; sourceBox right/bottom exclusive; anatomical L/R; Three UV origin bottom-left',
@@ -791,7 +671,6 @@ def main(argv=None):
     parser.add_argument('--kind',choices=['auto','action','turnaround','single','exploded'],default='auto')
     parser.add_argument('--layout',help='JSON source pixel boxes, polygons and pivots (one source image only)')
     parser.add_argument('--no-ocr',action='store_true')
-    parser.add_argument('--no-photocraft',action='store_true',help='Skip PhotoCraft 0.10.0 refine pass')
     parser.add_argument('--tolerance',type=int,default=25)
     parser.add_argument('--prompt',metavar='CHARACTER',help='Print exact exploded sheet prompt')
     parser.add_argument('--description',default='')
@@ -811,7 +690,7 @@ def main(argv=None):
         for path in paths:
             try:
                 r = cut_sheet(path,out/path.stem,args.kind,use_ocr=not args.no_ocr,
-                              tolerance=args.tolerance,use_photocraft=not args.no_photocraft)
+                              tolerance=args.tolerance)
                 results.append({'source':str(path),'manifest':str(out/path.stem/'manifest.json'),
                                 'status':r['status'],'frames':len(r['frames']),'missingActions':r['missingActions']})
             except (ValueError,OSError) as exc:
@@ -822,7 +701,7 @@ def main(argv=None):
                           'report':str(out/'batch_report.json')},indent=2))
         return 1 if not results or any(r['status']=='error' for r in results) else 0
     try:
-        r=cut_sheet(src,out,args.kind,args.layout,not args.no_ocr,args.tolerance,use_photocraft=not args.no_photocraft)
+        r=cut_sheet(src,out,args.kind,args.layout,not args.no_ocr,args.tolerance)
     except (ValueError,OSError) as exc:
         parser.exit(1,f'{exc}\n')
     print(json.dumps({'manifest':str(out/'manifest.json'),'frames':len(r['frames']),
