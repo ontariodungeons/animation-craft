@@ -3932,7 +3932,30 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let total = song_seconds(&dir);
     let scene_list = scenes(&transcript, total);
     let panels = panel_files(&dir);
-    let prompt_of = |panel: &Path| std::fs::read_to_string(panel.with_extension("prompt.md")).ok().map(|t| t.lines().next().unwrap_or_default().trim().to_string());
+    let prompt_texts: Vec<Option<String>> = panels
+        .iter()
+        .map(|p| {
+            std::fs::read_to_string(p.with_extension("prompt.md")).ok().map(|t| {
+                t.lines().filter(|l| !l.trim_start().starts_with('#') && !l.starts_with("Source:")).collect::<Vec<_>>().join(" ")
+                    .split_whitespace().collect::<Vec<_>>().join(" ")
+            })
+        })
+        .collect();
+    // Panels made from one prompt template share a long preamble; show what differs per panel.
+    let shared_words = {
+        let lists: Vec<Vec<&str>> = prompt_texts.iter().flatten().map(|t| t.split(' ').collect()).collect();
+        if lists.len() < 2 { 0 } else {
+            let first = &lists[0];
+            (0..first.len()).take_while(|&i| lists.iter().all(|l| l.get(i) == first.get(i))).count()
+        }
+    };
+    let prompt_of = |i: usize| -> Option<String> {
+        let text = prompt_texts.get(i)?.as_ref()?;
+        let words: Vec<&str> = text.split(' ').collect();
+        let own = if shared_words > 8 { words[shared_words.min(words.len())..].join(" ") } else { text.clone() };
+        let own = if own.trim().is_empty() { text.clone() } else { own };
+        Some(if own.chars().count() > 240 { format!("{}…", own.chars().take(240).collect::<String>()) } else { own })
+    };
     // Backlot's film-board look: theme pieces drawn as SVG (assets/storyboard-theme) and rendered by
     // VectorCraft, built into the program and written beside the storyboard for pdfcraft to place.
     let theme = dir.join(STORYBOARD_DIR).join(".theme");
@@ -4068,7 +4091,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
                 layout.push(json!({"page": page, "path": panel, "rect": r}));
                 x = frame[2] + 14.0;
                 let name = panel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-                let prompt = prompt_of(panel).unwrap_or_else(|| "(no prompt recorded for this panel)".into());
+                let prompt = prompt_of(j).unwrap_or_else(|| "(no prompt recorded for this panel)".into());
                 steps.push(block(page, [x, y + 30.0, pw - m - 12.0, y + row_h - 10.0], format!("{name} — {prompt}"), 7.5, "courier", INK));
             } else {
                 steps.push(text(page, [x, y + 30.0], pw - m - 12.0, format!("(no panel {} yet)", j + 1), 8.0, "courier", INK, false));
@@ -4138,7 +4161,8 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         run_tool_in(&dir, "pdfcraft-cli", &["render".into(), pdf.to_string_lossy().into_owned(), "--page".into(), page.to_string(), "--dpi".into(), "110".into(), "--out".into(), png.to_string_lossy().into_owned()])?;
         preview_files.push(png);
     }
-    std::fs::write(previews.join("layout.json"), json!({"page_size": [pw, ph], "images": layout}).to_string())?;
+    let titles: Vec<String> = scene_list.iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect();
+    std::fs::write(previews.join("layout.json"), json!({"page_size": [pw, ph], "images": layout, "scene_titles": titles}).to_string())?;
     s.draft_approved = false;
     write_project_file(s)?;
     let mut status = workshop_status(s)?;
@@ -4156,33 +4180,43 @@ fn scene_label(i: usize, scene: &Value) -> String {
     }
 }
 
-/// The storyboard's page previews (rendered by workshop.build_storyboard) and its scene titles.
+/// Newest change among the files the storyboard is built from (panels, prompts, assets, liner
+/// notes, transcript, studio intent): when it is newer than the PDF, the storyboard is out of date.
+fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut files: Vec<PathBuf> = files_in(&dir.join(STORYBOARD_DIR), None)
+        .into_iter()
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("panel-")))
+        .collect();
+    files.extend(files_in(&dir.join(ASSETS_DIR), None));
+    files.extend(files_in(&dir.join("liner-notes"), None));
+    files.extend(transcript_files(dir));
+    files.push(dir.join("intent.md"));
+    if let Some(parent) = dir.parent() {
+        files.push(parent.join("STUDIO.md"));
+    }
+    files.iter().filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok()).max()
+}
+
+/// The storyboard's page previews, scene titles and image layout (saved by workshop.build_storyboard),
+/// and whether newer files mean it should be rebuilt. Cheap: reads only the project folder.
 fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
-    let previews = files_in(&dir.join(STORYBOARD_DIR).join(".preview"), Some(&["png"]));
-    let previews: Vec<PathBuf> = std::fs::read_dir(dir.join(STORYBOARD_DIR).join(".preview"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| has_extension(p, &["png"]))
-        .chain(previews)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let titles = transcript_files(&dir)
-        .first()
-        .and_then(|t| std::fs::read_to_string(t).ok())
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .map(|t| scenes(&t, song_seconds(&dir)).iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect::<Vec<_>>())
-        .unwrap_or_default();
-    let layout = std::fs::read_to_string(dir.join(STORYBOARD_DIR).join(".preview").join("layout.json"))
+    let preview_dir = dir.join(STORYBOARD_DIR).join(".preview");
+    let previews = files_in(&preview_dir, Some(&["png"]));
+    let layout = std::fs::read_to_string(preview_dir.join("layout.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .unwrap_or_else(|| json!({}));
+    let built = std::fs::metadata(&pdf).and_then(|m| m.modified()).ok();
+    let can_build = !transcript_files(&dir).is_empty();
+    let stale = can_build && match (built, storyboard_inputs_changed(&dir)) {
+        (None, _) => !panel_files(&dir).is_empty(),
+        (Some(b), Some(changed)) => changed > b,
+        (Some(_), None) => false,
+    };
     Ok(json!({"ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
-        "scene_titles": titles, "layout": layout}))
+        "scene_titles": layout.get("scene_titles").cloned().unwrap_or_else(|| json!([])), "layout": layout, "stale": stale}))
 }
 
 fn file_entry(group: &str, path: &Path, removable: bool) -> Value {

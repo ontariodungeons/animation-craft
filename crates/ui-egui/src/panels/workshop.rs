@@ -450,8 +450,16 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
     if !open {
         return;
     }
-    if app.ui_state.storyboard_info.is_none() && app.ui_state.busy_command.is_none() {
+    // Re-read the storyboard every couple of seconds; when agents or tools add panels, prompts,
+    // assets or notes, rebuild it automatically so new work shows up without asking.
+    let fresh = app.ui_state.storyboard_checked.is_some_and(|t| t.elapsed() < Duration::from_secs(2));
+    if (!fresh || app.ui_state.storyboard_info.is_none()) && app.ui_state.busy_command.is_none() {
+        app.ui_state.storyboard_checked = Some(Instant::now());
         app.ui_state.storyboard_info = app.session.execute("workshop.storyboard", json!({})).ok();
+        if app.ui_state.storyboard_info.as_ref().is_some_and(|i| i["stale"] == json!(true)) {
+            run(app, "workshop.build_storyboard", json!({}));
+            app.ui_state.status_line = "New files found: updating the storyboard…".into();
+        }
     }
     let Some(info) = app.ui_state.storyboard_info.clone() else { return };
     let previews: Vec<String> = info["previews"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
