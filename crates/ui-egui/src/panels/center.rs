@@ -1298,7 +1298,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         let mut sorted_parts: Vec<_> = rig
             .parts
             .iter()
-            .filter(|p| is_rig_part_visible(&p.id, &part_states))
+            .filter(|p| crate::control_preview::participates(&rig, &p.id, &app.ui_state, &part_states))
             .cloned()
             .collect();
         sorted_parts.sort_by_key(|p| p.layer);
@@ -1309,11 +1309,12 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .copied()
                 .unwrap_or(1.0)
                 .clamp(0.0, 1.0);
+            // Prepare a mapped texture even if this frame hides it; later exported frames may show it.
+            let (path, status) = app.control_preview.path(&ctx, &rig, part, &app.ui_state);
+            if !status.is_empty() { app.face_preview.status = status; }
             if part_opacity <= 0.01 {
                 continue;
             }
-            let (path, status) = app.control_preview.path(&ctx, &rig, part, &app.ui_state);
-            if !status.is_empty() { app.face_preview.status = status; }
             let p_str = path.to_string_lossy().into_owned();
             let Some(ptex) = app.load_texture(&ctx, &p_str) else {
                 continue;
@@ -1870,6 +1871,45 @@ fn select_turnaround_frame_for_yaw(asset: Option<&Asset>, yaw_deg: f32) -> Optio
         .cloned()
 }
 
+#[derive(Clone)]
+struct ShapePreviewCache {
+    sources: String,
+    settings: animationcraft_engine::mesh_geometry::ShapeSettings,
+    views: std::sync::Arc<Vec<(String, image::RgbaImage)>>,
+    mesh: std::sync::Arc<animationcraft_engine::mesh_geometry::MeshGeometry>,
+}
+
+fn shape_preview(app: &AnimationCraftApp, ctx: &egui::Context) -> Option<std::sync::Arc<animationcraft_engine::mesh_geometry::MeshGeometry>> {
+    use animationcraft_engine::mesh_geometry::{self, ShapeSettings};
+    let asset = app.session().current_asset()?;
+    let mut paths = vec![asset.path.clone()];
+    for manifest in [&asset.turnaround_manifest, &asset.pose_manifest].into_iter().flatten() {
+        paths.push(manifest.manifest_path.clone());
+        paths.extend(manifest.frames.iter().map(|f| f.resolved_path.clone()));
+    }
+    let sources = format!("{:?}:{:?}:{:?}", asset.turnaround_registration.as_ref().map(|r|r.target_height_px),
+        paths.iter().map(|p| (p, std::fs::metadata(p).ok().map(|m| (m.len(),m.modified().ok())))).collect::<Vec<_>>(),
+        [&asset.turnaround_manifest,&asset.pose_manifest].into_iter().flatten().flat_map(|m|m.frames.iter().map(|f|&f.label)).collect::<Vec<_>>());
+    let settings = ShapeSettings {
+        inflation_depth_pct: app.ui_state.inflation_depth_pct,
+        relief_detail_pct: app.ui_state.relief_detail_pct,
+        mesh_res: app.ui_state.mesh_res,
+        proj_blend_pct: app.ui_state.proj_blend_pct as u32,
+        bump_intensity: app.ui_state.bump_strength as u32,
+    };
+    let id = egui::Id::new("shared-shape-preview");
+    let old = ctx.data_mut(|d| d.get_temp::<ShapePreviewCache>(id));
+    if let Some(cache) = &old {
+        if cache.sources == sources && cache.settings == settings { return Some(cache.mesh.clone()); }
+    }
+    let views = old.filter(|cache|cache.sources == sources).map(|cache|cache.views)
+        .unwrap_or_else(||std::sync::Arc::new(mesh_geometry::load_views(asset)));
+    if views.is_empty() { return None; }
+    let mesh = std::sync::Arc::new(mesh_geometry::build(&views, settings));
+    ctx.data_mut(|d|d.insert_temp(id, ShapePreviewCache {sources,settings,views,mesh:mesh.clone()}));
+    Some(mesh)
+}
+
 fn three_d_turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
     if app.ui_state.auto_turntable {
         let dt = sanitize_dt(ui.ctx().input(|i| i.stable_dt));
@@ -1920,10 +1960,9 @@ fn three_d_turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .unwrap_or_else(|| "Drift: not measured".to_string());
 
     let ctx = ui.ctx().clone();
-    let tex_turnaround = frame_opt.as_ref().and_then(|f| {
-        let p = f.resolved_path.to_string_lossy().into_owned();
-        app.load_texture(&ctx, &p)
-    });
+    let reference_path = frame_opt.as_ref().map(|f|f.resolved_path.clone())
+        .or_else(||app.session().current_asset().map(|a|a.path.clone()));
+    let tex_turnaround = reference_path.as_ref().and_then(|path|app.load_texture(&ctx,&path.to_string_lossy()));
 
     let avail = ui.available_size();
     let canvas_size = Vec2::new(avail.x.max(80.0), (avail.y - 8.0).max(220.0));
@@ -1946,55 +1985,28 @@ fn three_d_turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
             Color32::WHITE,
         );
 
-        // Right-side live 3D Visual-Hull Cross-Section Mesh Preview driven by yaw_deg + 3D Reconstruction sliders
         let hull_center = Pos2::new(rect.left() + rect.width() * 0.73, rect.center().y + 10.0);
         let hull_h = draw_size.y.max(150.0);
-        let hull_w = (draw_size.x * 0.85).max(95.0);
-        let slices = (app.ui_state.mesh_res.clamp(12, 40) / 2) as usize;
-        let rings = 16usize;
-        let yaw_rad = app.ui_state.yaw_deg.to_radians();
-        let depth_ratio = (app.ui_state.inflation_depth_pct as f32 / 58.0).clamp(0.25, 1.75);
-        let relief = (app.ui_state.relief_detail_pct as f32 / 100.0) * 0.08;
-
         let wire_col = match app.ui_state.shading_mode {
             ShadingMode::FeltPbr => Color32::from_rgba_unmultiplied(110, 210, 255, 155),
             ShadingMode::ClaySculpt => Color32::from_rgba_unmultiplied(225, 195, 165, 185),
             ShadingMode::Wireframe => Color32::from_rgba_unmultiplied(80, 235, 195, 220),
             ShadingMode::Normals => Color32::from_rgba_unmultiplied(195, 145, 255, 200),
         };
-
-        for iz in 0..=slices {
-            let u = iz as f32 / slices as f32;
-            // Anatomical silhouette taper (feet -> legs -> torso -> neck -> head -> crown)
-            let profile_r = if u < 0.12 {
-                0.24
-            } else if u < 0.42 {
-                0.28
-            } else if u < 0.68 {
-                0.42
-            } else if u < 0.74 {
-                0.22
-            } else if u < 0.94 {
-                0.38
-            } else {
-                0.18
-            };
-            let rx = hull_w * 0.5 * profile_r;
-            let rz = rx * 0.72 * depth_ratio;
-            let y_screen = (hull_center.y + hull_h * 0.5) - u * hull_h;
-
-            let mut ring_pts = Vec::with_capacity(rings + 1);
-            for it in 0..=rings {
-                let theta = (it as f32 / rings as f32) * std::f32::consts::TAU + yaw_rad;
-                let r_mod = 1.0 + relief * (3.0 * theta).cos();
-                let x3 = rx * r_mod * theta.cos();
-                let z3 = rz * r_mod * theta.sin();
-                let px = hull_center.x + x3;
-                let py = y_screen + z3 * 0.22;
-                ring_pts.push(Pos2::new(px, py));
-            }
-            for seg in ring_pts.windows(2) {
-                painter.line_segment([seg[0], seg[1]], Stroke::new(1.1, wire_col));
+        if let Some(mesh) = shape_preview(app, &ctx) {
+            let yaw = app.ui_state.yaw_deg.to_radians();
+            let projected: Vec<_> = mesh.positions.iter().map(|[x,y,z]| {
+                let horizontal = x * yaw.cos() - z * yaw.sin();
+                let depth = x * yaw.sin() + z * yaw.cos();
+                [horizontal, 0.5-y+depth*0.22]
+            }).collect();
+            let extent = projected.iter().map(|p|p[0].abs()).fold(0.01f32,f32::max);
+            let scale = hull_h.min((rect.width()*0.23-12.0).max(10.0)/extent);
+            let points: Vec<_> = projected.iter().map(|p|hull_center+Vec2::new(p[0],p[1])*scale).collect();
+            for face in mesh.indices.chunks_exact(3) {
+                for (a,b) in [(face[0],face[1]),(face[1],face[2]),(face[2],face[0])] {
+                    painter.line_segment([points[a as usize],points[b as usize]], Stroke::new(0.7,wire_col));
+                }
             }
         }
         painter.text(

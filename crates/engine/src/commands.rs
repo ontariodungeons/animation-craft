@@ -1714,7 +1714,7 @@ fn cmd_anim_preview_2d(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
-fn decontaminate_sprite_rgba(
+pub(crate) fn decontaminate_sprite_rgba(
     src: &image::RgbaImage,
     target_height: Option<u32>,
 ) -> (image::RgbaImage, [u32; 4]) {
@@ -1801,79 +1801,6 @@ fn decontaminate_sprite_rgba(
     }
 
     (cleaned, [bx0, by0, bx1, by1])
-}
-
-fn sample_row_span(img: &image::RgbaImage, v_norm: f32) -> (f32, f32, [f32; 3]) {
-    let w = img.width().max(1);
-    let h = img.height().max(1);
-    let mut min_y = h;
-    let mut max_y = 0u32;
-    let mut min_x = w;
-    let mut max_x = 0u32;
-    for y in 0..h {
-        for x in 0..w {
-            if img.get_pixel(x, y)[3] >= 96 {
-                if x < min_x {
-                    min_x = x;
-                }
-                if x > max_x {
-                    max_x = x;
-                }
-                if y < min_y {
-                    min_y = y;
-                }
-                if y > max_y {
-                    max_y = y;
-                }
-            }
-        }
-    }
-    if max_y <= min_y || max_x <= min_x {
-        return (0.0, 0.18, [0.78, 0.62, 0.48]);
-    }
-    let body_h = (max_y - min_y).max(1) as f32;
-    let y = (min_y as f32 + v_norm.clamp(0.0, 1.0) * body_h)
-        .round()
-        .clamp(min_y as f32, max_y as f32) as u32;
-
-    let mut row_x0 = w;
-    let mut row_x1 = 0u32;
-    let mut r_sum = 0u64;
-    let mut g_sum = 0u64;
-    let mut b_sum = 0u64;
-    let mut count = 0u64;
-
-    for dy in -1i32..=1i32 {
-        let sy = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
-        for x in 0..w {
-            let p = img.get_pixel(x, sy);
-            if p[3] >= 96 {
-                if x < row_x0 {
-                    row_x0 = x;
-                }
-                if x > row_x1 {
-                    row_x1 = x;
-                }
-                r_sum += u64::from(p[0]);
-                g_sum += u64::from(p[1]);
-                b_sum += u64::from(p[2]);
-                count += 1;
-            }
-        }
-    }
-    let global_cx = 0.5 * (min_x + max_x) as f32;
-    if row_x1 <= row_x0 || count == 0 {
-        return (0.0, 0.06, [0.72, 0.58, 0.46]);
-    }
-    let row_cx = 0.5 * (row_x0 + row_x1) as f32;
-    let center_offset = (row_cx - global_cx) / body_h;
-    let half_span = (0.5 * (row_x1 - row_x0) as f32 / body_h).clamp(0.035, 0.48);
-    let col = [
-        (r_sum as f32 / count as f32) / 255.0,
-        (g_sum as f32 / count as f32) / 255.0,
-        (b_sum as f32 / count as f32) / 255.0,
-    ];
-    (center_offset, half_span, col)
 }
 
 fn write_binary_glb(
@@ -2245,127 +2172,11 @@ fn cmd_mesh_build_4dir(s: &mut Session, params: &Value) -> Result<Value> {
         clean_turnaround_imgs.push(("front".to_string(), out_file, clean_img));
     }
 
-    let fallback_img = clean_turnaround_imgs
-        .first()
-        .map(|(_, _, img)| img.clone())
-        .unwrap_or_else(|| {
-            image::RgbaImage::from_pixel(64, 128, image::Rgba([200, 160, 120, 255]))
+    let views: Vec<_> = clean_turnaround_imgs.iter().map(|(label, _, img)| (label.clone(), img.clone())).collect();
+    let crate::mesh_geometry::MeshGeometry { positions, normals, uvs, colors, indices } =
+        crate::mesh_geometry::build(&views, crate::mesh_geometry::ShapeSettings {
+            inflation_depth_pct, relief_detail_pct, mesh_res, proj_blend_pct, bump_intensity,
         });
-
-    let find_view = |needle: &str| -> &image::RgbaImage {
-        clean_turnaround_imgs
-            .iter()
-            .find(|(lbl, _, _)| lbl.to_ascii_lowercase().contains(needle))
-            .map(|(_, _, img)| img)
-            .unwrap_or(&fallback_img)
-    };
-    let front_img = find_view("front");
-    let qfront_img = clean_turnaround_imgs
-        .iter()
-        .find(|(lbl, _, _)| lbl.to_ascii_lowercase().contains("quarter"))
-        .map(|(_, _, img)| img)
-        .unwrap_or(front_img);
-    let side_img = find_view("side");
-    let back_img = find_view("back");
-
-    let slices = mesh_res.max(12) as usize;
-    let rings = mesh_res.max(12) as usize;
-    let depth_scale = (inflation_depth_pct as f32 / 58.0).clamp(0.25, 1.85);
-    let relief_amp =
-        (relief_detail_pct as f32 / 100.0) * 0.035 + (bump_intensity as f32 / 100.0) * 0.02;
-    let blend_w = (proj_blend_pct as f32 / 100.0).clamp(0.0, 1.0);
-
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals: Vec<[f32; 3]> = Vec::new();
-    let mut uvs: Vec<[f32; 2]> = Vec::new();
-    let mut colors: Vec<[f32; 4]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-
-    for iz in 0..=slices {
-        // z_y runs strictly from 0.0 (feet planted on ground plane) to 1.0 (crown)
-        let u_height = iz as f32 / slices as f32;
-        let v_img = 1.0 - u_height;
-        let (cx_f, rx_f, col_f) = sample_row_span(front_img, v_img);
-        let (_cx_q, rx_q, col_q) = sample_row_span(qfront_img, v_img);
-        let (cz_s, rz_s_raw, col_s) = sample_row_span(side_img, v_img);
-        let (_cx_b, _rx_b, col_b) = sample_row_span(back_img, v_img);
-
-        let rx = (rx_f * (1.0 - 0.25 * blend_w) + rx_q * (0.25 * blend_w)).max(0.025);
-        let rz = (rz_s_raw * depth_scale).max(0.025);
-
-        // Taper very bottom and top rings slightly for clean manifold caps while keeping z >= 0.0
-        let cap_taper = if iz == 0 || iz == slices { 0.55 } else { 1.0 };
-
-        for it in 0..=rings {
-            let v_theta = it as f32 / rings as f32;
-            let theta = v_theta * std::f32::consts::TAU;
-            let cos_t = theta.cos();
-            let sin_t = theta.sin();
-
-            let relief =
-                1.0 + relief_amp * ((3.0 * theta + u_height * std::f32::consts::TAU).cos() * 0.5);
-            let x = cx_f + rx * cap_taper * relief * cos_t;
-            let z = cz_s + rz * cap_taper * relief * sin_t;
-            let y = u_height.max(0.0); // Ground plane strictly at y = 0.0 (glTF Y-up)
-
-            let nx = cos_t / rx.max(0.01);
-            let nz = sin_t / rz.max(0.01);
-            let n_len = (nx * nx + nz * nz).sqrt().max(1e-5);
-
-            let w_front = cos_t.max(0.0);
-            let w_back = (-cos_t).max(0.0);
-            let w_side = sin_t.abs();
-            let w_sum = (w_front + w_back + w_side).max(1e-4);
-            let r_col = (col_f[0] * w_front
-                + col_b[0] * w_back
-                + (col_s[0] * 0.6 + col_q[0] * 0.4) * w_side)
-                / w_sum;
-            let g_col = (col_f[1] * w_front
-                + col_b[1] * w_back
-                + (col_s[1] * 0.6 + col_q[1] * 0.4) * w_side)
-                / w_sum;
-            let b_col = (col_f[2] * w_front
-                + col_b[2] * w_back
-                + (col_s[2] * 0.6 + col_q[2] * 0.4) * w_side)
-                / w_sum;
-
-            positions.push([x, y, z]);
-            normals.push([nx / n_len, 0.0, nz / n_len]);
-            uvs.push([v_theta, v_img]);
-            colors.push([r_col, g_col, b_col, 1.0]);
-        }
-    }
-
-    let stride = (rings + 1) as u32;
-    for iz in 0..slices as u32 {
-        for it in 0..rings as u32 {
-            let i00 = iz * stride + it;
-            let i10 = (iz + 1) * stride + it;
-            let i01 = iz * stride + it + 1;
-            let i11 = (iz + 1) * stride + it + 1;
-            indices.extend_from_slice(&[i00, i01, i11, i00, i11, i10]);
-        }
-    }
-
-    // Bottom sole center cap at y = 0.0 and top crown cap at y = 1.0
-    let bottom_center_idx = positions.len() as u32;
-    positions.push([0.0, 0.0, 0.0]);
-    normals.push([0.0, -1.0, 0.0]);
-    uvs.push([0.5, 1.0]);
-    colors.push([0.35, 0.30, 0.28, 1.0]);
-    for it in 0..rings as u32 {
-        indices.extend_from_slice(&[bottom_center_idx, it + 1, it]);
-    }
-
-    let top_center_idx = positions.len() as u32;
-    positions.push([0.0, 1.0, 0.0]);
-    normals.push([0.0, 1.0, 0.0]);
-    uvs.push([0.5, 0.0]);
-    colors.push([0.75, 0.62, 0.50, 1.0]);
-    let top_ring_start = (slices as u32) * stride;
-    for it in 0..rings as u32 {
-        indices.extend_from_slice(&[top_center_idx, top_ring_start + it, top_ring_start + it + 1]);
-    }
 
     let default_glb = ingest_dir.join(format!("{asset_id}_4dir.glb"));
     let out_glb = params
@@ -4978,32 +4789,28 @@ print(json.dumps({'recommended': {'archetype': 'fixture_creature', 'primaryVerb'
     }
 
     #[test]
-    fn mesh_build_4dir_returns_not_implemented() {
+    fn mesh_export_vertices_match_shared_preview_geometry() {
+        let dir = temporary_directory("mesh_parity");
+        std::fs::write(dir.join("studio_pipeline_cli.py"), "").unwrap();
+        let source = dir.join("shape.png");
+        image::RgbaImage::from_fn(40,60,|x,y| {
+            if x>5 && x<28 && y>4 && y<56 { image::Rgba([80,140,200,255]) } else { image::Rgba([0,0,0,0]) }
+        }).save(&source).unwrap();
         let mut s = Session::default();
-        let err = s.execute("mesh.build_4dir", json!({})).unwrap_err();
-        assert!(matches!(err, EngineError::NotImplemented));
-
-        let res = s
-            .execute(
-                "mesh.build_4dir",
-                json!({
-                    "preset": "hopper",
-                    "mesh_res": 16,
-                    "inflation_depth_pct": 58,
-                    "relief_detail_pct": 44,
-                    "proj_blend_pct": 65,
-                    "bump_intensity": 35
-                }),
-            )
-            .unwrap();
-        assert_eq!(res["ok"], true);
-        assert!(res["vertex_count"].as_u64().unwrap() > 100);
-        let glb_path = PathBuf::from(res["glb"].as_str().unwrap());
-        let obj_path = PathBuf::from(res["obj"].as_str().unwrap());
-        assert!(glb_path.is_file());
-        assert!(obj_path.is_file());
-        let glb_bytes = std::fs::read(&glb_path).unwrap();
-        assert_eq!(&glb_bytes[0..4], b"glTF");
+        s.cwd=dir.clone();
+        let asset=Asset { id:"generated".into(),path:source,..Default::default() };
+        let views=crate::mesh_geometry::load_views(&asset);
+        let expected=crate::mesh_geometry::build(&views, crate::mesh_geometry::ShapeSettings {inflation_depth_pct:58,relief_detail_pct:44,mesh_res:16,proj_blend_pct:65,bump_intensity:35});
+        s.assets.insert("generated".into(),asset);
+        s.active_asset=Some("generated".into());
+        let result=s.execute("mesh.build_4dir",json!({"mesh_res":16})).unwrap();
+        let obj=std::fs::read_to_string(result["obj"].as_str().unwrap()).unwrap();
+        let vertices:Vec<Vec<f32>>=obj.lines().filter_map(|line|line.strip_prefix("v ")).map(|line|line.split_whitespace().map(|v|v.parse().unwrap()).collect()).collect();
+        assert_eq!(vertices.len(),expected.positions.len());
+        for (actual,expected) in vertices.iter().zip(expected.positions) {
+            for axis in 0..3 { assert!((actual[axis]-expected[axis]).abs()<0.00001); }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
