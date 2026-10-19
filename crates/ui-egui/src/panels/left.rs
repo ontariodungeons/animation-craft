@@ -8,9 +8,13 @@ use egui::{Color32, Sense, Stroke, Ui, Vec2};
 
 pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
-        .id_salt("left_scroll")
+        .id_salt(if app.ui_state.center_tab == CenterTab::AssetSheet { "left_pose_browser" } else { "left_scroll" })
         .show(ui, |ui| {
             super::header::project_assets(app, ui);
+            if app.ui_state.center_tab == CenterTab::AssetSheet {
+                super::center::pose_viewer::sidebar(app, ui);
+                ui.separator();
+            }
             ui.heading("Intake & Attached Sheets");
             // Attached Sheets per Character (Zero Context Switching)
             let (active_char, asset_sheet_name, pose_count, turn_sheet_name, turn_count) = {
@@ -372,58 +376,10 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             // ========================================================================
             // Section 3: Pose Sheet Cutouts (dynamic from manifest)
             // ========================================================================
-            ui.heading("3. Pose Sheet Cutouts");
-            ui.separator();
-
-            let pose_frames = app
-                .session()
-                .current_asset()
-                .and_then(|a| a.pose_manifest.as_ref())
-                .map(|m| m.frames.clone());
-            // Snapshot foot_lift values so we don't hold an immutable borrow of app
-            // while mutating it inside the loop below.
-            let foot_lifts: std::collections::HashMap<String, f32> = app
-                .session()
-                .current_asset()
-                .and_then(|a| a.motion_range.as_ref())
-                .map(|m| {
-                    m.poses
-                        .iter()
-                        .map(|(label, pm)| (label.clone(), pm.foot_lift_px))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            if let Some(frames) = &pose_frames {
-                if frames.is_empty() {
-                    ui.label("No pose frames in manifest.");
-                } else {
-                    for (i, frame) in frames.iter().enumerate() {
-                        let selected = app.ui_state.selected_pose_idx == i;
-                        let foot_lift = foot_lifts.get(&frame.label).copied().unwrap_or(f32::NAN);
-
-                        let label_text = if foot_lift.is_nan() {
-                            format!("{} (lift: not measured)", frame.label)
-                        } else {
-                            format!("{} (lift {:.0}px)", frame.label, foot_lift)
-                        };
-
-                        if ui.selectable_label(selected, &label_text).clicked() {
-                            app.ui_state_mut().selected_pose_idx = i;
-                            app.ui_state_mut().playing = false;
-                            app.ui_state_mut().center_tab = CenterTab::TwoD;
-                            app.exec_ui_command(UiCommand::AnimPreview2d {
-                                mode: frame.label.clone(),
-                            });
-                        }
-                    }
-                }
-            } else {
-                ui.label("No pose manifest loaded.");
-                ui.small("Use Intake ▸ Cut Sheet (PhotoCraft) or load a preset.");
+            if app.ui_state.center_tab != CenterTab::AssetSheet {
+                super::center::pose_viewer::sidebar(app, ui);
+                ui.separator();
             }
-
-            ui.separator();
 
             // ========================================================================
             // Section 4: Part Outliner (dynamic from asset.parts)
