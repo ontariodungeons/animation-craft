@@ -39,6 +39,10 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 ui.close();
             }
             ui.separator();
+            if action_button(app, ui, "menu.workshop", "Workshop", ready && app.session.project_path.is_some()) {
+                app.ui_state.show_workshop = true;
+                ui.close();
+            }
             if action_button(app, ui, "menu.transcribe", "Transcribe Song…", ready && project) {
                 ui.close();
                 if let Some(audio) = rfd::FileDialog::new()

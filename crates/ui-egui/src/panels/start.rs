@@ -66,16 +66,12 @@ pub(crate) fn record_open_project(app: &mut AnimationCraftApp) {
     }
 }
 
+/// New song project: opens the dialog that asks for the song's name and audio.
 pub(crate) fn new_project(app: &mut AnimationCraftApp) {
-    if let Some(path) = rfd::FileDialog::new()
-        .set_title("New Project")
-        .add_filter("AnimationCraft project", &["acproj"])
-        .set_file_name("Untitled.acproj")
-        .save_file()
-    {
-        // The save dialog has already asked before replacing an existing file.
-        run(app, "project.new", json!({"path": path, "overwrite": true}));
+    if app.ui_state.new_project_root.is_empty() {
+        app.ui_state.new_project_root = super::workshop::default_projects_root().display().to_string();
     }
+    app.ui_state.new_project_open = true;
 }
 
 pub(crate) fn open_project(app: &mut AnimationCraftApp) {

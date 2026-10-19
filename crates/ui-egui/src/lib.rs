@@ -83,6 +83,14 @@ pub struct UiState {
     pub recent_projects: Vec<String>,
     /// Where Recent is kept; `None` (tests, headless use) keeps it in memory only.
     pub recent_file: Option<std::path::PathBuf>,
+    /// Show the Workshop checklist even when it is complete (File ▸ Workshop).
+    pub show_workshop: bool,
+    /// Last `workshop.status`, refreshed about once a second.
+    pub workshop_status: Option<(Instant, Value)>,
+    pub new_project_open: bool,
+    pub new_project_name: String,
+    pub new_project_audio: String,
+    pub new_project_root: String,
     /// The project the recent list last recorded, to notice opens from any caller.
     pub recorded_project: Option<std::path::PathBuf>,
     pub archetype: String,
@@ -156,6 +164,12 @@ impl Default for UiState {
             demo_preset: None,
             recent_projects: Vec::new(),
             recent_file: None,
+            show_workshop: false,
+            workshop_status: None,
+            new_project_open: false,
+            new_project_name: String::new(),
+            new_project_audio: String::new(),
+            new_project_root: String::new(),
             recorded_project: None,
             archetype: "humanoid_biped".to_string(),
             q1_motion: "walk_jump_talk".to_string(),
@@ -837,6 +851,7 @@ impl AnimationCraftApp {
             crate::panels::header::header(self, &mut top_ui);
         }
         crate::panels::header::asset_dialogs(self, ui.ctx());
+        crate::panels::workshop::new_project_dialog(self, ui.ctx());
 
         let body =
             egui::Rect::from_min_max(egui::pos2(full.min.x, header_rect.max.y + 1.0), full.max);
@@ -873,6 +888,12 @@ impl AnimationCraftApp {
             let mut home = ui.new_child(egui::UiBuilder::new().max_rect(body));
             home.set_clip_rect(body);
             crate::panels::start::start_screen(self, &mut home);
+            return;
+        }
+        if crate::panels::workshop::showing(self) {
+            let mut workshop = ui.new_child(egui::UiBuilder::new().max_rect(body));
+            workshop.set_clip_rect(body);
+            crate::panels::workshop::workshop_screen(self, &mut workshop);
             return;
         }
 
@@ -1565,6 +1586,7 @@ impl UiCommand {
                     | "export.layered_motion"
                     | "validate.motion"
                     | "audio.transcribe"
+                    | "workshop.build_draft"
             );
         }
         matches!(
@@ -1761,9 +1783,11 @@ mod tests {
     #[test]
     fn headless_control_tick_services_commands_and_times_out_screenshots_when_window_suspended() {
         let mut app = AnimationCraftApp::new();
-        // The workspace tabs show once a project is open (Home shows before that).
-        let project = std::env::temp_dir().join(format!("ac_headless_{}.acproj", std::process::id()));
-        app.dispatch("project.new", json!({"path": project, "overwrite": true})).unwrap();
+        // The workspace tabs show once an asset is connected (Home shows before that). Without a
+        // project file there is no song workshop to complete first.
+        let project = std::env::temp_dir().join(format!("ac_headless_{}.png", std::process::id()));
+        image::RgbaImage::new(8, 8).save(&project).unwrap();
+        app.dispatch("project.add_asset", json!({"path": project})).unwrap();
         let ctx = egui::Context::default();
         let (tx, rx) = mpsc::channel();
         app.control_rx = Some(rx);

@@ -234,7 +234,7 @@ fn run_pipeline(s: &Session, args: &[String]) -> Result<Value> {
     Ok(serde_json::from_str(&stdout).unwrap_or_else(|_| json!({ "raw": stdout })))
 }
 
-fn sanitize_asset_id(raw: &str) -> String {
+pub fn sanitize_asset_id(raw: &str) -> String {
     let mut out = String::new();
     for ch in raw.chars() {
         if ch.is_ascii_alphanumeric() {
@@ -3225,7 +3225,8 @@ fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
 pub(crate) fn write_project_file(s: &Session) -> Result<()> {
     let Some(path) = &s.project_path else { return Ok(()) };
     let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
-    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": s.project_assets});
+    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": s.project_assets,
+        "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved}});
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -3255,9 +3256,14 @@ fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
             path.display()
         )));
     }
+    let audio = match params.get("audio").and_then(Value::as_str) {
+        Some(raw) => Some(song_audio_path(s, raw)?),
+        None => None,
+    };
     reset_for_project(s, path.clone(), Vec::new());
+    s.song_audio = audio;
     write_project_file(s)?;
-    Ok(json!({"ok": true, "project": path, "assets": s.project_assets}))
+    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "workshop": workshop_status(s)?}))
 }
 
 fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
@@ -3282,7 +3288,9 @@ fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
         .collect::<Vec<_>>();
     let missing = json!(missing);
     reset_for_project(s, path.clone(), assets);
-    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing}))
+    s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
+    s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
+    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing, "workshop": workshop_status(s)?}))
 }
 
 fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
@@ -3296,6 +3304,273 @@ fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({"ok": true, "project": s.project_path}))
 }
 
+// ---------------------------------------------------------------------------------------------
+// Workshop: what a song needs before animation starts. One project folder per song:
+//   <Song>.acproj, liner-notes/, images/, <song>.transcript.json (+ .fcproj), draft.pdf.
+// The song's audio is referenced where it lives and never copied.
+
+const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "flac", "m4a", "aac", "ogg"];
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp"];
+const DRAFT_PDF: &str = "draft.pdf";
+
+fn has_extension(path: &Path, allowed: &[&str]) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| allowed.iter().any(|a| a.eq_ignore_ascii_case(e)))
+}
+
+fn song_audio_path(s: &Session, raw: &str) -> Result<PathBuf> {
+    let path = resolve_workspace_path(s, raw);
+    if !path.is_file() || !has_extension(&path, AUDIO_EXTENSIONS) {
+        return Err(EngineError::InvalidParams(format!("not an audio file: {}", path.display())));
+    }
+    Ok(path)
+}
+
+fn project_dir(s: &Session) -> Result<PathBuf> {
+    s.project_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| EngineError::InvalidParams("no project is open; use project.new or project.open".into()))
+}
+
+/// Files in `dir` (not recursive), sorted, optionally limited to some extensions.
+fn files_in(dir: &Path, only: Option<&[&str]>) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && !p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')))
+        .filter(|p| only.is_none_or(|exts| has_extension(p, exts)))
+        .collect();
+    files.sort();
+    files
+}
+
+fn transcript_files(dir: &Path) -> Vec<PathBuf> {
+    files_in(dir, Some(&["json"]))
+        .into_iter()
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".transcript.json")))
+        .collect()
+}
+
+fn workshop_status(s: &Session) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let audio_ok = s.song_audio.as_ref().is_some_and(|p| p.is_file());
+    let transcripts = transcript_files(&dir);
+    let liner = files_in(&dir.join("liner-notes"), None);
+    let images = files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS));
+    let draft = dir.join(DRAFT_PDF);
+    let items = vec![
+        json!({"id": "audio", "label": "Song audio", "done": audio_ok, "path": s.song_audio,
+            "next": "workshop.set_audio {\"path\": \"<song audio>\"}"}),
+        json!({"id": "transcript", "label": "Transcript", "done": !transcripts.is_empty(), "path": transcripts.first(),
+            "next": "audio.transcribe {} (uses the song audio)"}),
+        json!({"id": "liner_notes", "label": "Liner notes", "done": !liner.is_empty(), "count": liner.len(),
+            "path": dir.join("liner-notes"), "next": "workshop.add {\"kind\": \"liner_notes\", \"paths\": [...]}"}),
+        json!({"id": "images", "label": "Reference images", "done": !images.is_empty(), "count": images.len(),
+            "path": dir.join("images"), "next": "workshop.add {\"kind\": \"images\", \"paths\": [...]}"}),
+        json!({"id": "draft", "label": "Draft PDF approved", "done": draft.is_file() && s.draft_approved,
+            "exists": draft.is_file(), "approved": s.draft_approved, "path": draft,
+            "next": if draft.is_file() { "workshop.approve_draft {\"approved\": true}" } else { "workshop.build_draft {}" }}),
+    ];
+    let complete = items.iter().all(|i| i["done"] == json!(true));
+    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "items": items}))
+}
+
+fn cmd_workshop_status(s: &mut Session, _: &Value) -> Result<Value> {
+    workshop_status(s)
+}
+
+fn cmd_workshop_set_audio(s: &mut Session, params: &Value) -> Result<Value> {
+    project_dir(s)?;
+    let raw = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("missing audio 'path'".into()))?;
+    s.song_audio = Some(song_audio_path(s, raw)?);
+    write_project_file(s)?;
+    workshop_status(s)
+}
+
+/// Copies liner notes or reference images into the project folder (audio is never copied).
+fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let (folder, only) = match params.get("kind").and_then(Value::as_str) {
+        Some("liner_notes") => ("liner-notes", None),
+        Some("images") => ("images", Some(IMAGE_EXTENSIONS)),
+        _ => return Err(EngineError::InvalidParams("kind must be liner_notes or images".into())),
+    };
+    let paths: Vec<PathBuf> = params
+        .get("paths")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|p| resolve_workspace_path(s, p))
+        .collect();
+    if paths.is_empty() {
+        return Err(EngineError::InvalidParams("pass 'paths': [files]".into()));
+    }
+    let target = dir.join(folder);
+    std::fs::create_dir_all(&target)?;
+    let mut added = Vec::new();
+    for path in &paths {
+        if !path.is_file() {
+            return Err(EngineError::InvalidParams(format!("file not found: {}", path.display())));
+        }
+        if let Some(exts) = only
+            && !has_extension(path, exts)
+        {
+            return Err(EngineError::InvalidParams(format!("not an image: {}", path.display())));
+        }
+        let name = path.file_name().ok_or_else(|| EngineError::InvalidParams("bad file name".into()))?;
+        let dest = target.join(name);
+        if dest != *path {
+            std::fs::copy(path, &dest)?;
+        }
+        added.push(dest);
+    }
+    let mut status = workshop_status(s)?;
+    status["added"] = json!(added);
+    Ok(status)
+}
+
+fn cmd_workshop_approve_draft(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
+    if approved && !dir.join(DRAFT_PDF).is_file() {
+        return Err(EngineError::InvalidParams("build the draft first (workshop.build_draft)".into()));
+    }
+    s.draft_approved = approved;
+    write_project_file(s)?;
+    workshop_status(s)
+}
+
+/// One sung phrase per line with its start time: speech-to-text capitalises the first word of each
+/// phrase, so a line starts at a capitalised word (not "I") or after . ! ?; paragraphs become stanzas.
+fn lyric_lines(transcript: &Value) -> Vec<String> {
+    let words: Vec<(f64, &str)> = transcript
+        .get("words")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|w| Some((w.get("start")?.as_f64()?, w.get("text")?.as_str()?.trim())))
+        .collect();
+    let stanza_starts: Vec<f64> = transcript
+        .get("paragraphs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.get("start")?.as_f64())
+        .collect();
+    let mut lines = Vec::new();
+    let mut current: Option<(f64, String)> = None;
+    let mut sentence_end = false;
+    for (start, text) in words {
+        let capital = text.chars().next().is_some_and(char::is_uppercase)
+            && !matches!(text.trim_end_matches([',', '.', '!', '?']), "I" | "I'm" | "I'll" | "I've" | "I'd");
+        let stanza = stanza_starts.iter().any(|s| (s - start).abs() < 0.01);
+        if current.is_some() && (capital || sentence_end || stanza) {
+            if let Some((t, line)) = current.take() {
+                lines.push(format!("{}  {line}", clock(t)));
+            }
+            if stanza {
+                lines.push(String::new());
+            }
+        }
+        match &mut current {
+            Some((_, line)) => {
+                line.push(' ');
+                line.push_str(text);
+            }
+            None => current = Some((start, text.to_string())),
+        }
+        sentence_end = text.ends_with(['.', '!', '?']);
+    }
+    if let Some((t, line)) = current {
+        lines.push(format!("{}  {line}", clock(t)));
+    }
+    lines
+}
+
+fn clock(seconds: f64) -> String {
+    let total = seconds.max(0.0).round() as u64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// Builds `draft.pdf` with pdfcraft-cli: title, timed lyrics and liner notes on page 1, then one
+/// page per reference image. A rebuilt draft needs approving again.
+fn cmd_workshop_build_draft(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let title = s
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|n| n.to_str())
+        .unwrap_or("Untitled")
+        .to_string();
+    let mut lines = vec![];
+    if let Some(audio) = &s.song_audio {
+        lines.push(format!("Song: {}", audio.display()));
+    }
+    if let Some(transcript) = transcript_files(&dir).first() {
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript)?)
+            .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
+        lines.push(String::new());
+        lines.push("Lyrics (transcript)".into());
+        lines.extend(lyric_lines(&doc));
+    }
+    let liner = files_in(&dir.join("liner-notes"), None);
+    if !liner.is_empty() {
+        lines.push(String::new());
+        lines.push("Liner notes".into());
+        for file in &liner {
+            match has_extension(file, &["md", "txt"]) {
+                true => lines.push(std::fs::read_to_string(file)?.chars().take(2400).collect()),
+                false => lines.push(format!("(see {})", file.display())),
+            }
+        }
+    }
+    let images = files_in(&dir.join("images"), Some(IMAGE_EXTENSIONS));
+    let (page_w, page_h, margin) = (842.0_f64, 595.0_f64, 40.0_f64);
+    let mut steps = vec![
+        json!({"tool": "doc_create", "args": {"from": "blank", "pages": 1 + images.len(), "width": page_w, "height": page_h, "name": title}}),
+        json!({"tool": "page_add_text", "args": {"doc": 1, "page": 1, "at": [margin, 56.0], "text": format!("{title} — draft"), "size": 22, "bold": true}}),
+    ];
+    if !lines.is_empty() {
+        steps.push(json!({"tool": "page_add_text", "args": {"doc": 1, "page": 1,
+            "rect": [margin, 90.0, page_w - margin, page_h - margin], "text": lines.join("\n"), "size": 11}}));
+    }
+    for (i, image) in images.iter().enumerate() {
+        let (w, h) = image::image_dimensions(image)?;
+        // Fit the image inside the page margins, keeping its proportions.
+        let scale = ((page_w - 2.0 * margin) / f64::from(w)).min((page_h - 2.0 * margin) / f64::from(h));
+        let (dw, dh) = (f64::from(w) * scale, f64::from(h) * scale);
+        let (x, y) = ((page_w - dw) / 2.0, (page_h - dh) / 2.0);
+        steps.push(json!({"tool": "page_add_image", "args": {"doc": 1, "page": i + 2, "path": image, "rect": [x, y, x + dw, y + dh]}}));
+    }
+    let draft = dir.join(DRAFT_PDF);
+    steps.push(json!({"tool": "doc_save", "args": {"doc": 1, "path": draft}}));
+    let script = dir.join(".draft.pdfcraft.json");
+    std::fs::write(&script, Value::Array(steps).to_string())?;
+    let run = run_tool_in(&dir, "pdfcraft-cli", &["run".into(), "--script".into(), script.to_string_lossy().into_owned(), "--report".into()]);
+    let _ = std::fs::remove_file(&script);
+    let report: Value = serde_json::from_str(&run?)
+        .map_err(|e| EngineError::ExternalTool("pdfcraft-cli".into(), e.to_string()))?;
+    if report.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(EngineError::ExternalTool("pdfcraft-cli".into(), report.to_string()));
+    }
+    s.draft_approved = false;
+    write_project_file(s)?;
+    let mut status = workshop_status(s)?;
+    status["draft"] = json!(draft);
+    status["pages"] = json!(1 + images.len());
+    Ok(status)
+}
+
 /// FilmCraft time base: ticks per second.
 const FILMCRAFT_TICKS_PER_SECOND: f64 = 254_016_000_000.0;
 
@@ -3307,7 +3582,8 @@ fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
         .get("audio")
         .and_then(Value::as_str)
         .map(|p| resolve_workspace_path(s, p))
-        .ok_or_else(|| EngineError::InvalidParams("missing 'audio' path".into()))?;
+        .or_else(|| s.song_audio.clone())
+        .ok_or_else(|| EngineError::InvalidParams("missing 'audio' path (or set the project's song)".into()))?;
     if !audio.is_file() {
         return Err(EngineError::InvalidParams(format!("audio file not found: {}", audio.display())));
     }
@@ -3323,11 +3599,16 @@ fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
             })?,
     };
     std::fs::create_dir_all(&out_dir)?;
-    let stem = params
-        .get("name")
-        .and_then(Value::as_str)
-        .map(sanitize_asset_id)
-        .unwrap_or_else(|| sanitize_asset_id(audio.file_stem().and_then(|n| n.to_str()).unwrap_or("audio")));
+    // Named after the project when one is open (song audio files are often "track13.cdda.wav").
+    let fallback = s
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .or_else(|| audio.file_stem())
+        .and_then(|n| n.to_str())
+        .unwrap_or("audio")
+        .to_string();
+    let stem = sanitize_asset_id(params.get("name").and_then(Value::as_str).unwrap_or(&fallback));
     let fcproj = out_dir.join(format!("{stem}.fcproj"));
     let transcript_path = out_dir.join(format!("{stem}.transcript.json"));
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
@@ -4382,7 +4663,7 @@ fn build() -> Vec<CommandSpec> {
             "New Project",
             ["File"],
             Some("Cmd+N"),
-            "{\"path\":\"folder/name.acproj\",\"overwrite\":false}",
+            "{\"path\":\"folder/name.acproj\",\"audio\":\"optional song audio\",\"overwrite\":false}",
             always,
             cmd_project_new
         ),
@@ -4529,6 +4810,43 @@ fn build() -> Vec<CommandSpec> {
             "{\"output\":\"optional.mp4\",\"mode\":\"optional\",\"speed\":1.0,\"duration\":3.0}",
             has_asset,
             cmd_export_cutout_mp4
+        ),
+        query!("workshop.status", "Workshop Checklist", "{}", cmd_workshop_status),
+        cmd!(
+            "workshop.set_audio",
+            "Set Song Audio",
+            ["Workshop"],
+            None,
+            "{\"path\": \"song audio file (referenced, not copied)\"}",
+            always,
+            cmd_workshop_set_audio
+        ),
+        cmd!(
+            "workshop.add",
+            "Add Liner Notes / Images",
+            ["Workshop"],
+            None,
+            "{\"kind\": \"liner_notes|images\", \"paths\": [\"file\"]}",
+            always,
+            cmd_workshop_add
+        ),
+        cmd!(
+            "workshop.build_draft",
+            "Build Draft PDF",
+            ["Workshop"],
+            None,
+            "{}",
+            always,
+            cmd_workshop_build_draft
+        ),
+        cmd!(
+            "workshop.approve_draft",
+            "Approve Draft PDF",
+            ["Workshop"],
+            None,
+            "{\"approved\": true}",
+            always,
+            cmd_workshop_approve_draft
         ),
         cmd!(
             "audio.transcribe",
