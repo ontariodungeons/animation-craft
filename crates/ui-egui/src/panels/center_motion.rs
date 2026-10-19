@@ -1294,3 +1294,28 @@ mod control_binding_tests {
         assert_eq!(motion.pos_offset["head"], [0.0, 0.0]);
     }
 }
+
+/// Canvas-space hierarchy transform shared by native drawing and export bounds.
+/// Visibility/opacity are deliberately independent of parent transforms.
+pub(crate) fn transform_rig_point(
+    rig: &LoadedCutoutRigPlan,
+    motion: &EvaluatedRigMotion,
+    part_id: &str,
+    point: [f32; 2],
+) -> [f32; 2] {
+    let mut point = point;
+    let mut id = Some(part_id);
+    for _ in 0..rig.parts.len() {
+        let Some(part) = id.and_then(|id| rig.parts.iter().find(|part| part.id == id)) else { break; };
+        let angle = motion.angles_rad.get(&part.id).copied().unwrap_or(0.0);
+        let scale = motion.scale_xy.get(&part.id).copied().unwrap_or([1.0,1.0]);
+        let offset = motion.pos_offset.get(&part.id).copied().unwrap_or([0.0,0.0]);
+        let (sin, cos) = angle.sin_cos();
+        let dx = (point[0] - part.pivot[0]) * scale[0];
+        let dy = (point[1] - part.pivot[1]) * scale[1];
+        point = [part.pivot[0] + dx*cos - dy*sin + offset[0], part.pivot[1] + dx*sin + dy*cos + offset[1]];
+        if part.parent.is_none() { point[1] += motion.root_dy_canvas; }
+        id = part.parent.as_deref();
+    }
+    point
+}

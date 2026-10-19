@@ -19,6 +19,8 @@
 pub mod automation;
 mod menus;
 mod face_preview;
+mod preview_export;
+mod control_preview;
 mod panels;
 
 use animationcraft_engine::Session;
@@ -48,6 +50,7 @@ pub struct AnimationCraftApp {
     ui_state: UiState,
     textures: HashMap<String, egui::TextureHandle>,
     face_preview: face_preview::FacePreview,
+    control_preview: control_preview::ControlPreview,
     pub automation: automation::Registry,
     control_rx: Option<Receiver<ControlRequest>>,
     control_port: Option<u16>,
@@ -320,6 +323,7 @@ impl AnimationCraftApp {
             ui_state: UiState::default(),
             textures: HashMap::new(),
             face_preview: face_preview::FacePreview::default(),
+            control_preview: control_preview::ControlPreview::default(),
             automation: automation::Registry::default(),
             control_rx: None,
             control_port: None,
@@ -1556,6 +1560,14 @@ impl AnimationCraftApp {
                     "A background pipeline command is already running…".to_string();
                 return;
             }
+            let snapshot_export = matches!(id, "export.cutout_mp4" | "export.layered_motion");
+            let export_textures = if snapshot_export {
+                match self.export_control_textures() {
+                    Ok(textures) => textures,
+                    Err(error) => { self.ui_state.status_line = error; return; }
+                }
+            } else { std::collections::BTreeMap::new() };
+            let export_state = self.ui_state.clone();
             self.sync_ui_before_command(id, &params);
             self.ui_state.busy_command = Some(id.to_string());
             self.ui_state.status_line = format!("Running `{id}` in background…");
@@ -1563,9 +1575,11 @@ impl AnimationCraftApp {
             let tx = self.job_tx.clone();
             let id_owned = id.to_string();
             std::thread::spawn(move || {
-                let result = session_clone
-                    .execute(&id_owned, params)
-                    .map_err(|e| e.to_string());
+                let result = if snapshot_export {
+                    preview_export::export(&mut session_clone, &export_state, &params, &export_textures, id_owned == "export.cutout_mp4")
+                } else {
+                    session_clone.execute(&id_owned, params).map_err(|e| e.to_string())
+                };
                 let _ = tx.send(BackgroundJobResult {
                     id: id_owned,
                     session: session_clone,
