@@ -1355,12 +1355,14 @@ mod tests {
                 pose_manifest: Some(LoadedManifest {
                     frames: vec![
                         ManifestFrame {
+                        qa_issues: Vec::new(),
                             label: "standing".into(),
                             resolved_path: root.join("first.png"),
                             parts: part_map.clone(),
                             ..Default::default()
                         },
                         ManifestFrame {
+                        qa_issues: Vec::new(),
                             index: 1,
                             label: "jumping".into(),
                             resolved_path: root.join("second.png"),
@@ -1786,6 +1788,7 @@ mod tests {
             let frame_count = if idx % 2 == 0 { 3 } else { 1 };
             let frames = (0..frame_count)
                 .map(|i| ManifestFrame {
+                        qa_issues: Vec::new(),
                     index: i,
                     label: format!("{slug}_pose_{i}"),
                     resolved_path: root.join("first.png"),

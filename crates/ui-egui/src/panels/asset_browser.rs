@@ -266,6 +266,7 @@ mod tests {
                 pose_manifest: Some(LoadedManifest {
                     frames: (0..11)
                         .map(|i| ManifestFrame {
+                        qa_issues: Vec::new(),
                             index: i,
                             label: format!("pose_{i}"),
                             ..Default::default()
