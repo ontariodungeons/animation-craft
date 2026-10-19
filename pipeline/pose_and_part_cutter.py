@@ -206,8 +206,10 @@ def _components(mask: np.ndarray, kind: str) -> list[tuple[int, int, int, int]]:
     return [b for row in rows for b in sorted(row, key=lambda b: b[0])]
 
 
-def _frame_review(crop: Image.Image, index: int, boxes: list, median_area: float) -> list[str]:
-    """Evidence that one cut frame may be wrong (empty list = nothing suspicious found)."""
+def _frame_review(crop: Image.Image, index: int, boxes: list, median_area: float, background: np.ndarray) -> list[str]:
+    """Evidence that one cut frame may be wrong (empty list = nothing suspicious found).
+
+    `background` marks sheet pixels matching the sheet's background colour, cropped to this frame's box."""
     issues = []
     x0, y0, x1, y1 = boxes[index]
     overlaps = [j for j, (a0, b0, a1, b1) in enumerate(boxes)
@@ -229,6 +231,12 @@ def _frame_review(crop: Image.Image, index: int, boxes: list, median_area: float
         if pieces:
             issues.append(f'{len(pieces)} detached piece(s) besides the figure, {stray_pct:.1f}% of visible pixels '
                           'outside it: check for source text, background residue or neighbour fragments')
+    visible = np.array(crop)[:, :, 3] > 20
+    kept = visible & background[:visible.shape[0], :visible.shape[1]]
+    kept_pct = 100.0 * kept.sum() / max(1, visible.sum())
+    # Clean cuts measure 0-8% (figure colours near the background); an unremoved panel measures 10-60%.
+    if kept_pct > 9:
+        issues.append(f'{kept_pct:.0f}% of visible pixels match the sheet background: background was not removed')
     return issues
 
 
@@ -648,6 +656,7 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
     frames = []
     editable = {'frames':[], 'puppet':(layout or {}).get('puppet',{})}
     boxes = [b for _,b,_ in crops]
+    sheet_background = _background_candidates(np.array(image)[:, :, :3], tolerance)
     median_area = float(np.median([(b[2]-b[0])*(b[3]-b[1]) for b in boxes]))
     for i,(item,box,crop) in enumerate(crops):
         ox,oy = (cw-crop.width)//2, ch-padding-crop.height
@@ -675,7 +684,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         touches = bool(alpha[0].any() or alpha[-1].any() or alpha[:,0].any() or alpha[:,-1].any())
         frames.append({'index':i,'label':item.get('label',name),'file':file,'size':[cw,ch],
             'qa': {'touchesCropBoundary':touches,'alphaReviewRequired':True,
-                   'issues': _frame_review(crop, i, boxes, median_area) if kind != 'exploded' else []},
+                   'issues': _frame_review(crop, i, boxes, median_area,
+                                           sheet_background[box[1]:box[3], box[0]:box[2]]) if kind != 'exploded' else []},
             'sourceBox':list(box),'sourceOffset':[ox,oy], 'anchor':[cw/2,ch-padding],
             'atlasRect':[ax,ay,cw,ch],'uv':[ax/atlas.width,1-(ay+ch)/atlas.height,cw/atlas.width,ch/atlas.height],
             'labelSource':item.get('labelSource','explicit' if layout or kind=='exploded' else 'unlabelled'),
