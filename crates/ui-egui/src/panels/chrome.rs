@@ -1,5 +1,5 @@
 //! Shared surfaces and controls for the studio's navigation and source artwork.
-use egui::{Color32, Response, RichText, Stroke, Ui};
+use egui::{Color32, Pos2, Response, RichText, Stroke, Ui, Vec2};
 
 pub(super) const SURFACE: Color32 = Color32::from_rgb(25, 30, 39);
 pub(super) const BORDER: Color32 = Color32::from_rgb(49, 59, 74);
@@ -195,4 +195,18 @@ pub(super) fn slider_row(
         help(response, explanation.0, explanation.1, explanation.2)
     })
     .inner
+}
+
+/// Small status badge: a green check when `ok`, otherwise a red cross.
+pub(crate) fn paint_status_badge(painter: &egui::Painter, centre: Pos2, ok: bool) {
+    let color = if ok { Color32::from_rgb(64, 186, 112) } else { Color32::from_rgb(226, 82, 82) };
+    painter.circle_filled(centre, 8.0, color);
+    let mark = Stroke::new(2.0, Color32::WHITE);
+    if ok {
+        painter.line_segment([centre + Vec2::new(-4.0, 0.0), centre + Vec2::new(-1.0, 3.0)], mark);
+        painter.line_segment([centre + Vec2::new(-1.0, 3.0), centre + Vec2::new(4.0, -3.0)], mark);
+    } else {
+        painter.line_segment([centre + Vec2::new(-3.0, -3.0), centre + Vec2::new(3.0, 3.0)], mark);
+        painter.line_segment([centre + Vec2::new(-3.0, 3.0), centre + Vec2::new(3.0, -3.0)], mark);
+    }
 }

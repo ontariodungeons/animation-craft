@@ -760,20 +760,25 @@ let response = chrome::slider_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 
                         ("Applies a procedural head nod offset and, when photocraft-cli is available, warps the eye regions inward.", "Preview blink timing and subtle head posture together.", "Drag from 0 to 100. Procedural head offset is immediate; release the slider to render the PhotoCraft CLI eye warp."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_blink", "slider", "Eye blink", &response);
+capability_badge(app, ui, &response, "Eye blink", "eye_blink");
 let response = chrome::slider_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
                         ("Applies a procedural horizontal head/gaze offset and, when photocraft-cli is available, shifts the eye regions.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. Procedural head offset is immediate; release to render the PhotoCraft CLI eye shift."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_gaze", "slider", "Eye gaze", &response);
+capability_badge(app, ui, &response, "Eye gaze", "eye_gaze");
 let response = chrome::slider_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
                         ("Deforms the bounded mouth region through external photocraft-cli Liquify while keeping the chin silhouette intact.", "Adjust expression opening while preserving the original file.", "20% preserves the source opening. Release the slider to render; inspect the result because detected landmarks can need correction."));
 if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.smile_open", "slider", "Mouth opening", &response);
+capability_badge(app, ui, &response, "Mouth opening", "smile_open");
 let response = chrome::slider_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
                         ("Adjusts procedural head placement or rotation in rig and layered preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
 app.automation.add_response("pose.head_yaw", "slider", "Head turn", &response);
+capability_badge(app, ui, &response, "Head turn", "head_yaw");
 let response = chrome::slider_row(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "", POSE,
                         ("Changes the procedural vertical head offset or rotation in rig and layered previews.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
 app.automation.add_response("pose.head_pitch", "slider", "Head tilt", &response);
+capability_badge(app, ui, &response, "Head tilt", "head_pitch");
 });
     ui.add_space(5.0);
     chrome::card().show(ui, |ui| {
@@ -783,18 +788,23 @@ ui.add(egui::Label::new(RichText::new("Preview adjustments; support varies by ri
 let response = chrome::slider_row(ui, "Arm spread", &mut app.ui_state.arm_spread, -45.0..=90.0, "", POSE,
                         ("Moves the arms outward or changes their rotation in supported preview actions.", "Check how far the arms can move without exposing gaps at the shoulders.", "Start near zero and increase gradually; A-Pose sets this to 35."));
 app.automation.add_response("pose.arm_spread", "slider", "Arm spread", &response);
+capability_badge(app, ui, &response, "Arm spread", "arm_spread");
 let response = chrome::slider_row(ui, "Elbow bend", &mut app.ui_state.elbow_bend, -45.0..=90.0, "", POSE,
                         ("Adjusts arm placement in the layered preview.", "Check arm spacing and overlap with the torso.", "Try a small value first. It is not a separate elbow joint solver and may not affect every rig."));
 app.automation.add_response("pose.elbow_bend", "slider", "Elbow bend", &response);
+capability_badge(app, ui, &response, "Elbow bend", "elbow_bend");
 let response = chrome::slider_row(ui, "Knee bend", &mut app.ui_state.knee_bend, -45.0..=90.0, "", POSE,
                         ("Offsets the legs in the current preview; some cutout actions also use it in leg rotation.", "Explore a crouched or lifted-leg pose and inspect foot placement.", "Increase gradually while watching both feet. Negative values move the adjustment in the opposite direction."));
 app.automation.add_response("pose.knee_bend", "slider", "Knee bend", &response);
+capability_badge(app, ui, &response, "Knee bend", "knee_bend");
 let response = chrome::slider_row(ui, "Ear spread", &mut app.ui_state.ear_splay, -45.0..=45.0, "", POSE,
                         ("Adjusts ear spacing or rotation, depending on the active preview rig.", "Make an expression more alert and inspect overlap near the head.", "Drag either side of zero and watch the ear bases. Reset Pose restores the default."));
 app.automation.add_response("pose.ear_splay", "slider", "Ear spread", &response);
+capability_badge(app, ui, &response, "Ear spread", "ear_splay");
 let response = chrome::slider_row(ui, "Ear tilt", &mut app.ui_state.ear_pitch, -45.0..=45.0, "", POSE,
                         ("Changes the vertical ear offset in the layered preview.", "Explore the silhouette of raised or lowered ears.", "Use small positive or negative values. This is an approximate offset, not a full 3D ear rotation."));
 app.automation.add_response("pose.ear_pitch", "slider", "Ear tilt", &response);
+capability_badge(app, ui, &response, "Ear tilt", "ear_pitch");
 });
     ui.add_space(5.0);
 }
@@ -936,4 +946,33 @@ fn quality_cards(app: &mut AnimationCraftApp, ui: &mut Ui) {
             "Check the analysis result for this asset.",
         );
     });
+}
+
+/// Marks a pose slider with whether the active rig's `control_bindings` route it (see
+/// docs/control-bindings.md). Assets without a rig plan get no badge: there is nothing to report.
+fn capability_badge(app: &mut AnimationCraftApp, ui: &Ui, slider: &egui::Response, label: &str, control: &str) {
+    let Some(bound) = app
+        .session()
+        .current_asset()
+        .and_then(|a| a.cutout_rig.as_ref())
+        .map(|rig| rig.control_bindings.supports(control))
+    else {
+        return;
+    };
+    let label_width = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), egui::FontId::proportional(12.0), Color32::WHITE)
+        .size()
+        .x;
+    let centre = egui::Pos2::new(slider.rect.left() + label_width + 14.0, slider.rect.top() - 11.0);
+    chrome::paint_status_badge(ui.painter(), centre, bound);
+    let rect = egui::Rect::from_center_size(centre, egui::Vec2::splat(16.0));
+    let text = if bound { "bound in this rig" } else { "not bound in this rig: has no effect" };
+    app.automation.add(format!("pose.{control}.capability"), "badge", text, rect);
+    ui.interact(rect, ui.id().with(("capability", control)), egui::Sense::hover())
+        .on_hover_text(if bound {
+            format!("{label} is bound in this rig's control_bindings.")
+        } else {
+            format!("{label} has no control_bindings mapping in this rig, so moving it has no effect.")
+        });
 }

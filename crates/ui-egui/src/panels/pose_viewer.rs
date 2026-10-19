@@ -559,6 +559,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                             &source.path,
                                             false,
                                             width,
+                                            None,
                                         )
                                         .clicked()
                                         {
@@ -881,6 +882,8 @@ fn canvas(
     }
 }
 
+/// `review`: the frame's cut-review issues (`Some(&[])` = passed); `None` draws no badge.
+#[allow(clippy::too_many_arguments)]
 fn tile(
     app: &mut AnimationCraftApp,
     ui: &mut Ui,
@@ -889,6 +892,7 @@ fn tile(
     path: &Path,
     selected: bool,
     width: f32,
+    review: Option<&[String]>,
 ) -> egui::Response {
     let response = ui.add_sized(
         [width, 160.0],
@@ -950,7 +954,21 @@ fn tile(
         TEXT,
     );
     app.automation.add_response(id, "button", label, &response);
-    response.on_hover_text(path.display().to_string())
+    let mut hover = path.display().to_string();
+    if let Some(issues) = review {
+        let ok = issues.is_empty();
+        let centre = Pos2::new(rect.right() - 15.0, rect.top() + 15.0);
+        super::chrome::paint_status_badge(&painter, centre, ok);
+        let badge = Rect::from_center_size(centre, Vec2::splat(16.0));
+        let badge_label = if ok { "cut review passed".to_string() } else { format!("{} cut issue(s)", issues.len()) };
+        app.automation.add(format!("{id}.review"), "badge", badge_label, badge);
+        hover.push_str(if ok { "\nCut review: passed" } else { "\nCut review:" });
+        for issue in issues {
+            hover.push_str("\n• ");
+            hover.push_str(issue);
+        }
+    }
+    response.on_hover_text(hover)
 }
 fn pose_grid(
     app: &mut AnimationCraftApp,
@@ -989,6 +1007,7 @@ fn pose_grid(
                             &frame.resolved_path,
                             app.ui_state.selected_pose_idx == index,
                             width,
+                            Some(&frame.qa_issues),
                         );
                         if response.clicked() {
                             app.ui_state.selected_pose_idx = index;
@@ -1143,6 +1162,7 @@ fn parts_view(
                                 &part.path,
                                 false,
                                 width,
+                                None,
                             )
                             .clicked()
                             {
