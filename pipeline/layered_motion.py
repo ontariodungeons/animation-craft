@@ -1,0 +1,338 @@
+"""Animate any set of pre-separated transparent layers and export transparent video.
+
+A spec describes layers (image, pivot, optional parent) and tracks (a duration plus motion per
+layer). Nothing here assumes what the layers depict: no anatomy, no part names, no counts.
+Motion is built from a few generic terms that add together per property:
+
+  keys       [[t, value], ...]            value is a number, or [x, y] for position/scale
+  ellipse    centre, rx, ry, start, turns, from, to     position offset along an ellipse
+  oscillate  amplitude, hz, phase, axis, envelope       continuous sine (stays smooth under motion blur)
+  follow     layer, gain, limit, smooth                 rotation leaning with a layer's horizontal velocity
+
+Every term is an offset from the resting state: position in pixels from the pivot, rotation in degrees,
+scale in percentage points added to 100, opacity in percentage points added to 100 (so -100 hides).
+Times are seconds from the start of the track.
+The result is one transparent WebM per track, rendered by EffectCraft.
+"""
+import argparse
+import json
+import math
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline.craft_cli import require_craft_cli  # noqa: E402
+
+try:
+    import numpy as np
+    from PIL import Image
+    from scipy import ndimage
+except ImportError as exc:
+    sys.exit(f'layered_motion needs numpy, Pillow and scipy ({exc})')
+
+PROPS = {'position': 2, 'rotation': 1, 'scale': 2, 'opacity': 1}
+EASES = {'linear': lambda u: u, 'smooth': lambda u: u * u * (3 - 2 * u),
+         'in': lambda u: u * u * u, 'out': lambda u: 1 - (1 - u) ** 3}
+
+
+def number(value, what):
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        raise ValueError(f'{what} must be a finite number, got {value!r}')
+    return float(value)
+
+
+def vector(value, size, what):
+    items = value if isinstance(value, list) else [value] * size
+    if len(items) != size:
+        raise ValueError(f'{what} needs {size} number(s)')
+    return [number(v, what) for v in items]
+
+
+def ease(name, u):
+    if name not in EASES:
+        raise ValueError(f'Unknown ease {name!r}; use one of {sorted(EASES)}')
+    return EASES[name](max(0.0, min(1.0, u)))
+
+
+def alpha_bounds(path):
+    with Image.open(path) as image:
+        box = image.convert('RGBA').getchannel('A').point(lambda a: 255 if a > 16 else 0).getbbox()
+    if not box:
+        raise ValueError(f'{path} has no visible pixels')
+    return box
+
+
+def extract_component(src, index, dest):
+    """Write only the index-th visible piece (ordered left to right) of a layer to its own PNG."""
+    with Image.open(src) as image:
+        rgba = np.array(image.convert('RGBA'))
+    labels, count = ndimage.label(rgba[:, :, 3] > 16, structure=np.ones((3, 3)))
+    if not 0 <= index < count:
+        raise ValueError(f'{src} has {count} separate piece(s); component {index} does not exist')
+    order = sorted(range(1, count + 1), key=lambda k: np.where(labels == k)[1].min())
+    rgba[labels != order[index], 3] = 0
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(rgba).save(dest)
+    return dest
+
+
+def resolve_pivot(pivot, image_path):
+    if isinstance(pivot, list):
+        return vector(pivot, 2, 'pivot')
+    if isinstance(pivot, dict) and pivot.get('of') == 'alphaBounds':
+        x0, y0, x1, y1 = alpha_bounds(image_path)
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        table = {'top': (cx, y0), 'bottom': (cx, y1), 'left': (x0, cy), 'right': (x1, cy), 'center': (cx, cy),
+                 'topLeft': (x0, y0), 'topRight': (x1, y0), 'bottomLeft': (x0, y1), 'bottomRight': (x1, y1)}
+        if pivot.get('anchor') not in table:
+            raise ValueError(f"pivot anchor must be one of {sorted(table)}")
+        return list(table[pivot['anchor']])
+    raise ValueError('pivot must be [x, y] or {"anchor": ..., "of": "alphaBounds"}')
+
+
+def load_spec(path, work):
+    spec = json.loads(Path(path).read_text())
+    base = Path(path).resolve().parent
+    canvas = spec.get('canvas')
+    if not (isinstance(canvas, list) and len(canvas) == 2):
+        raise ValueError('spec needs "canvas": [width, height]')
+    spec['fps'] = number(spec.get('fps', 30), 'fps')
+    layers = {}
+    for item in spec.get('layers', []):
+        lid = item.get('id')
+        if not isinstance(lid, str) or not lid or lid in layers:
+            raise ValueError(f'layer ids must be unique non-empty strings (got {lid!r})')
+        src = (base / item['file']).resolve()
+        if not src.is_file():
+            raise ValueError(f'layer {lid}: image not found: {src}')
+        with Image.open(src) as image:
+            if list(image.size) != list(canvas):
+                raise ValueError(f'layer {lid}: image is {image.size[0]}x{image.size[1]}, canvas is {canvas[0]}x{canvas[1]}')
+        if 'component' in item:
+            src = extract_component(src, int(item['component']), work / f'{lid}.png')
+        layers[lid] = {**item, 'path': src, 'pivot': resolve_pivot(item.get('pivot', [canvas[0] / 2, canvas[1] / 2]), src)}
+    for lid, layer in layers.items():
+        seen, cur = {lid}, layer.get('parent')
+        while cur:
+            if cur not in layers or cur in seen:
+                raise ValueError(f'layer {lid}: parent {cur!r} is unknown or forms a cycle')
+            seen.add(cur)
+            cur = layers[cur].get('parent')
+    if not spec.get('tracks'):
+        raise ValueError('spec needs at least one track')
+    spec['layers'] = layers
+    return spec
+
+
+def keys_at(keys, t, size, name):
+    if not keys:
+        raise ValueError('"keys" needs at least one [time, value] pair')
+    pairs = sorted(([number(k[0], 'key time'), vector(k[1], size, 'key value')] for k in keys), key=lambda p: p[0])
+    if t <= pairs[0][0]:
+        return pairs[0][1]
+    for (t0, v0), (t1, v1) in zip(pairs, pairs[1:]):
+        if t <= t1:
+            u = ease(name, (t - t0) / (t1 - t0)) if t1 > t0 else 1.0
+            return [a + (b - a) * u for a, b in zip(v0, v1)]
+    return pairs[-1][1]
+
+
+def sampled_term(term, t, size):
+    """Value of one non-oscillating term at time t."""
+    kind = term['kind']
+    if kind == 'keys':
+        return keys_at(term['keys'], t, size, term.get('ease', 'smooth'))
+    if kind == 'ellipse':
+        if size != 2:
+            raise ValueError('"ellipse" applies to position only')
+        t0, t1 = number(term.get('from', 0), 'from'), number(term['to'], 'to')
+        u = ease(term.get('ease', 'smooth'), (t - t0) / (t1 - t0)) if t1 > t0 else 1.0
+        a = number(term.get('start', 0), 'start') + 2 * math.pi * number(term.get('turns', 1), 'turns') * u
+        cx, cy = vector(term['centre'], 2, 'centre')
+        rx, ry = number(term['rx'], 'rx'), number(term['ry'], 'ry')
+        origin = vector(term.get('relativeTo', [cx + rx * math.cos(term.get('start', 0)), cy + ry * math.sin(term.get('start', 0))]), 2, 'relativeTo')
+        return [cx + rx * math.cos(a) - origin[0], cy + ry * math.sin(a) - origin[1]]
+    raise ValueError(f'Unknown motion term kind {kind!r}')
+
+
+def js_envelope(term):
+    env = term.get('envelope')
+    if not env:
+        return '1'
+    pts = json.dumps([[number(t, 'envelope time'), number(v, 'envelope value')] for t, v in env])
+    return ('(function(t){var K=%s;if(t<=K[0][0])return K[0][1];for(var i=1;i<K.length;i++){'
+            'if(t<=K[i][0]){var u=(t-K[i-1][0])/(K[i][0]-K[i-1][0]);return K[i-1][1]+(K[i][1]-K[i-1][1])*u;}}'
+            'return K[K.length-1][1];})(time)') % pts
+
+
+def oscillation_js(terms, size):
+    parts = [[] for _ in range(size)]
+    for term in terms:
+        axis = int(term.get('axis', 0))
+        if not 0 <= axis < size:
+            raise ValueError(f'oscillate axis {axis} is out of range for this property')
+        amp, hz, ph = number(term['amplitude'], 'amplitude'), number(term['hz'], 'hz'), number(term.get('phase', 0), 'phase')
+        parts[axis].append(f'{amp}*Math.sin(2*Math.PI*{hz}*time+{ph})*{js_envelope(term)}')
+    sums = ['(' + '+'.join(p) + ')' if p else '0' for p in parts]
+    return 'value + ' + (sums[0] if size == 1 else '[' + ','.join(sums) + ']')
+
+
+def velocity_x(layer_terms, fps, duration):
+    """Horizontal velocity (px/s) of a layer's sampled position terms, frame by frame."""
+    frames = int(round(duration * fps)) + 1
+    still = [t for t in layer_terms if t['kind'] in ('keys', 'ellipse')]
+    xs = [sum(sampled_term(t, i / fps, 2)[0] for t in still) for i in range(frames)]
+    return [(xs[min(i + 1, frames - 1)] - xs[max(i - 1, 0)]) * fps / (min(i + 1, frames - 1) - max(i - 1, 0) or 1) for i in range(frames)]
+
+
+def channel(track, spec, lid, prop, fps, duration):
+    """-> (keyframes [(t, value list)], expression or None) for one property of one layer."""
+    size = PROPS[prop]
+    terms = track.get('motion', {}).get(lid, {}).get(prop, [])
+    still = [t for t in terms if t['kind'] not in ('oscillate', 'follow')]
+    osc = [t for t in terms if t['kind'] == 'oscillate']
+    follow = [t for t in terms if t['kind'] == 'follow']
+    for t in terms:
+        if t['kind'] not in ('keys', 'ellipse', 'oscillate', 'follow'):
+            raise ValueError(f"Unknown motion term kind {t['kind']!r}")
+    if follow and prop != 'rotation':
+        raise ValueError('"follow" applies to rotation only')
+    frames = int(round(duration * fps)) + 1
+    series = []
+    follows = [(f, velocity_x(track.get('motion', {}).get(f.get('layer', lid), {}).get('position', []), fps, duration)) for f in follow]
+    for i in range(frames):
+        value = [0.0] * size
+        for term in still:
+            value = [a + b for a, b in zip(value, sampled_term(term, i / fps, size))]
+        series.append(value)
+    for f, velocity in follows:
+        smooth = max(0.0, number(f.get('smooth', 0.15), 'smooth'))
+        alpha = 1.0 if smooth == 0 else 1 - math.exp(-1.0 / (fps * smooth))
+        lean, gain, limit = 0.0, number(f['gain'], 'gain'), number(f['limit'], 'limit')
+        for i, v in enumerate(velocity):
+            lean += (max(-limit, min(limit, gain * v)) - lean) * alpha
+            series[i][0] += lean
+    keyed = bool(still or follow)
+    keys = [(i / fps, v) for i, v in enumerate(series)] if keyed else []
+    return keys, (oscillation_js(osc, size) if osc else None)
+
+
+def jsx_value(prop, offset, pivot):
+    if prop == 'position':
+        return f'[{pivot[0] + offset[0]:.4f},{pivot[1] + offset[1]:.4f},0]'
+    if prop == 'scale':
+        return f'[{100 + offset[0]:.4f},{100 + offset[1]:.4f},100]'
+    if prop == 'opacity':
+        return f'{100 + offset[0]:.4f}'
+    return f'{offset[0]:.4f}'
+
+
+def build_jsx(spec, project, work, blur):
+    out = ['var items = {};',
+           'function get(id, path){ if(!items[id]) items[id] = app.project.importFile(new ImportOptions(new File(path))); return items[id]; }']
+    fps = spec['fps']
+    for track in spec['tracks']:
+        tid, duration = track['id'], number(track['duration'], 'duration')
+        cid = re.sub(r'\W', '_', tid)
+        names = track.get('layers') or list(spec['layers'])
+        out.append(f'var comp_{cid} = app.project.items.addComp({json.dumps(tid)}, {spec["canvas"][0]}, {spec["canvas"][1]}, 1.0, {duration:.4f}, {fps});')
+        if blur:
+            out.append(f'comp_{cid}.motionBlur = true; comp_{cid}.shutterAngle = {blur["shutterAngle"]}; comp_{cid}.motionBlurSamplesPerFrame = {blur["samples"]};')
+        for lid in names:
+            if lid not in spec['layers']:
+                raise ValueError(f'track {tid}: unknown layer {lid!r}')
+            layer = spec['layers'][lid]
+            v = re.sub(r'\W', '_', f'L_{tid}_{lid}')
+            out += [f'var {v} = comp_{cid}.layers.add(get({json.dumps(lid)}, {json.dumps(str(layer["path"]))}));',
+                    f'{v}.name = {json.dumps(lid)};',
+                    f'{v}.property("Anchor Point").setValue([{layer["pivot"][0]},{layer["pivot"][1]},0]);',
+                    f'{v}.property("Position").setValue([{layer["pivot"][0]},{layer["pivot"][1]},0]);']
+            if blur and layer.get('motionBlur', True):
+                out.append(f'{v}.motionBlur = true;')
+        # Every parent link is made before any keyframe exists: EffectCraft keeps a child's world
+        # position at the moment of linking, so linking after the parent has moved would pin the child.
+        for lid in names:
+            layer = spec['layers'][lid]
+            if layer.get('parent') and layer['parent'] in names:
+                out.append(re.sub(r'\W', '_', f'L_{tid}_{lid}') + '.parent = ' + re.sub(r'\W', '_', f'L_{tid}_{layer["parent"]}') + ';')
+        for lid in names:
+            layer, v = spec['layers'][lid], re.sub(r'\W', '_', f'L_{tid}_{lid}')
+            for prop, name in (('position', 'Position'), ('rotation', 'Rotation'), ('scale', 'Scale'), ('opacity', 'Opacity')):
+                keys, expression = channel(track, spec, lid, prop, fps, duration)
+                handle = f'{v}.property({json.dumps(name)})'
+                for t, value in keys:
+                    out.append(f'{handle}.setValueAtTime({t:.5f}, {jsx_value(prop, value, layer["pivot"])});')
+                if expression:
+                    out.append(f'{handle}.expression = {json.dumps(expression)};')
+    out.append(f'app.project.save(new File({json.dumps(str(project))}));')
+    return '\n'.join(out) + '\n'
+
+
+def run(spec_path, out_dir, only=None, stills=0, video=True):
+    out_dir = Path(out_dir).resolve()
+    work = out_dir / 'work'
+    work.mkdir(parents=True, exist_ok=True)
+    spec = load_spec(spec_path, work)
+    if only:
+        unknown = sorted(set(only) - {t['id'] for t in spec['tracks']})
+        if unknown:
+            raise ValueError(f'unknown track(s): {unknown}')
+        spec['tracks'] = [t for t in spec['tracks'] if t['id'] in only]
+    blur_spec = spec.get('motionBlur')
+    blur = None
+    if blur_spec:
+        blur = {'shutterAngle': number(blur_spec.get('shutterAngle', 360), 'shutterAngle'), 'samples': int(blur_spec.get('samples', 16))}
+    project = work / 'layered_motion.ecproj'
+    script = work / 'layered_motion.jsx'
+    script.write_text(build_jsx(spec, project, work, blur))
+    binary = require_craft_cli('effectcraft-cli')
+    run_script = subprocess.run([binary, 'script', str(script)], capture_output=True, text=True, timeout=600)
+    if run_script.returncode:
+        raise RuntimeError((run_script.stderr.strip() or run_script.stdout.strip()).splitlines()[-1])
+    outputs = []
+    for track in spec['tracks']:
+        entry = {'track': track['id'], 'fps': spec['fps'], 'frames': int(round(track['duration'] * spec['fps']))}
+        if stills:
+            folder = out_dir / 'stills' / track['id']
+            folder.mkdir(parents=True, exist_ok=True)
+            entry['stills'] = []
+            for i in range(stills):
+                at = track['duration'] * (i + 0.5) / stills
+                still = folder / f'{i:02d}.png'
+                done = subprocess.run([binary, '--project', str(project), 'render-frame', '--comp', track['id'], '--time', f'{at:.4f}',
+                                       '--transparent', '--out', str(still)], capture_output=True, text=True, timeout=600)
+                if done.returncode or not still.is_file():
+                    raise RuntimeError(f"Still {i} of track {track['id']} failed: " + ((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1])
+                entry['stills'].append(str(still))
+        if not video:
+            outputs.append(entry)
+            continue
+        target = out_dir / f"{track['id']}.webm"
+        done = subprocess.run([binary, '--project', str(project), 'render', '--comp', track['id'], '--out', str(target),
+                               '--format', 'webm', '--channels', 'rgba'], capture_output=True, text=True, timeout=1800)
+        if done.returncode or not target.is_file() or target.stat().st_size == 0:
+            raise RuntimeError(f"Render of track {track['id']} failed: " + ((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1])
+        outputs.append({**entry, 'file': str(target)})
+    return {'ok': True, 'spec': str(Path(spec_path).resolve()), 'project': str(project), 'outputs': outputs}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--spec', required=True)
+    parser.add_argument('--out-dir', required=True)
+    parser.add_argument('--tracks', help='comma-separated track ids to build (default: all)')
+    parser.add_argument('--stills', type=int, default=0, help='also render this many evenly spaced transparent stills per track')
+    parser.add_argument('--no-video', action='store_true', help='skip the WebM export (use with --stills for quick review)')
+    args = parser.parse_args()
+    try:
+        only = [t for t in (args.tracks or '').split(',') if t] or None
+        print(json.dumps(run(args.spec, args.out_dir, only, args.stills, not args.no_video)))
+    except Exception as exc:
+        text = str(exc).strip().splitlines()
+        parser.exit(1, f'{text[-1] if text else type(exc).__name__}\n')
+
+
+if __name__ == '__main__':
+    main()

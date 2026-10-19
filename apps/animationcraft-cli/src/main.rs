@@ -204,6 +204,17 @@ fn tool_input_schema(id: &str) -> Value {
             },
             "required": ["select"]
         }),
+        "export.layered_motion" => json!({
+            "type": "object",
+            "properties": {
+                "spec": { "type": "string", "description": "Layered motion spec (JSON): layers, pivots and per-track motion" },
+                "out_dir": { "type": "string", "description": "Output folder for the transparent WebM per track" },
+                "tracks": { "description": "Track ids to build (array or comma-separated); default all" },
+                "stills": { "type": "integer", "minimum": 0, "description": "Also render this many evenly spaced transparent stills per track" },
+                "video": { "type": "boolean", "description": "false skips the WebM export (stills only)" }
+            },
+            "required": ["spec"]
+        }),
         _ => json!({ "type": "object", "properties": {}, "additionalProperties": true }),
     }
 }

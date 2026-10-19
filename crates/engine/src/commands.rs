@@ -4245,6 +4245,61 @@ fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value
     }))
 }
 
+fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
+    let spec_raw = params.get("spec").and_then(Value::as_str).ok_or_else(|| {
+        EngineError::InvalidParams("export.layered_motion requires `spec`: path to a layered motion spec (JSON)".into())
+    })?;
+    let spec_path = resolve_workspace_path(s, spec_raw);
+    if !spec_path.is_file() {
+        return Err(EngineError::InvalidParams(format!(
+            "layered motion spec not found: {}",
+            spec_path.display()
+        )));
+    }
+    let stem = spec_path.file_stem().and_then(|v| v.to_str()).unwrap_or("layered_motion");
+    let root = workspace_root(s);
+    let out_dir = match params.get("out_dir").and_then(Value::as_str) {
+        Some(dir) => resolve_workspace_path(s, dir),
+        None => root.join("exports/layered_motion").join(stem),
+    };
+    let script = root.join("pipeline/layered_motion.py");
+    let mut args = vec![
+        script.to_string_lossy().into_owned(),
+        "--spec".into(),
+        spec_path.to_string_lossy().into_owned(),
+        "--out-dir".into(),
+        out_dir.to_string_lossy().into_owned(),
+    ];
+    if let Some(tracks) = params.get("tracks") {
+        let list = match tracks {
+            Value::Array(items) => items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(","),
+            other => other.as_str().unwrap_or_default().to_string(),
+        };
+        if !list.is_empty() {
+            args.extend(["--tracks".into(), list]);
+        }
+    }
+    if let Some(count) = params.get("stills").and_then(Value::as_u64) {
+        args.extend(["--stills".into(), count.to_string()]);
+    }
+    if params.get("video").and_then(Value::as_bool) == Some(false) {
+        args.push("--no-video".into());
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut result: Value = stdout
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .ok_or_else(|| {
+            EngineError::CommandFailed("export.layered_motion".into(), "layered_motion.py returned no result".into())
+        })?;
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("command".into(), json!("export.layered_motion"));
+        obj.insert("out_dir".into(), json!(out_dir.to_string_lossy()));
+    }
+    Ok(result)
+}
+
 fn build() -> Vec<CommandSpec> {
     vec![
         query!(
@@ -4342,6 +4397,15 @@ fn build() -> Vec<CommandSpec> {
             "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"select\":{\"id\":\"select.rect\",\"params\":{}},\"contents\":\"contentAware\",\"color\":\"#hex\"}",
             always,
             cmd_image_content_aware_fill
+        ),
+        cmd!(
+            "export.layered_motion",
+            "Export Layered Motion Video",
+            ["Export"],
+            None,
+            "{\"spec\":\"layered_motion_spec.json\",\"out_dir\":\"optional_dir\",\"tracks\":\"optional_csv\",\"stills\":0,\"video\":true}",
+            always,
+            cmd_export_layered_motion
         ),
         cmd!(
             "export.cutout_mp4",
