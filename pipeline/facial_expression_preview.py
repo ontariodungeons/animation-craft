@@ -27,7 +27,7 @@ except ImportError as exc:
     sys.exit(f'Facial preview needs numpy and Pillow ({exc}); install them in the Python that runs this script')
 
 # Bump when the warp recipe, regions or validation change so older cached frames are never reused.
-RECIPE_VERSION = 5
+RECIPE_VERSION = 6
 EXPRESSIONS = {'smile': (1, 1), 'laugh': (1.12, 1.38), 'ooh': (.62, 1.18), 'mbp': (1.08, .22), 'talk': (.95, 1.15)}
 LANDMARKS = ('leftEye', 'rightEye', 'nose', 'mouthLeft', 'mouthRight')
 CALL_TIMEOUT = 45
@@ -254,11 +254,6 @@ def strokes_for(frame, expression, opening, blink, gaze, face, mouth):
         tx = max(mx - mw * .88, min(mx + mw * .88, mx + dx * sx))
         ty = max(my - mh * .88, min(my + mh * .88, my + dy * scale_y))
         move([mx + dx, my + dy], [tx, ty], brush_mouth)
-    for key in ('leftEye', 'rightEye'):
-        x, y = marks[key]
-        ey = fh * .04
-        for dy in (-ey, ey):
-            move([x, y + dy], [x + gaze / 45 * fw * .035, y + dy * (1 - blink / 100)], fw * .20)
     return strokes, clamped
 
 
@@ -301,6 +296,8 @@ def check_against_baseline(output, baseline, mask):
 
 def render(source, output_root, expression, opening, blink, gaze, face_json=None, deadline_s=90):
     deadline = Deadline(deadline_s)
+    if blink or gaze:
+        raise ValueError('Blink and gaze require explicit eyelid/pupil part or pin bindings; face landmarks alone are insufficient')
     source = Path(source).resolve(strict=True)
     if expression not in EXPRESSIONS:
         raise ValueError('Unknown expression')

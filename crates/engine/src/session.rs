@@ -144,6 +144,8 @@ pub struct CutoutRigPart {
 /// A parsed `{character_id}_cutout_rig_plan.json` produced by `guided_cutout_rig_builder.py`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadedCutoutRigPlan {
+    #[serde(default)]
+    pub control_bindings: crate::control_bindings::ControlBindings,
     pub plan_path: PathBuf,
     pub character_id: String,
     pub rig_type: String,
@@ -155,6 +157,31 @@ pub struct LoadedCutoutRigPlan {
     pub parts: Vec<CutoutRigPart>,
     pub pose_library: Value,
     pub effectcraft: Value,
+}
+
+fn load_control_bindings(raw: &Value, plan: &Path, parts: &[CutoutRigPart]) -> Result<crate::control_bindings::ControlBindings> {
+    let mut bindings: crate::control_bindings::ControlBindings = serde_json::from_value(
+        raw.get("control_bindings").cloned().unwrap_or_else(|| serde_json::json!({}))
+    ).map_err(|e| EngineError::InvalidParams(format!("invalid control_bindings: {e}")))?;
+    // Older plans explicitly declare a semantic kind. Preserve their face preview
+    // only when there is one declared head; never infer it from the filename or position.
+    if raw.get("control_bindings").is_none() {
+        let mut heads = parts.iter().filter(|part| part.kind == "head");
+        if let Some(head) = heads.next() {
+            if heads.next().is_none() {
+                bindings.face = Some(crate::control_bindings::FaceBinding { part: head.id.clone(), landmarks: None });
+            }
+        }
+    }
+    bindings.validate(&parts.iter().map(|p| p.id.clone()).collect::<Vec<_>>())
+        .map_err(EngineError::InvalidParams)?;
+    if let Some(face) = &mut bindings.face {
+        if let Some(path) = &mut face.landmarks {
+            if path.is_relative() { *path = plan.parent().unwrap_or(Path::new(".")).join(&*path); }
+            if !path.is_file() { return Err(EngineError::InvalidParams(format!("face landmarks file does not exist: {}", path.display()))); }
+        }
+    }
+    Ok(bindings)
 }
 
 impl LoadedCutoutRigPlan {
@@ -229,7 +256,9 @@ impl LoadedCutoutRigPlan {
             .unwrap_or_default();
         let pose_library = raw.get("pose_library").cloned().unwrap_or(Value::Null);
         let effectcraft = raw.get("effectcraft").cloned().unwrap_or(Value::Null);
+        let control_bindings = load_control_bindings(&raw, path, &parts)?;
         Ok(Self {
+            control_bindings,
             plan_path: path.to_path_buf(),
             character_id,
             rig_type,
@@ -472,7 +501,9 @@ impl LoadedCutoutRigPlan {
             }
         }
 
+        let control_bindings = load_control_bindings(raw, path, &parts)?;
         Ok(Self {
+            control_bindings,
             plan_path: path.to_path_buf(),
             character_id,
             rig_type: "layered_motion".to_string(),
@@ -1489,5 +1520,24 @@ mod tests {
         assert!(part_names.contains(&"chassis"));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod control_loading_tests {
+    use super::*;
+
+    #[test]
+    fn bindings_load_arbitrary_part_names_and_reject_dangling_targets() {
+        let parts = vec![CutoutRigPart { id: "surface_17".into(), ..Default::default() }];
+        let raw = serde_json::json!({"control_bindings":{"face":{"part":"surface_17"},"joints":[{"part":"surface_17","control":"head_pitch","rotation_deg":0.5}]}});
+        let bindings = load_control_bindings(&raw, Path::new("plan.json"), &parts).unwrap();
+        assert_eq!(bindings.face.unwrap().part, "surface_17");
+        let mut bad = raw.clone();
+        bad["control_bindings"]["joints"][0]["part"] = serde_json::json!("absent");
+        assert!(load_control_bindings(&bad, Path::new("plan.json"), &parts).is_err());
+        bad = raw;
+        bad["control_bindings"]["joints"][0]["control"] = serde_json::json!("typo");
+        assert!(load_control_bindings(&bad, Path::new("plan.json"), &parts).is_err());
     }
 }

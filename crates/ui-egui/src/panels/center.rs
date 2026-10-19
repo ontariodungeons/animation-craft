@@ -5,7 +5,7 @@
 
 use super::chrome;
 #[path = "center_motion.rs"]
-mod center_motion;
+pub(crate) mod center_motion;
 
 use crate::{AnimMode, AnimationCraftApp, CenterTab, ShadingMode, UiCommand};
 use animationcraft_engine::session::{ManifestPart, PartState};
@@ -1220,6 +1220,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let mut rendered_parts: Vec<RenderedStagePart> = Vec::new();
 
     if let Some(rig) = cutout_rig_opt {
+        app.face_preview.status.clear();
         let ctx = ui.ctx().clone();
         let cw = rig.canvas_size[0].max(1) as f32;
         let ch = rig.canvas_size[1].max(1) as f32;
@@ -1263,11 +1264,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         };
 
         let rig_eval = evaluate_cutout_rig_motion(&rig, &app.ui_state);
-        let angles_rad = &rig_eval.angles_rad;
-        let pos_offset = &rig_eval.pos_offset;
-        let scale_xy = &rig_eval.scale_xy;
         let opacity_map = &rig_eval.opacity;
-        let root_dy = rig_eval.root_dy_canvas;
 
         let mut parts_by_id: BTreeMap<&str, &animationcraft_engine::session::CutoutRigPart> =
             BTreeMap::new();
@@ -1283,33 +1280,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         };
 
         let transform_canvas_pt = |pt: Pos2, part_id: &str| -> Pos2 {
-            let mut cur = pt;
-            let mut cur_id = Some(part_id);
-            let mut depth = 0;
-            while let Some(id) = cur_id {
-                if depth > 6 {
-                    break;
-                }
-                if let Some(part) = parts_by_id.get(id) {
-                    let piv = Pos2::new(part.pivot[0], part.pivot[1]);
-                    let ang = angles_rad.get(id).copied().unwrap_or(0.0);
-                    let [sx, sy] = scale_xy.get(id).copied().unwrap_or([1.0, 1.0]);
-                    let [dx_off, dy_off] = pos_offset.get(id).copied().unwrap_or([0.0, 0.0]);
-                    let (s, c) = ang.sin_cos();
-                    let d = Vec2::new((cur.x - piv.x) * sx, (cur.y - piv.y) * sy);
-                    cur = Pos2::new(
-                        piv.x + d.x * c - d.y * s + dx_off,
-                        piv.y + d.x * s + d.y * c + dy_off,
-                    );
-                    if part.parent.is_none() {
-                        cur.y += root_dy;
-                    }
-                    cur_id = part.parent.as_deref();
-                } else {
-                    break;
-                }
-                depth += 1;
-            }
+            let transformed = center_motion::transform_rig_point(&rig, &rig_eval, part_id, [pt.x, pt.y]);
+            let mut cur = Pos2::new(transformed[0], transformed[1]);
             if explode_factor > 0.002
                 && let Some(part) = parts_by_id.get(part_id)
             {
@@ -1340,12 +1312,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             if part_opacity <= 0.01 {
                 continue;
             }
-            let path = if !is_layered_spec && part.id == "head" {
-                app.face_preview
-                    .path(&ctx, &part.cropped_path, &app.ui_state)
-            } else {
-                part.cropped_path.clone()
-            };
+            let (path, status) = app.control_preview.path(&ctx, &rig, part, &app.ui_state);
+            if !status.is_empty() { app.face_preview.status = status; }
             let p_str = path.to_string_lossy().into_owned();
             let Some(ptex) = app.load_texture(&ctx, &p_str) else {
                 continue;
@@ -1543,36 +1511,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let base_y = sprite_rect.top() + (part.bind_position[1] - part.pivot[1]) * scale;
 
                 let base_center = Pos2::new(base_x + pw * 0.5, base_y + ph * 0.5);
-                let rel_x = ((base_center.x - sprite_center.x)
-                    / (sprite_rect.width().max(1.0) * 0.5))
-                    .clamp(-1.0, 1.0);
-                let rel_y = ((base_center.y - sprite_center.y)
-                    / (sprite_rect.height().max(1.0) * 0.5))
-                    .clamp(-1.0, 1.0);
-                let (rig_dx, rig_dy) = if rel_y < -0.35 || part.name == "head" {
-                    (
-                        app.ui_state.head_yaw * 0.3
-                            + app.ui_state.eye_gaze * 0.12
-                            + app.ui_state.ear_splay * 0.15 * rel_x.signum(),
-                        app.ui_state.head_pitch * 0.2
-                            + app.ui_state.ear_pitch * 0.2
-                            + app.ui_state.eye_blink * 0.04,
-                    )
-                } else if rel_y > 0.35 {
-                    (
-                        app.ui_state.knee_bend * 0.2 * rel_x.signum(),
-                        -app.ui_state.knee_bend.max(0.0) * 0.35,
-                    )
-                } else if rel_x.abs() > 0.15 {
-                    (
-                        (app.ui_state.arm_spread + app.ui_state.elbow_bend * 0.5)
-                            * 0.35
-                            * rel_x.signum(),
-                        -app.ui_state.arm_spread * 0.2,
-                    )
-                } else {
-                    (0.0, 0.0)
-                };
+                let (rig_dx, rig_dy) = (0.0, 0.0);
                 let explode_vec = (base_center - sprite_center) * explode_factor;
                 let part_rect = Rect::from_min_size(
                     Pos2::new(
