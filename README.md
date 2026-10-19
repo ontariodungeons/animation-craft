@@ -71,6 +71,38 @@ same port still share one window, selection, playback state and screenshot queue
 Do not click or restart another agent's app. Agree on port ownership in the
 handoff rather than assuming the example port is free.
 
+### Stopping the instance you started
+
+A live window stays open until it is told to close. Save the project first, then
+use the instance's own control channel; do not rely on a window-manager close
+request (Hyprland 0.56 no longer accepts `hyprctl dispatch closewindow` or
+`killactive`, and a dirty EffectCraft/PhotoCraft/VectorCraft window would cancel
+the close to show its save prompt anyway):
+
+```bash
+./target/debug/animationcraft-cli --bridge 19897 exec project.save
+./target/debug/animationcraft-cli --bridge 19897 exec app.quit
+```
+
+The MCP server exposes the same operation as the `app_quit` tool when it is
+started with `--bridge`; headless MCP has no app process to quit and says so. The
+reply is `{"closing": true}` and the control port becomes free once the process
+exits. Wait for that before relaunching on the same port.
+
+If the control channel is unreachable, terminate the exact process you started
+(`$!` from its launch, or the PID owning the port), not a pattern:
+
+```bash
+kill "$pid"          # SIGTERM: normal shutdown
+# after 5s, only if it is still running:
+kill -9 "$pid"
+```
+
+Do not use `pkill -f`: the pattern can match the shell issuing it. Do not stop
+another agent's instance or reuse its port. See
+[`.agents/skills/craft-app-lifecycle/SKILL.md`](.agents/skills/craft-app-lifecycle/SKILL.md)
+for the equivalent PhotoCraft, EffectCraft, VectorCraft and FilmCraft commands.
+
 ## Current functional boundaries
 
 - Original images, pose sheets, part sheets and turnarounds are distinct inputs.
