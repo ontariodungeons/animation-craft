@@ -3869,29 +3869,20 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     };
     std::fs::create_dir_all(&out_dir)?;
 
-    // Build per-part Photocraft commands: duplicate the source onto a part layer, then
-    // convert its background to transparency. An optional `regions` map of
-    // part -> polygon path params adds a region mask before rasterizing.
-    // Default part set covers the typical felt-puppet anatomy seen in Scout/Hopper sheets.
-    let default_parts: Vec<&str> = vec![
-        "head", "ears", "torso", "arm_L", "arm_R", "leg_L", "leg_R",
-    ];
-    let parts: Vec<String> = params
-        .get("parts")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect::<Vec<_>>()
-        })
-        .filter(|names: &Vec<String>| !names.is_empty())
-        .unwrap_or_else(|| default_parts.iter().map(|n| n.to_string()).collect());
+    // Each part is the source masked by an explicit polygon from `regions`
+    // (part id -> polygon points). Without regions every "part" would be a copy of
+    // the whole image, so regions are required and any failed step fails that part.
+    let regions = params
+        .get("regions")
+        .and_then(Value::as_object)
+        .filter(|r| !r.is_empty())
+        .ok_or_else(|| {
+            EngineError::InvalidParams(
+                "image.break_apart requires `regions`: a map of part id to polygon points".into(),
+            )
+        })?;
+    let parts: Vec<String> = regions.keys().cloned().collect();
 
-    let tolerance = params
-        .get("tolerance")
-        .and_then(Value::as_u64)
-        .map(|v| v.clamp(1, 100) as u32)
-        .unwrap_or(25);
     let bin = resolve_craft_cli("photocraft-cli");
 
     let mut produced_parts: Vec<Value> = Vec::new();
@@ -3900,58 +3891,23 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     for part_id in &parts {
         let part_out = out_dir.join(format!("{part_id}.png"));
 
-        // Step 1: Duplicate source content onto a new part layer.
-        let step1_args = build_photocraft_run_args(
-            &source_path.to_string_lossy(),
-            "layer.new.layerViaCopy",
-            Some(&json!({"layer": part_id}).to_string()),
-            &part_out.to_string_lossy(),
-        );
-        if let Err(e) = run_tool_in(&root, &bin, &step1_args) {
-            errors.push(format!("{part_id}: {e}"));
-            continue;
-        }
-
-        // Step 2 (optional): isolate a region via a polygon path mask when provided.
-        let region = params
-            .get("regions")
-            .and_then(|r| r.get(part_id.as_str()))
-            .cloned();
-        let effective_input = if let Some(region_points) = region {
-            let masked_out = out_dir.join(format!("{part_id}_masked.png"));
-            let mask_args = build_photocraft_run_args(
-                &part_out.to_string_lossy(),
-                "path.fromPoints",
-                Some(&json!({"points": region_points}).to_string()),
-                &part_out.to_string_lossy(),
-            );
-            if run_tool_in(&root, &bin, &mask_args).is_ok() {
-                let vec_args = build_photocraft_run_args(
-                    &part_out.to_string_lossy(),
-                    "layer.vectorMask.fromPath",
-                    Some(&json!({"replace": true}).to_string()),
-                    &masked_out.to_string_lossy(),
-                );
-                if run_tool_in(&root, &bin, &vec_args).is_ok() {
-                    masked_out
-                } else {
-                    part_out.clone()
-                }
-            } else {
-                part_out.clone()
-            }
-        } else {
-            part_out.clone()
-        };
-
-        // Final step: convert remaining background color to transparency.
-        let alpha_args = build_photocraft_run_args(
-            &effective_input.to_string_lossy(),
-            "filter.other.colorToAlpha",
-            Some(&json!({"color": "#FFFFFF", "tolerance": tolerance, "dither": false}).to_string()),
-            &part_out.to_string_lossy(),
-        );
-        if let Err(e) = run_tool_in(&root, &bin, &alpha_args) {
+        // One PhotoCraft session per part: select the polygon, invert, clear the rest.
+        // The source is already matted at intake, so no background removal happens here.
+        let args = vec![
+            "run".to_string(),
+            source_path.to_string_lossy().into_owned(),
+            "--cmd".to_string(),
+            "select.lasso".to_string(),
+            "--params".to_string(),
+            json!({"points": regions[part_id.as_str()]}).to_string(),
+            "--cmd".to_string(),
+            "select.inverse".to_string(),
+            "--cmd".to_string(),
+            "edit.clear".to_string(),
+            "--out".to_string(),
+            part_out.to_string_lossy().into_owned(),
+        ];
+        if let Err(e) = run_tool_in(&root, &bin, &args) {
             errors.push(format!("{part_id}: {e}"));
             continue;
         }
@@ -3970,19 +3926,12 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
         }
     }
 
-    let tolerance = params
-        .get("tolerance")
-        .and_then(Value::as_u64)
-        .map(|v| v.clamp(1, 100) as u32)
-        .unwrap_or(25);
-
     Ok(json!({
         "ok": !produced_parts.is_empty(),
         "command": "image.break_apart",
         "asset_id": asset_id,
         "source": source_path.to_string_lossy(),
         "out_dir": out_dir.to_string_lossy(),
-        "tolerance": tolerance,
         "parts_produced": produced_parts.len(),
         "parts": produced_parts,
         "errors": errors,
@@ -4022,23 +3971,23 @@ fn cmd_image_puppet_warp(s: &mut Session, params: &Value) -> Result<Value> {
     };
     std::fs::create_dir_all(out_path.parent().unwrap_or(&root))?;
 
-    // Puppet warp mesh pins: source pin -> destination pin pairs.
+    // Pins come from the caller (e.g. rig joints); there is no sensible default.
     let pins: Vec<Value> = params
         .get("pins")
         .and_then(Value::as_array)
+        .filter(|p| !p.is_empty())
         .cloned()
-        .unwrap_or_else(|| {
-            vec![
-                json!({"src":[100,100],"dst":[100,110]}),
-                json!({"src":[200,100],"dst":[200,105]}),
-            ]
-        });
+        .ok_or_else(|| {
+            EngineError::InvalidParams(
+                "image.puppet_warp requires `pins`: [{\"src\":[x,y],\"dst\":[x,y]}, ...]".into(),
+            )
+        })?;
 
     let warp_params = json!({
         "pins": pins,
-        "mesh": params.get("mesh").and_then(Value::as_str).unwrap_or("default"),
-        "expansion": params.get("expansion").and_then(Value::as_f64).unwrap_or(10.0),
-        "distortion": params.get("distortion").and_then(Value::as_str).unwrap_or("normal"),
+        "mode": params.get("mode").and_then(Value::as_str).unwrap_or("normal"),
+        "density": params.get("density").and_then(Value::as_str).unwrap_or("normal"),
+        "expansion": params.get("expansion").and_then(Value::as_f64).unwrap_or(2.0),
     });
     let args = build_photocraft_run_args(
         &source_path.to_string_lossy(),
@@ -4106,16 +4055,21 @@ fn cmd_image_color_to_alpha(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .unwrap_or("#FFFFFF");
 
-    let tolerance = params
-        .get("tolerance")
-        .and_then(Value::as_u64)
-        .map(|v| v.clamp(1, 100) as u32)
-        .unwrap_or(30);
+    let transparency_threshold = params
+        .get("transparencyThreshold")
+        .and_then(Value::as_f64)
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.0);
+    let opacity_threshold = params
+        .get("opacityThreshold")
+        .and_then(Value::as_f64)
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(1.0);
 
     let color_params = json!({
         "color": color_raw,
-        "tolerance": tolerance,
-        "dither": false,
+        "transparencyThreshold": transparency_threshold,
+        "opacityThreshold": opacity_threshold,
     });
     let args = build_photocraft_run_args(
         &source_path.to_string_lossy(),
@@ -4142,7 +4096,8 @@ fn cmd_image_color_to_alpha(s: &mut Session, params: &Value) -> Result<Value> {
         "width": w,
         "height": h,
         "color": color_raw,
-        "tolerance": tolerance,
+        "transparencyThreshold": transparency_threshold,
+        "opacityThreshold": opacity_threshold,
     }))
 }
 
@@ -4179,27 +4134,46 @@ fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value
     };
     std::fs::create_dir_all(out_path.parent().unwrap_or(&root))?;
 
-    let selection = params.get("selection").and_then(Value::as_str).unwrap_or("subject");
+    // edit.fill acts on the current selection, so the caller names the selection command
+    // (e.g. select.rect, select.colorRange) that runs first in the same document session.
+    let select = params
+        .get("select")
+        .filter(|v| v.get("id").and_then(Value::as_str).is_some())
+        .ok_or_else(|| {
+            EngineError::InvalidParams(
+                "image.content_aware_fill requires `select`: {\"id\":\"select.*\",\"params\":{...}}".into(),
+            )
+        })?;
+    let select_id = select["id"].as_str().unwrap_or_default();
     let fill_contents = params.get("contents").and_then(Value::as_str).unwrap_or("contentAware");
     let color = params.get("color").and_then(Value::as_str);
 
     let mut fill_params = serde_json::Map::new();
     fill_params.insert("contents".to_string(), json!(fill_contents));
-    fill_params.insert("selection".to_string(), json!(selection));
-    fill_params.insert("mode".to_string(), json!("normal"));
-    fill_params.insert("opacity".to_string(), json!(100));
     if let Some(c) = color {
         fill_params.insert("color".to_string(), json!(c));
     }
 
     let fill_params_json = serde_json::to_string(&fill_params)
         .map_err(|e| EngineError::InvalidParams(format!("cannot serialize fill params: {e}")))?;
-    let args = build_photocraft_run_args(
-        &source_path.to_string_lossy(),
-        "edit.fill",
-        Some(&fill_params_json),
-        &out_path.to_string_lossy(),
-    );
+    let mut args = vec![
+        "run".to_string(),
+        source_path.to_string_lossy().into_owned(),
+        "--cmd".to_string(),
+        select_id.to_string(),
+    ];
+    if let Some(p) = select.get("params") {
+        args.push("--params".to_string());
+        args.push(p.to_string());
+    }
+    args.extend([
+        "--cmd".to_string(),
+        "edit.fill".to_string(),
+        "--params".to_string(),
+        fill_params_json,
+        "--out".to_string(),
+        out_path.to_string_lossy().into_owned(),
+    ]);
 
     let bin = resolve_craft_cli("photocraft-cli");
     run_tool_in(&root, &bin, &args)?;
@@ -4218,7 +4192,7 @@ fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value
         "output": out_path.to_string_lossy(),
         "width": w,
         "height": h,
-        "selection": selection,
+        "select": select_id,
         "contents": fill_contents,
         "color": color,
     }))
@@ -4291,7 +4265,7 @@ fn build() -> Vec<CommandSpec> {
             "Break Image Into Parts",
             ["Edit", "Break Apart"],
             None,
-            "{\"asset\":\"optional_id\",\"parts\":\"csv\",\"tolerance\":25,\"out_dir\":\"optional_dir\"}",
+            "{\"asset\":\"optional_id\",\"regions\":{\"part_id\":[[x,y]]},\"out_dir\":\"optional_dir\"}",
             always,
             cmd_image_break_apart
         ),
@@ -4300,7 +4274,7 @@ fn build() -> Vec<CommandSpec> {
             "Puppet Warp Mesh",
             ["Edit", "Break Apart"],
             None,
-            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"pins\":[{\"src\":[x,y],\"dst\":[x,y]}]}",
+            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"pins\":[{\"src\":[x,y],\"dst\":[x,y]}],\"mode\":\"rigid|normal|distort\",\"density\":\"fewer|normal|more\",\"expansion\":2}",
             always,
             cmd_image_puppet_warp
         ),
@@ -4309,7 +4283,7 @@ fn build() -> Vec<CommandSpec> {
             "Color to Alpha",
             ["Edit", "Break Apart"],
             None,
-            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"color\":\"#FFFFFF\",\"tolerance\":30}",
+            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"color\":\"#FFFFFF\",\"transparencyThreshold\":0,\"opacityThreshold\":1}",
             always,
             cmd_image_color_to_alpha
         ),
@@ -4318,7 +4292,7 @@ fn build() -> Vec<CommandSpec> {
             "Content-Aware Fill",
             ["Edit", "Break Apart"],
             None,
-            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"contents\":\"contentAware\",\"selection\":\"subject\",\"color\":\"#hex\"}",
+            "{\"asset\":\"optional_id\",\"source\":\"path\",\"out\":\"path\",\"select\":{\"id\":\"select.rect\",\"params\":{}},\"contents\":\"contentAware\",\"color\":\"#hex\"}",
             always,
             cmd_image_content_aware_fill
         ),
@@ -5281,9 +5255,8 @@ elif argv[0] == "compare-reference":
         assert!(matches!(err, EngineError::InvalidParams(_)));
     }
 
-    #[test]
-    fn image_break_apart_produces_part_list_for_existing_asset() {
-        let dir = temporary_directory("image_break_apart");
+    fn loaded_test_asset(name: &str, asset: &str) -> (Session, std::path::PathBuf) {
+        let dir = temporary_directory(name);
         let img_path = dir.join("test.png");
         image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 255, 255, 255]))
             .save(&img_path)
@@ -5292,25 +5265,37 @@ elif argv[0] == "compare-reference":
         s.cwd = dir.clone();
         s.execute(
             "intake.validate",
-            json!({"image": img_path.to_string_lossy(), "asset": "break_test"}),
+            json!({"image": img_path.to_string_lossy(), "asset": asset}),
         )
         .unwrap();
+        (s, dir)
+    }
 
-        let result = s.execute("image.break_apart", json!({"asset": "break_test"})).unwrap();
-        assert_eq!(result["command"], "image.break_apart");
-        assert_eq!(result["asset_id"], "break_test");
-        // Must actually produce parts, not just echo a count of 0
-        assert!(result["ok"].as_bool().unwrap_or(false), "break_apart should succeed: {result:?}");
-        assert!(result["parts_produced"].as_u64().unwrap_or(0) > 0, "should produce at least one part: {result:?}");
-        assert!(result["parts"].is_array());
-        // Every produced part must have a part id, label, and file path
-        for part in result["parts"].as_array().unwrap() {
-            assert!(part.get("part").is_some());
-            assert!(part.get("label").is_some());
-            assert!(part.get("file").is_some());
-            let file = part.get("file").and_then(Value::as_str).unwrap();
-            assert!(std::path::Path::new(file).is_file(), "part file {file} must exist");
-        }
+    #[test]
+    fn image_break_apart_rejects_missing_regions() {
+        let (mut s, dir) = loaded_test_asset("image_break_apart", "break_test");
+        let err = s.execute("image.break_apart", json!({"asset": "break_test"})).unwrap_err();
+        assert!(matches!(err, EngineError::InvalidParams(m) if m.contains("regions")));
+        let err = s
+            .execute("image.break_apart", json!({"asset": "break_test", "regions": {}}))
+            .unwrap_err();
+        assert!(matches!(err, EngineError::InvalidParams(_)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn image_puppet_warp_rejects_missing_pins() {
+        let (mut s, dir) = loaded_test_asset("image_puppet_warp", "warp_test");
+        let err = s.execute("image.puppet_warp", json!({"asset": "warp_test"})).unwrap_err();
+        assert!(matches!(err, EngineError::InvalidParams(m) if m.contains("pins")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn image_content_aware_fill_rejects_missing_selection() {
+        let (mut s, dir) = loaded_test_asset("image_fill", "fill_test");
+        let err = s.execute("image.content_aware_fill", json!({"asset": "fill_test"})).unwrap_err();
+        assert!(matches!(err, EngineError::InvalidParams(m) if m.contains("select")));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -5333,7 +5318,8 @@ elif argv[0] == "compare-reference":
         assert_eq!(result["command"], "image.color_to_alpha");
         assert_eq!(result["asset_id"], "alpha_test");
         assert_eq!(result["color"], "#FFFFFF");
-        assert!(result["tolerance"].is_number());
+        assert!(result["transparencyThreshold"].is_number());
+        assert!(result["opacityThreshold"].is_number());
         assert!(result["ok"].as_bool().unwrap_or(false), "color_to_alpha should succeed: {result:?}");
         // Output file must exist and have real content
         let out_path = result["output"].as_str().unwrap();

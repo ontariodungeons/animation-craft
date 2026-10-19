@@ -132,6 +132,82 @@ fn run_script_argument<'a>(positional: Option<&'a str>, raw_args: &[String]) -> 
     positional.or_else(|| raw_args.iter().any(|arg| arg == "-").then_some("-"))
 }
 
+/// Typed MCP input schemas for commands whose parameters are fixed; the rest keep a bare object
+/// and publish their parameter shape in the tool description.
+fn tool_input_schema(id: &str) -> Value {
+    let asset = json!({ "type": "string", "description": "Loaded asset id; defaults to the active asset" });
+    let source = json!({ "type": "string", "description": "Source image path; defaults to the asset's image" });
+    let out = json!({ "type": "string", "description": "Output PNG path" });
+    let unit = json!({ "type": "number", "minimum": 0, "maximum": 1 });
+    let point = json!({ "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 });
+    match id {
+        "image.break_apart" => json!({
+            "type": "object",
+            "properties": {
+                "asset": asset,
+                "regions": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "description": "Part id -> polygon points [[x, y], ...]",
+                    "additionalProperties": { "type": "array", "items": point }
+                },
+                "out_dir": { "type": "string" }
+            },
+            "required": ["regions"]
+        }),
+        "image.puppet_warp" => json!({
+            "type": "object",
+            "properties": {
+                "asset": asset,
+                "source": source,
+                "out": out,
+                "pins": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": { "src": point, "dst": point },
+                        "required": ["src", "dst"]
+                    }
+                },
+                "mode": { "enum": ["rigid", "normal", "distort"] },
+                "density": { "enum": ["fewer", "normal", "more"] },
+                "expansion": { "type": "number" }
+            },
+            "required": ["pins"]
+        }),
+        "image.color_to_alpha" => json!({
+            "type": "object",
+            "properties": {
+                "asset": asset,
+                "source": source,
+                "out": out,
+                "color": { "type": "string", "description": "Colour to remove, e.g. #FFFFFF" },
+                "transparencyThreshold": unit,
+                "opacityThreshold": unit
+            }
+        }),
+        "image.content_aware_fill" => json!({
+            "type": "object",
+            "properties": {
+                "asset": asset,
+                "source": source,
+                "out": out,
+                "select": {
+                    "type": "object",
+                    "description": "PhotoCraft selection command run before the fill, e.g. select.rect",
+                    "properties": { "id": { "type": "string" }, "params": { "type": "object" } },
+                    "required": ["id"]
+                },
+                "contents": { "type": "string" },
+                "color": { "type": "string" }
+            },
+            "required": ["select"]
+        }),
+        _ => json!({ "type": "object", "properties": {}, "additionalProperties": true }),
+    }
+}
+
 fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
@@ -166,7 +242,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         json!({
                             "name": spec.id.replace('.', "_"),
                             "description": format!("{} ({})", spec.label, spec.params),
-                            "inputSchema": { "type": "object" }
+                            "inputSchema": tool_input_schema(spec.id)
                         })
                     })
                     .collect();

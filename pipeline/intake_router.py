@@ -3,6 +3,8 @@ import os
 import subprocess
 import urllib.request
 
+from pipeline.craft_cli import require_craft_cli
+
 
 def classify_archetype_from_hint(hint_name: str = "", aspect: float = 1.0) -> dict:
     h = os.path.basename(hint_name).lower()
@@ -34,9 +36,10 @@ def classify_archetype_from_hint(hint_name: str = "", aspect: float = 1.0) -> di
 def inspect_image_with_photocraft(image_path: str) -> dict:
     if not image_path or not os.path.exists(image_path):
         return {"width": 512, "height": 512, "aspect": 1.0, "exists": False}
+    photocraft = require_craft_cli("photocraft-cli")
     try:
         out = subprocess.check_output(
-            ["/home/jesse/.local/bin/photocraft-cli", "info", image_path, "--json"],
+            [photocraft, "info", image_path, "--json"],
             stderr=subprocess.DEVNULL,
             timeout=5,
         ).decode("utf-8")
