@@ -4,9 +4,18 @@
 //! `app.session().current_asset()`. Unmeasured fields display `"not measured"`.
 
 use super::chrome;
+#[path = "center_motion.rs"]
+mod center_motion;
+
 use crate::{AnimMode, AnimationCraftApp, CenterTab, ShadingMode, UiCommand};
 use animationcraft_engine::session::{ManifestPart, PartState};
 use animationcraft_engine::{Asset, ManifestFrame};
+use center_motion::{
+    WasdInput, actual_size_viewport_state, center_stage_state, compute_preview_scale,
+    desired_labels_for_mode, evaluate_cutout_rig_motion, evaluate_jump, fit_viewport_state,
+    is_rig_part_visible, jump_arc, sanitize_dt, sanitize_zoom, step_playback_phase, step_wasd_roam,
+    stop_motion_state, toggle_sprint_lock_state, trigger_jump_state, zoom_in_state, zoom_out_state,
+};
 use egui::{Color32, Pos2, Rect, Stroke, Ui, Vec2};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -93,17 +102,113 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
     }
 }
 
-/// A grounded anticipation/landing interval surrounds a smooth ballistic flight.
-fn jump_arc(phase: f64) -> f32 {
-    let cycle = (phase / std::f64::consts::TAU).rem_euclid(1.0) as f32;
-    if !(0.18..=0.82).contains(&cycle) {
-        return 0.0;
-    }
-    let flight = (cycle - 0.18) / 0.64;
-    4.0 * flight * (1.0 - flight)
+#[derive(Clone, Copy)]
+enum ToolbarIcon {
+    JumpArrow,
+    RunChevrons,
+    WasdCross,
+    FitCorners,
+    ActualOneToOne,
+    ZoomMinus,
+    ZoomPlus,
+    CenterTarget,
 }
 
-/// Shared transport above the source/animation canvas.
+fn toolbar_icon_button(
+    ui: &mut Ui,
+    enabled: bool,
+    active: bool,
+    label: &str,
+    accent: Color32,
+    min_size: Vec2,
+    icon: ToolbarIcon,
+    hint: &str,
+) -> egui::Response {
+    let fill_alpha = if active { 0.34 } else { 0.18 };
+    let stroke_alpha = if active { 0.90 } else { 0.62 };
+    let response = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(
+                egui::RichText::new(format!("     {label}"))
+                    .strong()
+                    .color(chrome::TEXT),
+            )
+            .min_size(min_size)
+            .corner_radius(7)
+            .stroke(Stroke::new(
+                if active { 1.4 } else { 1.0 },
+                accent.gamma_multiply(stroke_alpha),
+            ))
+            .fill(accent.gamma_multiply(fill_alpha)),
+        )
+        .on_hover_text(hint);
+
+    let mark = response.rect.left_center() + Vec2::new(14.0, 0.0);
+    let ink = if enabled {
+        accent
+    } else {
+        accent.gamma_multiply(0.35)
+    };
+    let painter = ui.painter();
+    let stroke = Stroke::new(1.7, ink);
+    match icon {
+        ToolbarIcon::JumpArrow => {
+            painter.line_segment([mark + Vec2::new(0.0, 5.5), mark + Vec2::new(0.0, -5.0)], stroke);
+            painter.line_segment(
+                [mark + Vec2::new(-4.5, -1.0), mark + Vec2::new(0.0, -5.5)],
+                stroke,
+            );
+            painter.line_segment(
+                [mark + Vec2::new(4.5, -1.0), mark + Vec2::new(0.0, -5.5)],
+                stroke,
+            );
+        }
+        ToolbarIcon::RunChevrons => {
+            for dx in [-3.5, 1.5] {
+                let c = mark + Vec2::new(dx, 0.0);
+                painter.line_segment([c + Vec2::new(-2.5, -4.5), c + Vec2::new(2.0, 0.0)], stroke);
+                painter.line_segment([c + Vec2::new(2.0, 0.0), c + Vec2::new(-2.5, 4.5)], stroke);
+            }
+        }
+        ToolbarIcon::WasdCross => {
+            painter.line_segment([mark + Vec2::new(-5.0, 0.0), mark + Vec2::new(5.0, 0.0)], stroke);
+            painter.line_segment([mark + Vec2::new(0.0, -5.0), mark + Vec2::new(0.0, 5.0)], stroke);
+            painter.circle_filled(mark, 1.8, ink);
+        }
+        ToolbarIcon::FitCorners => {
+            let r = 5.0;
+            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let corner = mark + Vec2::new(sx * r, sy * r);
+                painter.line_segment([corner, corner + Vec2::new(-sx * 3.2, 0.0)], stroke);
+                painter.line_segment([corner, corner + Vec2::new(0.0, -sy * 3.2)], stroke);
+            }
+        }
+        ToolbarIcon::ActualOneToOne => {
+            painter.rect_stroke(
+                Rect::from_center_size(mark, Vec2::new(10.0, 10.0)),
+                2.0,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.circle_filled(mark, 1.8, ink);
+        }
+        ToolbarIcon::ZoomMinus => {
+            painter.line_segment([mark + Vec2::new(-4.5, 0.0), mark + Vec2::new(4.5, 0.0)], stroke);
+        }
+        ToolbarIcon::ZoomPlus => {
+            painter.line_segment([mark + Vec2::new(-4.5, 0.0), mark + Vec2::new(4.5, 0.0)], stroke);
+            painter.line_segment([mark + Vec2::new(0.0, -4.5), mark + Vec2::new(0.0, 4.5)], stroke);
+        }
+        ToolbarIcon::CenterTarget => {
+            painter.circle_stroke(mark, 4.5, stroke);
+            painter.circle_filled(mark, 1.6, ink);
+        }
+    }
+    response
+}
+
+/// Shared transport, action, movement, and viewport zoom toolbar above the source/animation canvas.
 fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let ready = app.session().current_asset().is_some();
     let running = app.ui_state.center_tab == CenterTab::TwoD && app.ui_state.playing;
@@ -198,14 +303,12 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             app.ui_state.playing = true;
                         }
                         "pause" => app.ui_state.playing = false,
-                        "stop" => {
-                            app.ui_state.playing = false;
-                            app.ui_state.playback_phase = 0.0;
-                        }
+                        "stop" => stop_motion_state(&mut app.ui_state),
                         _ => {}
                     }
                 }
             }
+
             let menu = ui.menu_button(format!("Action: {:?}", app.ui_state.anim_mode), |ui| {
                 for (mode, name, command) in [
                     (AnimMode::Idle, "Idle", "idle"),
@@ -213,6 +316,7 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     (AnimMode::Run, "Run", "run"),
                     (AnimMode::Jump, "Jump", "jump"),
                     (AnimMode::Wave, "Wave", "wave"),
+                    (AnimMode::LookScout, "Look / Scout", "look_scout"),
                     (AnimMode::Static, "Static", "static"),
                 ] {
                     let response = ui.selectable_label(app.ui_state.anim_mode == mode, name);
@@ -223,6 +327,9 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         &response,
                     );
                     if response.clicked() {
+                        if app.ui_state.anim_mode != mode {
+                            app.ui_state.playback_phase = 0.0;
+                        }
                         app.ui_state.anim_mode = mode;
                         app.exec_ui_command(UiCommand::AnimPreview2d {
                             mode: command.into(),
@@ -233,33 +340,187 @@ fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
             });
             app.automation
                 .add_response("playback.action", "button", "Action", &menu.response);
+
+            let jump_resp = toolbar_icon_button(
+                ui,
+                ready,
+                app.ui_state.anim_mode == AnimMode::Jump && running,
+                "Jump",
+                Color32::from_rgb(78, 196, 214),
+                Vec2::new(72.0, 30.0),
+                ToolbarIcon::JumpArrow,
+                "Trigger a full Jump cycle (takeoff crouch -> apex -> landing) driven by Jump height.",
+            );
+            app.automation
+                .add_response("playback.jump", "button", "Jump", &jump_resp);
+            if jump_resp.clicked() {
+                app.ui_state.center_tab = CenterTab::TwoD;
+                trigger_jump_state(&mut app.ui_state);
+            }
+
+            let sprint = app.ui_state.sprint_lock;
+            let run_label = if sprint { "Run: ON" } else { "Run" };
+            let run_resp = toolbar_icon_button(
+                ui,
+                ready,
+                sprint,
+                run_label,
+                Color32::from_rgb(98, 168, 248),
+                Vec2::new(74.0, 30.0),
+                ToolbarIcon::RunChevrons,
+                "Toggle sprint pace for playback and WASD movement.",
+            );
+            app.automation
+                .add_response("playback.run_lock", "button", run_label, &run_resp);
+            if run_resp.clicked() {
+                toggle_sprint_lock_state(&mut app.ui_state);
+            }
+
+            let wasd = app.ui_state.wasd_roam;
+            let wasd_label = if wasd { "WASD: ON" } else { "WASD" };
+            let wasd_resp = toolbar_icon_button(
+                ui,
+                ready,
+                wasd,
+                wasd_label,
+                Color32::from_rgb(168, 142, 245),
+                Vec2::new(78.0, 30.0),
+                ToolbarIcon::WasdCross,
+                "Enable frame-rate-independent WASD / arrow-key stage movement and Space jump.",
+            );
+            app.automation
+                .add_response("playback.wasd", "button", wasd_label, &wasd_resp);
+            if wasd_resp.clicked() {
+                app.ui_state.wasd_roam = !wasd;
+                if app.ui_state.wasd_roam {
+                    app.ui_state.center_tab = CenterTab::TwoD;
+                }
+            }
+
+            ui.separator();
+
+            let is_fit = !app.ui_state.preview_actual_size
+                && (sanitize_zoom(app.ui_state.preview_zoom) - 1.0).abs() < 0.01;
+            let fit_resp = toolbar_icon_button(
+                ui,
+                ready,
+                is_fit,
+                "Fit",
+                Color32::from_rgb(82, 196, 176),
+                Vec2::new(60.0, 30.0),
+                ToolbarIcon::FitCorners,
+                "Fit character and jump headroom into the available stage viewport.",
+            );
+            app.automation
+                .add_response("viewport.fit", "button", "Fit", &fit_resp);
+            if fit_resp.clicked() {
+                fit_viewport_state(&mut app.ui_state);
+            }
+
+            let is_actual = app.ui_state.preview_actual_size
+                && (sanitize_zoom(app.ui_state.preview_zoom) - 1.0).abs() < 0.01;
+            let actual_resp = toolbar_icon_button(
+                ui,
+                ready,
+                is_actual,
+                "100%",
+                Color32::from_rgb(104, 174, 248),
+                Vec2::new(66.0, 30.0),
+                ToolbarIcon::ActualOneToOne,
+                "Render artwork at 100% actual pixel size (1:1).",
+            );
+            app.automation
+                .add_response("viewport.actual_size", "button", "100%", &actual_resp);
+            if actual_resp.clicked() {
+                actual_size_viewport_state(&mut app.ui_state);
+            }
+
+            let zoom_out_resp = toolbar_icon_button(
+                ui,
+                ready,
+                false,
+                "Zoom -",
+                Color32::from_rgb(135, 170, 215),
+                Vec2::new(74.0, 30.0),
+                ToolbarIcon::ZoomMinus,
+                "Zoom out relative to the current Fit or 100% base scale.",
+            );
+            app.automation
+                .add_response("viewport.zoom_out", "button", "Zoom -", &zoom_out_resp);
+            if zoom_out_resp.clicked() {
+                zoom_out_state(&mut app.ui_state);
+            }
+
+            let zoom_in_resp = toolbar_icon_button(
+                ui,
+                ready,
+                false,
+                "Zoom +",
+                Color32::from_rgb(135, 170, 215),
+                Vec2::new(74.0, 30.0),
+                ToolbarIcon::ZoomPlus,
+                "Zoom in relative to the current Fit or 100% base scale.",
+            );
+            app.automation
+                .add_response("viewport.zoom_in", "button", "Zoom +", &zoom_in_resp);
+            if zoom_in_resp.clicked() {
+                zoom_in_state(&mut app.ui_state);
+            }
+
+            let center_resp = toolbar_icon_button(
+                ui,
+                ready,
+                app.ui_state.stage_offset_x.abs() > 0.5 || app.ui_state.stage_offset_y.abs() > 0.5,
+                "Center",
+                Color32::from_rgb(232, 184, 96),
+                Vec2::new(74.0, 30.0),
+                ToolbarIcon::CenterTarget,
+                "Recenter character on the ground baseline and clear WASD stage offsets.",
+            );
+            app.automation
+                .add_response("viewport.center", "button", "Center", &center_resp);
+            if center_resp.clicked() {
+                center_stage_state(&mut app.ui_state);
+            }
+
+            let status_str = if !ready {
+                "Load a character to preview"
+            } else if running {
+                "Playing"
+            } else if app.ui_state.center_tab != CenterTab::TwoD {
+                "Play opens Animate"
+            } else if app.ui_state.playback_phase == 0.0 {
+                "Stopped"
+            } else {
+                "Paused"
+            };
+            let zoom_mode = if app.ui_state.preview_actual_size {
+                "100%"
+            } else {
+                "Fit"
+            };
+            let zoom_pct = (sanitize_zoom(app.ui_state.preview_zoom) * 100.0).round() as i32;
             ui.label(
-                egui::RichText::new(if !ready {
-                    "Load a character to preview"
-                } else if running {
-                    "Playing"
-                } else if app.ui_state.center_tab != CenterTab::TwoD {
-                    "Play opens Animate"
-                } else if app.ui_state.playback_phase == 0.0 {
-                    "Stopped"
-                } else {
-                    "Paused"
-                })
-                .small()
-                .color(chrome::MUTED),
+                egui::RichText::new(format!("{status_str} · {zoom_mode} ({zoom_pct}%)"))
+                    .small()
+                    .color(chrome::MUTED),
             );
         });
+
+        if app.ui_state.anim_mode == AnimMode::Jump {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Jump height").strong().color(chrome::TEAL));
+                ui.spacing_mut().slider_width = (ui.available_width() - 135.0).clamp(80.0, 230.0);
+                let response = ui
+                    .add(egui::Slider::new(&mut app.ui_state.jump_height_pct, 0.0..=80.0).suffix("%"))
+                    .on_hover_text("Preview lift as a percentage of the artwork height. Raise this to make the whole character leave the ground. Motion amount also scales the jump; this does not change exported animations.");
+                app.automation
+                    .add_response("playback.jump_height", "slider", "Jump height", &response);
+                ui.label(egui::RichText::new("of artwork height").small().color(chrome::MUTED));
+            });
+        }
     });
-    if app.ui_state.anim_mode == AnimMode::Jump {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Jump height").strong().color(chrome::TEAL));
-            ui.spacing_mut().slider_width = (ui.available_width() - 135.0).clamp(80.0, 230.0);
-            let response = ui.add(egui::Slider::new(&mut app.ui_state.jump_height_pct, 0.0..=80.0).suffix("%"))
-                .on_hover_text("Preview lift as a percentage of the artwork height. Raise this to make the whole character leave the ground. Motion amount also scales the jump; this does not change exported animations.");
-            app.automation.add_response("playback.jump_height", "slider", "Jump height", &response);
-            ui.label(egui::RichText::new("of artwork height").small().color(chrome::MUTED));
-        });
-    }
     ui.add_space(8.0);
 }
 
@@ -345,11 +606,21 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let orig_str = orig_path.to_string_lossy().into_owned();
     if let Some(tex) = app.load_texture(&ctx, &orig_str) {
         let tsize = tex.size_vec2();
-        let scale = ((rect.width() - 32.0) / tsize.x.max(1.0))
-            .min((rect.height() - 24.0) / tsize.y.max(1.0))
-            .min(1.0);
+        let scale = compute_preview_scale(
+            tsize.x,
+            tsize.y,
+            rect.width() - 32.0,
+            rect.height() - 24.0,
+            1.0,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
         let draw_size = tsize * scale;
-        let img_rect = Rect::from_center_size(rect.center(), draw_size);
+        let img_center = Pos2::new(
+            rect.center().x + app.ui_state.stage_offset_x,
+            rect.center().y + app.ui_state.stage_offset_y,
+        );
+        let img_rect = Rect::from_center_size(img_center, draw_size);
         painter.image(
             tex.id(),
             img_rect,
@@ -416,19 +687,6 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
             }
         }
     });
-}
-
-/// Candidate pose labels for each animation mode, resolved against the active asset's real `pose_manifest`.
-fn desired_labels_for_mode(mode: AnimMode) -> &'static [&'static str] {
-    match mode {
-        AnimMode::Idle => &["standing", "looking_up", "standing", "looking_down"],
-        AnimMode::Walk => &["walking", "standing", "pointing", "standing"],
-        AnimMode::Run => &["running", "walking", "jumping", "walking"],
-        AnimMode::Jump => &["standing", "jumping", "standing"],
-        AnimMode::Wave => &["standing", "waving", "arms_wide", "clapping"],
-        AnimMode::LookScout => &["looking_up", "pointing", "looking_down", "standing"],
-        AnimMode::Static => &["standing"],
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -540,131 +798,70 @@ fn resolve_pose_sequence(
         return vec![make_resolved(chosen)];
     }
 
-    let mut matched = Vec::new();
+    // Resolve to the single best-matching reference pose for `mode` rather than cycling
+    // unrelated reference poses as if a static reference sheet were a temporal flipbook.
     for want in desired_labels_for_mode(mode) {
         if let Some(frame) = pm.frames.iter().find(|f| f.label == *want) {
-            matched.push(make_resolved(frame));
+            return vec![make_resolved(frame)];
         }
     }
-    if matched.is_empty() {
-        // Unlabelled references are not an animation cycle. Hold the inspected frame.
-        if let Some(frame) = pm
-            .frames
-            .get(selected_pose_idx)
-            .or_else(|| pm.frames.first())
-        {
-            matched.push(make_resolved(frame));
-        }
+
+    // Unlabelled references are not an animation cycle. Hold the inspected frame.
+    if let Some(frame) = pm
+        .frames
+        .get(selected_pose_idx)
+        .or_else(|| pm.frames.first())
+    {
+        return vec![make_resolved(frame)];
     }
-    matched
+    Vec::new()
 }
 
 fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
     playback_bar(app, ui);
-    ui.horizontal_wrapped(|ui| {
-        if ui.button("Jump (Space)").clicked() {
-            app.ui_state.anim_mode = AnimMode::Jump;
-            app.ui_state.playing = true;
-            app.ui_state.playback_phase = 1.0;
-        }
-        let sprint = app.ui_state.sprint_lock;
-        if ui
-            .selectable_label(sprint, if sprint { "Run: ON" } else { "Run: OFF" })
-            .clicked()
-        {
-            app.ui_state.sprint_lock = !sprint;
-        }
-        let wasd = app.ui_state.wasd_roam;
-        if ui.selectable_label(wasd, "WASD Move").clicked() {
-            app.ui_state.wasd_roam = !wasd;
-        }
-        if ui.button("Reset Cam").clicked() {
-            app.ui_state.yaw_deg = 45.0;
-            app.ui_state.auto_turntable = false;
-        }
-        if ui.button("Center").clicked() {
-            app.ui_state.playback_phase = 0.0;
-            app.ui_state.selected_pose_idx = 0;
-            app.ui_state.stage_offset_x = 0.0;
-            app.ui_state.stage_offset_y = 0.0;
-        }
-    });
 
-    // Keyboard WASD + Space handling when WASD Move is enabled
+    let raw_dt = ui.ctx().input(|i| i.stable_dt);
+
+    // Frame-rate-independent (dt-scaled) keyboard WASD + Space handling when WASD Move is enabled
+    let mut wasd_moved = false;
     if app.ui_state.wasd_roam {
-        ui.ctx().input(|i| {
-            let step = if app.ui_state.sprint_lock { 5.5 } else { 3.0 };
-            if i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft) {
-                app.ui_state.stage_offset_x =
-                    (app.ui_state.stage_offset_x - step).clamp(-220.0, 220.0);
-                app.ui_state.anim_mode = if app.ui_state.sprint_lock {
-                    AnimMode::Run
-                } else {
-                    AnimMode::Walk
-                };
-            }
-            if i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight) {
-                app.ui_state.stage_offset_x =
-                    (app.ui_state.stage_offset_x + step).clamp(-220.0, 220.0);
-                app.ui_state.anim_mode = if app.ui_state.sprint_lock {
-                    AnimMode::Run
-                } else {
-                    AnimMode::Walk
-                };
-            }
-            if i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp) {
-                app.ui_state.stage_offset_y =
-                    (app.ui_state.stage_offset_y - step * 0.7).clamp(-80.0, 40.0);
-            }
-            if i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown) {
-                app.ui_state.stage_offset_y =
-                    (app.ui_state.stage_offset_y + step * 0.7).clamp(-80.0, 40.0);
-            }
-            if i.key_pressed(egui::Key::Space) {
-                app.ui_state.anim_mode = AnimMode::Jump;
-                app.ui_state.playing = true;
-                app.ui_state.playback_phase = 1.0;
-            }
+        let wasd_input = ui.ctx().input(|i| WasdInput {
+            left: i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft),
+            right: i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight),
+            up: i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp),
+            down: i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown),
+            jump_pressed: i.key_pressed(egui::Key::Space),
         });
-    }
-
-    // Universal Motion Verbs bar (from Web App)
-    ui.horizontal_wrapped(|ui| {
-        ui.small("Universal Verb:");
-        for verb in [
-            "move_traverse",
-            "jump_rise_fall",
-            "turn_bank",
-            "express_talk",
-        ] {
-            let active = app.ui_state.universal_verb == verb;
-            if ui.selectable_label(active, verb).clicked() {
-                app.ui_state.universal_verb = verb.to_string();
-                app.ui_state.anim_mode = match verb {
-                    "move_traverse" => AnimMode::Walk,
-                    "jump_rise_fall" => AnimMode::Jump,
-                    "turn_bank" => AnimMode::LookScout,
-                    "express_talk" => AnimMode::Wave,
-                    _ => app.ui_state.anim_mode,
-                };
-            }
+        let outcome = step_wasd_roam(
+            app.ui_state.stage_offset_x,
+            app.ui_state.stage_offset_y,
+            raw_dt,
+            wasd_input,
+            app.ui_state.sprint_lock,
+            app.ui_state.anim_speed,
+        );
+        app.ui_state.stage_offset_x = outcome.offset_x;
+        app.ui_state.stage_offset_y = outcome.offset_y;
+        wasd_moved = outcome.moved;
+        if outcome.triggered_jump {
+            trigger_jump_state(&mut app.ui_state);
+        } else if let Some(mode) = outcome.mode_override {
+            app.ui_state.anim_mode = mode;
         }
-        ui.separator();
-        ui.small(format!(
-            "Asset: {} · Range: {:.0}% · Speed: {:.2}x",
-            app.session().active_asset.as_deref().unwrap_or("none"),
-            app.ui_state.pose_range_pct,
-            app.ui_state.anim_speed
-        ));
-    });
+    }
 
     ui.add_space(4.0);
 
-    // Advance phase incrementally using frame dt so changing speed never jumps phase
-    if app.ui_state.playing {
-        let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.0, 0.1) as f64;
-        let rate = if app.ui_state.sprint_lock { 5.0 } else { 3.2 };
-        app.ui_state.playback_phase += dt * (app.ui_state.anim_speed as f64) * rate;
+    // Advance phase incrementally using frame dt so changing speed or frame rate never jumps phase
+    if app.ui_state.playing || wasd_moved {
+        app.ui_state.playback_phase = step_playback_phase(
+            app.ui_state.playback_phase,
+            raw_dt,
+            true,
+            app.ui_state.anim_speed,
+            app.ui_state.sprint_lock,
+        );
+        ui.ctx().request_repaint();
     }
 
     let range_factor = (app.ui_state.pose_range_pct / 100.0).clamp(0.0, 1.0);
@@ -696,13 +893,15 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .map(|a| a.parts.clone())
         .unwrap_or_default();
 
-    let (pose_label, tex_opt, lift_px, lift_summary, frame_anchor, frame_size, frame_parts) =
+    let cutout_rig_opt = app
+        .session()
+        .current_asset()
+        .and_then(|a| a.cutout_rig.clone());
+
+    let (pose_label, tex_opt, measured_lift_px, measured_lift_summary, frame_anchor, frame_size, frame_parts) =
         if let Some(frame) = active_frame {
             let ctx = ui.ctx().clone();
-            let has_rig = app
-                .session()
-                .current_asset()
-                .is_some_and(|a| a.cutout_rig.is_some());
+            let has_rig = cutout_rig_opt.is_some();
             let path = if has_rig {
                 frame.path.clone()
             } else {
@@ -782,6 +981,33 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         ],
         Stroke::new(2.0, Color32::from_rgb(72, 185, 130)),
     );
+
+    let motion_active = (app.ui_state.playing || app.ui_state.playback_phase.abs() > 1e-6)
+        && app.ui_state.anim_mode != AnimMode::Static
+        && range_factor > 0.005;
+    let jump_kin = evaluate_jump(
+        app.ui_state.playback_phase,
+        app.ui_state.jump_height_pct,
+        range_factor,
+        motion_active && app.ui_state.anim_mode == AnimMode::Jump,
+    );
+
+    // Compute live stage lift in screen pixels so the contact shadow and baseline telemetry reflect Jump height
+    let approx_char_h = (rect.height() - 110.0).clamp(150.0, 420.0);
+    let (effective_lift_px, lift_summary) = if app.ui_state.anim_mode == AnimMode::Jump {
+        let live_px = jump_kin.lift_px(approx_char_h);
+        (
+            live_px,
+            format!(
+                "+{live_px:.1} px (jump {}, {:.0}% height)",
+                jump_kin.stage.as_str(),
+                app.ui_state.jump_height_pct
+            ),
+        )
+    } else {
+        (measured_lift_px, measured_lift_summary)
+    };
+
     painter.text(
         Pos2::new(rect.left() + 20.0, baseline_y + 10.0),
         egui::Align2::LEFT_TOP,
@@ -792,8 +1018,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         Color32::from_rgb(110, 220, 165),
     );
 
-    // Ground contact shadow (tracks stage_offset_x)
-    let shadow_w = (120.0 - lift_px * 0.7).max(55.0);
+    // Ground contact shadow (tracks stage_offset_x, narrows with airborne lift, widens slightly on crouch)
+    let shadow_w = (120.0 - effective_lift_px * 0.7 + jump_kin.crouch_fraction * 18.0).clamp(48.0, 142.0);
     let shadow_rect = Rect::from_center_size(
         Pos2::new(
             rect.center().x + app.ui_state.stage_offset_x,
@@ -821,11 +1047,6 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             || app.ui_state.arm_spread.abs() > 0.5
             || app.ui_state.eye_blink > 0.5);
 
-    let cutout_rig_opt = app
-        .session()
-        .current_asset()
-        .and_then(|a| a.cutout_rig.clone());
-
     let tint = match app.ui_state.shading_mode {
         ShadingMode::FeltPbr => Color32::WHITE,
         ShadingMode::ClaySculpt => Color32::from_rgb(215, 200, 185),
@@ -844,152 +1065,32 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         } else {
             1.0
         };
-        let scale = (max_h / (ch * headroom)).min(max_w / cw).min(1.15);
+        let scale = compute_preview_scale(
+            cw,
+            ch,
+            max_w,
+            max_h,
+            headroom,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
         let draw_size = Vec2::new(cw * scale, ch * scale);
         let center_x = rect.center().x + app.ui_state.stage_offset_x;
         let bottom_y = baseline_y + 18.0 + app.ui_state.stage_offset_y;
         let canvas_origin = Pos2::new(center_x - draw_size.x * 0.5, bottom_y - draw_size.y);
 
-        // Pose-library-design acting pattern: anticipation -> action -> hold -> settle
-        // Smooth stepped wave with holds so acting is readable
-        let phase = app.ui_state.playback_phase as f32;
-        let raw_sin = phase.sin();
-        let held_wave = (raw_sin * 1.35).clamp(-1.0, 1.0);
-        let held_cos = (phase.cos() * 1.35).clamp(-1.0, 1.0);
-        let amp = range_factor * (app.ui_state.anim_energy / 100.0).clamp(0.2, 1.5);
-
-        let (
-            torso_deg,
-            head_deg,
-            ear_l_deg,
-            ear_r_deg,
-            arm_l_deg,
-            arm_r_deg,
-            leg_l_deg,
-            foot_l_deg,
-            leg_r_deg,
-            foot_r_deg,
-            root_dy,
-        ) = match app.ui_state.anim_mode {
-            AnimMode::Idle => (
-                held_wave * 1.5 * amp,
-                -held_wave * 2.5 * amp + app.ui_state.head_yaw * 0.3,
-                held_cos * 7.0 * amp - app.ui_state.ear_splay * 0.3,
-                -held_cos * 7.0 * amp + app.ui_state.ear_splay * 0.3,
-                held_wave * 10.0 * amp + app.ui_state.arm_spread * 0.5,
-                -held_wave * 3.5 * amp - app.ui_state.arm_spread * 0.2,
-                held_wave * 6.0 * amp,
-                held_cos * 14.0 * amp,
-                -held_wave * 6.0 * amp,
-                -held_cos * 14.0 * amp,
-                -held_wave.abs() * 6.0 * amp,
-            ),
-            AnimMode::Walk => (
-                held_wave * 3.0 * amp,
-                -held_wave * 2.5 * amp + app.ui_state.head_yaw * 0.3,
-                -held_cos * 10.0 * amp - app.ui_state.ear_splay * 0.3,
-                -held_cos * 8.0 * amp + app.ui_state.ear_splay * 0.3,
-                held_wave * 18.0 * amp + app.ui_state.arm_spread * 0.5,
-                -held_wave * 4.5 * amp - app.ui_state.arm_spread * 0.2,
-                -held_wave * 13.0 * amp + app.ui_state.knee_bend * 0.4,
-                -held_wave * 15.0 * amp + held_cos * 8.0 * amp,
-                held_wave * 13.0 * amp - app.ui_state.knee_bend * 0.4,
-                held_wave * 15.0 * amp - held_cos * 8.0 * amp,
-                -held_wave.abs() * 16.0 * amp,
-            ),
-            AnimMode::Run => (
-                held_wave * 4.5 * amp,
-                -held_wave * 3.5 * amp,
-                -held_cos * 14.0 * amp,
-                -held_cos * 13.0 * amp,
-                held_wave * 24.0 * amp,
-                -held_wave * 6.0 * amp,
-                -held_wave * 16.0 * amp,
-                -held_wave * 18.0 * amp + held_cos * 10.0 * amp,
-                held_wave * 16.0 * amp,
-                held_wave * 18.0 * amp - held_cos * 10.0 * amp,
-                -held_wave.abs() * 26.0 * amp,
-            ),
-            AnimMode::Jump => {
-                let jump_lift = jump_arc(app.ui_state.playback_phase);
-                let crouch = if jump_lift == 0.0 {
-                    held_wave.abs() * app.ui_state.jump_height_pct / 80.0
-                } else {
-                    0.0
-                };
-                (
-                    -jump_lift * 4.0 * amp + crouch * 5.0 * amp,
-                    jump_lift * 5.0 * amp - crouch * 6.0 * amp,
-                    jump_lift * 14.0 * amp - crouch * 10.0 * amp,
-                    jump_lift * 16.0 * amp - crouch * 10.0 * amp,
-                    jump_lift * 28.0 * amp - crouch * 16.0 * amp,
-                    -jump_lift * 5.0 * amp + crouch * 4.0 * amp,
-                    -jump_lift * 15.0 * amp + crouch * 13.0 * amp,
-                    -jump_lift * 18.0 * amp + crouch * 14.0 * amp,
-                    -jump_lift * 14.0 * amp + crouch * 12.0 * amp,
-                    -jump_lift * 16.0 * amp + crouch * 14.0 * amp,
-                    -jump_lift * ch * app.ui_state.jump_height_pct / 100.0 * range_factor
-                        + crouch * 16.0 * amp,
-                )
-            }
-            AnimMode::Wave => (
-                held_wave * 2.0 * amp,
-                -4.5 * amp + held_wave * 3.0 * amp,
-                -8.0 * amp + held_cos * 6.0 * amp,
-                8.0 * amp + held_cos * 6.0 * amp,
-                24.0 * amp + held_wave * 18.0 * amp,
-                -3.5 * amp + held_cos * 2.5 * amp,
-                -held_wave * 8.0 * amp,
-                -held_wave * 14.0 * amp + held_cos * 6.0 * amp,
-                held_wave * 7.0 * amp,
-                held_wave * 12.0 * amp - held_cos * 6.0 * amp,
-                -held_wave.abs() * 8.0 * amp,
-            ),
-            AnimMode::LookScout => (
-                held_wave * 2.5 * amp,
-                held_wave * 8.0 * amp + app.ui_state.head_yaw * 0.4,
-                held_wave * 13.0 * amp,
-                held_wave * 12.0 * amp,
-                held_cos * 14.0 * amp,
-                -held_cos * 4.0 * amp,
-                -held_wave * 10.0 * amp,
-                -held_wave * 14.0 * amp,
-                held_wave * 10.0 * amp,
-                held_wave * 14.0 * amp,
-                -held_wave.abs() * 8.0 * amp,
-            ),
-            AnimMode::Static => (
-                0.0,
-                app.ui_state.head_yaw * 0.35,
-                -app.ui_state.ear_splay * 0.35,
-                app.ui_state.ear_splay * 0.35,
-                app.ui_state.arm_spread * 0.6 + app.ui_state.elbow_bend * 0.5,
-                -app.ui_state.arm_spread * 0.25 - app.ui_state.elbow_bend * 0.2,
-                app.ui_state.knee_bend * 0.5,
-                app.ui_state.knee_bend * 0.5,
-                -app.ui_state.knee_bend * 0.5,
-                -app.ui_state.knee_bend * 0.5,
-                0.0,
-            ),
-        };
-
-        let mut angles_rad: BTreeMap<&str, f32> = BTreeMap::new();
-        angles_rad.insert("torso", torso_deg.to_radians());
-        angles_rad.insert("head", head_deg.to_radians());
-        angles_rad.insert("ear_left", ear_l_deg.to_radians());
-        angles_rad.insert("ear_right", ear_r_deg.to_radians());
-        angles_rad.insert("arm_left", arm_l_deg.to_radians());
-        angles_rad.insert("arm_right", arm_r_deg.to_radians());
-        angles_rad.insert("leg_left", leg_l_deg.to_radians());
-        angles_rad.insert("foot_left", foot_l_deg.to_radians());
-        angles_rad.insert("leg_right", leg_r_deg.to_radians());
-        angles_rad.insert("foot_right", foot_r_deg.to_radians());
+        let rig_eval = evaluate_cutout_rig_motion(&rig, &app.ui_state);
+        let angles_rad = &rig_eval.angles_rad;
+        let root_dy = rig_eval.root_dy_canvas;
 
         let mut parts_by_id: BTreeMap<&str, &animationcraft_engine::session::CutoutRigPart> =
             BTreeMap::new();
         for p in &rig.parts {
             parts_by_id.insert(p.id.as_str(), p);
         }
+
+        let explode_factor = (app.ui_state.explode_pct / 100.0) * 0.45;
+        let rig_center_canvas = Pos2::new(cw * 0.5, ch * 0.5);
 
         let transform_canvas_pt = |pt: Pos2, part_id: &str| -> Pos2 {
             let mut cur = pt;
@@ -1014,16 +1115,28 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 }
                 depth += 1;
             }
+            if explode_factor > 0.002
+                && let Some(part) = parts_by_id.get(part_id)
+            {
+                let piv = Pos2::new(part.pivot[0], part.pivot[1]);
+                let explode_vec = (piv - rig_center_canvas) * explode_factor;
+                cur += explode_vec;
+            }
             Pos2::new(
                 canvas_origin.x + cur.x * scale,
                 canvas_origin.y + cur.y * scale,
             )
         };
 
-        let mut sorted_parts = rig.parts.clone();
+        let mut sorted_parts: Vec<_> = rig
+            .parts
+            .iter()
+            .filter(|p| is_rig_part_visible(&p.id, &part_states))
+            .cloned()
+            .collect();
         sorted_parts.sort_by_key(|p| p.layer);
 
-        for part in &sorted_parts {
+        for (part_idx, part) in sorted_parts.iter().enumerate() {
             let path = if part.id == "head" {
                 app.face_preview
                     .path(&ctx, &part.cropped_path, &app.ui_state)
@@ -1059,6 +1172,20 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             mesh.add_triangle(0, 1, 2);
             mesh.add_triangle(0, 2, 3);
             painter.add(egui::Shape::mesh(mesh));
+
+            if app.ui_state.show_topology_numbers {
+                let piv_screen =
+                    transform_canvas_pt(Pos2::new(part.pivot[0], part.pivot[1]), &part.id);
+                let badge_pos = piv_screen + Vec2::new(0.0, -12.0);
+                painter.circle_filled(badge_pos, 9.0, Color32::from_rgb(35, 95, 165));
+                painter.text(
+                    badge_pos,
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}", part_idx + 1),
+                    egui::FontId::monospace(10.0),
+                    Color32::WHITE,
+                );
+            }
         }
 
         if app.ui_state.show_pivot_markers || app.ui_state.shading_mode == ShadingMode::Wireframe {
@@ -1092,18 +1219,34 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         } else {
             1.0
         };
-        let scale = (max_h / (tex_size.y.max(1.0) * headroom))
-            .min(max_w / tex_size.x.max(1.0))
-            .min(1.25);
-        let draw_size = tex_size * scale;
+        let scale = compute_preview_scale(
+            tex_size.x,
+            tex_size.y,
+            max_w,
+            max_h,
+            headroom,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
+        let base_draw_size = tex_size * scale;
         let center_x = rect.center().x + app.ui_state.stage_offset_x;
         let preview_lift = if app.ui_state.anim_mode == AnimMode::Jump {
-            jump_arc(app.ui_state.playback_phase) * draw_size.y * app.ui_state.jump_height_pct
+            jump_arc(app.ui_state.playback_phase) * base_draw_size.y * app.ui_state.jump_height_pct
                 / 100.0
                 * range_factor
         } else {
-            lift_px
+            measured_lift_px
         };
+        // Grounded takeoff/landing crouch compression anchored at bottom_y
+        let (scale_x, scale_y) = if app.ui_state.anim_mode == AnimMode::Jump {
+            (
+                1.0 + jump_kin.crouch_fraction * 0.05 - jump_kin.lift_fraction * 0.02,
+                1.0 - jump_kin.crouch_fraction * 0.10 + jump_kin.lift_fraction * 0.04,
+            )
+        } else {
+            (1.0, 1.0)
+        };
+        let draw_size = Vec2::new(base_draw_size.x * scale_x, base_draw_size.y * scale_y);
         let bottom_y = baseline_y - preview_lift + app.ui_state.stage_offset_y;
         let sprite_rect = Rect::from_min_max(
             Pos2::new(center_x - draw_size.x * 0.5, bottom_y - draw_size.y),
@@ -1232,6 +1375,15 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     Stroke::new(1.5, Color32::from_rgb(255, 120, 40)),
                 );
             }
+            if app.ui_state.playing && frame_parts.is_empty() && app.ui_state.anim_mode != AnimMode::Jump {
+                painter.text(
+                    Pos2::new(rect.left() + 14.0, rect.top() + 32.0),
+                    egui::Align2::LEFT_TOP,
+                    "Reference pose held (build a cutout rig to articulate limbs for this action)",
+                    egui::FontId::proportional(11.0),
+                    Color32::from_rgb(235, 195, 115),
+                );
+            }
         }
     } else {
         painter.text(
@@ -1292,8 +1444,9 @@ fn select_turnaround_frame_for_yaw(asset: Option<&Asset>, yaw_deg: f32) -> Optio
 
 fn three_d_turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
     if app.ui_state.auto_turntable {
-        let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.0, 0.1);
+        let dt = sanitize_dt(ui.ctx().input(|i| i.stable_dt));
         app.ui_state.yaw_deg = (app.ui_state.yaw_deg + dt * 36.0).rem_euclid(360.0);
+        ui.ctx().request_repaint();
     }
 
     ui.horizontal_wrapped(|ui| {
@@ -1969,4 +2122,413 @@ mod tests {
             .collect();
         assert_eq!(solo_shown, vec!["head"]);
     }
+
+    #[test]
+    fn playback_phase_and_wasd_roam_are_frame_rate_invariant_across_dt_subdivisions() {
+        // 1.0 second of playback at 24 FPS, 60 FPS, and 120 FPS must yield identical phase
+        let mut phase_24 = 0.25_f64;
+        for _ in 0..24 {
+            phase_24 = step_playback_phase(phase_24, 1.0 / 24.0, true, 1.25, false);
+        }
+        let mut phase_60 = 0.25_f64;
+        for _ in 0..60 {
+            phase_60 = step_playback_phase(phase_60, 1.0 / 60.0, true, 1.25, false);
+        }
+        let mut phase_120 = 0.25_f64;
+        for _ in 0..120 {
+            phase_120 = step_playback_phase(phase_120, 1.0 / 120.0, true, 1.25, false);
+        }
+        assert!((phase_24 - phase_60).abs() < 1e-5);
+        assert!((phase_60 - phase_120).abs() < 1e-5);
+
+        // Paused playback must never advance phase regardless of dt
+        let paused_phase = step_playback_phase(phase_60, 0.05, false, 1.5, true);
+        assert_eq!(paused_phase, phase_60);
+
+        // 0.5 seconds of WASD diagonal roaming at 30 FPS vs 60 FPS vs 120 FPS must yield identical offsets
+        let input = WasdInput {
+            left: false,
+            right: true,
+            up: true,
+            down: false,
+            jump_pressed: false,
+        };
+        let run_roam = |steps: usize, dt: f32| -> (f32, f32, Option<AnimMode>) {
+            let (mut x, mut y, mut mode) = (0.0_f32, 0.0_f32, None);
+            for _ in 0..steps {
+                let out = step_wasd_roam(x, y, dt, input, false, 1.0);
+                x = out.offset_x;
+                y = out.offset_y;
+                mode = out.mode_override;
+            }
+            (x, y, mode)
+        };
+        let (x30, y30, mode30) = run_roam(15, 1.0 / 30.0);
+        let (x60, y60, mode60) = run_roam(30, 1.0 / 60.0);
+        let (x120, y120, mode120) = run_roam(60, 1.0 / 120.0);
+        assert!((x30 - x60).abs() < 1e-3 && (x60 - x120).abs() < 1e-3);
+        assert!((y30 - y60).abs() < 1e-3 && (y60 - y120).abs() < 1e-3);
+        assert!(x60 > 0.0 && y60 < 0.0);
+        assert_eq!(mode30, Some(AnimMode::Walk));
+        assert_eq!(mode60, Some(AnimMode::Walk));
+        assert_eq!(mode120, Some(AnimMode::Walk));
+
+        // Sprint lock increases WASD speed and switches horizontal movement to AnimMode::Run
+        let sprint_out = step_wasd_roam(0.0, 0.0, 0.05, input, true, 1.0);
+        let walk_out = step_wasd_roam(0.0, 0.0, 0.05, input, false, 1.0);
+        assert!(sprint_out.offset_x > walk_out.offset_x);
+        assert_eq!(sprint_out.mode_override, Some(AnimMode::Run));
+    }
+
+    #[test]
+    fn jump_kinematics_has_c0_continuous_takeoff_apex_landing_and_scales_with_jump_height() {
+        use center_motion::JumpStage;
+        let tau = std::f64::consts::TAU;
+
+        // Grounded at phase 0.0 and TAU
+        let start = evaluate_jump(0.0, 50.0, 1.0, true);
+        let end = evaluate_jump(tau, 50.0, 1.0, true);
+        assert_eq!(start.stage, JumpStage::Grounded);
+        assert_eq!(start.lift_fraction, 0.0);
+        assert_eq!(start.crouch_fraction, 0.0);
+        assert_eq!(end.lift_fraction, 0.0);
+        assert!(end.crouch_fraction.abs() < 1e-4);
+
+        // Takeoff crouch peaks at u = 0.09 with zero airborne lift
+        let takeoff_mid = evaluate_jump(0.09 * tau, 50.0, 1.0, true);
+        assert_eq!(takeoff_mid.stage, JumpStage::Takeoff);
+        assert_eq!(takeoff_mid.lift_fraction, 0.0);
+        assert!((takeoff_mid.crouch_unit - 1.0).abs() < 1e-4);
+        assert!(takeoff_mid.crouch_fraction > 0.5);
+
+        // Liftoff boundary u = 0.18 has both crouch == 0 and lift == 0 (no liftoff snap)
+        let liftoff = evaluate_jump(0.18 * tau, 50.0, 1.0, true);
+        assert!(liftoff.crouch_unit.abs() < 1e-4);
+        assert!(liftoff.lift_unit.abs() < 1e-4);
+
+        // Apex at u = 0.50 reaches full jump_height_pct and scales linearly with jump_height_pct
+        let apex_25 = evaluate_jump(0.50 * tau, 25.0, 1.0, true);
+        let apex_50 = evaluate_jump(0.50 * tau, 50.0, 1.0, true);
+        let apex_0 = evaluate_jump(0.50 * tau, 0.0, 1.0, true);
+        assert_eq!(apex_50.stage, JumpStage::Apex);
+        assert!((apex_50.lift_unit - 1.0).abs() < 1e-5);
+        assert_eq!(apex_50.crouch_fraction, 0.0);
+        assert!((apex_50.lift_px(300.0) - 150.0).abs() < 1e-3);
+        assert!((apex_25.lift_px(300.0) - 75.0).abs() < 1e-3);
+        assert_eq!(apex_0.lift_px(300.0), 0.0);
+
+        // Touchdown boundary u = 0.82 has both lift == 0 and crouch == 0 (no landing snap)
+        let touchdown = evaluate_jump(0.82 * tau, 50.0, 1.0, true);
+        assert!(touchdown.lift_unit.abs() < 1e-4);
+        assert!(touchdown.crouch_unit.abs() < 1e-4);
+
+        // Landing absorption peaks at u = 0.91 with zero airborne lift
+        let landing_mid = evaluate_jump(0.91 * tau, 50.0, 1.0, true);
+        assert_eq!(landing_mid.stage, JumpStage::Landing);
+        assert_eq!(landing_mid.lift_fraction, 0.0);
+        assert!((landing_mid.crouch_unit - 0.75).abs() < 1e-4);
+
+        // Dense C0 continuity check across the entire [0, TAU] cycle
+        let samples = 500usize;
+        let mut prev = evaluate_jump(0.0, 60.0, 1.0, true);
+        for i in 1..=samples {
+            let p = (i as f64 / samples as f64) * tau;
+            let cur = evaluate_jump(p, 60.0, 1.0, true);
+            assert!(
+                (cur.lift_unit - prev.lift_unit).abs() < 0.04,
+                "lift discontinuity at u={}: {} -> {}",
+                cur.cycle_u,
+                prev.lift_unit,
+                cur.lift_unit
+            );
+            assert!(
+                (cur.crouch_unit - prev.crouch_unit).abs() < 0.04,
+                "crouch discontinuity at u={}: {} -> {}",
+                cur.cycle_u,
+                prev.crouch_unit,
+                cur.crouch_unit
+            );
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn reference_pose_resolution_never_cycles_unrelated_reference_poses() {
+        let labels = [
+            "standing",
+            "walking",
+            "running",
+            "jumping",
+            "waving",
+            "pointing",
+            "looking_up",
+            "looking_down",
+            "arms_wide",
+            "clapping",
+        ];
+        let frames: Vec<ManifestFrame> = labels
+            .iter()
+            .enumerate()
+            .map(|(index, label)| ManifestFrame {
+                index,
+                label: (*label).to_string(),
+                file: format!("frames/{index:02}_{label}.png"),
+                resolved_path: PathBuf::from(format!("{index:02}_{label}.png")),
+                size: [200, 300],
+                source_box: None,
+                anchor: None,
+                parts: BTreeMap::new(),
+            })
+            .collect();
+        let asset = Asset {
+            id: "generic_sheet".into(),
+            pose_manifest: Some(LoadedManifest {
+                manifest_dir: PathBuf::from("generic"),
+                manifest_path: PathBuf::from("generic/manifest.json"),
+                sheet_type: "action".into(),
+                status: "ok".into(),
+                matting_engine: None,
+                source_image: None,
+                source_size: None,
+                frames,
+                part_names: Vec::new(),
+            }),
+            ..Asset::default()
+        };
+
+        let expected = [
+            (AnimMode::Idle, "standing"),
+            (AnimMode::Walk, "walking"),
+            (AnimMode::Run, "running"),
+            (AnimMode::Jump, "jumping"),
+            (AnimMode::Wave, "waving"),
+            (AnimMode::LookScout, "looking_up"),
+            (AnimMode::Static, "standing"),
+        ];
+        for (mode, expected_label) in expected {
+            let seq = resolve_pose_sequence(Some(&asset), mode, 100.0, 0, true);
+            assert_eq!(
+                seq.len(),
+                1,
+                "mode {mode:?} must resolve to a single reference pose, not a multi-pose flipbook"
+            );
+            assert_eq!(seq[0].label, expected_label);
+        }
+    }
+
+    #[test]
+    fn stop_center_and_cutout_rig_evaluation_respect_rest_pose_and_joint_limits() {
+        use animationcraft_engine::session::{CutoutRigPart, LoadedCutoutRigPlan};
+        use serde_json::json;
+
+        // Generic non-biped rig with arbitrary part IDs, rotation limits, and pose_library
+        let rig = LoadedCutoutRigPlan {
+            character_id: "mech_drone".into(),
+            rig_type: "cutout_rig".into(),
+            canvas_size: [400, 500],
+            character_bbox: [40, 30, 360, 470],
+            parts: vec![
+                CutoutRigPart {
+                    id: "hull_core".into(),
+                    parent: None,
+                    pivot: [200.0, 250.0],
+                    rotation: [-10.0, 10.0],
+                    ..CutoutRigPart::default()
+                },
+                CutoutRigPart {
+                    id: "thruster_left".into(),
+                    parent: Some("hull_core".into()),
+                    pivot: [130.0, 260.0],
+                    rotation: [-20.0, 25.0],
+                    ..CutoutRigPart::default()
+                },
+                CutoutRigPart {
+                    id: "head".into(),
+                    parent: Some("hull_core".into()),
+                    pivot: [200.0, 150.0],
+                    rotation: [-12.0, 12.0],
+                    ..CutoutRigPart::default()
+                },
+            ],
+            pose_library: json!({
+                "poses": {
+                    "walk_contact": {
+                        "parts": {
+                            "hull_core": { "rotation": 6.0 },
+                            "thruster_left": { "rotation": 40.0 },
+                            "head": { "rotation": -5.0 }
+                        }
+                    },
+                    "walk_passing": {
+                        "parts": {
+                            "hull_core": { "rotation": -6.0 },
+                            "thruster_left": { "rotation": -35.0 },
+                            "head": { "rotation": 5.0 }
+                        }
+                    }
+                }
+            }),
+            ..LoadedCutoutRigPlan::default()
+        };
+
+        let mut state = crate::UiState::default();
+        trigger_jump_state(&mut state);
+        assert_eq!(state.anim_mode, AnimMode::Jump);
+        assert!(state.playing);
+        assert_eq!(
+            state.playback_phase, 0.0,
+            "Jump trigger must start at phase 0.0 (takeoff), not mid-cycle"
+        );
+
+        // Advance into Walk stride and verify pose_library target + rotation clamping
+        state.anim_mode = AnimMode::Walk;
+        state.playing = true;
+        state.playback_phase = std::f64::consts::FRAC_PI_2;
+        state.stage_offset_x = 85.0;
+        state.stage_offset_y = -20.0;
+        let active_eval = evaluate_cutout_rig_motion(&rig, &state);
+        assert!(active_eval.angles_deg["hull_core"] > 0.0);
+        assert!(
+            (active_eval.angles_deg["thruster_left"] - 25.0).abs() < 1e-4,
+            "thruster_left rotation (40 deg in pose_library) must clamp to part.rotation max (25 deg)"
+        );
+        assert!(active_eval.root_dy_canvas < 0.0);
+
+        // Pause holds the exact evaluated pose
+        state.playing = false;
+        let paused_eval = evaluate_cutout_rig_motion(&rig, &state);
+        assert_eq!(paused_eval.angles_deg, active_eval.angles_deg);
+        assert_eq!(paused_eval.root_dy_canvas, active_eval.root_dy_canvas);
+
+        // Stop resets playing, phase, stage offsets, and returns all rig joints to 0.0 rest pose
+        stop_motion_state(&mut state);
+        assert!(!state.playing);
+        assert_eq!(state.playback_phase, 0.0);
+        assert_eq!(state.stage_offset_x, 0.0);
+        assert_eq!(state.stage_offset_y, 0.0);
+        let stopped_eval = evaluate_cutout_rig_motion(&rig, &state);
+        for (part_id, deg) in &stopped_eval.angles_deg {
+            assert_eq!(
+                *deg, 0.0,
+                "part `{part_id}` must return to 0.0 deg bind pose when stopped"
+            );
+        }
+        assert_eq!(stopped_eval.root_dy_canvas, 0.0);
+    }
+
+    #[test]
+    fn viewport_zoom_fit_actual_size_and_toolbar_controls_apply_to_rig_and_sprite() {
+        let mut app = AnimationCraftApp::new();
+        let ctx = egui::Context::default();
+
+        let render = |app: &mut AnimationCraftApp| {
+            app.automation.begin_frame();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 260.0))),
+                    ..Default::default()
+                },
+                |ui| playback_bar(app, ui),
+            );
+            output.textures_delta.clear();
+        };
+
+        render(&mut app);
+        let elements = &app.automation.elements;
+        for required_id in [
+            "playback.play",
+            "playback.pause",
+            "playback.stop",
+            "playback.action",
+            "playback.jump",
+            "playback.run_lock",
+            "playback.wasd",
+            "viewport.fit",
+            "viewport.actual_size",
+            "viewport.zoom_out",
+            "viewport.zoom_in",
+            "viewport.center",
+        ] {
+            assert!(
+                elements.iter().any(|e| e.id == required_id),
+                "missing toolbar automation id `{required_id}`"
+            );
+        }
+
+        // Triggering Jump switches mode to Jump and exposes the Jump height slider in the toolbar
+        trigger_jump_state(&mut app.ui_state);
+        render(&mut app);
+        assert!(
+            app.automation
+                .elements
+                .iter()
+                .any(|e| e.id == "playback.jump_height"),
+            "missing `playback.jump_height` slider when in AnimMode::Jump"
+        );
+
+        // Verify Fit (actual_size=false, zoom=1.0), 100% (actual_size=true, zoom=1.0), Zoom +/Zoom -, and jump headroom
+        let fit_base = compute_preview_scale(1000.0, 800.0, 500.0, 400.0, 1.0, false, 1.0);
+        assert!((fit_base - 0.5).abs() < 1e-4);
+
+        // Jump headroom scales down Fit base to preserve headroom above the character
+        let fit_jump = compute_preview_scale(1000.0, 800.0, 500.0, 400.0, 1.5, false, 1.0);
+        assert!(fit_jump < fit_base);
+        assert!((fit_jump - (400.0 / (800.0 * 1.5))).abs() < 1e-4);
+
+        // Actual size (100%) uses 1.0 base scale multiplied by preview_zoom
+        actual_size_viewport_state(&mut app.ui_state);
+        assert!(app.ui_state.preview_actual_size);
+        assert_eq!(app.ui_state.preview_zoom, 1.0);
+        let actual_100 = compute_preview_scale(
+            1000.0,
+            800.0,
+            500.0,
+            400.0,
+            1.0,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
+        assert!((actual_100 - 1.0).abs() < 1e-4);
+
+        // Zoom + and Zoom - multiply the active base scale in both Fit and 100% modes
+        zoom_in_state(&mut app.ui_state);
+        assert!(app.ui_state.preview_zoom > 1.0);
+        let zoomed_actual = compute_preview_scale(
+            1000.0,
+            800.0,
+            500.0,
+            400.0,
+            1.0,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
+        assert!(zoomed_actual > actual_100);
+
+        fit_viewport_state(&mut app.ui_state);
+        assert!(!app.ui_state.preview_actual_size);
+        assert_eq!(app.ui_state.preview_zoom, 1.0);
+        zoom_out_state(&mut app.ui_state);
+        assert!(app.ui_state.preview_zoom < 1.0);
+        let zoomed_fit = compute_preview_scale(
+            1000.0,
+            800.0,
+            500.0,
+            400.0,
+            1.0,
+            app.ui_state.preview_actual_size,
+            app.ui_state.preview_zoom,
+        );
+        assert!(zoomed_fit < fit_base);
+
+        // Center resets stage offsets without clobbering zoom
+        app.ui_state.stage_offset_x = 42.0;
+        app.ui_state.stage_offset_y = -18.0;
+        let kept_zoom = app.ui_state.preview_zoom;
+        center_stage_state(&mut app.ui_state);
+        assert_eq!(app.ui_state.stage_offset_x, 0.0);
+        assert_eq!(app.ui_state.stage_offset_y, 0.0);
+        assert_eq!(app.ui_state.preview_zoom, kept_zoom);
+    }
 }
+
+
