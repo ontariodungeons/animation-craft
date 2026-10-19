@@ -31,7 +31,11 @@ fn source_sheet_card(
                 let response = chrome::button(ui, "View sheet", false)
                     .on_hover_text("Open this character's connected reference sheet in the center workspace.");
                 app.automation.add_response(view_id, "button", format!("View {title}"), &response);
-                if response.clicked() { app.ui_state.center_tab = tab; }
+                if response.clicked() {
+                    if let Some(path) = app.session().current_asset().and_then(|a| super::center::pose_viewer::sheet_path(a, slot)) {
+                        super::center::pose_viewer::open_source(app, ui.ctx(), &path);
+                    } else { app.ui_state.status_line = "Attach a sheet to open it here.".into(); }
+                }
                 let response = chrome::help(chrome::button(ui, if filename == "none" { "Attach…" } else { "Replace…" }, false),
                     "Attach an image sheet to the currently selected character.",
                     "Add pose or turnaround references without creating a different character.",
@@ -75,7 +79,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     .clone()
                     .unwrap_or_else(|| "none".to_string());
                 let a_name = asset
-                    .and_then(|a| a.attached_asset_sheet.as_ref())
+                    .and_then(|a| a.pose_manifest.as_ref().and_then(|m| m.source_image.as_ref()).or(a.attached_asset_sheet.as_ref()))
                     .and_then(|p| p.file_name())
                     .and_then(|n| n.to_str())
                     .unwrap_or("none")

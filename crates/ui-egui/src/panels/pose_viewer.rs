@@ -36,6 +36,9 @@ struct ViewerState {
     anchors: bool,
     source_index: usize,
     source_open: bool,
+    slice_kind: String,
+    return_mode: Mode,
+    return_view: Option<(bool, f32, Vec2)>,
     rig_parts: bool,
     selected_part: Option<String>,
     last_pose: usize,
@@ -53,6 +56,9 @@ impl Default for ViewerState {
             anchors: false,
             source_index: 0,
             source_open: false,
+            slice_kind: "auto".into(),
+            return_mode: Mode::All,
+            return_view: None,
             rig_parts: false,
             selected_part: None,
             last_pose: usize::MAX,
@@ -70,6 +76,25 @@ impl ViewerState {
             self.fit_image();
         }
     }
+    fn inspect_pose(&mut self) {
+        if self.mode != Mode::Pose {
+            self.return_mode = if self.mode == Mode::Source {
+                Mode::Source
+            } else {
+                Mode::All
+            };
+            self.return_view = Some((self.fit, self.zoom, self.pan));
+        }
+        self.select_mode(Mode::Pose);
+    }
+    fn return_from_pose(&mut self) {
+        self.mode = self.return_mode;
+        if let Some((fit, zoom, pan)) = self.return_view.take() {
+            self.fit = fit;
+            self.zoom = zoom;
+            self.pan = pan;
+        }
+    }
     fn change_zoom(&mut self, factor: f32) {
         self.zoom = (self.zoom * factor).clamp(0.05, 8.0);
         self.fit = false;
@@ -79,6 +104,7 @@ impl ViewerState {
 struct Source {
     label: String,
     path: PathBuf,
+    kind: String,
 }
 fn sources(asset: &Asset) -> Vec<Source> {
     let mut result = Vec::new();
@@ -114,6 +140,13 @@ fn sources(asset: &Asset) -> Vec<Source> {
             result.push(Source {
                 label: label.into(),
                 path: path.clone(),
+                kind: match label {
+                    "Pose sheet" => "action",
+                    "Turnaround reference" => "turnaround",
+                    "Exploded parts sheet" => "exploded",
+                    _ => "auto",
+                }
+                .into(),
             });
         }
     }
@@ -122,10 +155,108 @@ fn sources(asset: &Asset) -> Vec<Source> {
             result.push(Source {
                 label: reference.label.clone(),
                 path: reference.path.clone(),
+                kind: match reference.kind.as_str() {
+                    "asset_sheet" | "pose_sheet" => "action",
+                    "turnaround_sheet" => "turnaround",
+                    _ => "auto",
+                }
+                .into(),
             });
         }
     }
     result
+}
+
+pub(crate) fn sheet_path(asset: &Asset, slot: &str) -> Option<PathBuf> {
+    if slot == "turnaround_sheet" {
+        asset
+            .attached_turnaround_sheet
+            .clone()
+            .or_else(|| asset.turnaround_manifest.as_ref()?.source_image.clone())
+    } else {
+        asset
+            .pose_manifest
+            .as_ref()
+            .and_then(|m| m.source_image.clone())
+            .or_else(|| asset.attached_asset_sheet.clone())
+    }
+}
+
+pub(in crate::panels) fn open_source(
+    app: &mut AnimationCraftApp,
+    ctx: &egui::Context,
+    path: &Path,
+) {
+    let Some(asset) = app.session().current_asset() else {
+        return;
+    };
+    let choices = sources(asset);
+    let Some(index) = choices.iter().position(|s| s.path == path) else {
+        return;
+    };
+    let id = egui::Id::new(("pose_viewer", &asset.id));
+    let mut state = ctx
+        .data_mut(|d| d.get_temp::<ViewerState>(id))
+        .unwrap_or_default();
+    state.select_mode(Mode::Source);
+    state.source_index = index;
+    state.source_open = true;
+    state.slice_kind = choices[index].kind.clone();
+    ctx.data_mut(|d| {
+        d.remove_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset.id)));
+        d.insert_temp(id, state);
+    });
+    app.ui_state.center_tab = CenterTab::AssetSheet;
+}
+
+fn sheet_summary(ui: &mut Ui, asset: &Asset, path: &Path) {
+    let manifest = asset
+        .pose_manifest
+        .iter()
+        .chain(asset.turnaround_manifest.iter())
+        .find(|m| m.source_image.as_deref() == Some(path));
+    let Some(manifest) = manifest else {
+        ui.label(RichText::new("Not sliced").small().color(MUTED));
+        return;
+    };
+    let status = if manifest.status == "ready" {
+        "Ready"
+    } else {
+        "Needs review"
+    };
+    ui.label(
+        RichText::new(format!("{} slices · {status}", manifest.frames.len()))
+            .small()
+            .color(if manifest.status == "ready" {
+                super::chrome::TEAL
+            } else {
+                Color32::from_rgb(238, 193, 104)
+            }),
+    );
+    let key = egui::Id::new(("sheet_warnings", &manifest.manifest_path));
+    let warnings = ui.ctx().data_mut(|d| {
+        if let Some(warnings) = d.get_temp::<Vec<String>>(key) {
+            return warnings;
+        }
+        let warnings: Vec<String> = std::fs::read(&manifest.manifest_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|v| v.get("warnings").cloned())
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        d.insert_temp(key, warnings.clone());
+        warnings
+    });
+    if !warnings.is_empty() {
+        ui.collapsing("Review notes", |ui| {
+            for warning in warnings {
+                ui.add(egui::Label::new(warning).wrap());
+            }
+        });
+    }
 }
 
 fn can_map_crops(asset: &Asset, source: &Path, size: [usize; 2]) -> bool {
@@ -174,7 +305,8 @@ fn button(
             enabled,
             egui::Button::new(RichText::new(label).color(TEXT)).min_size(Vec2::new(0.0, 28.0)),
         )
-        .on_hover_text(help);
+        .on_hover_text(help)
+        .on_disabled_hover_text(help);
     app.automation.add_response(id, "button", label, &response);
     response.clicked()
 }
@@ -201,7 +333,7 @@ pub(super) fn navigation(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .data(|d| d.get_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset_id))))
         .is_some()
     {
-        state.select_mode(Mode::Pose);
+        state.inspect_pose();
     }
     ui.horizontal_wrapped(|ui| {
         for (mode, id, label) in [
@@ -246,7 +378,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset.id))))
         .is_some()
     {
-        state.select_mode(Mode::Pose);
+        state.inspect_pose();
         state.fit_image();
     }
     if state.last_pose != app.ui_state.selected_pose_idx {
@@ -260,11 +392,15 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 app,
                 ui,
                 "pose.back",
-                "Back to poses",
+                if state.return_mode == Mode::Source {
+                    "Back to sheet"
+                } else {
+                    "Back to poses"
+                },
                 true,
-                "Return to the complete pose gallery, keeping this pose selected.",
+                "Return to the originating sheet or gallery, keeping the selection.",
             ) {
-                state.select_mode(Mode::All);
+                state.return_from_pose();
             }
             ui.horizontal_wrapped(|ui| {
                 let index = app.ui_state.selected_pose_idx;
@@ -357,19 +493,33 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     tolerance: app.ui_state.bg_tolerance,
                 });
             }
+            let choices = sources(&asset);
+            let selected_source = choices.get(state.source_index);
             let menu = ui.menu_button("Sheet tools", |ui| {
                 let ready = app.ui_state.busy_command.is_none();
                 if button(app, ui, "pose.import_sheet", "Replace pose sheet…", ready, "Replace and slice the active pose sheet. Use Add sheet to keep existing references.")
                     && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png","jpg","jpeg","webp"]).pick_file() {
                     app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(), slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance }); ui.close();
                 }
-                if button(app, ui, "pose.recut", "Re-cut active sheet", ready, "Re-run the cutter for the active asset.") {
-                    app.exec_ui_command(UiCommand::AssetCutSheet { asset_id: asset.id.clone(), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
+                ui.separator();
+                ui.label("Slice the open sheet as:");
+                for (kind, label) in [("auto","Detect type"),("action","Poses"),("turnaround","Turnaround"),("single","Single image"),("exploded","Parts sheet")] {
+                    let response=ui.selectable_value(&mut state.slice_kind,kind.into(),label);
+                    app.automation.add_response(format!("pose.slice_kind.{kind}"),"button",label,&response);
+                }
+                let ocr = ui.checkbox(&mut app.ui_state.use_ocr, "Read labels with OCR").on_hover_text("Use installed OCR to suggest labels. Review them; unavailable or uncertain labels remain numbered.");
+                app.automation.add_response("pose.ocr", "checkbox", "Read labels with OCR", &ocr);
+                let enabled = ready && state.source_open && selected_source.is_some();
+                let recut = button(app, ui, "pose.recut", "Re-cut this sheet", enabled, "Open a sheet first. Slicing writes a new output revision and preserves previous files.");
+                let layout = if button(app, ui, "pose.apply_layout", "Apply layout…", enabled, "Choose a reviewed JSON layout for this sheet. Previous cutouts remain available if the operation fails.") {
+                    rfd::FileDialog::new().add_filter("Layout JSON", &["json"]).pick_file()
+                } else { None };
+                if (recut || layout.is_some()) && let Some(source) = selected_source {
+                    app.exec_ui_command(UiCommand::CutReviewedSheet { asset_id: asset.id.clone(), source: source.path.to_string_lossy().into_owned(), kind: state.slice_kind.clone(), layout: layout.map(|p|p.to_string_lossy().into_owned()), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
                 }
             });
             app.automation
                 .add_response("pose.tools", "button", "Sheet tools", &menu.response);
-            let choices = sources(&asset);
             if choices.is_empty() {
                 empty(
                     ui,
@@ -404,6 +554,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                         {
                                             state.source_index = i;
                                             state.source_open = true;
+                                            state.slice_kind = source.kind.clone();
                                             state.fit_image();
                                         }
                                     }
@@ -423,6 +574,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     }
                     ui.label(RichText::new(&choices[state.source_index].label).strong());
                     let source = &choices[state.source_index];
+                    sheet_summary(ui, &asset, &source.path);
                     let context = ui.ctx().clone();
                     let maps = app
                         .load_texture(&context, &source.path.to_string_lossy())
@@ -682,7 +834,7 @@ fn canvas(
                     ) {
                         app.ui_state.selected_pose_idx = index;
                         app.ui_state.playing = false;
-                        state.select_mode(Mode::Pose);
+                        state.inspect_pose();
                         ui.close();
                     }
                 });
@@ -843,7 +995,7 @@ fn pose_grid(
                             ) {
                                 app.ui_state.selected_pose_idx = index;
                                 app.ui_state.playing = false;
-                                state.select_mode(Mode::Pose);
+                                state.inspect_pose();
                                 ui.close();
                             }
                         });

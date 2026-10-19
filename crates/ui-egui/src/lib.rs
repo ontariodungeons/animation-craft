@@ -626,6 +626,8 @@ impl AnimationCraftApp {
                         | "asset.make_transparent"
                         | "asset.build_cutout_rig"
                         | "asset.load_manifest"
+                        | "asset.cut_sheet"
+                        | "intake.validate"
                 ) {
                     self.textures.clear();
                 }
@@ -962,6 +964,14 @@ pub enum UiCommand {
         tolerance: u32,
         use_ocr: bool,
     },
+    CutReviewedSheet {
+        asset_id: String,
+        source: String,
+        kind: String,
+        layout: Option<String>,
+        tolerance: u32,
+        use_ocr: bool,
+    },
     LoadPreset {
         preset: String,
     },
@@ -1051,6 +1061,13 @@ impl UiCommand {
                     "use_ocr": use_ocr,
                 }),
             ),
+            UiCommand::CutReviewedSheet { asset_id, source, kind, layout, tolerance, use_ocr } => {
+                let revision = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+                let mut params = serde_json::json!({"asset":asset_id,"source":source,"kind":kind,"tolerance":tolerance,"use_ocr":use_ocr,
+                    "out_dir":format!("exports/sheet_reviews/{asset_id}/{revision}")});
+                if let Some(layout) = layout { params["layout"] = serde_json::json!(layout); }
+                ("asset.cut_sheet", params)
+            },
             UiCommand::LoadPreset { preset } => (
                 "asset.load_manifest",
                 serde_json::json!({ "preset": preset }),
@@ -1128,6 +1145,7 @@ impl UiCommand {
             UiCommand::IntakeValidate { .. }
                 | UiCommand::IntakeThreeQuestion { .. }
                 | UiCommand::AssetCutSheet { .. }
+                | UiCommand::CutReviewedSheet { .. }
                 | UiCommand::TurnaroundRegister
                 | UiCommand::MeshBuild4Dir { .. }
                 | UiCommand::ExportEffectcraft { .. }
@@ -1142,7 +1160,15 @@ impl AnimationCraftApp {
     /// Execute a UI command. Long-running subprocess commands run on a background worker
     /// thread so the egui window and TCP control server never freeze.
     pub fn exec_ui_command(&mut self, cmd: UiCommand) {
-        let (id, params) = cmd.to_engine_call();
+        let (id, mut params) = cmd.to_engine_call();
+        if matches!(cmd, UiCommand::AssetCutSheet { .. }) {
+            let slot = if self.ui_state.center_tab == CenterTab::TurnaroundSheet { "turnaround_sheet" } else { "asset_sheet" };
+            let source = self.session.current_asset().and_then(|a| panels::sheet_path(a, slot));
+            let Some(source) = source else { self.ui_state.status_line = "Attach a sheet before slicing.".into(); return; };
+            params["source"] = serde_json::json!(source);
+            let revision = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+            params["out_dir"] = serde_json::json!(format!("exports/sheet_reviews/{revision}"));
+        }
         if cmd.is_long_running() {
             if self.ui_state.busy_command.is_some() {
                 self.ui_state.status_line =
