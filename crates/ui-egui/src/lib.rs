@@ -866,6 +866,16 @@ impl AnimationCraftApp {
         self.automation
             .add("panel.right", "panel", "Right Motion & Export", right_rect);
 
+        crate::panels::start::shortcuts(self, ui.ctx());
+        crate::panels::start::record_open_project(self);
+        if !crate::panels::start::project_open(self) {
+            // Home uses the whole body: start card plus the workflow strip.
+            let mut home = ui.new_child(egui::UiBuilder::new().max_rect(body));
+            home.set_clip_rect(body);
+            crate::panels::start::start_screen(self, &mut home);
+            return;
+        }
+
         // Panel dividers
         let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 50, 64));
         ui.painter().line_segment(
@@ -889,19 +899,6 @@ impl AnimationCraftApp {
             ],
             stroke,
         );
-
-        crate::panels::start::shortcuts(self, ui.ctx());
-        crate::panels::start::record_open_project(self);
-        if !crate::panels::start::project_open(self) {
-            for rect in [left_rect, right_rect] {
-                let mut side = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(6.0)));
-                crate::panels::start::empty_panel(&mut side);
-            }
-            let mut home = ui.new_child(egui::UiBuilder::new().max_rect(center_rect));
-            home.set_clip_rect(center_rect);
-            crate::panels::start::start_screen(self, &mut home);
-            return;
-        }
 
         {
             let inner = left_rect.shrink(6.0);
@@ -1567,6 +1564,7 @@ impl UiCommand {
                     | "export.cutout_mp4"
                     | "export.layered_motion"
                     | "validate.motion"
+                    | "audio.transcribe"
             );
         }
         matches!(

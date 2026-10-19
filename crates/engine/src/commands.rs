@@ -3296,6 +3296,150 @@ fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({"ok": true, "project": s.project_path}))
 }
 
+/// FilmCraft time base: ticks per second.
+const FILMCRAFT_TICKS_PER_SECOND: f64 = 254_016_000_000.0;
+
+/// Transcribes a song with FilmCraft's speech-to-text (headless `filmcraft-cli`) and saves a FilmCraft
+/// project holding it as a sequence, so animation can be placed against the lyrics. FilmCraft does the
+/// work; a FilmCraft build without speech-to-text is reported as an error, never worked around.
+fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
+    let audio = params
+        .get("audio")
+        .and_then(Value::as_str)
+        .map(|p| resolve_workspace_path(s, p))
+        .ok_or_else(|| EngineError::InvalidParams("missing 'audio' path".into()))?;
+    if !audio.is_file() {
+        return Err(EngineError::InvalidParams(format!("audio file not found: {}", audio.display())));
+    }
+    let out_dir = match params.get("out_dir").and_then(Value::as_str) {
+        Some(dir) => resolve_workspace_path(s, dir),
+        None => s
+            .project_path
+            .as_ref()
+            .and_then(|p| p.parent())
+            .map(Path::to_path_buf)
+            .ok_or_else(|| {
+                EngineError::InvalidParams("pass 'out_dir' or open a project (project.new / project.open)".into())
+            })?,
+    };
+    std::fs::create_dir_all(&out_dir)?;
+    let stem = params
+        .get("name")
+        .and_then(Value::as_str)
+        .map(sanitize_asset_id)
+        .unwrap_or_else(|| sanitize_asset_id(audio.file_stem().and_then(|n| n.to_str()).unwrap_or("audio")));
+    let fcproj = out_dir.join(format!("{stem}.fcproj"));
+    let transcript_path = out_dir.join(format!("{stem}.transcript.json"));
+    let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    if fcproj.exists() && !overwrite {
+        return Err(EngineError::InvalidParams(format!(
+            "{} already exists (pass \"overwrite\": true to replace it)",
+            fcproj.display()
+        )));
+    }
+    let model = params.get("model").and_then(Value::as_str).unwrap_or("whisper-small");
+    let language = params.get("language").and_then(Value::as_str).unwrap_or("en");
+    // A song is usually one singer; FilmCraft's speaker split otherwise breaks lines mid-phrase.
+    let diarize = params.get("diarize").and_then(Value::as_bool).unwrap_or(false);
+    let tool = "filmcraft-cli";
+    let failed = |what: &str, detail: String| EngineError::ExternalTool(tool.into(), format!("{what}: {detail}"));
+
+    // 1. Import the audio into a new FilmCraft project.
+    let imported: Value = serde_json::from_str(&run_tool_in(
+        &out_dir,
+        tool,
+        &[
+            "--save-as".into(),
+            fcproj.to_string_lossy().into_owned(),
+            "exec".into(),
+            "file.import".into(),
+            json!({"paths": [audio]}).to_string(),
+        ],
+    )?)
+    .map_err(|e| failed("file.import", e.to_string()))?;
+    let item = imported
+        .pointer("/items/0")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| failed("file.import", format!("no media item imported: {imported}")))?;
+
+    // 2. Transcribe, put the song on a sequence and read the transcript back.
+    let script = out_dir.join(format!(".{stem}.transcribe.jsonl"));
+    let lines = [
+        json!({"id": "transcript.generate", "params": {"items": [item], "model": model, "language": language, "diarize": diarize}}),
+        json!({"id": "file.newSequenceFromClip", "params": {"items": [item]}}),
+        json!({"id": "transcript.inspect", "params": {"paragraphGapSeconds": 1.5}}),
+    ];
+    std::fs::write(&script, lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"))?;
+    let run = run_tool_in(
+        &out_dir,
+        tool,
+        &[
+            "--project".into(),
+            fcproj.to_string_lossy().into_owned(),
+            "--save".into(),
+            "--compact".into(),
+            "run".into(),
+            script.to_string_lossy().into_owned(),
+        ],
+    );
+    let _ = std::fs::remove_file(&script);
+    let run = run?;
+    let mut results = Vec::new();
+    for line in run.lines().filter(|l| l.trim_start().starts_with('{')) {
+        let entry: Value = serde_json::from_str(line).map_err(|e| failed("run", e.to_string()))?;
+        if entry.get("ok").and_then(Value::as_bool) != Some(true) {
+            let id = entry.get("id").and_then(Value::as_str).unwrap_or("run");
+            let error = entry.get("error").and_then(Value::as_str).unwrap_or("failed");
+            return Err(failed(id, error.to_string()));
+        }
+        results.push(entry);
+    }
+    let inspect = results
+        .iter()
+        .find(|e| e.get("id").and_then(Value::as_str) == Some("transcript.inspect"))
+        .and_then(|e| e.get("result"))
+        .ok_or_else(|| failed("transcript.inspect", "no transcript returned".into()))?;
+    let seconds = |v: Option<&Value>| v.and_then(Value::as_f64).map(|t| (t / FILMCRAFT_TICKS_PER_SECOND * 1000.0).round() / 1000.0);
+    let words: Vec<Value> = inspect
+        .get("words")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|w| json!({"text": w.get("text"), "start": seconds(w.get("start")), "end": seconds(w.get("end")), "speaker": w.get("speaker")}))
+        .collect();
+    let paragraphs: Vec<Value> = inspect
+        .get("paragraphs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|p| json!({"text": p.get("text"), "start": seconds(p.get("start")), "end": seconds(p.get("end")), "speaker": p.get("speaker")}))
+        .collect();
+    if words.is_empty() {
+        return Err(failed("transcript.inspect", "FilmCraft returned no words for this audio".into()));
+    }
+    let transcript = json!({
+        "audio": audio,
+        "filmcraft_project": fcproj,
+        "model": model,
+        "language": language,
+        "diarize": diarize,
+        "source": "filmcraft-cli transcript.generate",
+        "paragraphs": paragraphs,
+        "words": words,
+    });
+    let text = serde_json::to_string_pretty(&transcript)
+        .map_err(|e| EngineError::InvalidParams(format!("cannot encode transcript: {e}")))?;
+    std::fs::write(&transcript_path, text)?;
+    Ok(json!({
+        "ok": true,
+        "filmcraft_project": fcproj,
+        "transcript": transcript_path,
+        "model": model,
+        "word_count": transcript["words"].as_array().map_or(0, Vec::len),
+        "paragraphs": transcript["paragraphs"],
+    }))
+}
+
 fn cmd_project_close(s: &mut Session, _: &Value) -> Result<Value> {
     *s = Session {
         cwd: s.cwd.clone(),
@@ -4385,6 +4529,15 @@ fn build() -> Vec<CommandSpec> {
             "{\"output\":\"optional.mp4\",\"mode\":\"optional\",\"speed\":1.0,\"duration\":3.0}",
             has_asset,
             cmd_export_cutout_mp4
+        ),
+        cmd!(
+            "audio.transcribe",
+            "Transcribe Song (FilmCraft)",
+            ["File"],
+            None,
+            "{\"audio\": \"path\", \"out_dir\": \"optional, default: the open project's folder\", \"name\": \"optional\", \"model\": \"whisper-small\", \"language\": \"en\", \"diarize\": false, \"overwrite\": false}",
+            always,
+            cmd_audio_transcribe
         ),
         cmd!(
             "intake.validate",

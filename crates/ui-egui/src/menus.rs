@@ -39,6 +39,16 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 ui.close();
             }
             ui.separator();
+            if action_button(app, ui, "menu.transcribe", "Transcribe Song…", ready && project) {
+                ui.close();
+                if let Some(audio) = rfd::FileDialog::new()
+                    .set_title("Transcribe Song")
+                    .add_filter("Audio", &["wav", "mp3", "flac", "m4a", "aac", "ogg"])
+                    .pick_file()
+                {
+                    command(app, "audio.transcribe", json!({"audio": audio}));
+                }
+            }
             if action_button(app, ui, "menu.import", "+ Import Asset…", ready && project) {
                 app.ui_state.connect_asset_open = true;
                 ui.close();
