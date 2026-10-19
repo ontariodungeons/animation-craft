@@ -1,239 +1,210 @@
-# AnimationCraft — Outstanding Functionality & CLI Integration Tasks
+# AnimationCraft — Focused import and UI fixes
 
-Status: **Draft for review** (do not begin implementation until reviewed)
+Status: **Revised after review; bounded implementation handoff**
 Date: 2026-10-19
-Owner: to be assigned
-Related: `RUST_CRAFT_REFACTOR_SPEC.md`, `docs/superpowers/specs/2026-10-18-modular-2d-3d-blender-filmcraft-pipeline-design.md`
-
-This document lists functionality and CLI/MCP integration that is **not yet implemented or not yet exposed**, discovered by auditing:
-
-- the `animationcraft` engine command registry (`crates/engine/src/commands.rs`),
-- the `animationcraft-cli` CLI surface (`apps/animationcraft-cli/src/main.rs`),
-- the animationcraft MCP tool surface,
-- the sibling `*Craft` CLIs installed locally (PhotoCraft, EffectCraft, FilmCraft, VectorCraft).
-
-Legend: `[ ]` open · `[x]` done · **(quick win)** small/reversible · **(feature)** net-new · **(integration)** wires an existing external tool.
-
----
-
-## 0. Current state (baseline)
-
-### Engine — 31 registered commands
-`project.list_assets`, `project.add_asset`, `project.remove_asset`, `project.update_asset`,
-`project.load_asset`, `asset.make_transparent`, `asset.build_cutout_rig`, `image.break_apart`,
-`image.puppet_warp`, `image.color_to_alpha`, `image.content_aware_fill`, `export.cutout_mp4`,
-`intake.validate`, `intake.three_question`, `intake.compare_reference`, `part.show_all`,
-`export.agent_prompt`, `asset.cut_sheet`, `asset.load_manifest`, `part.set_state`,
-`turnaround.optimize_accuracy`, `anim.preview_2d`, `mesh.build_4dir`, `export.effectcraft`,
-`effectcraft.run_script`, `export.filmcraft`, `export.blender`, `export.character_iteration`,
-`scene.farm_school_lineup`, `vision.analyze`, `command.list`.
-
-### MCP surface
-- 31 tools, 1:1 with engine commands (id `.` → `_`).
-- `resources/list` and `prompts/list` return empty arrays.
-- `tools/call` always returns `isError: false`.
-- `initialize` advertises only `{ "tools": {} }`.
-
-### CLI subcommands
-`info`, `commands [filter]`, `exec <id> [key=value ...]`, `vision [image|character]`,
-`run <script.jsonl | ->`, `mcp`, `help`, `--version`.
-Live UI control (only on `--bridge <port>`): `ui.state`, `ui.inspect`, `ui.click`,
-`ui.vision`, `ui.screenshot`, `ui.set_view`.
-
-### Local sibling CLIs available
-- `photocraft-cli` (`~/.local/share/photocraft/0.9.0/`) — raster editor.
-- `effectcraft-cli` (`~/.local/share/effectcraft/0.10.0/`) — motion graphics/compositor.
-- `filmcraft-cli` (`~/.local/share/filmcraft/0.8.0/`) — video editor.
-- `vectorcraft-cli` / `figcraft` / `cadcraft` — vector / design / CAD (adjacent).
-
----
-
-## Phase 1 — Wire up features that already exist but are not exposed (quick wins)
-
-- [ ] **T1. Register the 3 orphaned export commands. (quick win)**
-  `cmd_export_threejs`, `cmd_export_react_motion`, `cmd_export_blender_script` exist in
-  `crates/engine/src/commands.rs` but are unregistered (currently `#[allow(dead_code)]`).
-  Register as `export.threejs`, `export.remotion`, `export.blender_script` and remove the
-  `#[allow(dead_code)]` annotations. Derives from `src/exporters/*.ts` parity.
-
-- [ ] **T2. `mesh.verify_parity` — topology parity check. (integration)**
-  Wrap `pipeline/topology_parity.py` (verts / edges / loops = 3×tris / bones) and consume
-  `exports/blender53_live_metrics.json`. Complements `compare_html_vs_blender.py`.
-
-- [ ] **T3. Make `vision.analyze` reachable with a real schema.**
-  Confirm it is invocable from MCP and CLI with `{"character"|"image"}` and returns the
-  pixel/alpha/drift/lift metrics used by the GUI.
-
-- [ ] **T4. `export.transparent_video`. (integration)**
-  Wrap FilmCraft alpha export (`file.newTransparentVideo`, `file.exportMedia {alpha:true}`,
-  WebM/EXR) for RGBA animation output.
-
----
-
-## Phase 2 — Missing image & rig operations (parity with PhotoCraft)
-
-- [ ] **T5. `image.crop` / `image.trim`. (integration)**
-  Wrap `photocraft-cli` `image.crop` and `image.trim` — needed to trim sheets before slicing.
-
-- [ ] **T6. `image.slice`. (integration)**
-  Wrap PhotoCraft `slice.fromGuides` / `slice.divide` to slice sheets into sprite/part tiles.
-
-- [ ] **T7. `image.content_aware_scale` / `image.content_aware_move`. (integration)**
-  Wrap `edit.contentAwareScale` and `paint.contentAwareMove` to reposition limbs without
-  distorting artwork.
-
-- [ ] **T8. `image.combine_shapes`. (integration)**
-  Wrap `layer.combineShapes.{unite,subtractFrontShape,intersectShapeAreas,excludeOverlappingShapes}`
-  for boolean mask construction.
-
-- [ ] **T9. `rig.set_joint` / `rig.edit_pivot`. (feature)**
-  Add joint/pivot editing. Today there is only visibility/solo (`part.set_state`) and
-  `asset.build_cutout_rig`; there is no way to correct an auto-placed pivot.
-
-- [ ] **T10. `skin.strip_costume` / `skin.apply_costume`. (feature)**
-  Port the TS decisions in `src/topology/skinning.ts` into Rust engine commands (base
-  mannequin ⇄ costume swap), so the engine can toggle costume shells.
-
----
-
-## Phase 3 — Animation rendering (largest functional gap)
-
-- [ ] **T11. `anim.render_2d`. (feature — highest value)**
-  Render a pose-cycle / walk-run-jump loop to a frame sequence or MP4 directly from the
-  active `pose_manifest` + `motion_range`. Today `anim.preview_2d` only sets state; there
-  is no renderer, so only `export.cutout_mp4` (rig-based) produces motion.
-
-- [ ] **T12. `anim.retime`. (integration)**
-  Wrap FilmCraft `clip.setTimeInterpolation` (frameSampling / frameBlending / opticalFlow)
-  for smooth slow-motion of rendered clips.
-
-- [ ] **T13. `anim.scene_detect`. (integration)**
-  Wrap FilmCraft `clip.sceneEditDetection` to auto-split long pose sheets / rendered clips.
-
-- [ ] **T14. `anim.render_turntable`. (feature)**
-  Single-character 4-direction turntable render. A 6-character variant exists via
-  `scene.farm_school_lineup`; expose the single-character case.
-
----
-
-## Phase 4 — EffectCraft integration depth (real cutout animation)
-
-- [ ] **T15. Generate real EffectCraft keyframed compositions. (integration — high value)**
-  `export.effectcraft` currently emits a `.jsx` via `guided_cutout_rig_builder.py --jsx-only`.
-  Extend it to emit genuine `effectcraft-cli` operations:
-  - `layer.setParent` — bone/pivot hierarchy,
-  - `prop.addKey` + `keys.set` — position/rotation keys,
-  - `keys.interpolation` — bezier/continuous cycles,
-  - `prop.setExpression` with `loopOut` — repeating walk/run cycles.
-  Goal: a `.ecproj` that actually animates the cutout rig, not just a script stub.
-
-- [ ] **T16. `effectcraft.inspect`. (integration)**
-  Wrap `effectcraft-cli doc_inspect` / `get_project` so an agent can verify a generated comp.
-
-- [ ] **T17. `effectcraft.render_preview`. (integration)**
-  Wrap `effectcraft-cli render-frame` for a quick comp preview PNG.
-
----
-
-## Phase 5 — VectorCraft / SVG integration
-
-- [ ] **T18. `export.vector`. (integration)**
-  Export limb masks (`parts/*_limb_masks.svg`) to VectorCraft, or import them as editable
-  vector paths for precise re-masking.
-
-- [ ] **T19. `image.svg_to_mask`. (integration)**
-  Convert an SVG mask into a raster alpha mask via `vectorcraft-cli` for exact cutouts.
-
----
-
-## Phase 6 — MCP server completeness
-
-- [ ] **T20. `isError: true` when a command returns `Ok({ok:false})`. (quick win — correctness)**
-  Today `tools/call` always reports `isError: false`, so agents treat
-  `image_break_apart` failures (empty `parts`, `ok:false`) as success.
-
-- [ ] **T21. Expose MCP resources. (feature)**
-  Implement `resources/list` + `resources/read` for `animationcraft://project`,
-  `animationcraft://assets/{id}`, `animationcraft://commands`; advertise `resources` in
-  `initialize` capabilities.
-
-- [ ] **T22. Expose MCP prompts. (feature)**
-  Implement `prompts/list` + `prompts/get` for the 3-question intake and the rigging-agent
-  prompt (already produced by `export.agent_prompt`).
-
-- [ ] **T23. Generate real `inputSchema` from `CommandSpec.params`. (feature)**
-  Replace `{ "type":"object", "additionalProperties": true }` with per-command JSON schemas
-  so agents get typed parameters.
-
-- [ ] **T24. Add `ui_*` MCP tools for bridge mode. (feature)**
-  Expose `ui_state`, `ui_inspect`, `ui_click`, `ui_screenshot`, `ui_set_view` as MCP tools
-  so agents can drive the live GUI over MCP, not only the CLI `--bridge`.
-
----
-
-## Phase 7 — CLI parity with `filmcraft-cli`
-
-- [ ] **T25. `describe <id>`. (quick win)**
-  Print one command as JSON (menu, shortcut, params, enabled).
-
-- [ ] **T26. `inspect [project|asset]`. (feature)**
-  Dump the project/asset tree as JSON (`filmcraft-cli inspect` equivalent).
-
-- [ ] **T27. `probe <media>`. (feature)**
-  Media/asset metadata as JSON.
-
-- [ ] **T28. `bench`. (feature)**
-  Startup/command timing for agents and performance tracking.
-
-- [ ] **T29. Document `ui.*` control commands in `help`. (quick win)**
-  They appear only in the bridge section; surface them as a first-class group.
-
----
-
-## Phase 8 — Robustness & project hygiene
-
-- [ ] **T30. Version the runtime fixture dependency.**
-  `exports/templates/exploded_part_sheet_spec.json` (~4 KB) is required by the cutter but is
-  untracked/gitignored. Relocate into a tracked `assets/` directory and commit deliberately
-  (flagged in the UI-merge handoff as a real runtime dependency, not a test skip).
-
-- [ ] **T31. Fix Python test false-passes (coordinate ownership).**
-  `tests/test_pipeline_cli.py` places assertions inside `if local_asset_exists`, producing
-  false passes on machines without the assets.
-
-- [ ] **T32. `cargo fmt --check` clean-up. (chore)**
-  The baseline is not fmt-clean (e.g. `apps/animationcraft/src/main.rs`). Reformats of
-  files shared with concurrent agents must be coordinated.
-
-- [ ] **T33. `project.purge` / cleanup. (feature)**
-  Remove generated exports and stale rig plans to keep the working tree tidy.
-
----
-
-## Suggested priority order
-
-1. **T1, T20, T15** — register orphaned exports; fix MCP error signaling; deepen EffectCraft
-   keyframe output. Highest value, lowest risk.
-2. **T11, T5, T6** — animation rendering + core image ops.
-3. **T21–T24** — MCP resources / prompts / UI tools (largest agent-UX gain).
-4. **T2, T9, T10** — parity and rig correctness.
-5. **T7, T8, T12–T14, T16–T19, T25–T29** — breadth.
-6. **T30–T33** — hygiene.
-
----
-
-## Validation expectations per task
-
-Every task should land with:
-- `cargo check --workspace`
-- `cargo test --workspace` (add unit tests for the new command: registration + failure path)
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- An updated MCP tool + CLI `describe`/`commands` entry where applicable
-- One commit per task, on a branch, via PR (no force-push, no reset of shared HEAD)
-
-## Known pre-existing issues (out of scope unless picked up)
-
-- 3 dead export helpers in `commands.rs` (addressed by **T1**).
-- Fixture-dependent engine tests require local `exports/pose_and_parts/*` and
-  `exports/templates/*` (addressed by **T30**).
-- `cargo fmt --check` not currently clean (addressed by **T32**).
+Replaces: the broad 33-task integration backlog in this file.
+
+## Outcome and boundaries
+
+Make the existing character import and artwork-review workflow dependable:
+connect a character → add the correct sheets → inspect all poses or parts →
+open a single item → correct an import problem → switch characters without
+losing the connected artwork. CLI-driven operations must report the same outcome
+as the app and must not hang silently.
+
+This is a repair pass on the merged UI, not another redesign or a new animation
+platform. Preserve **Artwork → Sheets / Poses / Parts**, full-sheet browsing,
+pose selection that stays in the gallery, right-click **Open single pose**,
+return navigation, synchronized selection, the existing grouped inspector cards,
+and the restored expression sliders with value readouts and hover explanations.
+Keep overlays off initially and one relevant View options menu per view.
+
+Do not register extra export commands or add new Craft integrations in this pass.
+A functional defect discovered outside this workflow is recorded separately,
+not automatically added to the implementation scope.
+
+## Evidence and ownership
+
+The reimport review tested the code merged in `a376ded` using fresh output
+folders, the standalone CLI, and a live app on port 19894. All 11 originals
+imported and all 11 characters could be selected. Fourteen sheet manifests
+contained 111 nonempty frames; that is file validation, not proof of correct
+segmentation or usable animation.
+
+Evidence: `exports/reimport-review-2026-10-19/review-report.txt`, with sibling
+`live/` and `headless/` logs, screenshots, command scripts and artifact checks.
+These are local review artifacts, not portable test fixtures. Embedded replay
+paths still refer to the isolated `/tmp/animationcraft-reimport-*` workspaces.
+
+Before coding, inspect current main and the owning agents' changes. The review
+observed concurrent edits in:
+
+- `apps/animationcraft-cli/src/main.rs`
+- `crates/engine/src/commands.rs`
+- `pipeline/guided_cutout_rig_builder.py`
+
+Coordinate overlap before editing those files; do not duplicate ongoing fixes.
+Use an isolated branch/worktree from current committed main. The original report
+was committed as `8f28c8c`; its MCP description includes work that was uncommitted
+when reviewed. Recheck claims against the implementation being changed.
+Follow `AGENTS.md`; never stage, reset or replace another agent's working files.
+
+## Ordered fixes
+
+### F1. Make sheet imports work from a clean checkout
+
+**Observed:** slicing fails when the ignored
+`exports/templates/exploded_part_sheet_spec.json` is absent. The review only
+continued after copying the existing template into its isolated workspaces.
+
+**Change:** move/version that existing runtime template in an appropriate tracked
+source location and update its readers. Do not add a new template system or
+require users to copy files from another checkout.
+
+**Acceptance:** run a small generated sheet through the real cutter with no
+pre-existing exports. Assert the generated manifest and decoded, nonempty frame
+images. The test must fail when the runtime dependency cannot be resolved.
+
+### F2. Connect the right artwork to each character and sheet type
+
+**Observed:** Rust presets point Sam to Rusty's poses, Maisy to Jenny's poses,
+and Mr Puddles to Puddles' poses; Old Mac's pose mapping differs between catalogues.
+The Python catalogue substitutes original images or illustrations for missing
+sheets. Maisy's original is a presentation slide, and its pose entry repeats its
+turnaround. Hayley's scene illustration is not a pose sheet. Generated Hayley and
+Old Mac strips inspected in the review do not establish complete turnarounds.
+
+**Change:** reconcile the existing mappings using visually verified sources.
+Represent unavailable sheets as missing. Preserve useful slides/illustrations
+as labeled references; do not silently treat them as poses or turnarounds.
+Reuse existing catalogue/state structures; no new asset database or automatic
+vault-wide matching service.
+
+**Acceptance:** verify source identity for all 11 catalogue characters. Test
+that switching characters preserves each one's sources, selected artwork and
+loaded manifests. Include a regression that would catch cross-character reuse.
+Missing sheets show a clear empty state, not fabricated frame counts.
+
+### F3. Make incomplete slicing visible and provide a bounded correction path
+
+**Observed:** Scout's pose import fails with “No foreground characters detected;
+supply --layout.” Sam's numbered 12-pose sheet produces only six poses while
+returning success. Several cutouts retain source labels or neighboring fragments.
+The Python cutter accepts explicit layouts, but the engine command does not
+forward that option.
+
+**Change:** diagnose the existing detector/matting path with those sources first.
+Repair the demonstrated causes without replacing the cutter. Where explicit
+layout is needed, pass the existing layout-file option through `asset.cut_sheet`
+and provide an **Apply layout…** action under existing Sheet tools. No interactive
+mask/polygon editor or new segmentation service in this pass.
+
+Show the actual slice count and `needs_review`/failure status beside the sheet.
+Keep the source available for comparison. A failed re-cut must preserve the last
+usable cutouts and selection; it must not imply the character is ready to animate.
+
+**Acceptance:** Scout yields reviewable cutouts via the repaired automatic path
+or the explicit-layout path. Sam's reviewed layout yields all 12 distinct source
+poses. Compare actual crops with source bounds, including source-text and adjacent
+figure contamination. Invalid layouts produce actionable errors and leave prior
+usable output intact. Use generated fixtures for portable regression tests and
+the real sheets for visual acceptance; do not add private vault files to Git.
+
+### F4. Finish the existing sheet and pose navigation contract
+
+**Observed:** new imports use `Pose 00` labels because the intake path forces OCR
+off. The left-hand “View sheet” action selects a broad center tab rather than an
+explicit sheet. This creates ambiguity now that Artwork contains several views.
+The merged UI already has Sheets/Poses/Parts and additive reference attachment;
+extend and verify these controls rather than building a second browser.
+
+**Change:** make each View sheet action open the matching full sheet. Keep Add
+sheet additive and Replace explicit. Preserve the originating sheet/gallery and
+selection when opening and returning from a single item. Use reviewed manifest
+labels when available; offer the existing OCR capability for re-cutting and keep
+honest numbered labels when recognition is unavailable or uncertain. Do not guess
+that an arbitrary frame is “Walking.” Do not introduce another naming service.
+
+Retain the expression sliders, grouped cards, readable values and What/Why/How
+hover help. Check the existing layout with all 11 character connections at normal
+and narrow widths; fix clipping caused by this workflow without redesigning the
+rest of the inspector.
+
+**Acceptance:** an interaction test and live review cover add versus replace,
+opening a specific sheet, gallery selection without an automatic view change,
+context-menu single view, return to the originating gallery, and character
+switching. The selected image, label and index agree. The expression sliders
+remain usable and their readouts reflect the changed values.
+
+### F5. Make the existing CLI bridge and failure reporting dependable
+
+**Observed:** live commands paused when the app workspace was hidden and resumed
+when visible. The standalone CLI continued normally. The bridge client has no
+request timeout. MCP's successful-result path does not classify a returned
+`ok:false` as a tool failure; Rust errors currently take a separate JSON-RPC path.
+
+**Change:** reproduce and fix command servicing when the window is hidden, and
+bound connection/response waits with clear diagnostics. Keep timeout handling
+explicit: timing out must not claim the operation was cancelled, and must not
+automatically retry a mutating import. A screenshot requiring a visible rendering
+surface should fail clearly if it cannot be captured.
+
+For existing commands only, preserve failed outcomes through CLI and MCP. Handle
+both engine errors and successful transport responses containing `ok:false`.
+Retain useful error details and input/output paths. Coordinate with the current
+CLI owner before touching their MCP work.
+
+**Acceptance:** a hidden-window state query completes without switching desktops;
+a screenshot completes or returns a bounded, clear error. A stalled test server
+cannot hang the CLI indefinitely. Missing source, invalid layout and failed cutter
+are failures through CLI and MCP, not optimistic success messages. No duplicate
+import is launched after a timeout.
+
+### F6. Close the pass with honest, repeatable acceptance tests
+
+This is validation of F1–F5, not a separate testing-framework project.
+
+- Replace conditional-assertion false passes in the touched import/cutter paths
+  with generated temporary fixtures that always exercise the behavior.
+- Do not treat the topology parser's `loops == triangles * 3` self-check as
+  independent parity evidence. Mesh parity itself is outside this pass.
+- The runtime-template fix does not supply the three existing engine tests'
+  separate sample-image dependencies. Give affected tests explicit generated
+  fixtures or record the remaining inherited failures accurately; no silent skips.
+- Run the relevant Rust/Python tests and build the app. Run the workspace suite
+  for integration and distinguish unrelated baseline failures. Check formatting
+  on changed code without a repository-wide formatting sweep.
+- Repeat the 11-character source/import/switch review with fresh outputs. Record
+  failures, actual pose/view counts and missing sheet types. Inspect images, not
+  only JSON keys, file existence or exit codes.
+- Validate portable paths in tests; distinguish real-sheet visual evidence from
+  tests that can run on a clean checkout.
+
+## Completion and handoff
+
+Deliver one scoped PR, or small dependent PRs if ownership requires it. Each
+handoff identifies its base and commit, changed files, test results and screenshots.
+No blanket staging, force push or reset of the shared checkout.
+
+The pass is complete when the existing import-to-artwork-review workflow meets
+F1–F5's acceptance checks and F6 records the results. Missing source artwork may
+remain missing when represented honestly; a failed slice or wrong character
+mapping is not a completed feature. Existing artwork must remain accessible.
+Do not claim this validates anatomy, rig quality, motion cycles or media exports.
+
+## Explicitly deferred
+
+The previous T1–T29 proposals are not an implementation queue for this pass,
+except the narrowly scoped failure-reporting correction from T20:
+
+- Extra Three.js/Remotion/Blender export registration and new export formats.
+- New renderers, turntables, retiming, scene detection and costume swapping.
+- New crop/trim/content-aware/boolean-mask wrappers or vector integrations.
+- A new pivot editor, mask editor or asset database.
+- Rebuilding the existing EffectCraft composition/keyframe generator.
+- MCP resources/prompts, broad schema redesign, new inspect/probe/bench commands.
+- Generated-output purge commands and repository-wide formatting.
+
+`vision.analyze` already works through CLI and MCP, and live UI commands already
+appear in CLI help. Those are not missing features. Keep broader ideas in a
+separate future discussion; they must not expand this repair pass.
