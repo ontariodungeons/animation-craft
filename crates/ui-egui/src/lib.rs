@@ -677,7 +677,12 @@ impl AnimationCraftApp {
             return Err("Wait for the background command before changing project assets".into());
         }
         self.sync_ui_before_command(id, &params);
-        let res = self.session.execute(id, params).map_err(|e| e.to_string());
+        let res = if preview_export::uses_preview(&self.session, id, &params) {
+            let textures = self.export_control_textures()?;
+            preview_export::export(&mut self.session, &self.ui_state, &params, &textures, id == "export.cutout_mp4")
+        } else {
+            self.session.execute(id, params).map_err(|e| e.to_string())
+        };
         self.sync_ui_after_command(id, &res);
         res
     }
@@ -1567,7 +1572,7 @@ impl AnimationCraftApp {
                     "A background pipeline command is already running…".to_string();
                 return;
             }
-            let snapshot_export = matches!(id, "export.cutout_mp4" | "export.layered_motion");
+            let snapshot_export = preview_export::uses_preview(&self.session, id, &params);
             let export_textures = if snapshot_export {
                 match self.export_control_textures() {
                     Ok(textures) => textures,
