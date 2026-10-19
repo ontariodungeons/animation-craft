@@ -12,6 +12,35 @@ use animationcraft_engine::{
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf};
 
+/// An explicit external spec is a document export, not a request to export the active viewport.
+pub(crate) fn uses_preview(session: &Session, id: &str, params: &Value) -> bool {
+    if id == "export.cutout_mp4" {
+        return true;
+    }
+    if id != "export.layered_motion" {
+        return false;
+    }
+    let Some(spec) = params
+        .get("spec")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    else {
+        return true;
+    };
+    let Some(rig) = session.current_asset().and_then(|a| a.cutout_rig.as_ref()) else {
+        return false;
+    };
+    match (
+        std::fs::canonicalize(animationcraft_engine::commands::resolve_workspace_path(
+            session, spec,
+        )),
+        std::fs::canonicalize(&rig.plan_path),
+    ) {
+        (Ok(requested), Ok(loaded)) => requested == loaded,
+        _ => false,
+    }
+}
+
 pub(crate) fn sampled_spec(
     rig: &LoadedCutoutRigPlan,
     state: &UiState,
@@ -144,6 +173,27 @@ pub(crate) fn export(
     textures: &BTreeMap<String, Vec<PathBuf>>,
     mp4: bool,
 ) -> Result<Value, String> {
+    let mut export_state = state.clone();
+    if let Some(speed) = params.get("speed") {
+        let speed = speed
+            .as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= 100.0)
+            .ok_or("Export speed must be a finite number between 0 and 100")?;
+        export_state.anim_speed = speed as f32;
+    }
+    if let Some(mode) = params.get("mode") {
+        export_state.anim_mode = match mode.as_str().ok_or("Export mode must be a string")? {
+            "idle" | "standing" => crate::AnimMode::Idle,
+            "walk" | "walking" => crate::AnimMode::Walk,
+            "run" | "running" => crate::AnimMode::Run,
+            "jump" | "jumping" => crate::AnimMode::Jump,
+            "wave" | "waving" => crate::AnimMode::Wave,
+            "look" | "look_scout" | "explore" => crate::AnimMode::LookScout,
+            "static" => crate::AnimMode::Static,
+            _ => return Err("Unknown export motion mode".into()),
+        };
+    }
+    let state = &export_state;
     let asset = session.current_asset().ok_or("No active asset to export")?;
     let rig = asset
         .cutout_rig
@@ -154,7 +204,10 @@ pub(crate) fn export(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
     {
-        let requested = std::fs::canonicalize(spec).map_err(|e| e.to_string())?;
+        let requested = std::fs::canonicalize(
+            animationcraft_engine::commands::resolve_workspace_path(session, spec),
+        )
+        .map_err(|e| e.to_string())?;
         let loaded = std::fs::canonicalize(&rig.plan_path).map_err(|e| e.to_string())?;
         if requested != loaded {
             return Err(
@@ -162,13 +215,21 @@ pub(crate) fn export(
             );
         }
     }
+    if params.get("duration").is_some_and(|v| v.as_f64().is_none()) {
+        return Err("Export duration must be a number".into());
+    }
     let track_duration = evaluate_cutout_rig_motion(rig, state).track_duration;
     let duration =
         params
             .get("duration")
             .and_then(Value::as_f64)
             .unwrap_or(if track_duration > 0.0 {
-                track_duration as f64 / (state.anim_speed as f64).max(0.01)
+                track_duration as f64
+                    / if state.anim_speed > 0.0 {
+                        state.anim_speed as f64
+                    } else {
+                        1.0
+                    }
             } else {
                 3.0
             });
@@ -177,8 +238,7 @@ pub(crate) fn export(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_nanos();
-    let root = std::env::current_dir()
-        .map_err(|e| e.to_string())?
+    let root = animationcraft_engine::commands::workspace_root(session)
         .join("exports/preview_snapshots")
         .join(format!("{}-{stamp}", std::process::id()));
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
@@ -222,7 +282,7 @@ pub(crate) fn export(
         let output = params
             .get("output")
             .and_then(Value::as_str)
-            .map(PathBuf::from)
+            .map(|p| animationcraft_engine::commands::resolve_workspace_path(session, p))
             .unwrap_or_else(|| root.join("preview.mp4"));
         if let Some(parent) = output.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -546,5 +606,52 @@ mod tests {
             transform_rig_point(&rig, &motion, "node8", [0.0, 0.0]),
             [9.0, -7.0]
         );
+    }
+    #[test]
+    fn explicit_external_spec_is_not_replaced_by_active_preview() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "animationcraft-spec-routing-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let active = root.join("active.json");
+        let external = root.join("external.json");
+        std::fs::write(&active, b"{}").unwrap();
+        std::fs::write(&external, b"{}").unwrap();
+        let mut session = Session::default();
+        session.active_asset = Some("fixture".into());
+        session.assets.insert(
+            "fixture".into(),
+            animationcraft_engine::Asset {
+                id: "fixture".into(),
+                cutout_rig: Some(LoadedCutoutRigPlan {
+                    plan_path: active.clone(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        assert!(uses_preview(&session, "export.layered_motion", &json!({})));
+        assert!(uses_preview(
+            &session,
+            "export.layered_motion",
+            &json!({"spec":active})
+        ));
+        assert!(!uses_preview(
+            &session,
+            "export.layered_motion",
+            &json!({"spec":external})
+        ));
+        session.assets.clear();
+        assert!(!uses_preview(
+            &session,
+            "export.layered_motion",
+            &json!({"spec":external})
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
