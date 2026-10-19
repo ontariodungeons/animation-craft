@@ -1,5 +1,11 @@
 # Modular Image-to-Animation Studio, Blender 5.3 Bridge & FilmCraft Pipeline Implementation Plan
 
+> **Historical design reference — not the active implementation plan.**
+> The current application is Rust/egui; see [README](../../../README.md) and the current user assignment.
+> Statements below about inline/shared-checkout work, untracked baselines, old ports,
+> tool versions, completion status, or required new features are historical, not instructions.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Refactor the monolithic HTML turnaround studio into composable TypeScript (`src/`) and Python (`pipeline/`) functions with a 3-Question AI Intake + "Ask Omarchy Agent" UI trigger, multi-archetype rigging (`humanoid_biped`, `axial_creature`, `radial_prop`, `vehicle_hull`), live Blender 5.3 visual check & orthographic render, `filmcraft-cli` / `effectcraft-cli` video loading, and a zero-noise step-by-step agent skill verified by a fresh subagent.

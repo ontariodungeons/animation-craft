@@ -1,5 +1,11 @@
 # Rust `*Craft` Refactoring Spec for `AnimationCraft` (`animationcraft` + `animationcraft-cli`)
 
+> **Historical design reference — not the active implementation plan.**
+> The current application is Rust/egui; see [README](README.md) and the current user assignment.
+> Statements below about inline/shared-checkout work, untracked baselines, old ports,
+> tool versions, completion status, or required new features are historical, not instructions.
+
+
 ## 1. Goal & Non-Negotiables
 Refactor `/home/jesse/Work/omhas-animation` into a pure-Rust `*Craft` application matching the exact architecture and shared libraries of `/home/jesse/Work/filmcraft-codex` (`storytold/filmcraft`, `storytold/photocraft`, `storytold/effectcraft`):
 - **DO NOT use `raylib`**. Use **`craft-ui`** (`storytold/craft-libs`), **`egui = "0.36"`**, and **`eframe = "0.36"`** (already cached locally in `/home/jesse/.cargo/git/checkouts/craft-libs-d830b991a08c6c3d` and `/home/jesse/Work/filmcraft-codex/Cargo.lock`).

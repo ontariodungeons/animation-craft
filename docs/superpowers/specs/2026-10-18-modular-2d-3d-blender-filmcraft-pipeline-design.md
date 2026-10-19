@@ -1,7 +1,13 @@
 # Modular Image-to-Animation Studio, Blender 5.3 Bridge & FilmCraft Video Pipeline Design
 
+> **Historical design reference — not the active implementation plan.**
+> The current application is Rust/egui; see [README](../../../README.md) and the current user assignment.
+> Statements below about inline/shared-checkout work, untracked baselines, old ports,
+> tool versions, completion status, or required new features are historical, not instructions.
+
+
 Date: 2026-10-18
-Status: Draft for Review
+Status: Historical proposal; consult current runtime and task scope
 Workspace: `/home/jesse/Work/omhas-animation`
 
 ---

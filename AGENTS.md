@@ -1,6 +1,6 @@
 # Working on AnimationCraft with concurrent agents
 
-Read `CLAUDE.md` for the general coding guidelines. These rules keep independent
+Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
 UI, engine, pipeline, and test work from overwriting one another.
 
 ## Start with an isolated checkout

@@ -1,6 +1,12 @@
 # Pose and Part Cutter Implementation Plan
 
-> Implement inline in the existing workspace: the requested pipeline is currently untracked, so a worktree would omit it. The user's explicit build request supplies execution authorization.
+> **Historical design reference — not the active implementation plan.**
+> The current application is Rust/egui; see [README](../../../README.md) and the current user assignment.
+> Statements below about inline/shared-checkout work, untracked baselines, old ports,
+> tool versions, completion status, or required new features are historical, not instructions.
+
+
+> Superseded workflow: the baseline is now tracked. Use an isolated worktree per AGENTS.md.
 
 **Goal:** Review Track B and export the actual vault pose/turnaround sheets as transparent sprites, atlases, and honest, editable articulated cutouts.
 **Architecture:** Offline Pillow/NumPy/SciPy connected-component segmentation with optional local Tesseract label recognition; explicit JSON layout/mask overrides for ambiguous sheets. Never invent hidden limb pixels or certify inferred masks. Keep existing Blender pipeline unchanged; add an independent CLI and unified CLI entrypoint.
