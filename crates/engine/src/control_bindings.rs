@@ -61,6 +61,19 @@ pub struct EvaluatedPin {
 }
 
 impl ControlBindings {
+    /// Whether a control has an explicit route. Facial raster preview owns only
+    /// mouth opening; eyes require authored joints or pins.
+    pub fn supports(&self, control: &str) -> bool {
+        (control == "smile_open" && self.face.is_some())
+            || self.joints.iter().any(|j| {
+                j.control == control && (j.rotation_deg != 0.0 || j.translation != [0.0, 0.0])
+            })
+            || self
+                .pins
+                .iter()
+                .any(|p| p.control.as_deref() == Some(control) && p.delta != [0.0, 0.0])
+    }
+
     /// Reject unsupported controls, dangling part references and invalid arithmetic
     /// before a plan is installed. Missing mappings intentionally do nothing.
     pub fn validate(&self, parts: &[String]) -> Result<(), String> {
@@ -150,6 +163,9 @@ mod tests {
             ..Default::default()
         };
         assert!(b.validate(&["layer-42".into()]).is_ok());
+        assert!(b.supports("elbow_bend"));
+        assert!(!b.supports("eye_blink"));
+        assert!(!b.supports("eye_gaze"));
         let values = BTreeMap::from([("elbow_bend".into(), 20.0), ("eye_blink".into(), 100.0)]);
         assert_eq!(
             b.evaluate_part("layer-42", &values),
