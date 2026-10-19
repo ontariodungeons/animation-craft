@@ -418,19 +418,12 @@ impl AnimationCraftApp {
     /// Load or fetch a cached texture from disk, preserving PhotoCraft's transparent RGBA
     /// directly and only running solid-background stripping on unmatted opaque JPEGs.
     pub fn load_texture(&mut self, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
-        let tol = self.ui_state.bg_tolerance;
-        let cache_key = format!("{path}#tol={tol}");
+        let cache_key = path.to_string();
         if let Some(tex) = self.textures.get(&cache_key) {
             return Some(tex.clone());
         }
-        let raw_img = image::open(path).ok()?.into_rgba8();
-        let has_photocraft_alpha =
-            raw_img.width() > 0 && raw_img.height() > 0 && raw_img.get_pixel(0, 0)[3] < 250;
-        let img = if has_photocraft_alpha {
-            raw_img
-        } else {
-            animationcraft_engine::commands::strip_solid_background_rgba(&raw_img, tol)
-        };
+        // Show the file as it is; background removal belongs to the PhotoCraft import step.
+        let img = image::open(path).ok()?.into_rgba8();
         let size = [img.width() as usize, img.height() as usize];
         let pixels = img.into_raw();
         let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);

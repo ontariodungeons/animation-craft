@@ -253,197 +253,6 @@ fn sanitize_asset_id(raw: &str) -> String {
 
 // ---------- command implementations ----------
 
-/// Strip a solid/white studio background from an RGBA image as Step 1 of import.
-///
-/// 1. If at least 20% of border pixels already have `alpha < 32`, returns `src` unchanged.
-/// 2. Estimates the studio background color `(bg_r, bg_g, bg_b)` from the image border.
-/// 3. Flood-fills from all 4 image edges (and from horizontal/vertical sheet gutters) for
-///    pixels within `tolerance` of `(bg_r, bg_g, bg_b)`, plus enclosed near-white studio
-///    background pockets (`>= 80` px) between limbs/poses.
-/// 4. Feathers the 1px boundary ring and decontaminates boundary RGB from clean interior
-///    neighbors so no white halo remains around the character silhouette.
-pub fn strip_solid_background_rgba(src: &image::RgbaImage, tolerance: u32) -> image::RgbaImage {
-    let w = src.width();
-    let h = src.height();
-    if w < 4 || h < 4 {
-        return src.clone();
-    }
-
-    let mut border_r = Vec::with_capacity(((w + h) * 2) as usize);
-    let mut border_g = Vec::with_capacity(((w + h) * 2) as usize);
-    let mut border_b = Vec::with_capacity(((w + h) * 2) as usize);
-    let mut transparent_border = 0usize;
-    let mut total_border = 0usize;
-
-    for x in 0..w {
-        for y in [0, h - 1] {
-            let p = src.get_pixel(x, y).0;
-            total_border += 1;
-            if p[3] < 32 {
-                transparent_border += 1;
-            } else {
-                border_r.push(p[0]);
-                border_g.push(p[1]);
-                border_b.push(p[2]);
-            }
-        }
-    }
-    for y in 1..(h - 1) {
-        for x in [0, w - 1] {
-            let p = src.get_pixel(x, y).0;
-            total_border += 1;
-            if p[3] < 32 {
-                transparent_border += 1;
-            } else {
-                border_r.push(p[0]);
-                border_g.push(p[1]);
-                border_b.push(p[2]);
-            }
-        }
-    }
-
-    // Already transparent background
-    if transparent_border * 5 >= total_border.max(1) || border_r.is_empty() {
-        return src.clone();
-    }
-
-    border_r.sort_unstable();
-    border_g.sort_unstable();
-    border_b.sort_unstable();
-    let mid = border_r.len() / 2;
-    let bg_r = i32::from(border_r[mid]);
-    let bg_g = i32::from(border_g[mid]);
-    let bg_b = i32::from(border_b[mid]);
-    let bg_max = bg_r.max(bg_g).max(bg_b);
-    let bg_min = bg_r.min(bg_g).min(bg_b);
-    let bg_is_neutral_light = bg_min >= 210 && (bg_max - bg_min) <= 22;
-    let bg_is_neutral_dark = bg_max <= 35 && (bg_max - bg_min) <= 18;
-
-    let tol_dist = (tolerance.clamp(5, 100) as i32) + 12;
-    let soft_dist = tol_dist + 16;
-
-    let color_dist = |p: [u8; 4]| -> i32 {
-        let dr = (i32::from(p[0]) - bg_r).abs();
-        let dg = (i32::from(p[1]) - bg_g).abs();
-        let db = (i32::from(p[2]) - bg_b).abs();
-        dr.max(dg).max(db) + (dr + dg + db) / 4
-    };
-
-    let matches_studio_bg = |p: [u8; 4], max_dist: i32| -> bool {
-        if p[3] < 32 {
-            return true;
-        }
-        let d = color_dist(p);
-        if d > max_dist {
-            return false;
-        }
-        let max_c = p[0].max(p[1]).max(p[2]);
-        let min_c = p[0].min(p[1]).min(p[2]);
-        let sat = max_c.saturating_sub(min_c);
-        if bg_is_neutral_light {
-            // Protect warm cream fur, skin tones, and colored clothing from white BG flood-fill
-            sat <= 18 && min_c >= 220
-        } else if bg_is_neutral_dark {
-            // Protect brown boots, dark blue jeans, and colored fur from black BG flood-fill
-            sat <= 18 && max_c <= 32
-        } else {
-            true
-        }
-    };
-
-    let len = (w * h) as usize;
-    let mut is_bg = vec![false; len];
-    let mut queue = std::collections::VecDeque::with_capacity((w + h) as usize * 4);
-    let idx = |x: u32, y: u32| -> usize { (y * w + x) as usize };
-
-    // Seed from all 4 borders
-    for x in 0..w {
-        for y in [0, h - 1] {
-            let p = src.get_pixel(x, y).0;
-            let i = idx(x, y);
-            if !is_bg[i] && matches_studio_bg(p, tol_dist) {
-                is_bg[i] = true;
-                queue.push_back((x, y));
-            }
-        }
-    }
-    for y in 1..(h - 1) {
-        for x in [0, w - 1] {
-            let p = src.get_pixel(x, y).0;
-            let i = idx(x, y);
-            if !is_bg[i] && matches_studio_bg(p, tol_dist) {
-                is_bg[i] = true;
-                queue.push_back((x, y));
-            }
-        }
-    }
-
-    // Flood-fill connected studio background
-    while let Some((cx, cy)) = queue.pop_front() {
-        let neighbors = [
-            (cx.wrapping_sub(1), cy),
-            (cx + 1, cy),
-            (cx, cy.wrapping_sub(1)),
-            (cx, cy + 1),
-        ];
-        for (nx, ny) in neighbors {
-            if nx < w && ny < h {
-                let ni = idx(nx, ny);
-                if !is_bg[ni] {
-                    let p = src.get_pixel(nx, ny).0;
-                    if matches_studio_bg(p, tol_dist) {
-                        is_bg[ni] = true;
-                        queue.push_back((nx, ny));
-                    }
-                }
-            }
-        }
-    }
-
-    // Build output with soft 1px anti-aliased edge ramp and RGB decontamination from interior pixels
-    let mut out = src.clone();
-    for y in 0..h {
-        for x in 0..w {
-            let i = idx(x, y);
-            if is_bg[i] {
-                out.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
-                continue;
-            }
-            // Check if adjacent to background
-            let mut touches_bg = false;
-            for (nx, ny) in [
-                (x.wrapping_sub(1), y),
-                (x + 1, y),
-                (x, y.wrapping_sub(1)),
-                (x, y + 1),
-            ] {
-                if nx < w && ny < h && is_bg[idx(nx, ny)] {
-                    touches_bg = true;
-                    break;
-                }
-            }
-            if touches_bg {
-                let p = src.get_pixel(x, y).0;
-                let dist = color_dist(p);
-                let new_alpha = if matches_studio_bg(p, tol_dist) {
-                    0u8
-                } else if dist < soft_dist && (bg_is_neutral_light || bg_is_neutral_dark) {
-                    (((dist - tol_dist).max(4) * 235) / (soft_dist - tol_dist).max(1))
-                        .clamp(90, 240) as u8
-                } else {
-                    p[3]
-                };
-                if new_alpha == 0 {
-                    out.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
-                } else {
-                    out.put_pixel(x, y, image::Rgba([p[0], p[1], p[2], new_alpha]));
-                }
-            }
-        }
-    }
-    out
-}
-
 fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
     let image_raw = params
         .get("image")
@@ -498,34 +307,14 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or_else(|| "sheet".to_string());
     let transparent_path = import_dir.join(format!("{stem_clean}_transparent.png"));
 
-    let (width, height, effective_path, matting_tool) = match image::open(&resolved_path) {
-        Ok(dyn_img) => {
-            let rgba = dyn_img.into_rgba8();
-            let w = rgba.width();
-            let h = rgba.height();
-            let pc_ok = run_photocraft_transparent_step1(
-                &resolved_path,
-                &transparent_path,
-                w,
-                h,
-                tolerance,
-            );
-            if pc_ok && transparent_path.is_file() {
-                (w, h, transparent_path.clone(), "photocraft-cli")
-            } else {
-                let cleaned = strip_solid_background_rgba(&rgba, tolerance);
-                if cleaned.save(&transparent_path).is_ok() {
-                    (w, h, transparent_path.clone(), "rust-floodfill-fallback")
-                } else {
-                    (w, h, resolved_path.clone(), "raw")
-                }
-            }
-        }
-        Err(_) => {
-            let (w, h) = image::image_dimensions(&resolved_path).unwrap_or((0, 0));
-            (w, h, resolved_path.clone(), "raw")
-        }
-    };
+    // Background removal is PhotoCraft's job; if it cannot run, the import fails rather than
+    // continuing with a hand-rolled or un-matted image.
+    let (width, height) = image::image_dimensions(&resolved_path).map_err(|e| {
+        EngineError::InvalidParams(format!("cannot read image {}: {e}", resolved_path.display()))
+    })?;
+    run_photocraft_transparent_step1(&resolved_path, &transparent_path, width, height, tolerance)
+        .map_err(|e| EngineError::ExternalTool("photocraft-cli".into(), e))?;
+    let (effective_path, matting_tool) = (transparent_path.clone(), "photocraft-cli");
 
     let resolved_str = effective_path.to_string_lossy().into_owned();
     let pipeline_args = vec!["validate".to_string(), resolved_str];
@@ -692,9 +481,9 @@ pub fn run_photocraft_transparent_step1(
     width: u32,
     height: u32,
     tolerance: u32,
-) -> bool {
+) -> std::result::Result<(), String> {
     if width < 8 || height < 8 {
-        return false;
+        return Err(format!("image is {width}x{height}; background removal needs at least 8x8"));
     }
     let bin = resolve_craft_cli("photocraft-cli");
     let tol = tolerance.clamp(8, 35);
@@ -737,11 +526,15 @@ pub fn run_photocraft_transparent_step1(
         "--out".to_string(),
         output_path.to_string_lossy().into_owned(),
     ];
-    std::process::Command::new(bin)
+    let out = std::process::Command::new(&bin)
         .args(&args)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .map_err(|e| format!("cannot run {bin}: {e}"))?;
+    if !out.status.success() || !output_path.is_file() {
+        let msg = String::from_utf8_lossy(&out.stderr);
+        return Err(msg.lines().last().unwrap_or("magic eraser produced no output").to_string());
+    }
+    Ok(())
 }
 
 fn cmd_intake_compare_reference(s: &mut Session, params: &Value) -> Result<Value> {
