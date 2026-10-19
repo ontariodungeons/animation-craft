@@ -3,15 +3,65 @@
 //! All data is read from `Session.current_asset()` manifests — never hardcoded to
 //! Hopper/Hardcoded paths. Every button dispatches a [`UiCommand`].
 
+use super::chrome;
 use crate::{AnimationCraftApp, CenterTab, UiCommand};
-use egui::{Color32, Sense, Stroke, Ui, Vec2};
+use egui::Ui;
+
+fn source_sheet_card(
+    app: &mut AnimationCraftApp,
+    ui: &mut Ui,
+    title: &str,
+    filename: &str,
+    count_label: &str,
+    tab: CenterTab,
+    slot: &str,
+    view_id: &str,
+    import_id: &str,
+) {
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(title).strong().color(chrome::TEXT));
+            chrome::badge(ui, count_label, chrome::BLUE);
+        });
+        ui.add(egui::Label::new(egui::RichText::new(if filename == "none" { "No source attached" } else { filename }).small().color(chrome::MUTED)).truncate())
+            .on_hover_text(filename);
+        ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = chrome::button(ui, "View sheet", false)
+                    .on_hover_text("Open this character's connected reference sheet in the center workspace.");
+                app.automation.add_response(view_id, "button", &format!("View {title}"), &response);
+                if response.clicked() { app.ui_state.center_tab = tab; }
+                let response = chrome::help(chrome::button(ui, if filename == "none" { "Attach…" } else { "Replace…" }, false),
+                    "Attach an image sheet to the currently selected character.",
+                    "Add pose or turnaround references without creating a different character.",
+                    "Choose a file. Intake processing and automatic slicing will run; review the result.");
+                app.automation.add_response(import_id, "button", &format!("Attach {title}"), &response);
+                if response.clicked()
+                    && let Some(file) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
+                {
+                    let path = file.display().to_string();
+                    app.ui_state.image_path = Some(path.clone());
+                    app.ui_state.center_tab = tab;
+                    app.exec_ui_command(UiCommand::IntakeValidate {
+                        image_path: path, slot: slot.into(), attach_to_active: true,
+                        auto_cut: true, tolerance: app.ui_state.bg_tolerance,
+                    });
+                }
+            });
+        });
+    });
+    ui.add_space(6.0);
+}
 
 pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
         .id_salt("left_scroll")
         .show(ui, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            ui.spacing_mut().item_spacing.y = 6.0;
             super::header::project_assets(app, ui);
-            ui.heading("Intake & Attached Sheets");
+            ui.label(egui::RichText::new("Source artwork").size(14.0).strong().color(chrome::TEXT));
             // Attached Sheets per Character (Zero Context Switching)
             let (active_char, asset_sheet_name, pose_count, turn_sheet_name, turn_count) = {
                 let asset = app.session().current_asset();
@@ -43,102 +93,34 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 (id, a_name, p_cnt, t_name, t_cnt)
             };
 
-            ui.label(format!(
-                "Active Character: {active_char} (Transparent BG Step 1)"
-            ));
-            ui.horizontal_wrapped(|ui| {
-                let r_view_asset = ui.selectable_label(
-                    app.ui_state.center_tab == CenterTab::AssetSheet,
-                    format!("[Asset Sheet] ({pose_count} poses)"),
-                );
-                app.automation.add_response(
-                    "btn.view_asset_sheet",
-                    "button",
-                    "View Asset Sheet Tab",
-                    &r_view_asset,
-                );
-                if r_view_asset.clicked() {
-                    app.ui_state_mut().center_tab = CenterTab::AssetSheet;
-                }
-                if ui.button("Import Asset Sheet…").clicked()
-                    && let Some(file) = rfd::FileDialog::new()
-                        .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-                        .pick_file()
-                {
-                    let path_str = file.display().to_string();
-                    let tolerance = app.ui_state.bg_tolerance;
-                    app.ui_state_mut().image_path = Some(path_str.clone());
-                    app.ui_state_mut().center_tab = CenterTab::AssetSheet;
-                    app.exec_ui_command(UiCommand::IntakeValidate {
-                        image_path: path_str,
-                        slot: "asset_sheet".to_string(),
-                        attach_to_active: true,
-                        auto_cut: true,
-                        tolerance,
-                    });
-                }
-            });
-            ui.small(format!("  -> {asset_sheet_name}"));
-
-            ui.horizontal_wrapped(|ui| {
-                let r_view_turn = ui.selectable_label(
-                    app.ui_state.center_tab == CenterTab::TurnaroundSheet,
-                    format!("[Turnaround Sheet] ({turn_count} views)"),
-                );
-                app.automation.add_response(
-                    "btn.view_turnaround_sheet",
-                    "button",
-                    "View Turnaround Sheet Tab",
-                    &r_view_turn,
-                );
-                if r_view_turn.clicked() {
-                    app.ui_state_mut().center_tab = CenterTab::TurnaroundSheet;
-                }
-                if ui.button("Import Turnaround…").clicked()
-                    && let Some(file) = rfd::FileDialog::new()
-                        .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-                        .pick_file()
-                {
-                    let path_str = file.display().to_string();
-                    let tolerance = app.ui_state.bg_tolerance;
-                    app.ui_state_mut().image_path = Some(path_str.clone());
-                    app.ui_state_mut().center_tab = CenterTab::TurnaroundSheet;
-                    app.exec_ui_command(UiCommand::IntakeValidate {
-                        image_path: path_str,
-                        slot: "turnaround_sheet".to_string(),
-                        attach_to_active: true,
-                        auto_cut: true,
-                        tolerance,
-                    });
-                }
-            });
-            ui.small(format!("  -> {turn_sheet_name}"));
-
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("+ New Character from Image…").clicked()
-                    && let Some(file) = rfd::FileDialog::new()
-                        .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-                        .pick_file()
-                {
-                    let path_str = file.display().to_string();
-                    let tolerance = app.ui_state.bg_tolerance;
-                    app.ui_state_mut().image_path = Some(path_str.clone());
-                    app.exec_ui_command(UiCommand::IntakeValidate {
-                        image_path: path_str,
-                        slot: "auto".to_string(),
-                        attach_to_active: false,
-                        auto_cut: true,
-                        tolerance,
-                    });
-                }
-                ui.small("or drag & drop PNG/JPG/WebP");
-            });
-
-            ui.separator();
-
+            ui.label(egui::RichText::new(format!("References for {active_char}")).small().color(chrome::MUTED));
+            source_sheet_card(app, ui, "Pose sheet", &asset_sheet_name, &format!("{pose_count} poses"),
+                CenterTab::AssetSheet, "asset_sheet", "btn.view_asset_sheet", "btn.import_asset_sheet");
+            source_sheet_card(app, ui, "Turnaround", &turn_sheet_name, &format!("{turn_count} views"),
+                CenterTab::TurnaroundSheet, "turnaround_sheet", "btn.view_turnaround_sheet", "btn.import_turnaround");
+            let response = ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
+                chrome::help(chrome::button(ui, "+ New character from image…", true),
+                    "Import and process an image as a new character.",
+                    "Start with new artwork rather than replacing a reference on this character.",
+                    "Choose an image. Background processing and classification will run; inspect the result before rigging.")
+            }).inner;
+            app.automation.add_response("btn.new_character", "button", "New character from image", &response);
+            if response.clicked()
+                && let Some(file) = rfd::FileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp"]).pick_file()
+            {
+                let path = file.display().to_string();
+                app.ui_state.image_path = Some(path.clone());
+                app.exec_ui_command(UiCommand::IntakeValidate {
+                    image_path: path, slot: "auto".into(), attach_to_active: false,
+                    auto_cut: true, tolerance: app.ui_state.bg_tolerance,
+                });
+            }
+            ui.add_space(6.0);
+            let settings = egui::CollapsingHeader::new(egui::RichText::new("Preparation tools").color(chrome::BLUE))
+                .id_salt("left.preparation_tools").default_open(false).show(ui, |ui| {
             // Universal archetype buttons
             ui.horizontal_wrapped(|ui| {
-                ui.label("Archetype:");
+                ui.label("Character type:");
                 let archetype_buttons = [
                     (
                         "Humanoid Biped",
@@ -182,29 +164,23 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 }
             });
 
-            ui.checkbox(
-                &mut app.ui_state_mut().strip_costume,
-                "Strip costume to base mannequin",
-            );
+            ui.checkbox(&mut app.ui_state_mut().strip_costume, "Request a base mannequin")
+                .on_hover_text("Requests costume removal in the intake workflow. Support depends on the downstream pipeline; this toggle alone does not remove clothing.");
 
-            ui.horizontal(|ui| {
-                ui.label("BG Tolerance:");
-                let tol = app.ui_state.bg_tolerance;
-                ui.add(
-                    egui::Slider::new(&mut app.ui_state_mut().bg_tolerance, 1..=100)
-                        .text(format!("{tol}")),
-                );
-            });
+            ui.label("Background tolerance");
+            ui.spacing_mut().slider_width = (ui.available_width() - 60.0).max(32.0);
+            ui.add(egui::Slider::new(&mut app.ui_state.bg_tolerance, 1..=100))
+                .on_hover_text("Higher values remove a broader range of background colors. Start low and inspect pale fur, fine edges and holes before increasing.");
             ui.checkbox(
                 &mut app.ui_state_mut().use_ocr,
-                "Local VLM / OCR Pose Auto-Label",
-            );
+                "Read pose labels automatically",
+            ).on_hover_text("Request OCR when cutting a sheet. Check the detected labels against the artwork; this setting does not prove that text recognition is available.");
 
             ui.separator();
 
             // Primary intake / pipeline buttons
             ui.horizontal_wrapped(|ui| {
-                let r_val = ui.button("Validate Intake");
+                let r_val = chrome::button(ui, "Process image", false);
                 app.automation.add_response(
                     "btn.validate_intake",
                     "button",
@@ -222,7 +198,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         tolerance,
                     });
                 }
-                let r_3q = ui.button("Ask Omarchy Agent (3Q)");
+                let r_3q = chrome::button(ui, "Analyze intake", false);
                 app.automation.add_response(
                     "btn.ask_3q",
                     "button",
@@ -239,7 +215,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         strip_costume: st.strip_costume,
                     });
                 }
-                let r_cut = ui.button("Cut Sheet (PhotoCraft)");
+                let r_cut = chrome::button(ui, "Slice sheet", false);
                 app.automation.add_response(
                     "btn.cut_sheet",
                     "button",
@@ -260,7 +236,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         use_ocr,
                     });
                 }
-                let r_reg = ui.button("0px Drift Register");
+                let r_reg = chrome::button(ui, "Align views", false);
                 app.automation.add_response(
                     "btn.drift_register",
                     "button",
@@ -270,7 +246,7 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if r_reg.clicked() {
                     app.exec_ui_command(UiCommand::TurnaroundRegister);
                 }
-                let r_prompt = ui.button("Export Agent Prompt (.md)");
+                let r_prompt = chrome::button(ui, "Export agent brief", false);
                 app.automation.add_response(
                     "btn.export_prompt",
                     "button",
@@ -291,250 +267,13 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
             ui.separator();
 
-            // ========================================================================
-            // Section 2: 5-View Turnaround Strip (dynamic from manifest)
-            // ========================================================================
-            ui.heading("2. Registered 5-View Turnaround");
-            ui.separator();
-
-            let ctx = ui.ctx().clone();
-            let turnaround_frames = app
-                .session()
-                .current_asset()
-                .and_then(|a| a.turnaround_manifest.as_ref())
-                .map(|m| m.frames.clone());
-
-            if let Some(frames) = &turnaround_frames {
-                if frames.is_empty() {
-                    ui.label("No turnaround frames in manifest.");
-                } else {
-                    ui.horizontal_wrapped(|ui| {
-                        for frame in frames {
-                            let label = &frame.label;
-                            let deg = match label.as_str() {
-                                "front" | "00_front" | "0° Front" => 0.0,
-                                "quarter_front" | "45°" | "45° 3/4" => 45.0,
-                                "side" | "90°" | "90° Side" => 90.0,
-                                "opposite_quarter" | "135°" | "135° Back-3/4" => 135.0,
-                                "back" | "180°" | "180° Back" => 180.0,
-                                _ => 0.0,
-                            };
-                            let is_selected = (app.ui_state.yaw_deg - deg).abs() < 15.0;
-
-                            let desired = Vec2::new(54.0, 68.0);
-                            let (rect, response) = ui.allocate_at_least(desired, Sense::click());
-                            if response.clicked() {
-                                app.ui_state_mut().center_tab = CenterTab::ThreeD;
-                                app.ui_state_mut().auto_turntable = false;
-                                app.ui_state_mut().yaw_deg = deg;
-                            }
-
-                            let bg = if is_selected {
-                                Color32::from_rgb(42, 62, 92)
-                            } else {
-                                Color32::from_rgb(28, 32, 42)
-                            };
-                            ui.painter().rect_filled(rect, 4.0, bg);
-                            if is_selected {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    4.0,
-                                    Stroke::new(1.5, Color32::from_rgb(90, 190, 250)),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-
-                            if let Some(tex) =
-                                app.load_texture(&ctx, &frame.resolved_path.to_string_lossy())
-                            {
-                                let pad = rect.shrink(3.0);
-                                ui.painter().image(
-                                    tex.id(),
-                                    pad,
-                                    egui::Rect::from_min_max(
-                                        egui::Pos2::ZERO,
-                                        egui::Pos2::new(1.0, 1.0),
-                                    ),
-                                    Color32::WHITE,
-                                );
-                            }
-                            ui.small(label);
-                        }
-                    });
-                }
-            } else {
-                ui.label("No turnaround manifest loaded.");
-                ui.small("Use Intake ▸ Validate Intake, then Cut Sheet, or load a preset.");
-            }
-
-            ui.separator();
-
-            // ========================================================================
-            // Section 3: Pose Sheet Cutouts (dynamic from manifest)
-            // ========================================================================
-            ui.heading("3. Pose Sheet Cutouts");
-            ui.separator();
-
-            let pose_frames = app
-                .session()
-                .current_asset()
-                .and_then(|a| a.pose_manifest.as_ref())
-                .map(|m| m.frames.clone());
-            // Snapshot foot_lift values so we don't hold an immutable borrow of app
-            // while mutating it inside the loop below.
-            let foot_lifts: std::collections::HashMap<String, f32> = app
-                .session()
-                .current_asset()
-                .and_then(|a| a.motion_range.as_ref())
-                .map(|m| {
-                    m.poses
-                        .iter()
-                        .map(|(label, pm)| (label.clone(), pm.foot_lift_px))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            if let Some(frames) = &pose_frames {
-                if frames.is_empty() {
-                    ui.label("No pose frames in manifest.");
-                } else {
-                    for (i, frame) in frames.iter().enumerate() {
-                        let selected = app.ui_state.selected_pose_idx == i;
-                        let foot_lift = foot_lifts.get(&frame.label).copied().unwrap_or(f32::NAN);
-
-                        let label_text = if foot_lift.is_nan() {
-                            format!("{} (lift: not measured)", frame.label)
-                        } else {
-                            format!("{} (lift {:.0}px)", frame.label, foot_lift)
-                        };
-
-                        if ui.selectable_label(selected, &label_text).clicked() {
-                            app.ui_state_mut().selected_pose_idx = i;
-                            app.ui_state_mut().playing = false;
-                            app.ui_state_mut().center_tab = CenterTab::TwoD;
-                            app.exec_ui_command(UiCommand::AnimPreview2d {
-                                mode: frame.label.clone(),
-                            });
-                        }
-                    }
-                }
-            } else {
-                ui.label("No pose manifest loaded.");
-                ui.small("Use Intake ▸ Cut Sheet (PhotoCraft) or load a preset.");
-            }
-
-            ui.separator();
-
-            // ========================================================================
-            // Section 4: Part Outliner (dynamic from asset.parts)
-            // ========================================================================
-            ui.heading("4. Part Outliner");
-            ui.separator();
-
-            // Outliner mode toggle + explode + pivots + topology numbers
-            ui.horizontal_wrapped(|ui| {
-                ui.checkbox(
-                    &mut app.ui_state_mut().outliner_collections_mode,
-                    "Collections mode",
-                );
-                ui.checkbox(&mut app.ui_state_mut().show_topology_numbers, "Topology #");
             });
-            let explode_pct = app.ui_state.explode_pct;
-            ui.horizontal(|ui| {
-                ui.label("Explode:");
-                ui.add(
-                    egui::Slider::new(&mut app.ui_state_mut().explode_pct, 0.0..=100.0)
-                        .text(format!("{:.0}%", explode_pct)),
-                );
-            });
-            ui.checkbox(
-                &mut app.ui_state_mut().show_pivot_markers,
-                "Joint Pivot Markers",
-            );
+            app.automation.add_response("left.preparation_tools", "button", "Preparation tools", &settings.header_response);
+            settings.header_response.on_hover_text("Character type, background settings, intake analysis, slicing, registration and agent prompts.");
+            ui.add_space(8.0);
 
-            ui.separator();
-
-            // Show All / Clear Solo + Verify All
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("Show All / Clear Solo").clicked() {
-                    app.exec_ui_command(UiCommand::PartShowAll);
-                }
-                let r_ver = ui.button("✓ Verify All Parts");
-                app.automation.add_response(
-                    "btn.verify_all_parts",
-                    "button",
-                    "Verify All Parts",
-                    &r_ver,
-                );
-                if r_ver.clicked() {
-                    app.exec_ui_command(UiCommand::SetPartState {
-                        part: "*".to_string(),
-                        visible: None,
-                        solo: None,
-                        verified: Some(true),
-                    });
-                }
-            });
-
-            ui.separator();
-
-            // Per-part visible/solo/verified checkboxes
-            let parts: Vec<animationcraft_engine::session::PartState> = app
-                .session()
-                .current_asset()
-                .map(|a| a.parts.clone())
-                .unwrap_or_default();
-
-            if parts.is_empty() {
-                ui.label("No parts available. Cut a sheet or load a manifest.");
-            } else {
-                egui::Grid::new("part_outliner_grid").show(ui, |ui| {
-                    for (idx, part) in parts.iter().enumerate() {
-                        let mut visible = part.visible;
-                        let mut solo = part.solo;
-                        let mut verified = part.verified;
-
-                        let part_name = part.name.clone();
-                        let response = ui
-                            .checkbox(&mut visible, "")
-                            .on_hover_text(format!("Toggle {part_name}"));
-                        if response.changed() {
-                            app.exec_ui_command(UiCommand::SetPartState {
-                                part: part_name.clone(),
-                                visible: Some(visible),
-                                solo: None,
-                                verified: None,
-                            });
-                        }
-
-                        let solo_response = ui
-                            .checkbox(&mut solo, "S")
-                            .on_hover_text(format!("Solo {part_name}"));
-                        if solo_response.changed() {
-                            app.exec_ui_command(UiCommand::SetPartState {
-                                part: part_name.clone(),
-                                visible: None,
-                                solo: Some(solo),
-                                verified: None,
-                            });
-                        }
-
-                        let ver_response = ui
-                            .checkbox(&mut verified, "✓")
-                            .on_hover_text(format!("Verify {part_name}"));
-                        if ver_response.changed() {
-                            app.exec_ui_command(UiCommand::SetPartState {
-                                part: part_name.clone(),
-                                visible: None,
-                                solo: None,
-                                verified: Some(verified),
-                            });
-                        }
-
-                        ui.label(format!("#{} {}", idx + 1, part.name));
-                        ui.end_row();
-                    }
-                });
-            }
+            super::asset_browser::turnaround(app, ui);
+            super::asset_browser::poses(app, ui);
+            super::asset_browser::parts(app, ui);
         });
 }
