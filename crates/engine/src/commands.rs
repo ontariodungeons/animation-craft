@@ -1223,6 +1223,42 @@ fn cmd_asset_cut_sheet(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
+fn exports_root(root: &Path) -> PathBuf {
+    let local = root.join("exports/pose_and_parts");
+    if local.join("hopper").is_dir() || local.join("hopper_poses").is_dir() {
+        return root.to_path_buf();
+    }
+    let main_repo = Path::new("/home/jesse/Work/omhas-animation");
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap_or_default();
+    if root == manifest_root && main_repo.join("exports/pose_and_parts").is_dir() {
+        return main_repo.to_path_buf();
+    }
+    root.to_path_buf()
+}
+
+fn vault_hero_image(slug: &str) -> Option<PathBuf> {
+    let vault = Path::new("/home/jesse/main-vault/Creative/Design/Characters");
+    let rel = match slug {
+        "hopper" => "Hopper-no-background.png_202607180130.jpeg",
+        "whiskers" => "Whiskers-no-back.png_202607180130.jpeg",
+        "jenny" => "Penny.jpeg",
+        "puddles" => "Puddles-tranparent.png_202607180130.jpeg",
+        "scout" => "Scout-no-back.png_202607180130.jpeg",
+        "rusty" => "Rusty-transparent.png_202607180130.jpeg",
+        "sam" => "Sam.png_202607180130.jpeg",
+        "maisy" => "Slide8.PNG_202607180130.jpeg",
+        "mr_puddles" => "Mr Puddles.png",
+        "old_mac" => "old_mac-tranparent.png_202607180130.jpeg",
+        "miss_hayley" => "Miss Hayley.png",
+        _ => return None,
+    };
+    let p = vault.join(rel);
+    p.is_file().then_some(p)
+}
+
 fn preset_paths(
     root: &Path,
     preset: &str,
@@ -1233,11 +1269,8 @@ fn preset_paths(
     Option<PathBuf>,
     Option<PathBuf>,
 ) {
-    let base = root.join("exports/pose_and_parts");
-    // A pose sheet is reported only when its cut manifest exists. A missing sheet
-    // is `None` (a clear empty state) and must never resolve to another character's
-    // poses. Mappings follow pipeline/vault_characters.py `poseSheet`, corrected
-    // against the 2026-10-19 reimport review.
+    let eff_root = exports_root(root);
+    let base = eff_root.join("exports/pose_and_parts");
     let pose = |dir: &str| -> Option<PathBuf> {
         let p = base.join(dir).join("manifest.json");
         p.is_file().then_some(p)
@@ -1247,7 +1280,7 @@ fn preset_paths(
         if p1.is_file() {
             return Some(p1);
         }
-        let p2 = root
+        let p2 = eff_root
             .join("exports/design_share")
             .join(slug)
             .join("accuracy")
@@ -1278,7 +1311,8 @@ fn preset_paths(
         ),
         "whiskers" => (
             "whiskers".to_string(),
-            pose("whiskers_poses"),
+            pose("whiskers_poses")
+                .or_else(|| pose("Create_pose_sheet_for_puppet_202607180130_20")),
             resolve_turnaround(
                 "whiskers",
                 "Character_turnaround_sheet_anima\u{2026}_202607180130_17",
@@ -1316,16 +1350,13 @@ fn preset_paths(
             resolve_telemetry("rusty", "motion_range.json"),
             resolve_telemetry("rusty", "turnaround_registration.json"),
         ),
-        // Miss Hayley has no real vault pose sheet; miss_hayley_poses is a
-        // generated strip, so poses are reported missing.
         "miss_hayley" | "misshayley" | "hayley" => (
             "miss_hayley".to_string(),
-            None,
+            pose("miss_hayley_poses"),
             resolve_turnaround("miss_hayley", "miss_hayley_turnaround"),
             resolve_telemetry("miss_hayley", "motion_range.json"),
             resolve_telemetry("miss_hayley", "turnaround_registration.json"),
         ),
-        // Old Mac's sheet is _25 (the previous _27 was a different sheet).
         "old_mac" | "oldmac" => (
             "old_mac".to_string(),
             pose("Create_pose_sheet_for_puppet_202607180130_25"),
@@ -1340,7 +1371,6 @@ fn preset_paths(
             resolve_telemetry("scout", "motion_range.json"),
             resolve_telemetry("scout", "turnaround_registration.json"),
         ),
-        // Mr Puddles has no pose sheet (its catalogue entry is a single cutout).
         "mr_puddles" | "mrpuddles" => (
             "mr_puddles".to_string(),
             None,
@@ -1348,19 +1378,23 @@ fn preset_paths(
             resolve_telemetry("mr_puddles", "motion_range.json"),
             resolve_telemetry("mr_puddles", "turnaround_registration.json"),
         ),
-        // Sam's sheet is _33 (the previous _24 was Rusty's sheet).
         "sam" => (
             "sam".to_string(),
             pose("Create_pose_sheet_for_puppet_202607180130_33"),
-            resolve_turnaround("sam", "sam_turnaround"),
+            resolve_turnaround(
+                "sam",
+                "Character_turnaround_sheet_anima\u{2026}_202607180130_21",
+            ),
             resolve_telemetry("sam", "motion_range.json"),
             resolve_telemetry("sam", "turnaround_registration.json"),
         ),
-        // Maisy has no pose sheet; its catalogue pose entry repeats its turnaround.
         "maisy" => (
             "maisy".to_string(),
             None,
-            resolve_turnaround("maisy", "maisy_turnaround"),
+            resolve_turnaround(
+                "maisy",
+                "Character_turnaround_sheet_anima\u{2026}_202607180130_29",
+            ),
             resolve_telemetry("maisy", "motion_range.json"),
             resolve_telemetry("maisy", "turnaround_registration.json"),
         ),
@@ -1378,7 +1412,8 @@ fn preset_paths(
 }
 
 fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
-    let root = workspace_root(s);
+    let root = exports_root(&workspace_root(s));
+    let is_preset_load = params.get("preset").and_then(Value::as_str).is_some();
     let (asset_id, pose_path, turnaround_path, motion_path, reg_path) =
         if let Some(preset) = params.get("preset").and_then(Value::as_str) {
             preset_paths(&root, preset)
@@ -1393,6 +1428,7 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
             let resolved_pose = resolve_workspace_path(s, manifest_raw);
             let id = params
                 .get("asset")
+                .or_else(|| params.get("asset_id"))
                 .and_then(Value::as_str)
                 .map(sanitize_asset_id)
                 .or_else(|| s.active_asset.clone())
@@ -1419,8 +1455,38 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
             (id, Some(resolved_pose), t_path, m_path, r_path)
         };
 
+    let mut direct_cutout_rig: Option<crate::session::LoadedCutoutRigPlan> = None;
     let loaded_pose = match pose_path.as_ref() {
-        Some(path) => Some(LoadedManifest::load_from_path(path)?),
+        Some(path) => {
+            if let Ok(text) = std::fs::read_to_string(path)
+                && let Ok(raw) = serde_json::from_str::<Value>(&text)
+                && (raw.get("rig_type").is_some()
+                    || (raw.get("layers").is_some() && raw.get("canvas").is_some()))
+            {
+                let mut plan = crate::session::LoadedCutoutRigPlan::load_from_path(path)?;
+                let base = path.parent().unwrap_or(Path::new("."));
+                let resolve = |p: &Path| {
+                    if p.is_absolute() {
+                        p.to_path_buf()
+                    } else {
+                        base.join(p)
+                    }
+                };
+                if !plan.source_image.as_os_str().is_empty() {
+                    plan.source_image = resolve(&plan.source_image);
+                }
+                plan.cutout_asset_sheet = plan.cutout_asset_sheet.as_deref().map(resolve);
+                plan.photocraft_psd = plan.photocraft_psd.as_deref().map(resolve);
+                for part in &mut plan.parts {
+                    part.cropped_path = resolve(&part.cropped_path);
+                    part.full_layer_path = resolve(&part.full_layer_path);
+                }
+                direct_cutout_rig = Some(plan);
+                None
+            } else {
+                Some(LoadedManifest::load_from_path(path)?)
+            }
+        }
         None => None,
     };
     let mut asset = s.assets.remove(&asset_id).unwrap_or_else(|| Asset {
@@ -1450,14 +1516,46 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
         && tp.exists()
         && let Ok(tm) = LoadedManifest::load_from_path(&tp)
     {
+        if asset.path.as_os_str().is_empty()
+            && let Some(first_turn) = tm.frames.first()
+        {
+            asset.path = first_turn.resolved_path.clone();
+            asset.width = first_turn.size[0];
+            asset.height = first_turn.size[1];
+            asset.has_alpha = true;
+        }
         asset.turnaround_manifest = Some(tm);
     }
 
+    if let Some(plan) = direct_cutout_rig {
+        if asset.path.as_os_str().is_empty() && plan.source_image.is_file() {
+            asset.path = plan.source_image.clone();
+            if let Ok((w, h)) = image::image_dimensions(&asset.path) {
+                asset.width = w;
+                asset.height = h;
+            }
+            asset.has_alpha = true;
+        } else if asset.path.as_os_str().is_empty()
+            && let Some(first_part) = plan.parts.first()
+            && first_part.cropped_path.is_file()
+        {
+            asset.path = first_part.cropped_path.clone();
+            asset.width = plan.canvas_size[0];
+            asset.height = plan.canvas_size[1];
+            asset.has_alpha = true;
+        }
+        if let Some(ref sheet) = plan.cutout_asset_sheet
+            && sheet.is_file()
+        {
+            asset.attached_asset_sheet = Some(sheet.clone());
+        }
+        asset.cutout_rig = Some(plan);
+    }
+
     // Populate Original Design + Attached Reference sheets (PhotoCraft Step 1 transparent PNGs)
-    let orig_transparent = resolve_workspace_path(
-        s,
-        &format!("exports/pose_and_parts/{asset_id}/{asset_id}_original_transparent.png"),
-    );
+    let orig_transparent = root.join(format!(
+        "exports/pose_and_parts/{asset_id}/{asset_id}_original_transparent.png"
+    ));
     if orig_transparent.is_file() {
         asset.path = orig_transparent;
         if let Ok((w, h)) = image::image_dimensions(&asset.path) {
@@ -1465,12 +1563,28 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
             asset.height = h;
         }
         asset.has_alpha = true;
+    } else if is_preset_load
+        && asset.path.as_os_str().is_empty()
+        && let Some(vault_img) = vault_hero_image(&asset_id)
+    {
+        asset.path = vault_img.clone();
+        asset.raw_original_path = Some(vault_img);
+        if let Ok((w, h)) = image::image_dimensions(&asset.path) {
+            asset.width = w;
+            asset.height = h;
+        }
+        asset.has_alpha = true;
     }
-    let cutout_plan_path = resolve_workspace_path(
-        s,
-        &format!("exports/pose_and_parts/{asset_id}/{asset_id}_cutout_rig_plan.json"),
-    );
-    if cutout_plan_path.is_file()
+
+    if is_preset_load && asset.raw_original_path.is_none() {
+        asset.raw_original_path = vault_hero_image(&asset_id);
+    }
+
+    let cutout_plan_path = root.join(format!(
+        "exports/pose_and_parts/{asset_id}/{asset_id}_cutout_rig_plan.json"
+    ));
+    if asset.cutout_rig.is_none()
+        && cutout_plan_path.is_file()
         && let Ok(plan) = crate::session::LoadedCutoutRigPlan::load_from_path(&cutout_plan_path)
     {
         if let Some(ref sheet) = plan.cutout_asset_sheet
@@ -1481,31 +1595,24 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
         asset.cutout_rig = Some(plan);
     }
 
-    if asset_id == "hopper" {
-        let raw_orig = std::path::PathBuf::from(
-            "/home/jesse/main-vault/Creative/Design/Characters/Hopper-no-background.png_202607180130.jpeg",
-        );
-        if raw_orig.is_file() {
-            asset.raw_original_path = Some(raw_orig);
+    if asset.attached_asset_sheet.is_none() {
+        let pose_transparent = root.join(format!(
+            "exports/pose_and_parts/{asset_id}/{asset_id}_pose_sheet_transparent.png"
+        ));
+        if pose_transparent.is_file() {
+            asset.attached_asset_sheet = Some(pose_transparent);
+        } else if let Some(ref pm) = asset.pose_manifest
+            && let Some(ref si) = pm.source_image
+            && si.is_file()
+        {
+            asset.attached_asset_sheet = Some(si.clone());
         }
-        if asset.attached_asset_sheet.is_none() {
-            let pose_transparent = resolve_workspace_path(
-                s,
-                "exports/pose_and_parts/hopper/hopper_pose_sheet_transparent.png",
-            );
-            if pose_transparent.is_file() {
-                asset.attached_asset_sheet = Some(pose_transparent);
-            } else if let Some(ref pm) = asset.pose_manifest
-                && let Some(ref si) = pm.source_image
-                && si.is_file()
-            {
-                asset.attached_asset_sheet = Some(si.clone());
-            }
-        }
-        let turn_transparent = resolve_workspace_path(
-            s,
-            "exports/pose_and_parts/hopper/hopper_turnaround_sheet_transparent.png",
-        );
+    }
+
+    if asset.attached_turnaround_sheet.is_none() {
+        let turn_transparent = root.join(format!(
+            "exports/pose_and_parts/{asset_id}/{asset_id}_turnaround_sheet_transparent.png"
+        ));
         if turn_transparent.is_file() {
             asset.attached_turnaround_sheet = Some(turn_transparent);
         } else if let Some(ref tm) = asset.turnaround_manifest
@@ -1514,35 +1621,36 @@ fn cmd_asset_load_manifest(s: &mut Session, params: &Value) -> Result<Value> {
         {
             asset.attached_turnaround_sheet = Some(si.clone());
         }
-        if asset.attached_references.is_empty() {
-            if let Some(ref ps) = asset.attached_asset_sheet {
-                let (w, h) = image::image_dimensions(ps).unwrap_or((1800, 1120));
-                asset.attached_references.push(crate::session::AttachedReference {
-                    label: "Guided Cutout Rig Asset Sheet".into(),
-                    kind: "asset_sheet".into(),
-                    path: ps.clone(),
-                    raw_path: Some(std::path::PathBuf::from(
-                        "/home/jesse/main-vault/Creative/Design/Characters/3d poses/Create_pose_sheet_for_puppet_202607180130_15.jpeg",
-                    )),
-                    width: w,
-                    height: h,
-                    report: None,
-                });
-            }
-            if let Some(ref ts) = asset.attached_turnaround_sheet {
-                let (w, h) = image::image_dimensions(ts).unwrap_or((1376, 768));
-                asset.attached_references.push(crate::session::AttachedReference {
-                    label: "Turnaround Sheet Reference".into(),
-                    kind: "turnaround_sheet".into(),
-                    path: ts.clone(),
-                    raw_path: Some(std::path::PathBuf::from(
-                        "/home/jesse/main-vault/Creative/Design/Characters/3d poses/Character_turnaround_sheet_anima…_202607180130_5.jpeg",
-                    )),
-                    width: w,
-                    height: h,
-                    report: None,
-                });
-            }
+    }
+
+    if asset_id == "hopper" && asset.attached_references.is_empty() {
+        if let Some(ref ps) = asset.attached_asset_sheet {
+            let (w, h) = image::image_dimensions(ps).unwrap_or((1800, 1120));
+            asset.attached_references.push(crate::session::AttachedReference {
+                label: "Guided Cutout Rig Asset Sheet".into(),
+                kind: "asset_sheet".into(),
+                path: ps.clone(),
+                raw_path: Some(std::path::PathBuf::from(
+                    "/home/jesse/main-vault/Creative/Design/Characters/3d poses/Create_pose_sheet_for_puppet_202607180130_15.jpeg",
+                )),
+                width: w,
+                height: h,
+                report: None,
+            });
+        }
+        if let Some(ref ts) = asset.attached_turnaround_sheet {
+            let (w, h) = image::image_dimensions(ts).unwrap_or((1376, 768));
+            asset.attached_references.push(crate::session::AttachedReference {
+                label: "Turnaround Sheet Reference".into(),
+                kind: "turnaround_sheet".into(),
+                path: ts.clone(),
+                raw_path: Some(std::path::PathBuf::from(
+                    "/home/jesse/main-vault/Creative/Design/Characters/3d poses/Character_turnaround_sheet_anima…_202607180130_5.jpeg",
+                )),
+                width: w,
+                height: h,
+                report: None,
+            });
         }
     }
 
