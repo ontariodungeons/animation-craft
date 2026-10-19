@@ -3,6 +3,7 @@
 //! All sprite paths, pose labels, and lift/drift telemetry are read dynamically from
 //! `app.session().current_asset()`. Unmeasured fields display `"not measured"`.
 
+use super::chrome;
 use crate::{AnimMode, AnimationCraftApp, CenterTab, ShadingMode, UiCommand};
 use animationcraft_engine::session::{ManifestPart, PartState};
 use animationcraft_engine::{Asset, ManifestFrame};
@@ -11,74 +12,66 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    // Top Viewport Mode & Shading Bar (Original View + Attached Reference Sheets + Animated Cutout Rig)
-    ui.horizontal_wrapped(|ui| {
-        ui.heading("Hopper Studio");
-        ui.separator();
-        for (tab, id_str, label) in [
-            (
-                CenterTab::OriginalView,
-                "tab.original",
-                "1. Original View",
-            ),
-            (
-                CenterTab::AssetSheet,
-                "tab.asset_sheet",
-                "2. Cutout Asset Sheet",
-            ),
-            (
-                CenterTab::TurnaroundSheet,
-                "tab.turnaround_sheet",
-                "3. Turnaround Ref",
-            ),
-            (CenterTab::TwoD, "tab.2d", "4. Animated Cutout View"),
-            (CenterTab::ThreeD, "tab.3d", "5. 3D Turnaround"),
-            (CenterTab::FivePoseLineup, "tab.lineup", "6. 5-Pose Lineup"),
-        ] {
-            let resp = ui.selectable_label(app.ui_state.center_tab == tab, label);
-            app.automation.add_response(id_str, "tab", label, &resp);
-            if resp.clicked() {
-                app.ui_state.center_tab = tab;
+    let title = app
+        .session
+        .project_assets
+        .iter()
+        .find(|entry| Some(entry.id.as_str()) == app.session.active_asset.as_deref())
+        .map(|entry| entry.name.clone())
+        .unwrap_or_else(|| "Character workspace".into());
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(egui::RichText::new(&title).size(18.0).strong().color(chrome::TEXT)).truncate());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().button_padding = egui::vec2(9.0, 6.0);
+                let menu = ui.menu_button("View options ▾", |ui| {
+                    ui.set_min_width(210.0);
+                    if matches!(app.ui_state.center_tab, CenterTab::TwoD | CenterTab::ThreeD) {
+                        ui.label(egui::RichText::new("Preview style").strong());
+                        for (shade, id, label, hint) in [
+                            (ShadingMode::FeltPbr, "shade.felt_pbr", "Artwork", "Use the artwork-colored preview treatment. This is not a full physically based material renderer."),
+                            (ShadingMode::ClaySculpt, "shade.clay", "Clay", "Inspect the form with a muted clay treatment."),
+                            (ShadingMode::Wireframe, "shade.wire", "Wireframe", "Inspect the preview's structure and joint overlay."),
+                            (ShadingMode::Normals, "shade.normals", "Normals", "Use the normal-style diagnostic colors supported by the preview."),
+                        ] {
+                            let response = ui.selectable_value(&mut app.ui_state.shading_mode, shade, label).on_hover_text(hint);
+                            app.automation.add_response(id, "button", label, &response);
+                        }
+                        ui.separator();
+                    }
+                    ui.label(egui::RichText::new("Canvas & overlays").strong());
+                    for (id, label, value, hint) in [
+                        ("view.background", "Light background", &mut app.ui_state.light_backdrop, "Switch the supported canvas views between light and dark backgrounds to inspect edges."),
+                        ("view.pivots", "Show joint anchors", &mut app.ui_state.show_pivot_markers, "Show available joint locations on the original artwork and supported animation previews."),
+                        ("view.topology", "Show part labels", &mut app.ui_state.show_topology_numbers, "Label available joints or parts in supported views. Enable joint anchors on the Original tab to see joint names."),
+                        ("view.references", "Reference guides", &mut app.ui_state.show_ref_planes, "Show the reference-plane guides in the 2D animation preview."),
+                    ] {
+                        let response = ui.checkbox(value, label).on_hover_text(hint);
+                        app.automation.add_response(id, "checkbox", label, &response);
+                    }
+                });
+                app.automation.add_response("view.options", "button", "View options", &menu.response);
+                menu.response.on_hover_text("Canvas background, preview style and inspection overlays. These controls do not alter source artwork.");
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            for (tab, id, label, explanation) in [
+                (CenterTab::OriginalView, "tab.original", "Original", "Inspect the active source image and optional joint overlay."),
+                (CenterTab::AssetSheet, "tab.asset_sheet", "Parts", "Review the connected cutout or pose sheet."),
+                (CenterTab::TurnaroundSheet, "tab.turnaround_sheet", "Turnaround", "Inspect the character reference views."),
+                (CenterTab::TwoD, "tab.2d", "Animate", "Preview the selected action and inspect moving cutout parts."),
+                (CenterTab::ThreeD, "tab.3d", "3D", "Inspect the current 3D turnaround preview."),
+                (CenterTab::FivePoseLineup, "tab.lineup", "Lineup", "Compare poses side by side."),
+            ] {
+                let response = chrome::tab(ui, label, app.ui_state.center_tab == tab).on_hover_text(explanation);
+                app.automation.add_response(id, "tab", label, &response);
+                if response.clicked() { app.ui_state.center_tab = tab; }
             }
-        }
-        ui.separator();
-        for (shade, id_str, label) in [
-            (ShadingMode::FeltPbr, "shade.felt_pbr", "Felt PBR"),
-            (ShadingMode::ClaySculpt, "shade.clay", "Clay"),
-            (ShadingMode::Wireframe, "shade.wire", "Wire+Mesh"),
-            (ShadingMode::Normals, "shade.normals", "Normals"),
-        ] {
-            let resp = ui.selectable_label(app.ui_state.shading_mode == shade, label);
-            app.automation.add_response(id_str, "button", label, &resp);
-            if resp.clicked() {
-                app.ui_state.shading_mode = shade;
-            }
-        }
-        ui.separator();
-        let ref_planes = app.ui_state.show_ref_planes;
-        if ui.selectable_label(ref_planes, "Ref Planes").clicked() {
-            app.ui_state.show_ref_planes = !ref_planes;
-        }
-        let light_bg = app.ui_state.light_backdrop;
-        if ui
-            .selectable_label(
-                light_bg,
-                if light_bg { "Light BG" } else { "Dark BG" },
-            )
-            .clicked()
-        {
-            app.ui_state.light_backdrop = !light_bg;
-        }
-        let pivots = app.ui_state.show_pivot_markers;
-        if ui.selectable_label(pivots, "Joint Pivots").clicked() {
-            app.ui_state.show_pivot_markers = !pivots;
-        }
-        let topo = app.ui_state.show_topology_numbers;
-        if ui.selectable_label(topo, "Topology #").clicked() {
-            app.ui_state.show_topology_numbers = !topo;
-        }
+        });
     });
-    ui.separator();
+    ui.add_space(8.0);
 
     match app.ui_state.center_tab {
         CenterTab::OriginalView => original_design_view(app, ui),
@@ -104,67 +97,42 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
         )
     };
 
-    ui.horizontal_wrapped(|ui| {
-        ui.strong(format!(
-            "Original Design: {} ({})",
-            asset_id.to_uppercase(),
-            orig_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("hopper_original_transparent.png")
-        ));
-        ui.separator();
-        ui.colored_label(
-            Color32::from_rgb(100, 225, 160),
-            "Step 1: PhotoCraft Transparent BG (border_alpha = 1.0, PSNR = 46.8 dB)",
-        );
-        if let Some(ref rig) = cutout_rig_opt {
-            ui.separator();
-            ui.colored_label(
-                Color32::from_rgb(120, 200, 255),
-                format!(
-                    "Guided Cutout Rig: {} parts & joint anchors discovered (100% coverage)",
-                    rig.parts.len()
-                ),
-            );
-        }
-        ui.separator();
-        if ui.button("Open 2. Cutout Asset Sheet ->").clicked() {
-            app.ui_state.center_tab = CenterTab::AssetSheet;
-        }
-        if ui.button("Open 4. Animated Cutout View ->").clicked() {
-            app.ui_state.center_tab = CenterTab::TwoD;
-        }
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Source image").strong().color(chrome::TEXT));
+            if let Some(asset) = app.session.current_asset() {
+                chrome::badge(ui, &format!("{} × {} px", asset.width, asset.height), chrome::BLUE);
+                chrome::badge(ui, if asset.has_alpha { "Alpha channel" } else { "Opaque image" }, chrome::MUTED)
+                    .on_hover_text("An alpha channel can store transparency. Its presence alone does not verify background removal quality.");
+            }
+            if let Some(ref rig) = cutout_rig_opt {
+                chrome::badge(ui, &format!("{} rig parts loaded", rig.parts.len()), chrome::TEAL)
+                    .on_hover_text("Loaded rig parts, not a guarantee of correct segmentation or joint placement. Review the artwork and animation.");
+            }
+        });
+        ui.add(egui::Label::new(egui::RichText::new(orig_path.file_name().and_then(|n| n.to_str()).unwrap_or(&asset_id)).small().color(chrome::MUTED)).truncate())
+            .on_hover_text(orig_path.display().to_string());
+        ui.horizontal_wrapped(|ui| {
+            let response = chrome::button(ui, "Review parts", false)
+                .on_hover_text("Open the connected parts or pose sheet and inspect the available cutouts.");
+            app.automation.add_response("original.review_parts", "button", "Review parts", &response);
+            if response.clicked() { app.ui_state.center_tab = CenterTab::AssetSheet; }
+            let response = chrome::button(ui, "Preview animation", true)
+                .on_hover_text("Open the animation viewport. Select an action in the inspector to the right.");
+            app.automation.add_response("original.preview", "button", "Preview animation", &response);
+            if response.clicked() { app.ui_state.center_tab = CenterTab::TwoD; }
+        });
     });
-    ui.add_space(4.0);
+    ui.add_space(8.0);
 
     let avail = ui.available_size();
     let stage_h = (avail.y - 96.0).max(220.0);
-    let (rect, _resp) = ui.allocate_exact_size(Vec2::new(avail.x.max(120.0), stage_h), egui::Sense::hover());
+    let (rect, _resp) =
+        ui.allocate_exact_size(Vec2::new(avail.x.max(120.0), stage_h), egui::Sense::hover());
     let painter = ui.painter_at(rect);
 
-    // Checkerboard transparency backdrop
-    let chk = 16.0;
-    let mut y = rect.top();
-    let mut row_idx = 0usize;
-    while y < rect.bottom() {
-        let mut x = rect.left();
-        let mut col_idx = 0usize;
-        let h = (rect.bottom() - y).min(chk);
-        while x < rect.right() {
-            let w = (rect.right() - x).min(chk);
-            let c = if (row_idx + col_idx).is_multiple_of(2) {
-                Color32::from_rgb(24, 28, 38)
-            } else {
-                Color32::from_rgb(32, 37, 48)
-            };
-            painter.rect_filled(Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)), 0.0, c);
-            x += chk;
-            col_idx += 1;
-        }
-        y += chk;
-        row_idx += 1;
-    }
+    paint_transparent_checkerboard(&painter, rect, app.ui_state.light_backdrop);
 
     let ctx = ui.ctx().clone();
     let orig_str = orig_path.to_string_lossy().into_owned();
@@ -182,8 +150,10 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
             Color32::WHITE,
         );
 
-        // Draw discovered joint anchors & parent-child hierarchy overlay if present
-        if let Some(ref rig) = cutout_rig_opt {
+        // Original artwork remains unobstructed until its inspection overlay is enabled.
+        if let Some(ref rig) = cutout_rig_opt
+            && app.ui_state.show_pivot_markers
+        {
             let mut by_id = BTreeMap::new();
             for p in &rig.parts {
                 by_id.insert(p.id.as_str(), p);
@@ -212,13 +182,15 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     Stroke::new(1.5, Color32::from_rgba_unmultiplied(80, 230, 160, 175)),
                 );
                 painter.circle_filled(Pos2::new(sx, sy), 4.5, Color32::from_rgb(255, 85, 85));
-                painter.text(
-                    Pos2::new(sx + 7.0, sy - 7.0),
-                    egui::Align2::LEFT_CENTER,
-                    &p.id,
-                    egui::FontId::monospace(10.5),
-                    Color32::from_rgb(255, 240, 150),
-                );
+                if app.ui_state.show_topology_numbers {
+                    painter.text(
+                        Pos2::new(sx + 7.0, sy - 7.0),
+                        egui::Align2::LEFT_CENTER,
+                        &p.id,
+                        egui::FontId::monospace(10.5),
+                        Color32::from_rgb(255, 240, 150),
+                    );
+                }
             }
         }
     }
@@ -443,7 +415,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         ui.ctx().input(|i| {
             let step = if app.ui_state.sprint_lock { 5.5 } else { 3.0 };
             if i.key_down(egui::Key::A) || i.key_down(egui::Key::ArrowLeft) {
-                app.ui_state.stage_offset_x = (app.ui_state.stage_offset_x - step).clamp(-220.0, 220.0);
+                app.ui_state.stage_offset_x =
+                    (app.ui_state.stage_offset_x - step).clamp(-220.0, 220.0);
                 app.ui_state.anim_mode = if app.ui_state.sprint_lock {
                     AnimMode::Run
                 } else {
@@ -451,7 +424,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 };
             }
             if i.key_down(egui::Key::D) || i.key_down(egui::Key::ArrowRight) {
-                app.ui_state.stage_offset_x = (app.ui_state.stage_offset_x + step).clamp(-220.0, 220.0);
+                app.ui_state.stage_offset_x =
+                    (app.ui_state.stage_offset_x + step).clamp(-220.0, 220.0);
                 app.ui_state.anim_mode = if app.ui_state.sprint_lock {
                     AnimMode::Run
                 } else {
@@ -459,10 +433,12 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 };
             }
             if i.key_down(egui::Key::W) || i.key_down(egui::Key::ArrowUp) {
-                app.ui_state.stage_offset_y = (app.ui_state.stage_offset_y - step * 0.7).clamp(-80.0, 40.0);
+                app.ui_state.stage_offset_y =
+                    (app.ui_state.stage_offset_y - step * 0.7).clamp(-80.0, 40.0);
             }
             if i.key_down(egui::Key::S) || i.key_down(egui::Key::ArrowDown) {
-                app.ui_state.stage_offset_y = (app.ui_state.stage_offset_y + step * 0.7).clamp(-80.0, 40.0);
+                app.ui_state.stage_offset_y =
+                    (app.ui_state.stage_offset_y + step * 0.7).clamp(-80.0, 40.0);
             }
             if i.key_pressed(egui::Key::Space) {
                 app.ui_state.anim_mode = AnimMode::Jump;
@@ -931,10 +907,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 };
                 let pw = (part.size[0].max(1) as f32) * scale;
                 let ph = (part.size[1].max(1) as f32) * scale;
-                let base_x =
-                    sprite_rect.left() + (part.bind_position[0] - part.pivot[0]) * scale;
-                let base_y =
-                    sprite_rect.top() + (part.bind_position[1] - part.pivot[1]) * scale;
+                let base_x = sprite_rect.left() + (part.bind_position[0] - part.pivot[0]) * scale;
+                let base_y = sprite_rect.top() + (part.bind_position[1] - part.pivot[1]) * scale;
 
                 let (rig_dx, rig_dy) = match part.name.as_str() {
                     "ears" => (
@@ -1139,10 +1113,8 @@ fn three_d_turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
     ui.add_space(4.0);
 
-    let frame_opt = select_turnaround_frame_for_yaw(
-        app.session().current_asset(),
-        app.ui_state.yaw_deg,
-    );
+    let frame_opt =
+        select_turnaround_frame_for_yaw(app.session().current_asset(), app.ui_state.yaw_deg);
     let drift_label = app
         .session()
         .current_asset()
@@ -1358,10 +1330,7 @@ fn paint_transparent_checkerboard(painter: &egui::Painter, rect: Rect, light_mod
             Color32::from_rgb(198, 204, 214),
         )
     } else {
-        (
-            Color32::from_rgb(18, 22, 30),
-            Color32::from_rgb(26, 31, 42),
-        )
+        (Color32::from_rgb(18, 22, 30), Color32::from_rgb(26, 31, 42))
     };
     painter.rect_filled(rect, 6.0, c1);
     let tile = 20.0;
@@ -1558,8 +1527,7 @@ fn turnaround_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
         );
         if let Some(tex) = app.load_texture(&ctx, &p) {
             let ts = tex.size_vec2();
-            let scale =
-                (slot_rect.height() / ts.y.max(1.0)).min(slot_rect.width() / ts.x.max(1.0));
+            let scale = (slot_rect.height() / ts.y.max(1.0)).min(slot_rect.width() / ts.x.max(1.0));
             let draw_size = ts * scale;
             let img_rect = Rect::from_center_size(slot_rect.center(), draw_size);
             bot_painter.image(

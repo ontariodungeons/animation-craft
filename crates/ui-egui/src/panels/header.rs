@@ -1,6 +1,7 @@
 //! Project connections and workflow actions shared by the menus and toolbar.
+use super::chrome;
 use crate::{AnimationCraftApp, CenterTab, DemoPreset, UiCommand};
-use egui::Ui;
+use egui::{RichText, Ui};
 use serde_json::{Value, json};
 
 pub(crate) const PRESETS: [DemoPreset; 11] = [
@@ -83,10 +84,51 @@ pub(crate) fn action_button(
     label: &str,
     enabled: bool,
 ) -> bool {
-    let response = ui.add_enabled(
-        enabled && app.ui_state.busy_command.is_none(),
-        egui::Button::new(label),
-    );
+    let response = ui
+        .add_enabled_ui(enabled && app.ui_state.busy_command.is_none(), |ui| {
+            chrome::button(
+                ui,
+                label,
+                matches!(id, "toolbar.import" | "toolbar.export_mp4" | "project.add"),
+            )
+        })
+        .inner;
+    let explanation = match id {
+        "toolbar.import" | "project.add" => (
+            "Connect an image, sheet, or rig to the project.",
+            "Keep source files together without immediately processing them.",
+            "Click, choose a source and give it a name. Use preparation tools when ready.",
+        ),
+        "toolbar.transparent" => (
+            "Process the active source to remove its background.",
+            "Prepare artwork for compositing and rigging.",
+            "Use on an imported image and inspect the result before continuing.",
+        ),
+        "toolbar.build_rig" => (
+            "Create a proposed cutout rig for the active image.",
+            "Separate movable parts for animation.",
+            "Click after preparing the artwork. Review generated parts and joints; automatic placement needs checking.",
+        ),
+        "toolbar.reload" => (
+            "Reload the connected source from disk.",
+            "Refresh after changing its file externally.",
+            "Click to reload; review any changes to the asset.",
+        ),
+        "toolbar.export_mp4" => (
+            "Render the connected cutout project to MP4.",
+            "Create a playable video for review.",
+            "Choose an output path. The connected animation project determines the rendered motion.",
+        ),
+        _ => (
+            label,
+            "Manage this asset in your project.",
+            "Click to perform the labeled action.",
+        ),
+    };
+    let response = chrome::help(response, explanation.0, explanation.1, explanation.2)
+        .on_disabled_hover_text(
+            "This action needs an available asset or rig, and no background task running.",
+        );
     app.automation.add_response(id, "button", label, &response);
     response.clicked()
 }
@@ -103,7 +145,12 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .id_salt("header_actions")
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.strong("AnimationCraft");
+                ui.label(
+                    RichText::new("AnimationCraft")
+                        .size(16.0)
+                        .strong()
+                        .color(chrome::TEXT),
+                );
                 ui.separator();
                 if action_button(app, ui, "toolbar.import", "+ Import Asset", true) {
                     app.ui_state.connect_asset_open = true;
@@ -136,7 +183,13 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
         if app.ui_state.busy_command.is_some() {
             ui.spinner();
         }
-        ui.add(egui::Label::new(&app.ui_state.status_line).truncate());
+        let message = if app.ui_state.status_line.contains("CLI Bridge listening") {
+            "Ready"
+        } else {
+            &app.ui_state.status_line
+        };
+        ui.add(egui::Label::new(RichText::new(message).small().color(chrome::MUTED)).truncate())
+            .on_hover_text(&app.ui_state.status_line);
     });
 }
 
@@ -213,74 +266,54 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
 }
 
 pub(crate) fn project_assets(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    ui.heading("Project Assets");
     let entries = app.session.project_assets.clone();
-    ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
-        for (index, entry) in entries.iter().enumerate() {
-            ui.push_id(&entry.id, |ui| {
-                ui.horizontal(|ui| {
-                    let active = app.session.active_asset.as_deref() == Some(&entry.id);
-                    let label = egui::Button::selectable(active, &entry.name);
-                    let response = ui
-                        .add_sized([ui.available_width().max(100.0) - 78.0, 22.0], label)
-                        .on_hover_text(
-                            entry
-                                .path
-                                .as_ref()
-                                .map(|p| p.display().to_string())
-                                .unwrap_or_else(|| {
-                                    format!(
-                                        "Preset: {}",
-                                        entry.preset.as_deref().unwrap_or("unknown")
-                                    )
-                                }),
-                        );
-                    app.automation.add_response(
-                        format!("project.load.{}", entry.id),
-                        "button",
-                        &entry.name,
-                        &response,
-                    );
-                    if response.clicked() {
-                        command(app, "project.load_asset", json!({"id": entry.id}));
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button("Rename…").clicked() {
-                            app.ui_state.rename_asset =
-                                Some((entry.id.clone(), entry.name.clone()));
-                            ui.close();
-                        }
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Project assets").size(14.0).strong().color(chrome::TEXT));
+            chrome::badge(ui, &entries.len().to_string(), chrome::BLUE);
+        });
+        ui.add_space(4.0);
+        ui.add_enabled_ui(app.ui_state.busy_command.is_none(), |ui| {
+            for (index, entry) in entries.iter().enumerate() {
+                ui.push_id(&entry.id, |ui| {
+                    ui.horizontal(|ui| {
+                        let active = app.session.active_asset.as_deref() == Some(&entry.id);
+                        let response = ui.add_sized([(ui.available_width() - 40.0).max(40.0), 34.0],
+                            egui::Button::selectable(active, RichText::new(&entry.name).size(13.0).strong()).wrap())
+                            .on_hover_text(entry.path.as_ref().map(|p| p.display().to_string())
+                                .unwrap_or_else(|| format!("Preset: {}", entry.preset.as_deref().unwrap_or("unknown"))));
+                        app.automation.add_response(format!("project.load.{}", entry.id), "button", &entry.name, &response);
+                        if response.clicked() { command(app, "project.load_asset", json!({"id": entry.id})); }
+                        let menu = ui.menu_button("•••", |ui| {
+                            if action_button(app, ui, &format!("project.rename.{}", entry.id), "Rename…", true) {
+                                app.ui_state.rename_asset = Some((entry.id.clone(), entry.name.clone()));
+                                ui.close();
+                            }
+                            for (suffix, label, enabled, target) in [
+                                ("up", "Move up", index > 0, index.saturating_sub(1)),
+                                ("down", "Move down", index + 1 < entries.len(), index + 1),
+                            ] {
+                                if action_button(app, ui, &format!("project.{suffix}.{}", entry.id), label, enabled) {
+                                    command(app, "project.update_asset", json!({"id": entry.id, "index": target}));
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if action_button(app, ui, &format!("project.remove.{}", entry.id), "Remove from project", true) {
+                                command(app, "project.remove_asset", json!({"id": entry.id}));
+                                ui.close();
+                            }
+                        });
+                        app.automation.add_response(format!("project.manage.{}", entry.id), "button", "Manage asset", &menu.response);
+                        menu.response.on_hover_text("Rename, reorder, or remove this connection. Removing it does not delete its source file.");
                     });
-                    for (suffix, label, enabled, target) in [
-                        ("up", "^", index > 0, index.saturating_sub(1)),
-                        ("down", "v", index + 1 < entries.len(), index + 1),
-                    ] {
-                        if action_button(
-                            app,
-                            ui,
-                            &format!("project.{suffix}.{}", entry.id),
-                            label,
-                            enabled,
-                        ) {
-                            command(
-                                app,
-                                "project.update_asset",
-                                json!({"id": entry.id, "index": target}),
-                            );
-                        }
-                    }
-                    if action_button(app, ui, &format!("project.remove.{}", entry.id), "x", true) {
-                        command(app, "project.remove_asset", json!({"id": entry.id}));
-                    }
                 });
-            });
-        }
-        if entries.is_empty() {
-            ui.weak("No connected assets");
-        }
-        if action_button(app, ui, "project.add", "+ Add / Connect Asset…", true) {
-            app.ui_state.connect_asset_open = true;
-        }
+            }
+            if entries.is_empty() { ui.label(RichText::new("No assets connected yet").color(chrome::MUTED)); }
+            ui.add_space(4.0);
+            if action_button(app, ui, "project.add", "+ Add asset…", true) { app.ui_state.connect_asset_open = true; }
+        });
     });
-    ui.separator();
+    ui.add_space(10.0);
 }

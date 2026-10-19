@@ -825,6 +825,19 @@ fn parts_view(
     }
 }
 
+pub(in crate::panels) fn select_pose(
+    app: &mut AnimationCraftApp,
+    ctx: &egui::Context,
+    index: usize,
+) {
+    app.ui_state.selected_pose_idx = index;
+    app.ui_state.playing = false;
+    app.ui_state.center_tab = CenterTab::AssetSheet;
+    if let Some(asset_id) = app.session.active_asset.as_ref() {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pose_viewer_selection", asset_id)), index));
+    }
+}
+
 pub(in crate::panels) fn sidebar(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let frames = app
         .session()
@@ -915,14 +928,7 @@ pub(in crate::panels) fn sidebar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 ))
                 .clicked()
             {
-                app.ui_state.selected_pose_idx = index;
-                app.ui_state.playing = false;
-                app.ui_state.center_tab = CenterTab::AssetSheet;
-                if let Some(asset_id) = app.session.active_asset.as_ref() {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::new(("pose_viewer_selection", asset_id)), index)
-                    });
-                }
+                select_pose(app, ui.ctx(), index);
             }
         }
     });

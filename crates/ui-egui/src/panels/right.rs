@@ -3,8 +3,12 @@
 //! All silhouette motion range and registration drift values are read strictly from
 //! `app.session().current_asset()`. Unmeasured fields display `"not measured"`.
 
+use super::chrome::{self, help};
 use crate::{AnimMode, AnimationCraftApp, UiCommand};
 use egui::{CollapsingHeader, Color32, RichText, Ui};
+
+#[path = "inspector_widgets.rs"]
+mod widgets;
 
 // Inspector accents: labels carry meaning even when colors cannot be distinguished.
 const MOTION: Color32 = Color32::from_rgb(112, 196, 255);
@@ -12,17 +16,6 @@ const POSE: Color32 = Color32::from_rgb(195, 164, 255);
 const MESH: Color32 = Color32::from_rgb(240, 190, 112);
 const EXPORT: Color32 = Color32::from_rgb(100, 215, 194);
 const READY: Color32 = Color32::from_rgb(128, 218, 154);
-
-fn help(response: egui::Response, what: &str, why: &str, how: &str) -> egui::Response {
-    response.on_hover_ui(|ui| {
-        ui.set_max_width(290.0);
-        for (heading, body) in [("What", what), ("Why", why), ("How", how)] {
-            ui.label(RichText::new(heading).strong());
-            ui.add(egui::Label::new(body).wrap());
-            ui.add_space(4.0);
-        }
-    })
-}
 
 fn slider<T: egui::emath::Numeric>(
     ui: &mut Ui,
@@ -43,19 +36,6 @@ fn slider<T: egui::emath::Numeric>(
         how,
     );
     ui.add_space(4.0);
-}
-
-fn export_button(ui: &mut Ui, label: &str, explanation: (&str, &str, &str)) -> egui::Response {
-    let (what, why, how) = explanation;
-    help(
-        ui.add_sized(
-            [ui.available_width(), 28.0],
-            egui::Button::new(RichText::new(label).color(EXPORT)).wrap(),
-        ),
-        what,
-        why,
-        how,
-    )
 }
 
 pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
@@ -145,19 +125,30 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         "Values loaded from the asset's motion and registration reports.",
                         "Check how far the silhouette moves and whether views stay aligned.",
                         "Lift, width change and side reach below are scaled estimates at the current motion amount, not live measurements of each rendered frame.");
-                    let rows = if let Some(mr) = motion_opt {
-                        vec![
-                            ("Foot lift", format!("{:.1} px", mr.foot_lift_max_px * scale), format!("Maximum measured lift: {:.1} px in {}. Use it to judge foot clearance.", mr.foot_lift_max_px, mr.foot_lift_max_pose)),
-                            ("Width change", format!("{:.1} px", mr.width_max_delta_px * scale), format!("Maximum measured width change: {:.1} px in {}. Allow this much room beside the character.", mr.width_max_delta_px, mr.width_max_pose)),
-                            ("Left / right reach", format!("{:.1} / {:+.1} px", mr.left_min_delta_px * scale, mr.right_max_delta_px * scale), "Horizontal changes relative to the reference silhouette. Negative values extend left; positive values extend right.".into()),
-                            ("Reference height", format!("{:.0} px", mr.still_height_px), format!("Height of the still reference: {}. Used to compare the scale of different poses.", mr.still_label)),
-                        ]
+                    if let Some(mr) = motion_opt {
+                        ui.label(RichText::new(format!("Estimates at {:.0}% motion", scale * 100.0)).small().weak());
+                        let foot_samples: Vec<_> = mr.poses.keys().filter_map(|name| mr.raw["poses"][name.as_str()]["metrics"]["footLiftPx"].as_f64().map(|value| (name.as_str(), value as f32))).collect();
+                        let width_samples: Vec<_> = mr.poses.keys().filter_map(|name| mr.raw["poses"][name.as_str()]["deltaFromStill"]["widthPx"].as_f64().map(|value| (name.as_str(), value as f32))).collect();
+                        let lift = mr.raw["limits"]["footLiftPx"]["max"].as_f64();
+                        let width = mr.raw["limits"]["widthPx"]["maxDeltaFromStill"].as_f64();
+                        let lift_value = lift.map(|v| format!("{:.1}", v * scale as f64)).unwrap_or_else(|| "—".into());
+                        let width_value = width.map(|v| format!("{:.1}", v * scale as f64)).unwrap_or_else(|| "—".into());
+                        let lift_caption = lift.map(|v| format!("Peak {v:.1} px · {}", mr.foot_lift_max_pose)).unwrap_or_else(|| "Peak lift not measured".into());
+                        let width_caption = width.map(|v| format!("Peak {v:.1} px · {}", mr.width_max_pose)).unwrap_or_else(|| "Peak width change not measured".into());
+                        widgets::metric_card(ui, "Foot lift", &lift_value, "px",
+                            &lift_caption, &foot_samples, MOTION,
+                            ("Estimated foot lift at the selected motion amount. Bars show original measurements for each pose.", "Judge foot clearance and compare the pose references.", "Change Motion amount to scale the estimate. Hover a bar for its pose and measured value; the chart is not a playback timeline."));
+                        widgets::metric_card(ui, "Width change", &width_value, "px",
+                            &width_caption, &width_samples, POSE,
+                            ("Estimated change from the still silhouette width. Bars show recorded changes by pose.", "Allow enough space around the character for wider poses.", "Negative bars are narrower than the reference; positive bars are wider. Hover to read a pose measurement."));
+                        help(ui.label(format!("Side reach: {:.1} / {:+.1} px", mr.left_min_delta_px * scale, mr.right_max_delta_px * scale)),
+                            "Scaled horizontal reach relative to the reference silhouette.", "Keep movement inside the stage framing.", "Left values extend left; right values extend right. Adjust Motion amount to compare.");
+                        help(ui.label(format!("Reference height: {:.0} px", mr.still_height_px)),
+                            &format!("Height of the still reference: {}.", mr.still_label), "Compare the scale of poses.", "This is a recorded reference value; it does not change with Motion amount.");
                     } else {
-                        vec![("Motion report", "Not measured".into(), "Load or generate a motion report for this asset before interpreting motion limits.".into())]
-                    };
-                    for (label, value, detail) in rows {
-                        help(ui.add(egui::Label::new(format!("{label}: {value}")).wrap()), &detail,
-                            "Use measured evidence when judging movement quality.", "Read this value after adjusting Motion amount; hover to see what it measures.");
+                        widgets::metric_card(ui, "Motion measurements", "—", "",
+                            "No motion report loaded for this asset.", &[], MOTION,
+                            ("No measurement data is available.", "Unknown motion must not be mistaken for zero movement.", "Load or generate a motion report before comparing pose measurements."));
                     }
                     let drift = reg_opt.map(|r| format!("Alignment drift: {:.1} px", r.max_vertical_drift_px))
                         .unwrap_or_else(|| "Alignment drift: Not measured".into());
@@ -171,66 +162,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             CollapsingHeader::new(RichText::new("3 · Expression & pose").color(POSE).strong())
                 .id_salt("3. Visemes & Pose Sliders")
                 .default_open(false)
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        help(ui.small("Mouth shape"), "A viseme is a mouth shape associated with speech.", "Choose an expression or speech shape for the character.", "These selections currently store a preview setting; they do not generate lip-sync or missing mouth artwork.");
-                        for (id, label) in [
-                            ("smile", "Smile"),
-                            ("laugh", "Laugh"),
-                            ("ooh", "Ooh"),
-                            ("mbp", "M/B/P"),
-                            ("talk", "Talk"),
-                        ] {
-                            let active = app.ui_state.mouth_viseme == id;
-                            if help(ui.selectable_label(active, label),
-                                &format!("Select {label} as the mouth-shape setting."),
-                                "Record the desired expression for preview work.",
-                                "Click to select. A stored selection does not guarantee a visible mouth change; the current renderer does not synthesize visemes.").clicked() {
-                                app.ui_state.mouth_viseme = id.to_string();
-                            }
-                        }
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        if help(ui.small_button("Sheet Neutral"), "Reset all pose adjustments to their neutral defaults.", "Quickly explore a pose starting point.", "Click, then fine-tune the controls below. These are preview offsets and may not affect every rig.").clicked() {
-                            app.ui_state.reset_pose_sliders();
-                        }
-                        if help(ui.small_button("A-Pose"), "Reset the pose, then set arm spread to 35.", "Quickly explore a pose starting point.", "Click, then fine-tune the controls below. These are preview offsets and may not affect every rig.").clicked() {
-                            app.ui_state.reset_pose_sliders();
-                            app.ui_state.arm_spread = 35.0;
-                        }
-                        if help(ui.small_button("Action Hop"), "Set knee bend to 30, elbow bend to 25 and ear pitch to -15.", "Quickly explore a pose starting point.", "Click, then fine-tune the controls below. These are preview offsets and may not affect every rig.").clicked() {
-                            app.ui_state.knee_bend = 30.0;
-                            app.ui_state.elbow_bend = 25.0;
-                            app.ui_state.ear_pitch = -15.0;
-                        }
-                        if help(ui.small_button("Alert Ears"), "Set ear splay to 20 and eye blink to 80.", "Quickly explore a pose starting point.", "Click, then fine-tune the controls below. These are preview offsets and may not affect every rig.").clicked() {
-                            app.ui_state.ear_splay = 20.0;
-                            app.ui_state.eye_blink = 80.0;
-                        }
-                        if help(ui.small_button("Reset Pose"), "Reset all pose adjustments to their neutral defaults.", "Quickly explore a pose starting point.", "Click, then fine-tune the controls below. These are preview offsets and may not affect every rig.").clicked() {
-                            app.ui_state.reset_pose_sliders();
-                        }
-                    });
-                    slider(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%",
-                        ("Controls the blink-related preview offset.", "Check the head pose during an expressive moment.", "Drag from 0 to 100. The current layered preview shifts the head; this does not close painted eyelids."));
-                    slider(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "",
-                        ("Controls a gaze-related horizontal head offset.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. This does not redraw eyes or move pupils independently."));
-                    slider(ui, "Knee bend", &mut app.ui_state.knee_bend, -45.0..=90.0, "",
-                        ("Offsets the legs in the current preview; some cutout actions also use it in leg rotation.", "Explore a crouched or lifted-leg pose and inspect foot placement.", "Increase gradually while watching both feet. Negative values move the adjustment in the opposite direction."));
-                    slider(ui, "Elbow bend", &mut app.ui_state.elbow_bend, -45.0..=90.0, "",
-                        ("Adjusts arm placement in the layered preview.", "Check arm spacing and overlap with the torso.", "Try a small value first. It is not a separate elbow joint solver and may not affect every rig."));
-                    slider(ui, "Ear spread", &mut app.ui_state.ear_splay, -45.0..=45.0, "",
-                        ("Adjusts ear spacing or rotation, depending on the active preview rig.", "Make an expression more alert and inspect overlap near the head.", "Drag either side of zero and watch the ear bases. Reset Pose restores the default."));
-                    slider(ui, "Ear tilt", &mut app.ui_state.ear_pitch, -45.0..=45.0, "",
-                        ("Changes the vertical ear offset in the layered preview.", "Explore the silhouette of raised or lowered ears.", "Use small positive or negative values. This is an approximate offset, not a full 3D ear rotation."));
-                    slider(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "",
-                        ("Adjusts head placement or rotation in supported preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
-                    slider(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "",
-                        ("Changes the vertical head offset in the layered preview.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
-                    slider(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%",
-                        ("Stores a mouth-opening value used as a small head offset in the layered preview.", "Record an expression adjustment while inspecting the pose.", "20% is the current neutral value. It does not redraw the mouth or generate lip-sync."));
-                    slider(ui, "Arm spread", &mut app.ui_state.arm_spread, -45.0..=90.0, "",
-                        ("Moves the arms outward or changes their rotation in supported preview actions.", "Check how far the arms can move without exposing gaps at the shoulders.", "Start near zero and increase gradually; A-Pose sets this to 35."));
+                .show(ui, |ui| { expression_controls(app, ui);
                 });
 
             ui.separator();
@@ -239,27 +171,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             CollapsingHeader::new(RichText::new("4 · 3D shape").color(MESH).strong())
                 .id_salt("3b. 3D Reconstruction & Multi-View")
                 .default_open(false)
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.small("Mode:");
-                        for (mode_id, label) in [
-                            ("volumetric", "Volume"),
-                            ("rig", "Rig (limited)"),
-                        ] {
-                            let active = app.ui_state.recon_mode == mode_id;
-                            if help(ui.selectable_label(active, label),
-                                "Select the reconstruction mode recorded in the project.",
-                                "Volume approximates depth from silhouettes; an articulated rig would use separate movable parts.",
-                                "Current mesh export uses the same volume builder for both selections. Rig mode does not yet produce a separate articulated mesh.").clicked() {
-                                app.ui_state.recon_mode = mode_id.to_string();
-                            }
-                        }
-                    });
-                    slider(ui, "Depth", &mut app.ui_state.inflation_depth_pct, 10..=100, "%", ("Controls how thick the generated volume is.", "Give a flat silhouette depth without making it excessively round.", "Start near 58%. Compare the side view and rebuild the mesh after adjusting."));
-                    slider(ui, "Surface relief", &mut app.ui_state.relief_detail_pct, 0..=100, "%", ("Adds procedural surface variation to the volume.", "Break up a perfectly smooth surface.", "Start low and increase gradually. This is generated relief, not detail recovered from the artwork."));
-                    slider(ui, "Mesh detail", &mut app.ui_state.mesh_res, 12..=64, "", ("Controls the number of height slices and radial segments.", "Higher values create a smoother mesh but increase geometry and processing cost.", "Start at 32. Raise only if the exported silhouette looks faceted; rebuild to apply."));
-                    slider(ui, "View blending", &mut app.ui_state.proj_blend_pct, 0.0..=100.0, "%", ("Weights the front and quarter-view silhouette spans used during mesh generation.", "Adjust how much the quarter view contributes to the shape.", "Compare low and high values on a rebuilt mesh. This does not generate missing views."));
-                    slider(ui, "Surface bump", &mut app.ui_state.bump_strength, 0.0..=100.0, "%", ("Adds to the procedural relief amplitude during mesh export.", "Introduce more surface variation when a smooth result looks too plain.", "Use small values first. This is geometric variation, not a physically based felt material."));
+                .show(ui, |ui| { shape_controls(app, ui);
                 });
 
             ui.separator();
@@ -268,58 +180,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
             CollapsingHeader::new(RichText::new("5 · Quality checks").color(READY).strong())
                 .id_salt("4. Asset & Registration QA")
                 .default_open(true)
-                .show(ui, |ui| {
-                    let asset = app.session().current_asset();
-                    let turnaround_count = asset
-                        .and_then(|a| a.turnaround_manifest.as_ref())
-                        .map(|m| m.frames.len());
-                    let pose_count = asset
-                        .and_then(|a| a.pose_manifest.as_ref())
-                        .map(|m| m.frames.len());
-                    let part_count = asset.map(|a| a.parts.len()).unwrap_or(0);
-                    let verified_count = asset
-                        .map(|a| a.parts.iter().filter(|p| p.verified).count())
-                        .unwrap_or(0);
-                    let reg_passed = asset
-                        .and_then(|a| a.turnaround_registration.as_ref())
-                        .map(|r| r.registration_passed);
-
-                    match reg_passed {
-                        Some(true) => {
-                            ui.colored_label(
-                                READY,
-                                "PASS · View alignment",
-                            );
-                        }
-                        Some(false) => {
-                            ui.colored_label(
-                                MESH,
-                                "REVIEW · View alignment",
-                            );
-                        }
-                        None => {
-                            ui.label("NOT MEASURED · View alignment");
-                        }
-                    }
-
-                    help(ui.label("Loaded artwork & review"), "Counts of loaded views, pose references and reviewed cutout parts.", "Find missing inputs before exporting. Loaded does not mean verified.", "Review cutout parts in the left panel. View alignment status comes from the registration report.");
-                    match turnaround_count {
-                        Some(n) => ui.label(format!("• Turnaround views: {n} loaded")),
-                        None => ui.label("• Turnaround views: not loaded"),
-                    };
-                    match pose_count {
-                        Some(n) => ui.label(format!("• Pose frames: {n} loaded")),
-                        None => ui.label("• Pose frames: not loaded"),
-                    };
-                    if part_count > 0 {
-                        ui.label(format!(
-                            "• Cutout parts: {part_count} ({verified_count}/{part_count} verified)"
-                        ));
-                    } else {
-                        ui.label("• Cutout parts: not measured");
-                    }
-                    help(ui.label("Topology check: Not measured"), "Mesh and bone parity has no measured result here.", "Avoid treating a status label as proof that the exported rig is correct.", "Inspect and validate the exported rig before delivery.");
-                    help(ui.label("AI / OCR status: Not checked"), "This panel does not track whether the external image or text analysis service is available.", "Loaded artwork does not prove that AI analysis ran.", "Check the analysis command result for this asset.");
+                .show(ui, |ui| { quality_cards(app, ui);
                 });
 
             ui.separator();
@@ -334,7 +195,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .active_asset
                         .clone()
                         .unwrap_or_else(|| "hopper".to_string());
-                    let r_iter = export_button(ui, "Action reel + layers", ("Runs the character-iteration pipeline to create layers and an action reel.", "Share a review package of supported character actions.", "Uses the selected character ID. This preset-oriented pipeline may not support a newly imported character."));
+                    let r_iter = widgets::action_card(ui, "Action reel", "Create a review package of layers and six actions.", "Preset workflow · MP4 + layers", "Create action reel", app.ui_state.busy_command.is_none(), ("Runs the character-iteration pipeline to create layers and an action reel.", "Share a review package of supported character actions.", "Uses the selected character ID. This preset-oriented pipeline may not support a newly imported character."));
                     app.automation.add_response(
                         "export.iteration",
                         "button",
@@ -348,7 +209,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             character: slug.clone(),
                         });
                     }
-                    let r_ec = export_button(ui, "Run EffectCraft script", ("Executes the existing EffectCraft JSX script.", "Build the composition described by that script in EffectCraft.", "Requires exports/effectcraft_demo/build_scene.jsx. It does not generate a new script from the current preview."));
+                    let r_ec = widgets::action_card(ui, "EffectCraft", "Build a composition from an existing script.", "Requires a prepared JSX script", "Run script", app.ui_state.busy_command.is_none(), ("Executes the existing EffectCraft JSX script.", "Build the composition described by that script in EffectCraft.", "Requires exports/effectcraft_demo/build_scene.jsx. It does not generate a new script from the current preview."));
                     app.automation.add_response(
                         "export.effectcraft",
                         "button",
@@ -360,7 +221,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         app.ui_state.last_export = Some(out.clone());
                         app.exec_ui_command(UiCommand::ExportEffectcraft { output: out });
                     }
-                    let r_fc = export_button(ui, "Send to FilmCraft", ("Imports media into a FilmCraft project.", "Continue editing a rendered animation on a timeline.", "This button currently uses the pipeline default Hopper video. For other media, use export.filmcraft with an explicit media path."));
+                    let r_fc = widgets::action_card(ui, "FilmCraft", "Open rendered video in an editing project.", "Currently uses the default Hopper video", "Import video", app.ui_state.busy_command.is_none(), ("Imports media into a FilmCraft project.", "Continue editing a rendered animation on a timeline.", "This button currently uses the pipeline default Hopper video. For other media, use export.filmcraft with an explicit media path."));
                     app.automation.add_response(
                         "export.filmcraft",
                         "button",
@@ -372,7 +233,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         app.ui_state.last_export = Some(out.clone());
                         app.exec_ui_command(UiCommand::ExportFilmcraft { output: out });
                     }
-                    let r_glb = export_button(ui, "Build mesh · GLB / OBJ", ("Builds a volume mesh and writes GLB and OBJ files.", "Move the generated shape into a 3D editor.", "Adjust 3D shape settings, then click. Missing views may reuse the first image; neither selection currently creates an articulated rig."));
+                    let r_glb = widgets::action_card(ui, "3D mesh", "Build a volume from the available image views.", "GLB + OBJ · volume only", "Build mesh", app.ui_state.busy_command.is_none(), ("Builds a volume mesh and writes GLB and OBJ files.", "Move the generated shape into a 3D editor.", "Adjust 3D shape settings, then click. Missing views may reuse the first image; neither selection currently creates an articulated rig."));
                     app.automation.add_response(
                         "export.glb",
                         "button",
@@ -392,7 +253,7 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                             bump_intensity: st.bump_strength as u32,
                         });
                     }
-                    let r_blend = export_button(ui, "Render with Blender", ("Runs the Blender character pipeline through its live connection.", "Render a character animation in Blender.", "Requires the Blender service on port 9876. The current pipeline uses character IDs; verify source identity for custom imports before running."));
+                    let r_blend = widgets::action_card(ui, "Blender", "Render animation through the connected Blender app.", "Requires a live Blender connection", "Render animation", app.ui_state.busy_command.is_none(), ("Runs the Blender character pipeline through its live connection.", "Render a character animation in Blender.", "Requires the Blender service on port 9876. The current pipeline uses character IDs; verify source identity for custom imports before running."));
                     app.automation.add_response(
                         "export.blender",
                         "button",
@@ -414,4 +275,272 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     }
                 });
         });
+}
+
+fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new("Pose starting points").strong().color(POSE));
+        ui.add(
+            egui::Label::new(
+                RichText::new("Choose a starting pose, then fine-tune below.")
+                    .small()
+                    .color(chrome::MUTED),
+            )
+            .wrap(),
+        );
+        ui.horizontal_wrapped(|ui| {
+            for (label, id, tip) in [
+                (
+                    "A pose",
+                    "a_pose",
+                    "Reset the pose and spread the arms to 35.",
+                ),
+                (
+                    "Hop",
+                    "hop",
+                    "Set knees to 30, elbows to 25 and ear tilt to −15.",
+                ),
+                ("Alert", "alert", "Set ear spread to 20 and blink to 80."),
+            ] {
+                let response = help(
+                    chrome::button(ui, label, false),
+                    tip,
+                    "Explore a pose starting point.",
+                    "Click, then adjust the values below. Supported rigs can respond differently.",
+                );
+                app.automation.add_response(
+                    format!("pose.preset.{id}"),
+                    "button",
+                    label,
+                    &response,
+                );
+                if response.clicked() {
+                    match id {
+                        "a_pose" => {
+                            app.ui_state.reset_pose_sliders();
+                            app.ui_state.arm_spread = 35.0;
+                        }
+                        "hop" => {
+                            app.ui_state.knee_bend = 30.0;
+                            app.ui_state.elbow_bend = 25.0;
+                            app.ui_state.ear_pitch = -15.0;
+                        }
+                        _ => {
+                            app.ui_state.ear_splay = 20.0;
+                            app.ui_state.eye_blink = 80.0;
+                        }
+                    }
+                }
+            }
+        });
+        let response = help(
+            chrome::button(ui, "Reset pose", false),
+            "Restore the default pose, part separation and stage offset.",
+            "Return to a neutral starting point.",
+            "Click to reset the preview adjustments. The source artwork is unchanged.",
+        );
+        app.automation
+            .add_response("pose.reset", "button", "Reset pose", &response);
+        if response.clicked() {
+            app.ui_state.reset_pose_sliders();
+        }
+    });
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("Mouth expression").strong().color(POSE));
+                        ui.add(egui::Label::new(RichText::new("Stored selection · no generated lip-sync").small().color(chrome::MUTED)).wrap());
+                        ui.horizontal_wrapped(|ui| {
+                            for (id, label) in [("smile", "Smile"), ("laugh", "Laugh"), ("ooh", "Ooh"), ("mbp", "M/B/P"), ("talk", "Talk")] {
+                                let response = help(chrome::tab(ui, label, app.ui_state.mouth_viseme == id),
+                                    "Store a mouth-expression selection.", "Record the intended expression while working on a pose.",
+                                    "Click to select. The current renderer does not synthesize mouth shapes or lip-sync.");
+                                app.automation.add_response(format!("pose.mouth.{id}"), "button", label, &response);
+                                if response.clicked() { app.ui_state.mouth_viseme = id.into(); }
+                            }
+                        });
+                    });
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+ui.set_width(ui.available_width());
+ui.label(RichText::new("Face & head").strong().color(POSE));
+ui.add(egui::Label::new(RichText::new("Drag a value sideways, or click to type.").small().color(chrome::MUTED)).wrap());
+let response = chrome::number_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%", POSE,
+                        ("Controls the blink-related preview offset.", "Check the head pose during an expressive moment.", "Drag from 0 to 100. The current layered preview shifts the head; this does not close painted eyelids."));
+app.automation.add_response("pose.eye_blink", "number", "Eye blink", &response);
+let response = chrome::number_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
+                        ("Controls a gaze-related horizontal head offset.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. This does not redraw eyes or move pupils independently."));
+app.automation.add_response("pose.eye_gaze", "number", "Eye gaze", &response);
+let response = chrome::number_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
+                        ("Stores a mouth-opening value used as a small head offset in the layered preview.", "Record an expression adjustment while inspecting the pose.", "20% is the current neutral value. It does not redraw the mouth or generate lip-sync."));
+app.automation.add_response("pose.smile_open", "number", "Mouth opening", &response);
+let response = chrome::number_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
+                        ("Adjusts head placement or rotation in supported preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));
+app.automation.add_response("pose.head_yaw", "number", "Head turn", &response);
+let response = chrome::number_row(ui, "Head tilt", &mut app.ui_state.head_pitch, -45.0..=45.0, "", POSE,
+                        ("Changes the vertical head offset in the layered preview.", "Explore the head position relative to the body.", "Use small values while watching the neck. This does not reconstruct an up or down view."));
+app.automation.add_response("pose.head_pitch", "number", "Head tilt", &response);
+});
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+ui.set_width(ui.available_width());
+ui.label(RichText::new("Body & ears").strong().color(POSE));
+ui.add(egui::Label::new(RichText::new("Preview adjustments; support varies by rig.").small().color(chrome::MUTED)).wrap());
+let response = chrome::number_row(ui, "Arm spread", &mut app.ui_state.arm_spread, -45.0..=90.0, "", POSE,
+                        ("Moves the arms outward or changes their rotation in supported preview actions.", "Check how far the arms can move without exposing gaps at the shoulders.", "Start near zero and increase gradually; A-Pose sets this to 35."));
+app.automation.add_response("pose.arm_spread", "number", "Arm spread", &response);
+let response = chrome::number_row(ui, "Elbow bend", &mut app.ui_state.elbow_bend, -45.0..=90.0, "", POSE,
+                        ("Adjusts arm placement in the layered preview.", "Check arm spacing and overlap with the torso.", "Try a small value first. It is not a separate elbow joint solver and may not affect every rig."));
+app.automation.add_response("pose.elbow_bend", "number", "Elbow bend", &response);
+let response = chrome::number_row(ui, "Knee bend", &mut app.ui_state.knee_bend, -45.0..=90.0, "", POSE,
+                        ("Offsets the legs in the current preview; some cutout actions also use it in leg rotation.", "Explore a crouched or lifted-leg pose and inspect foot placement.", "Increase gradually while watching both feet. Negative values move the adjustment in the opposite direction."));
+app.automation.add_response("pose.knee_bend", "number", "Knee bend", &response);
+let response = chrome::number_row(ui, "Ear spread", &mut app.ui_state.ear_splay, -45.0..=45.0, "", POSE,
+                        ("Adjusts ear spacing or rotation, depending on the active preview rig.", "Make an expression more alert and inspect overlap near the head.", "Drag either side of zero and watch the ear bases. Reset Pose restores the default."));
+app.automation.add_response("pose.ear_splay", "number", "Ear spread", &response);
+let response = chrome::number_row(ui, "Ear tilt", &mut app.ui_state.ear_pitch, -45.0..=45.0, "", POSE,
+                        ("Changes the vertical ear offset in the layered preview.", "Explore the silhouette of raised or lowered ears.", "Use small positive or negative values. This is an approximate offset, not a full 3D ear rotation."));
+app.automation.add_response("pose.ear_pitch", "number", "Ear tilt", &response);
+});
+    ui.add_space(5.0);
+}
+
+fn shape_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    chrome::card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("Reconstruction").strong().color(MESH));
+                        ui.horizontal_wrapped(|ui| {
+                            for (id, label) in [("volumetric", "Volume"), ("rig", "Rig")] {
+                                let response = help(chrome::tab(ui, label, app.ui_state.recon_mode == id),
+                                    "Select the reconstruction mode stored in the project.", "Describe the intended construction method.",
+                                    "Both selections currently use the volume builder. Rig mode does not produce an articulated mesh yet.");
+                                app.automation.add_response(format!("shape.mode.{id}"), "button", label, &response);
+                                if response.clicked() { app.ui_state.recon_mode = id.into(); }
+                            }
+                        });
+                        ui.add(egui::Label::new(RichText::new("Rig mode currently uses the volume builder.").small().color(chrome::MUTED)).wrap());
+                    });
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+ui.set_width(ui.available_width());
+ui.label(RichText::new("Form & resolution").strong().color(MESH));
+ui.add(egui::Label::new(RichText::new("Drag a value, or click to enter an exact amount.").small().color(chrome::MUTED)).wrap());
+let response = chrome::number_row(ui, "Depth", &mut app.ui_state.inflation_depth_pct, 10..=100, "%", MESH, ("Controls how thick the generated volume is.", "Give a flat silhouette depth without making it excessively round.", "Start near 58%. Compare the side view and rebuild the mesh after adjusting."));
+app.automation.add_response("shape.inflation_depth_pct", "number", "Depth", &response);
+let response = chrome::number_row(ui, "Mesh detail", &mut app.ui_state.mesh_res, 12..=64, "", MESH, ("Controls the number of height slices and radial segments.", "Higher values create a smoother mesh but increase geometry and processing cost.", "Start at 32. Raise only if the exported silhouette looks faceted; rebuild to apply."));
+app.automation.add_response("shape.mesh_res", "number", "Mesh detail", &response);
+let response = chrome::number_row(ui, "View blending", &mut app.ui_state.proj_blend_pct, 0.0..=100.0, "%", MESH, ("Weights the front and quarter-view silhouette spans used during mesh generation.", "Adjust how much the quarter view contributes to the shape.", "Compare low and high values on a rebuilt mesh. This does not generate missing views."));
+app.automation.add_response("shape.proj_blend_pct", "number", "View blending", &response);
+});
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+ui.set_width(ui.available_width());
+ui.label(RichText::new("Surface").strong().color(MESH));
+ui.add(egui::Label::new(RichText::new("Generated relief, not recovered image detail.").small().color(chrome::MUTED)).wrap());
+let response = chrome::number_row(ui, "Surface relief", &mut app.ui_state.relief_detail_pct, 0..=100, "%", MESH, ("Adds procedural surface variation to the volume.", "Break up a perfectly smooth surface.", "Start low and increase gradually. This is generated relief, not detail recovered from the artwork."));
+app.automation.add_response("shape.relief_detail_pct", "number", "Surface relief", &response);
+let response = chrome::number_row(ui, "Surface bump", &mut app.ui_state.bump_strength, 0.0..=100.0, "%", MESH, ("Adds to the procedural relief amplitude during mesh export.", "Introduce more surface variation when a smooth result looks too plain.", "Use small values first. This is geometric variation, not a physically based felt material."));
+app.automation.add_response("shape.bump_strength", "number", "Surface bump", &response);
+});
+    ui.add_space(5.0);
+    ui.add(
+        egui::Label::new(
+            RichText::new("Use Build mesh in Export to apply these settings to a new file.")
+                .small()
+                .color(chrome::MUTED),
+        )
+        .wrap(),
+    );
+}
+
+fn quality_cards(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    let asset = app.session().current_asset();
+    let turnaround_count = asset
+        .and_then(|a| a.turnaround_manifest.as_ref())
+        .map(|m| m.frames.len());
+    let pose_count = asset
+        .and_then(|a| a.pose_manifest.as_ref())
+        .map(|m| m.frames.len());
+    let part_count = asset.map(|a| a.parts.len()).unwrap_or(0);
+    let verified_count = asset
+        .map(|a| a.parts.iter().filter(|p| p.verified).count())
+        .unwrap_or(0);
+    let reg_passed = asset
+        .and_then(|a| a.turnaround_registration.as_ref())
+        .map(|r| r.registration_passed);
+
+    chrome::card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("View alignment").strong().color(chrome::TEXT));
+                        let (label, tone) = match reg_passed { Some(true) => ("Passed", READY), Some(false) => ("Needs review", MESH), None => ("Not measured", chrome::MUTED) };
+                        chrome::badge(ui, label, tone).on_hover_text("Result recorded in the loaded registration report. This does not certify the entire rig.");
+                        if let Some(reg) = asset.and_then(|a| a.turnaround_registration.as_ref()) {
+                            ui.label(RichText::new(format!("{:.1} px drift", reg.max_vertical_drift_px)).size(20.0).color(chrome::TEXT));
+                        }
+                        ui.add(egui::Label::new(RichText::new("Alignment between reference views.").small().color(chrome::MUTED)).wrap());
+                    });
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(
+            RichText::new("Artwork & review")
+                .strong()
+                .color(chrome::TEXT),
+        );
+        ui.horizontal_wrapped(|ui| {
+            chrome::badge(
+                ui,
+                &turnaround_count
+                    .map(|n| format!("{n} views"))
+                    .unwrap_or_else(|| "No views".into()),
+                MOTION,
+            );
+            chrome::badge(
+                ui,
+                &pose_count
+                    .map(|n| format!("{n} poses"))
+                    .unwrap_or_else(|| "No poses".into()),
+                POSE,
+            );
+        });
+        if part_count > 0 {
+            ui.add(
+                egui::ProgressBar::new(verified_count as f32 / part_count as f32)
+                    .desired_width(ui.available_width())
+                    .fill(READY.gamma_multiply(0.5))
+                    .text(format!("{verified_count} / {part_count} parts reviewed")),
+            )
+            .on_hover_text(
+                "Manual review marks set in the Parts list. This is not automatic validation.",
+            );
+        } else {
+            ui.label("No parts loaded");
+        }
+        ui.add(
+            egui::Label::new(
+                RichText::new("Review parts in the left panel.")
+                    .small()
+                    .color(chrome::MUTED),
+            )
+            .wrap(),
+        );
+    });
+    ui.add_space(5.0);
+    chrome::card().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new("Other checks").strong().color(chrome::TEXT));
+        help(
+            ui.label(RichText::new("Topology · not measured").color(chrome::MUTED)),
+            "No measured mesh or bone comparison is available here.",
+            "Avoid treating a status label as proof that the rig is correct.",
+            "Inspect and validate the exported rig before delivery.",
+        );
+        help(
+            ui.label(RichText::new("AI / OCR · not checked").color(chrome::MUTED)),
+            "Service availability is not tracked in this panel.",
+            "Loaded artwork does not prove that AI analysis ran.",
+            "Check the analysis result for this asset.",
+        );
+    });
 }
