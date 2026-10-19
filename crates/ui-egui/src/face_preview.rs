@@ -40,23 +40,17 @@ pub(crate) struct FacePreview {
 
 impl FacePreview {
     pub fn path(&mut self, ctx: &egui::Context, source: &Path, state: &UiState) -> PathBuf {
-        let neutral = state.mouth_viseme == "smile"
-            && (state.smile_open - 20.0).abs() < 0.1
-            && state.eye_blink < 0.1
-            && state.eye_gaze.abs() < 0.1;
+        self.path_recipe(ctx, source, state, None)
+    }
+
+    pub(crate) fn path_recipe(&mut self, ctx: &egui::Context, source: &Path, state: &UiState, recipe: Option<serde_json::Value>) -> PathBuf {
+        let neutral = recipe.is_none() && state.mouth_viseme == "smile"
+            && (state.smile_open - 20.0).abs() < 0.1;
         if neutral {
             self.reset();
             return source.to_path_buf();
         }
-        let stamp = std::fs::metadata(source).and_then(|m| m.modified()).ok();
-        let key = format!(
-            "{}:{stamp:?}:{}:{:.0}:{:.0}:{:.0}",
-            source.display(),
-            state.mouth_viseme,
-            state.smile_open,
-            state.eye_blink,
-            state.eye_gaze
-        );
+        let key = preview_key(source, state, recipe.as_ref());
         // Status belongs to the asset/settings that produced it.
         if self.status_key != key {
             self.status.clear();
@@ -66,13 +60,23 @@ impl FacePreview {
             && key != self.attempted
             && !ctx.input(|i| i.pointer.any_down())
         {
-            self.start(ctx, source, state, key.clone());
+            self.start(ctx, source, state, key.clone(), recipe);
         }
         if key == self.ready_key && !self.frames.is_empty() {
             let index = ((state.playback_phase * 3.0).max(0.0) as usize) % self.frames.len();
             self.frames[index].clone()
         } else {
             source.to_path_buf()
+        }
+    }
+
+    pub(crate) fn ready_recipe(&mut self, source: &Path, state: &UiState, recipe: &serde_json::Value) -> Result<Vec<PathBuf>, String> {
+        let key = preview_key(source, state, Some(recipe));
+        self.poll(&key);
+        if key == self.ready_key && !self.frames.is_empty() && self.frames.iter().all(|p| p.is_file()) {
+            Ok(self.frames.clone())
+        } else {
+            Err(if self.status_key == key && !self.status.is_empty() { self.status.clone() } else { "Preview the requested deformation before exporting; its texture is not ready.".into() })
         }
     }
 
@@ -95,7 +99,7 @@ impl FacePreview {
                 Ok((frames, warnings)) => {
                     self.ready_key = key.to_string();
                     self.frames = frames;
-                    let mut status = String::from("PhotoCraft preview · review the detected face");
+                    let mut status = String::from("PhotoCraft deformation preview · review the result");
                     if !warnings.is_empty() {
                         status.push_str(&format!(" · warning: {warnings}"));
                     }
@@ -127,18 +131,19 @@ impl FacePreview {
         self.status_key = key.to_string();
     }
 
-    fn start(&mut self, ctx: &egui::Context, source: &Path, state: &UiState, key: String) {
+    fn start(&mut self, ctx: &egui::Context, source: &Path, state: &UiState, key: String, recipe: Option<serde_json::Value>) {
         self.attempted = key.clone();
         self.set_status(&key, "Rendering facial preview with PhotoCraft…".into());
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         self.job = Some(Job { key, cancel: cancel.clone(), receiver });
         let args = JobArgs {
+            recipe,
             source: source.to_path_buf(),
             expression: state.mouth_viseme.clone(),
             opening: state.smile_open,
-            blink: state.eye_blink,
-            gaze: state.eye_gaze,
+            blink: 0.0,
+            gaze: 0.0,
         };
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -148,7 +153,13 @@ impl FacePreview {
     }
 }
 
+fn preview_key(source: &Path, state: &UiState, recipe: Option<&serde_json::Value>) -> String {
+    let stamp = std::fs::metadata(source).and_then(|m| m.modified()).ok();
+    format!("{}:{stamp:?}:{}:{:.3}:{recipe:?}", source.display(), state.mouth_viseme, state.smile_open)
+}
+
 struct JobArgs {
+    recipe: Option<serde_json::Value>,
     source: PathBuf,
     expression: String,
     opening: f32,
@@ -216,7 +227,8 @@ fn stop(child: &mut std::process::Child) {
 }
 
 fn run_script(args: &JobArgs, cancel: &AtomicBool) -> JobResult {
-    let script = find_script()?;
+    let mut script = find_script()?;
+    if args.recipe.is_some() { script.set_file_name("control_texture_preview.py"); }
     let mut command = Command::new("python3");
     command
         .arg(script)
@@ -236,6 +248,9 @@ fn run_script(args: &JobArgs, cancel: &AtomicBool) -> JobResult {
         .arg(SCRIPT_DEADLINE_SECS.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(recipe) = &args.recipe {
+        command.arg("--recipe").arg(recipe.to_string());
+    }
     // Own process group, so stopping the job also stops the PhotoCraft processes it started.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
