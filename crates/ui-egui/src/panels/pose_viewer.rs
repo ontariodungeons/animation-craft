@@ -186,6 +186,44 @@ fn surface() -> egui::Frame {
         .inner_margin(10)
 }
 
+pub(super) fn navigation(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    let Some(asset_id) = app.session().active_asset.clone() else {
+        return;
+    };
+    let state_id = egui::Id::new(("pose_viewer", &asset_id));
+    let mut state = ui
+        .ctx()
+        .data_mut(|d| d.get_temp::<ViewerState>(state_id))
+        .unwrap_or_default();
+    // Sidebar selection is consumed by show(); reflect that destination in this header too.
+    if ui
+        .ctx()
+        .data(|d| d.get_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset_id))))
+        .is_some()
+    {
+        state.select_mode(Mode::Pose);
+    }
+    ui.horizontal_wrapped(|ui| {
+        for (mode, id, label) in [
+            (Mode::Source, "source", "Sheets"),
+            (Mode::All, "all", "Poses"),
+            (Mode::Parts, "parts", "Parts"),
+        ] {
+            let active = state.mode == mode || (mode == Mode::All && state.mode == Mode::Pose);
+            let response = super::chrome::tab(ui, label, active);
+            app.automation
+                .add_response(format!("pose.mode.{id}"), "tab", label, &response);
+            if response.clicked() {
+                state.select_mode(mode);
+                if mode == Mode::Source {
+                    state.source_open = false;
+                }
+            }
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(state_id, state));
+}
+
 pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let Some(asset) = app.session().current_asset().cloned() else {
         ui.heading("Pose browser");
@@ -198,7 +236,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .map(|m| m.frames.as_slice())
         .unwrap_or(&[]);
     app.ui_state.selected_pose_idx = navigate(app.ui_state.selected_pose_idx, 0, frames.len());
-    let state_id = ui.id().with(("pose_viewer", &asset.id));
+    let state_id = egui::Id::new(("pose_viewer", &asset.id));
     let mut state = ui
         .ctx()
         .data_mut(|d| d.get_temp::<ViewerState>(state_id))
@@ -216,26 +254,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
         state.selected_part = None;
         state.fit_image();
     }
-    surface().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            for (mode, id, label) in [
-                (Mode::Source, "source", "Sheets"),
-                (Mode::All, "all", "Poses"),
-                (Mode::Parts, "parts", "Parts"),
-            ] {
-                let active = state.mode == mode || (mode == Mode::All && state.mode == Mode::Pose);
-                let response = super::chrome::tab(ui, label, active);
-                app.automation
-                    .add_response(format!("pose.mode.{id}"), "tab", label, &response);
-                if response.clicked() {
-                    state.select_mode(mode);
-                    if mode == Mode::Source {
-                        state.source_open = false;
-                    }
-                }
-            }
-        });
+    ui.vertical(|ui| {
         if state.mode == Mode::Pose {
             if button(
                 app,
@@ -1218,7 +1237,8 @@ mod tests {
                     Pos2::new(220.0, 0.0),
                     Pos2::new(900.0, 700.0),
                 )));
-                state_id = main.id().with(("pose_viewer", "fixture"));
+                state_id = egui::Id::new(("pose_viewer", "fixture"));
+                navigation(app, &mut main);
                 show(app, &mut main);
             },
         );

@@ -1,0 +1,140 @@
+[
+  {
+    "command": "image.crop",
+    "params": {
+      "x": 1116,
+      "y": 424,
+      "width": 208,
+      "height": 276
+    }
+  },
+  {
+    "command": "layer.new.layerFromBackground",
+    "params": {
+      "ifPresent": true
+    }
+  },
+  {
+    "command": "paint.magicEraser",
+    "params": {
+      "x": 1,
+      "y": 1,
+      "tolerance": 25,
+      "antiAlias": true,
+      "contiguous": true
+    }
+  },
+  {
+    "command": "paint.magicEraser",
+    "params": {
+      "x": 206,
+      "y": 1,
+      "tolerance": 25,
+      "antiAlias": true,
+      "contiguous": true
+    }
+  },
+  {
+    "command": "paint.magicEraser",
+    "params": {
+      "x": 1,
+      "y": 274,
+      "tolerance": 25,
+      "antiAlias": true,
+      "contiguous": true
+    }
+  },
+  {
+    "command": "paint.magicEraser",
+    "params": {
+      "x": 206,
+      "y": 274,
+      "tolerance": 25,
+      "antiAlias": true,
+      "contiguous": true
+    }
+  },
+  {
+    "command": "select.lasso",
+    "params": {
+      "points": [
+        [
+          88,
+          201
+        ],
+        [
+          122,
+          201
+        ],
+        [
+          122,
+          269
+        ],
+        [
+          87,
+          269
+        ]
+      ],
+      "antiAlias": true
+    }
+  },
+  {
+    "command": "select.colorRange",
+    "params": {
+      "points": [
+        [
+          105,
+          240
+        ]
+      ],
+      "fuzziness": 100,
+      "mode": "intersect"
+    }
+  },
+  {
+    "command": "select.refineEdge",
+    "params": {
+      "radius": 0,
+      "contrast": 100,
+      "feather": 0,
+      "output": "selection"
+    }
+  },
+  {
+    "command": "select.lasso",
+    "params": {
+      "points": [
+        [
+          91,
+          249
+        ],
+        [
+          118,
+          249
+        ],
+        [
+          120,
+          263
+        ],
+        [
+          115,
+          269
+        ],
+        [
+          89,
+          269
+        ],
+        [
+          91,
+          261
+        ]
+      ],
+      "mode": "add",
+      "antiAlias": true
+    }
+  },
+  {
+    "command": "layer.layerMask.hideSelection",
+    "params": {}
+  }
+]

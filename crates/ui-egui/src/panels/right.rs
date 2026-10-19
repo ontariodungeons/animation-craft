@@ -350,16 +350,17 @@ fn expression_controls(app: &mut AnimationCraftApp, ui: &mut Ui) {
     chrome::card().show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("Mouth expression").strong().color(POSE));
-                        ui.add(egui::Label::new(RichText::new("Stored selection · no generated lip-sync").small().color(chrome::MUTED)).wrap());
+                        ui.add(egui::Label::new(RichText::new("PhotoCraft facial preview · requires a detected face").small().color(chrome::MUTED)).wrap());
                         ui.horizontal_wrapped(|ui| {
                             for (id, label) in [("smile", "Smile"), ("laugh", "Laugh"), ("ooh", "Ooh"), ("mbp", "M/B/P"), ("talk", "Talk")] {
                                 let response = help(chrome::tab(ui, label, app.ui_state.mouth_viseme == id),
-                                    "Store a mouth-expression selection.", "Record the intended expression while working on a pose.",
-                                    "Click to select. The current renderer does not synthesize mouth shapes or lip-sync.");
+                                    "Deform the detected mouth using PhotoCraft.", "Preview the expression on the actual artwork.",
+                                    "Click to render a preview. Talk loops mouth deformation; it is not audio-driven lip-sync. Review the detected face before export.");
                                 app.automation.add_response(format!("pose.mouth.{id}"), "button", label, &response);
-                                if response.clicked() { app.ui_state.mouth_viseme = id.into(); }
+                                if response.clicked() { app.ui_state.mouth_viseme = id.into(); app.ui_state.center_tab = crate::CenterTab::TwoD; if id == "talk" { app.ui_state.playing = true; } }
                             }
                         });
+                        if !app.face_preview.status.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&app.face_preview.status).small()).wrap()); }
                     });
     ui.add_space(5.0);
     chrome::card().show(ui, |ui| {
@@ -368,12 +369,15 @@ ui.label(RichText::new("Face & head").strong().color(POSE));
 ui.add(egui::Label::new(RichText::new("Drag a slider to shape the expression.").small().color(chrome::MUTED)).wrap());
 let response = chrome::slider_row(ui, "Eye blink", &mut app.ui_state.eye_blink, 0.0..=100.0, "%", POSE,
                         ("Controls the blink-related preview offset.", "Check the head pose during an expressive moment.", "Drag from 0 to 100. The current layered preview shifts the head; this does not close painted eyelids."));
+if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_blink", "slider", "Eye blink", &response);
 let response = chrome::slider_row(ui, "Eye gaze", &mut app.ui_state.eye_gaze, -45.0..=45.0, "", POSE,
                         ("Controls a gaze-related horizontal head offset.", "Suggest a change of attention while composing a pose.", "Try small positive or negative values. This does not redraw eyes or move pupils independently."));
+if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.eye_gaze", "slider", "Eye gaze", &response);
 let response = chrome::slider_row(ui, "Mouth opening", &mut app.ui_state.smile_open, 0.0..=100.0, "%", POSE,
-                        ("Stores a mouth-opening value used as a small head offset in the layered preview.", "Record an expression adjustment while inspecting the pose.", "20% is the current neutral value. It does not redraw the mouth or generate lip-sync."));
+                        ("Deforms the mouth region through PhotoCraft Liquify.", "Adjust expression opening while preserving the original file.", "20% preserves the source opening. Release the slider to render; inspect the result because detected landmarks can need correction."));
+if response.changed() { app.ui_state.center_tab = crate::CenterTab::TwoD; }
 app.automation.add_response("pose.smile_open", "slider", "Mouth opening", &response);
 let response = chrome::slider_row(ui, "Head turn", &mut app.ui_state.head_yaw, -45.0..=45.0, "", POSE,
                         ("Adjusts head placement or rotation in supported preview paths.", "Suggest a look to the side and check neck overlap.", "Drag either side of zero. It cannot reveal artwork hidden behind the head."));

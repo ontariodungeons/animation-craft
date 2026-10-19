@@ -71,6 +71,15 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 if response.clicked() { app.ui_state.center_tab = tab; }
             }
         });
+        if app.ui_state.center_tab == CenterTab::AssetSheet {
+            ui.add_space(4.0);
+            ui.separator();
+            pose_viewer::navigation(app, ui);
+        } else if app.ui_state.center_tab == CenterTab::OriginalView {
+            ui.add_space(4.0);
+            ui.separator();
+            original_info(app, ui);
+        }
     });
     ui.add_space(8.0);
 
@@ -84,23 +93,185 @@ pub(crate) fn center_viewport(app: &mut AnimationCraftApp, ui: &mut Ui) {
     }
 }
 
-fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    let (asset_id, orig_path, cutout_rig_opt, attached_refs) = {
-        let Some(asset) = app.session.current_asset() else {
-            ui.label("No active character loaded.");
-            return;
-        };
-        (
-            asset.id.clone(),
-            asset.path.clone(),
-            asset.cutout_rig.clone(),
-            asset.attached_references.clone(),
-        )
-    };
+/// A grounded anticipation/landing interval surrounds a smooth ballistic flight.
+fn jump_arc(phase: f64) -> f32 {
+    let cycle = (phase / std::f64::consts::TAU).rem_euclid(1.0) as f32;
+    if !(0.18..=0.82).contains(&cycle) {
+        return 0.0;
+    }
+    let flight = (cycle - 0.18) / 0.64;
+    4.0 * flight * (1.0 - flight)
+}
 
+/// Shared transport above the source/animation canvas.
+fn playback_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    let ready = app.session().current_asset().is_some();
+    let running = app.ui_state.center_tab == CenterTab::TwoD && app.ui_state.playing;
     chrome::card().show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
+            for (id, label, enabled, hint) in [
+                (
+                    "play",
+                    "Play",
+                    ready && !running,
+                    "Open Animate and play the selected action from the current position.",
+                ),
+                (
+                    "pause",
+                    "Pause",
+                    ready && running,
+                    "Pause the preview and hold the current frame.",
+                ),
+                (
+                    "stop",
+                    "Stop",
+                    ready,
+                    "Stop playback and return to the start of the action.",
+                ),
+            ] {
+                let accent = match id {
+                    "play" => Color32::from_rgb(74, 206, 144),
+                    "stop" => Color32::from_rgb(242, 108, 116),
+                    _ => Color32::from_rgb(238, 193, 104),
+                };
+                let response = ui
+                    .add_enabled(
+                        enabled,
+                        egui::Button::new(
+                            egui::RichText::new(format!("      {label}"))
+                                .strong()
+                                .color(chrome::TEXT),
+                        )
+                        .min_size(Vec2::new(92.0, 36.0))
+                        .corner_radius(7)
+                        .stroke(Stroke::new(1.0, accent.gamma_multiply(0.7)))
+                        .fill(accent.gamma_multiply(0.22)),
+                    )
+                    .on_hover_text(hint);
+                // Native vector marks stay crisp at small sizes and do not depend on font glyphs.
+                let mark = response.rect.left_center() + Vec2::new(17.0, 0.0);
+                let ink = if enabled {
+                    accent
+                } else {
+                    accent.gamma_multiply(0.35)
+                };
+                let painter = ui.painter();
+                match id {
+                    "play" => {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![
+                                mark + Vec2::new(-5.0, -7.0),
+                                mark + Vec2::new(7.0, 0.0),
+                                mark + Vec2::new(-5.0, 7.0),
+                            ],
+                            ink,
+                            Stroke::NONE,
+                        ));
+                    }
+                    "stop" => {
+                        painter.rect_filled(
+                            Rect::from_center_size(mark, Vec2::splat(13.0)),
+                            3,
+                            ink,
+                        );
+                    }
+                    _ => {
+                        for x in [-4.0, 4.0] {
+                            painter.rect_filled(
+                                Rect::from_center_size(
+                                    mark + Vec2::new(x, 0.0),
+                                    Vec2::new(4.0, 14.0),
+                                ),
+                                1,
+                                ink,
+                            );
+                        }
+                    }
+                }
+                app.automation
+                    .add_response(format!("playback.{id}"), "button", label, &response);
+                if response.clicked() {
+                    match id {
+                        "play" => {
+                            app.ui_state.center_tab = CenterTab::TwoD;
+                            app.ui_state.playing = true;
+                        }
+                        "pause" => app.ui_state.playing = false,
+                        "stop" => {
+                            app.ui_state.playing = false;
+                            app.ui_state.playback_phase = 0.0;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let menu = ui.menu_button(format!("Action: {:?}", app.ui_state.anim_mode), |ui| {
+                for (mode, name, command) in [
+                    (AnimMode::Idle, "Idle", "idle"),
+                    (AnimMode::Walk, "Walk", "walk"),
+                    (AnimMode::Run, "Run", "run"),
+                    (AnimMode::Jump, "Jump", "jump"),
+                    (AnimMode::Wave, "Wave", "wave"),
+                    (AnimMode::Static, "Static", "static"),
+                ] {
+                    let response = ui.selectable_label(app.ui_state.anim_mode == mode, name);
+                    app.automation.add_response(
+                        format!("playback.action.{command}"),
+                        "button",
+                        name,
+                        &response,
+                    );
+                    if response.clicked() {
+                        app.ui_state.anim_mode = mode;
+                        app.exec_ui_command(UiCommand::AnimPreview2d {
+                            mode: command.into(),
+                        });
+                        ui.close();
+                    }
+                }
+            });
+            app.automation
+                .add_response("playback.action", "button", "Action", &menu.response);
+            ui.label(
+                egui::RichText::new(if !ready {
+                    "Load a character to preview"
+                } else if running {
+                    "Playing"
+                } else if app.ui_state.center_tab != CenterTab::TwoD {
+                    "Play opens Animate"
+                } else if app.ui_state.playback_phase == 0.0 {
+                    "Stopped"
+                } else {
+                    "Paused"
+                })
+                .small()
+                .color(chrome::MUTED),
+            );
+        });
+    });
+    if app.ui_state.anim_mode == AnimMode::Jump {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Jump height").strong().color(chrome::TEAL));
+            ui.spacing_mut().slider_width = (ui.available_width() - 135.0).clamp(80.0, 230.0);
+            let response = ui.add(egui::Slider::new(&mut app.ui_state.jump_height_pct, 0.0..=80.0).suffix("%"))
+                .on_hover_text("Preview lift as a percentage of the artwork height. Raise this to make the whole character leave the ground. Motion amount also scales the jump; this does not change exported animations.");
+            app.automation.add_response("playback.jump_height", "slider", "Jump height", &response);
+            ui.label(egui::RichText::new("of artwork height").small().color(chrome::MUTED));
+        });
+    }
+    ui.add_space(8.0);
+}
+
+fn original_info(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    let Some(asset) = app.session().current_asset().cloned() else {
+        return;
+    };
+    let asset_id = asset.id;
+    let orig_path = asset.path;
+    let cutout_rig_opt = asset.cutout_rig;
+    ui.set_width(ui.available_width());
+    ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Source image").strong().color(chrome::TEXT));
             if let Some(asset) = app.session.current_asset() {
                 chrome::badge(ui, &format!("{} × {} px", asset.width, asset.height), chrome::BLUE);
@@ -112,20 +283,55 @@ fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     .on_hover_text("Loaded rig parts, not a guarantee of correct segmentation or joint placement. Review the artwork and animation.");
             }
         });
-        ui.add(egui::Label::new(egui::RichText::new(orig_path.file_name().and_then(|n| n.to_str()).unwrap_or(&asset_id)).small().color(chrome::MUTED)).truncate())
-            .on_hover_text(orig_path.display().to_string());
-        ui.horizontal_wrapped(|ui| {
-            let response = chrome::button(ui, "Review parts", false)
-                .on_hover_text("Open the connected parts or pose sheet and inspect the available cutouts.");
-            app.automation.add_response("original.review_parts", "button", "Review parts", &response);
-            if response.clicked() { app.ui_state.center_tab = CenterTab::AssetSheet; }
-            let response = chrome::button(ui, "Preview animation", true)
-                .on_hover_text("Open the animation viewport. Select an action in the inspector to the right.");
-            app.automation.add_response("original.preview", "button", "Preview animation", &response);
-            if response.clicked() { app.ui_state.center_tab = CenterTab::TwoD; }
-        });
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(
+                orig_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&asset_id),
+            )
+            .small()
+            .color(chrome::MUTED),
+        )
+        .truncate(),
+    )
+    .on_hover_text(orig_path.display().to_string());
+    ui.horizontal_wrapped(|ui| {
+        let response = chrome::button(ui, "Review parts", false).on_hover_text(
+            "Open the connected parts or pose sheet and inspect the available cutouts.",
+        );
+        app.automation
+            .add_response("original.review_parts", "button", "Review parts", &response);
+        if response.clicked() {
+            app.ui_state.center_tab = CenterTab::AssetSheet;
+        }
+        let response = chrome::button(ui, "Preview animation", true).on_hover_text(
+            "Open the animation viewport. Select an action in the inspector to the right.",
+        );
+        app.automation
+            .add_response("original.preview", "button", "Preview animation", &response);
+        if response.clicked() {
+            app.ui_state.center_tab = CenterTab::TwoD;
+            app.ui_state.playing = true;
+        }
     });
-    ui.add_space(8.0);
+}
+
+fn original_design_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
+    let (orig_path, cutout_rig_opt, attached_refs) = {
+        let Some(asset) = app.session.current_asset() else {
+            ui.label("No active character loaded.");
+            return;
+        };
+        (
+            asset.path.clone(),
+            asset.cutout_rig.clone(),
+            asset.attached_references.clone(),
+        )
+    };
+
+    playback_bar(app, ui);
 
     let avail = ui.available_size();
     let stage_h = (avail.y - 96.0).max(220.0);
@@ -218,7 +424,7 @@ fn desired_labels_for_mode(mode: AnimMode) -> &'static [&'static str] {
         AnimMode::Idle => &["standing", "looking_up", "standing", "looking_down"],
         AnimMode::Walk => &["walking", "standing", "pointing", "standing"],
         AnimMode::Run => &["running", "walking", "jumping", "walking"],
-        AnimMode::Jump => &["standing", "jumping", "running"],
+        AnimMode::Jump => &["standing", "jumping", "standing"],
         AnimMode::Wave => &["standing", "waving", "arms_wide", "clapping"],
         AnimMode::LookScout => &["looking_up", "pointing", "looking_down", "standing"],
         AnimMode::Static => &["standing"],
@@ -341,48 +547,21 @@ fn resolve_pose_sequence(
         }
     }
     if matched.is_empty() {
-        for f in &pm.frames {
-            matched.push(make_resolved(f));
+        // Unlabelled references are not an animation cycle. Hold the inspected frame.
+        if let Some(frame) = pm
+            .frames
+            .get(selected_pose_idx)
+            .or_else(|| pm.frames.first())
+        {
+            matched.push(make_resolved(frame));
         }
     }
     matched
 }
 
 fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
-    // Action Cycle & Playback Bar
+    playback_bar(app, ui);
     ui.horizontal_wrapped(|ui| {
-        ui.strong("Action Cycle:");
-        for (mode, label) in [
-            (AnimMode::Idle, "Idle"),
-            (AnimMode::Walk, "Walk"),
-            (AnimMode::Run, "Run"),
-            (AnimMode::Jump, "Jump Loop"),
-            (AnimMode::Wave, "Wave Hi"),
-            (AnimMode::LookScout, "Look Scout"),
-            (AnimMode::Static, "Static Bind"),
-        ] {
-            if ui
-                .selectable_label(app.ui_state.anim_mode == mode, label)
-                .clicked()
-            {
-                app.ui_state.anim_mode = mode;
-                app.exec_ui_command(UiCommand::AnimPreview2d {
-                    mode: label.to_string(),
-                });
-            }
-        }
-        ui.separator();
-        if ui
-            .button(if app.ui_state.playing {
-                "⏸ Pause"
-            } else {
-                "▶ Play"
-            })
-            .clicked()
-        {
-            // Toggle playback while preserving current playback_phase (no jump on pause!)
-            app.ui_state.playing = !app.ui_state.playing;
-        }
         if ui.button("Jump (Space)").clicked() {
             app.ui_state.anim_mode = AnimMode::Jump;
             app.ui_state.playing = true;
@@ -520,7 +699,16 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let (pose_label, tex_opt, lift_px, lift_summary, frame_anchor, frame_size, frame_parts) =
         if let Some(frame) = active_frame {
             let ctx = ui.ctx().clone();
-            let path_str = frame.path.to_string_lossy().into_owned();
+            let has_rig = app
+                .session()
+                .current_asset()
+                .is_some_and(|a| a.cutout_rig.is_some());
+            let path = if has_rig {
+                frame.path.clone()
+            } else {
+                app.face_preview.path(&ctx, &frame.path, &app.ui_state)
+            };
+            let path_str = path.to_string_lossy().into_owned();
             let tex = app.load_texture(&ctx, &path_str);
             let (lift_val, lift_text) = match frame.measured_lift_px {
                 Some(raw_lift) => {
@@ -630,7 +818,6 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
             || app.ui_state.head_yaw.abs() > 0.5
             || app.ui_state.head_pitch.abs() > 0.5
             || app.ui_state.eye_gaze.abs() > 0.5
-            || (app.ui_state.smile_open - 20.0).abs() > 1.0
             || app.ui_state.arm_spread.abs() > 0.5
             || app.ui_state.eye_blink > 0.5);
 
@@ -652,7 +839,12 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         let ch = rig.canvas_size[1].max(1) as f32;
         let max_h = (rect.height() - 105.0).max(160.0);
         let max_w = (rect.width() - 32.0).max(120.0);
-        let scale = (max_h / ch).min(max_w / cw).min(1.15);
+        let headroom = if app.ui_state.anim_mode == AnimMode::Jump {
+            1.0 + app.ui_state.jump_height_pct / 100.0
+        } else {
+            1.0
+        };
+        let scale = (max_h / (ch * headroom)).min(max_w / cw).min(1.15);
         let draw_size = Vec2::new(cw * scale, ch * scale);
         let center_x = rect.center().x + app.ui_state.stage_offset_x;
         let bottom_y = baseline_y + 18.0 + app.ui_state.stage_offset_y;
@@ -719,8 +911,12 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 -held_wave.abs() * 26.0 * amp,
             ),
             AnimMode::Jump => {
-                let jump_lift = held_wave.max(0.0);
-                let crouch = (-held_wave).max(0.0);
+                let jump_lift = jump_arc(app.ui_state.playback_phase);
+                let crouch = if jump_lift == 0.0 {
+                    held_wave.abs() * app.ui_state.jump_height_pct / 80.0
+                } else {
+                    0.0
+                };
                 (
                     -jump_lift * 4.0 * amp + crouch * 5.0 * amp,
                     jump_lift * 5.0 * amp - crouch * 6.0 * amp,
@@ -732,7 +928,8 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     -jump_lift * 18.0 * amp + crouch * 14.0 * amp,
                     -jump_lift * 14.0 * amp + crouch * 12.0 * amp,
                     -jump_lift * 16.0 * amp + crouch * 14.0 * amp,
-                    -jump_lift * 56.0 * amp + crouch * 16.0 * amp,
+                    -jump_lift * ch * app.ui_state.jump_height_pct / 100.0 * range_factor
+                        + crouch * 16.0 * amp,
                 )
             }
             AnimMode::Wave => (
@@ -827,7 +1024,13 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         sorted_parts.sort_by_key(|p| p.layer);
 
         for part in &sorted_parts {
-            let p_str = part.cropped_path.to_string_lossy().into_owned();
+            let path = if part.id == "head" {
+                app.face_preview
+                    .path(&ctx, &part.cropped_path, &app.ui_state)
+            } else {
+                part.cropped_path.clone()
+            };
+            let p_str = path.to_string_lossy().into_owned();
             let Some(ptex) = app.load_texture(&ctx, &p_str) else {
                 continue;
             };
@@ -884,12 +1087,24 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
         let tex_size = tex.size_vec2();
         let max_h = (rect.height() - 115.0).max(150.0);
         let max_w = (rect.width() - 32.0).max(120.0);
-        let scale = (max_h / tex_size.y.max(1.0))
+        let headroom = if app.ui_state.anim_mode == AnimMode::Jump {
+            1.0 + app.ui_state.jump_height_pct / 100.0
+        } else {
+            1.0
+        };
+        let scale = (max_h / (tex_size.y.max(1.0) * headroom))
             .min(max_w / tex_size.x.max(1.0))
             .min(1.25);
         let draw_size = tex_size * scale;
         let center_x = rect.center().x + app.ui_state.stage_offset_x;
-        let bottom_y = baseline_y - lift_px + app.ui_state.stage_offset_y;
+        let preview_lift = if app.ui_state.anim_mode == AnimMode::Jump {
+            jump_arc(app.ui_state.playback_phase) * draw_size.y * app.ui_state.jump_height_pct
+                / 100.0
+                * range_factor
+        } else {
+            lift_px
+        };
+        let bottom_y = baseline_y - preview_lift + app.ui_state.stage_offset_y;
         let sprite_rect = Rect::from_min_max(
             Pos2::new(center_x - draw_size.x * 0.5, bottom_y - draw_size.y),
             Pos2::new(center_x + draw_size.x * 0.5, bottom_y),
@@ -916,12 +1131,7 @@ fn two_d_gate(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         app.ui_state.head_yaw * 0.25 + app.ui_state.ear_splay * 0.15,
                         -app.ui_state.ear_splay.abs() * 0.25 + app.ui_state.ear_pitch * 0.2,
                     ),
-                    "head" => (
-                        app.ui_state.head_yaw * 0.35 + app.ui_state.eye_gaze * 0.15,
-                        app.ui_state.eye_blink * 0.05
-                            + app.ui_state.head_pitch * 0.22
-                            + (app.ui_state.smile_open - 20.0) * 0.04,
-                    ),
+                    "head" => (app.ui_state.head_yaw * 0.35, app.ui_state.head_pitch * 0.22),
                     "arm_L" => (
                         (app.ui_state.arm_spread + app.ui_state.elbow_bend * 0.5) * 0.35,
                         -app.ui_state.arm_spread * 0.2,
@@ -1556,6 +1766,69 @@ fn turnaround_sheet_view(app: &mut AnimationCraftApp, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn jump_has_grounded_endpoints_and_a_single_apex() {
+        let turn = std::f64::consts::TAU;
+        assert_eq!(jump_arc(0.0), 0.0);
+        assert_eq!(jump_arc(turn), 0.0);
+        assert!((jump_arc(turn * 0.5) - 1.0).abs() < 0.00001);
+        assert!(jump_arc(turn * 0.3) < jump_arc(turn * 0.4));
+        assert!((jump_arc(turn * 0.3) - jump_arc(turn * 0.7)).abs() < 0.00001);
+    }
+
+    #[test]
+    fn center_transport_opens_animation_pauses_and_rewinds() {
+        let mut app = AnimationCraftApp::new();
+        app.session.active_asset = Some("transport_test".into());
+        app.session
+            .assets
+            .insert("transport_test".into(), Asset::default());
+        app.ui_state.center_tab = CenterTab::OriginalView;
+        app.ui_state.playback_phase = 2.5;
+        let ctx = egui::Context::default();
+        let render = |app: &mut AnimationCraftApp, events| {
+            app.automation.begin_frame();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320.0, 220.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| playback_bar(app, ui),
+            );
+            output.textures_delta.clear();
+        };
+        for id in ["playback.play", "playback.pause", "playback.stop"] {
+            render(&mut app, vec![]);
+            let elem = app.automation.elements.iter().find(|e| e.id == id).unwrap();
+            assert_eq!(elem.enabled, Some(true));
+            let pos = Pos2::new(
+                elem.rect[0] + elem.rect[2] / 2.0,
+                elem.rect[1] + elem.rect[3] / 2.0,
+            );
+            for pressed in [true, false] {
+                render(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            assert_eq!(app.ui_state.center_tab, CenterTab::TwoD);
+            assert_eq!(app.ui_state.playing, id == "playback.play");
+            assert_eq!(
+                app.ui_state.playback_phase,
+                if id == "playback.stop" { 0.0 } else { 2.5 }
+            );
+        }
+    }
+
     use super::*;
     use animationcraft_engine::session::LoadedManifest;
 

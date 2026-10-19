@@ -18,6 +18,7 @@
 
 pub mod automation;
 mod menus;
+mod face_preview;
 mod panels;
 
 use animationcraft_engine::Session;
@@ -44,6 +45,7 @@ pub struct AnimationCraftApp {
     session: Session,
     ui_state: UiState,
     textures: HashMap<String, egui::TextureHandle>,
+    face_preview: face_preview::FacePreview,
     pub automation: automation::Registry,
     control_rx: Option<Receiver<ControlRequest>>,
     control_port: Option<u16>,
@@ -96,6 +98,7 @@ pub struct UiState {
     pub anim_speed: f32,
     pub anim_energy: f32,
     pub pose_range_pct: f32,
+    pub jump_height_pct: f32,
     pub yaw_deg: f32,
     pub explode_pct: f32,
     pub bump_strength: f32,
@@ -158,6 +161,7 @@ impl Default for UiState {
             anim_speed: 1.0,
             anim_energy: 100.0,
             pose_range_pct: 100.0,
+            jump_height_pct: 30.0,
             yaw_deg: 45.0,
             explode_pct: 0.0,
             bump_strength: 35.0,
@@ -300,6 +304,7 @@ impl AnimationCraftApp {
             session: Session::default(),
             ui_state: UiState::default(),
             textures: HashMap::new(),
+            face_preview: face_preview::FacePreview::default(),
             automation: automation::Registry::default(),
             control_rx: None,
             control_port: None,
@@ -503,6 +508,9 @@ impl AnimationCraftApp {
                     "yaw_deg": self.ui_state.yaw_deg,
                     "playing": self.ui_state.playing,
                     "playback_phase": self.ui_state.playback_phase,
+                    "jump_height_pct": self.ui_state.jump_height_pct,
+                    "mouth_expression": self.ui_state.mouth_viseme,
+                    "facial_preview_status": self.face_preview.status,
                     "busy_command": self.ui_state.busy_command,
                     "image_path": self.ui_state.image_path,
                     "last_export": self.ui_state.last_export,
@@ -538,6 +546,16 @@ impl AnimationCraftApp {
                 }
                 if let Some(range) = params.get("pose_range_pct").and_then(Value::as_f64) {
                     self.ui_state.pose_range_pct = (range as f32).clamp(0.0, 100.0);
+                }
+                if let Some(height) = params.get("jump_height_pct").and_then(Value::as_f64) {
+                    self.ui_state.jump_height_pct = (height as f32).clamp(0.0, 80.0);
+                }
+                if let Some(expression) = params.get("mouth_expression").and_then(Value::as_str) {
+                    if !["smile", "laugh", "ooh", "mbp", "talk"].contains(&expression) { return Err("Unknown mouth expression".into()); }
+                    self.ui_state.mouth_viseme = expression.into();
+                }
+                for (key, value, low, high) in [("mouth_opening", &mut self.ui_state.smile_open, 0.0, 100.0), ("eye_blink", &mut self.ui_state.eye_blink, 0.0, 100.0), ("eye_gaze", &mut self.ui_state.eye_gaze, -45.0, 45.0)] {
+                    if let Some(number) = params.get(key).and_then(Value::as_f64) { *value = (number as f32).clamp(low, high); }
                 }
                 if let Some(playing) = params.get("playing").and_then(Value::as_bool) {
                     self.ui_state.playing = playing;
