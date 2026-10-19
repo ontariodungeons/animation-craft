@@ -30,6 +30,12 @@ pub(crate) fn status(app: &mut AnimationCraftApp) -> Option<Value> {
     if !fresh {
         let value = app.session.execute("workshop.status", json!({})).ok()?;
         app.ui_state.workshop_status = Some((Instant::now(), value));
+        app.ui_state.workshop_files = app
+            .session
+            .execute("workshop.files", json!({}))
+            .ok()
+            .and_then(|f| f["files"].as_array().cloned())
+            .unwrap_or_default();
     }
     app.ui_state.workshop_status.as_ref().map(|(_, v)| v.clone())
 }
@@ -58,9 +64,19 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .unwrap_or("Untitled")
         .to_string();
     let ready = app.ui_state.busy_command.is_none();
-    let width = 620.0_f32.min(area.width() - 32.0);
-    let column = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.top() + 36.0), vec2(width, area.height() - 48.0));
+    // Checklist on the left, Files beside it when there is room, otherwise below.
+    let side = area.width() >= 1100.0;
+    let files_w = 400.0;
+    let width = 620.0_f32.min(area.width() - 32.0 - if side { files_w + 24.0 } else { 0.0 });
+    let left = area.center().x - (width + if side { files_w + 24.0 } else { 0.0 }) / 2.0;
+    let column = Rect::from_min_size(pos2(left, area.top() + 36.0), vec2(width, area.height() - 48.0));
+    if side {
+        let files = Rect::from_min_size(pos2(column.right() + 24.0, area.top() + 36.0), vec2(files_w, area.height() - 48.0));
+        let mut ui_files = ui.new_child(egui::UiBuilder::new().max_rect(files));
+        files_panel(app, &mut ui_files, ready);
+    }
     ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
+      egui::ScrollArea::vertical().id_salt("workshop.column").auto_shrink([false, false]).show(ui, |ui| {
         ui.label(RichText::new(format!("{title} — workshop")).size(26.0).color(TEXT));
         ui.add_space(4.0);
         ui.label(
@@ -89,7 +105,145 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 ui.spinner();
             }
         });
+        if !side {
+            ui.add_space(16.0);
+            files_panel(app, ui, ready);
+        }
+      });
     });
+    confirm_remove(app, ui.ctx());
+}
+
+const GROUPS: [(&str, &str); 6] = [
+    ("audio", "Song audio"),
+    ("transcript", "Transcript"),
+    ("liner_notes", "Liner notes"),
+    ("images", "Reference images"),
+    ("draft", "Draft PDF"),
+    ("other", "Other files in the project folder"),
+];
+
+fn human_size(bytes: u64) -> String {
+    match bytes {
+        b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / f64::from(1 << 20)),
+        b if b >= 1 << 10 => format!("{:.0} KB", b as f64 / 1024.0),
+        b => format!("{b} B"),
+    }
+}
+
+/// Every workshop file with Copy path / Open / Remove, grouped like the checklist.
+fn files_panel(app: &mut AnimationCraftApp, ui: &mut Ui, ready: bool) {
+    let files = app.ui_state.workshop_files.clone();
+    ui.label(RichText::new("Files").size(16.0).color(TEXT));
+    ui.label(RichText::new("Copy a path to share it, open a file, or remove what does not belong.").size(11.5).color(MUTED));
+    ui.add_space(8.0);
+    egui::ScrollArea::vertical().id_salt("workshop.files").auto_shrink([false, true]).max_height(f32::INFINITY).show(ui, |ui| {
+        for (group, title) in GROUPS {
+            let entries: Vec<&Value> = files.iter().filter(|f| f["group"] == json!(group)).collect();
+            if entries.is_empty() {
+                continue;
+            }
+            ui.label(RichText::new(title).size(12.0).strong().color(MUTED));
+            for (i, entry) in entries.iter().enumerate() {
+                file_row(app, ui, entry, &format!("{group}.{i}"), ready);
+            }
+            ui.add_space(8.0);
+        }
+        if files.is_empty() {
+            ui.label(RichText::new("No files yet.").color(MUTED));
+        }
+    });
+}
+
+fn file_row(app: &mut AnimationCraftApp, ui: &mut Ui, entry: &Value, key: &str, ready: bool) {
+    let path = entry["path"].as_str().unwrap_or_default().to_string();
+    let name = entry["name"].as_str().unwrap_or_default();
+    let size = entry["size"].as_u64().map(human_size).unwrap_or_else(|| "missing".into());
+    chrome::card().inner_margin(6).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            let thumb = entry["group"] == json!("images");
+            let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+            if thumb && let Some(tex) = app.load_texture(ui.ctx(), &path) {
+                let [w, h] = tex.size();
+                let scale = 36.0 / w.max(h).max(1) as f32;
+                let size = vec2(w as f32 * scale, h as f32 * scale);
+                ui.painter().image(tex.id(), Rect::from_center_size(r.center(), size), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
+            } else {
+                // A page with a folded corner, so it never reads as a checkbox.
+                let page = Rect::from_center_size(r.center(), vec2(16.0, 21.0));
+                let fold = 5.0;
+                let stroke = egui::Stroke::new(1.3, MUTED);
+                let p = ui.painter();
+                p.line_segment([page.left_top(), pos2(page.right() - fold, page.top())], stroke);
+                p.line_segment([pos2(page.right() - fold, page.top()), pos2(page.right(), page.top() + fold)], stroke);
+                p.line_segment([pos2(page.right(), page.top() + fold), page.right_bottom()], stroke);
+                p.line_segment([page.right_bottom(), page.left_bottom()], stroke);
+                p.line_segment([page.left_bottom(), page.left_top()], stroke);
+                p.line_segment([pos2(page.right() - fold, page.top()), pos2(page.right() - fold, page.top() + fold)], stroke);
+                p.line_segment([pos2(page.right() - fold, page.top() + fold), pos2(page.right(), page.top() + fold)], stroke);
+            }
+            ui.vertical(|ui| {
+                ui.label(RichText::new(name).size(12.5).color(TEXT)).on_hover_text(&path);
+                ui.label(RichText::new(size).size(11.0).color(MUTED));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(ready, |ui| {
+                    if button(app, ui, &format!("file.{key}.remove"), "Remove", entry["removable"] == json!(true)) {
+                        app.ui_state.workshop_remove = Some(path.clone());
+                    }
+                });
+                if button(app, ui, &format!("file.{key}.open"), "Open", entry["exists"] == json!(true)) {
+                    app.ui_state.status_line = match std::process::Command::new("xdg-open").arg(&path).spawn() {
+                        Ok(_) => format!("Opened {path}"),
+                        Err(e) => format!("Could not open {path}: {e}"),
+                    };
+                }
+                if button(app, ui, &format!("file.{key}.copy"), "Copy path", true) {
+                    ui.ctx().copy_text(path.clone());
+                    app.ui_state.status_line = format!("Copied {path}");
+                }
+            });
+        });
+    });
+}
+
+fn confirm_remove(app: &mut AnimationCraftApp, ctx: &egui::Context) {
+    let Some(path) = app.ui_state.workshop_remove.clone() else { return };
+    let audio = app.session.song_audio.as_ref().is_some_and(|a| a.display().to_string() == path);
+    let mut open = true;
+    let mut decided = false;
+    egui::Window::new("Remove file?")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+        ui.label(&path);
+        ui.add_space(4.0);
+        ui.label(if audio {
+            "The project stops pointing to this song. The audio file itself is not touched."
+        } else {
+            "The file moves to the desktop trash, where it can be restored."
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let remove = chrome::button(ui, if audio { "Unlink" } else { "Move to trash" }, true);
+            app.automation.add_response("workshop.remove.confirm", "button", "Confirm remove", &remove);
+            if remove.clicked() {
+                run(app, "workshop.remove", json!({"path": path}));
+                decided = true;
+            }
+            let cancel = chrome::button(ui, "Cancel", false);
+            app.automation.add_response("workshop.remove.cancel", "button", "Cancel remove", &cancel);
+            if cancel.clicked() {
+                decided = true;
+            }
+        });
+    });
+    if !open || decided {
+        app.ui_state.workshop_remove = None;
+    }
 }
 
 fn row(app: &mut AnimationCraftApp, ui: &mut Ui, item: &Value, ready: bool) {
@@ -155,8 +309,10 @@ fn actions(app: &mut AnimationCraftApp, ui: &mut Ui, id: &str, item: &Value, pat
             } else {
                 ("Liner notes", &["md", "txt", "pdf", "png", "jpg", "jpeg"])
             };
+            // The desktop file picker can hand back an empty list when closed: treat that as cancel.
             if button(app, ui, &format!("{id}.add"), "Add…", true)
                 && let Some(files) = rfd::FileDialog::new().set_title(title).add_filter(title, filter).pick_files()
+                && !files.is_empty()
             {
                 run(app, "workshop.add", json!({"kind": id, "paths": files}));
             }

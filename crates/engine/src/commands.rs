@@ -3438,6 +3438,80 @@ fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(status)
 }
 
+fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
+    let size = std::fs::metadata(path).map(|m| m.len()).ok();
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    json!({"group": group, "name": name, "path": path, "size": size, "exists": path.exists(), "removable": removable})
+}
+
+/// Every file the workshop knows about, grouped by checklist item, plus anything else at the top of
+/// the project folder (so stray files an agent dropped there can be seen and removed).
+fn cmd_workshop_files(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let mut files = Vec::new();
+    if let Some(audio) = &s.song_audio {
+        files.push(file_entry("audio", audio, true));
+    }
+    let transcripts = transcript_files(&dir);
+    for t in &transcripts {
+        files.push(file_entry("transcript", t, true));
+        let fcproj = t.with_file_name(t.file_name().and_then(|n| n.to_str()).unwrap_or_default().replace(".transcript.json", ".fcproj"));
+        if fcproj.is_file() {
+            files.push(file_entry("transcript", &fcproj, true));
+        }
+    }
+    for f in files_in(&dir.join("liner-notes"), None) {
+        files.push(file_entry("liner_notes", &f, true));
+    }
+    for f in files_in(&dir.join("images"), None) {
+        files.push(file_entry("images", &f, true));
+    }
+    let draft = dir.join(DRAFT_PDF);
+    if draft.is_file() {
+        files.push(file_entry("draft", &draft, true));
+    }
+    let listed: Vec<PathBuf> = files.iter().filter_map(|f| f["path"].as_str().map(PathBuf::from)).collect();
+    for f in files_in(&dir, None) {
+        if !listed.contains(&f) && Some(&f) != s.project_path.as_ref() {
+            files.push(file_entry("other", &f, true));
+        }
+    }
+    Ok(json!({"ok": true, "project_dir": dir, "files": files}))
+}
+
+/// Removes a workshop file: the song audio is only unlinked (the original is never touched); files
+/// inside the project folder go to the desktop trash (`gio trash`), so they can be restored.
+fn cmd_workshop_remove(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let raw = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("missing 'path'".into()))?;
+    let path = resolve_workspace_path(s, raw);
+    if s.song_audio.as_ref() == Some(&path) {
+        s.song_audio = None;
+        write_project_file(s)?;
+        let mut status = workshop_status(s)?;
+        status["unlinked"] = json!(path);
+        return Ok(status);
+    }
+    let inside = path.canonicalize().ok().zip(dir.canonicalize().ok()).is_some_and(|(p, d)| p.starts_with(&d));
+    if !inside || Some(&path) == s.project_path.as_ref() || !path.is_file() {
+        return Err(EngineError::InvalidParams(format!(
+            "only files inside the project folder can be removed: {}",
+            path.display()
+        )));
+    }
+    run_tool_in(&dir, "gio", &["trash".into(), path.to_string_lossy().into_owned()])?;
+    if path == dir.join(DRAFT_PDF) {
+        s.draft_approved = false;
+        write_project_file(s)?;
+    }
+    let mut status = workshop_status(s)?;
+    status["trashed"] = json!(path);
+    Ok(status)
+}
+
 fn cmd_workshop_approve_draft(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
@@ -4829,6 +4903,16 @@ fn build() -> Vec<CommandSpec> {
             "{\"kind\": \"liner_notes|images\", \"paths\": [\"file\"]}",
             always,
             cmd_workshop_add
+        ),
+        query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
+        cmd!(
+            "workshop.remove",
+            "Remove Workshop File",
+            ["Workshop"],
+            None,
+            "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}",
+            always,
+            cmd_workshop_remove
         ),
         cmd!(
             "workshop.build_draft",

@@ -87,6 +87,10 @@ pub struct UiState {
     pub show_workshop: bool,
     /// Last `workshop.status`, refreshed about once a second.
     pub workshop_status: Option<(Instant, Value)>,
+    /// Last `workshop.files`, refreshed with the status.
+    pub workshop_files: Vec<Value>,
+    /// A file waiting for the user to confirm its removal.
+    pub workshop_remove: Option<String>,
     pub new_project_open: bool,
     pub new_project_name: String,
     pub new_project_audio: String,
@@ -166,6 +170,8 @@ impl Default for UiState {
             recent_file: None,
             show_workshop: false,
             workshop_status: None,
+            workshop_files: Vec::new(),
+            workshop_remove: None,
             new_project_open: false,
             new_project_name: String::new(),
             new_project_audio: String::new(),
