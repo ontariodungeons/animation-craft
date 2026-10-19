@@ -9,6 +9,10 @@ Motion is built from a few generic terms that add together per property:
   oscillate  amplitude, hz, phase, axis, envelope       continuous sine (stays smooth under motion blur)
   follow     layer, gain, limit, smooth                 rotation leaning with a layer's horizontal velocity
 
+Optional spec fields: `margin` [left, top, right, bottom] enlarges the clip beyond the layer canvas (room for
+artwork that touches the edge or moves outside it; the layers keep their place, offset by left/top), `reference` an image of the expected look and track `loop` true, both used by the validation
+that runs on every rendered clip.
+
 Every term is an offset from the resting state: position in pixels from the pivot, rotation in degrees,
 scale in percentage points added to 100, opacity in percentage points added to 100 (so -100 hides).
 Times are seconds from the start of the track.
@@ -18,12 +22,14 @@ import argparse
 import json
 import math
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.craft_cli import require_craft_cli  # noqa: E402
+from pipeline.motion_validate import analyze, contact_sheet, lint_spec  # noqa: E402
 
 try:
     import numpy as np
@@ -233,11 +239,14 @@ def build_jsx(spec, project, work, blur):
     out = ['var items = {};',
            'function get(id, path){ if(!items[id]) items[id] = app.project.importFile(new ImportOptions(new File(path))); return items[id]; }']
     fps = spec['fps']
+    margin = vector(spec.get('margin', [0, 0, 0, 0]), 4, 'margin')
+    shift = margin[:2]
+    comp_w, comp_h = int(spec['canvas'][0] + margin[0] + margin[2]), int(spec['canvas'][1] + margin[1] + margin[3])
     for track in spec['tracks']:
         tid, duration = track['id'], number(track['duration'], 'duration')
         cid = re.sub(r'\W', '_', tid)
         names = track.get('layers') or list(spec['layers'])
-        out.append(f'var comp_{cid} = app.project.items.addComp({json.dumps(tid)}, {spec["canvas"][0]}, {spec["canvas"][1]}, 1.0, {duration:.4f}, {fps});')
+        out.append(f'var comp_{cid} = app.project.items.addComp({json.dumps(tid)}, {comp_w}, {comp_h}, 1.0, {duration:.4f}, {fps});')
         if blur:
             out.append(f'comp_{cid}.motionBlur = true; comp_{cid}.shutterAngle = {blur["shutterAngle"]}; comp_{cid}.motionBlurSamplesPerFrame = {blur["samples"]};')
         for lid in names:
@@ -245,10 +254,11 @@ def build_jsx(spec, project, work, blur):
                 raise ValueError(f'track {tid}: unknown layer {lid!r}')
             layer = spec['layers'][lid]
             v = re.sub(r'\W', '_', f'L_{tid}_{lid}')
+            sx, sy = shift  # linking keeps world position, so children start shifted too and end up local to the parent
             out += [f'var {v} = comp_{cid}.layers.add(get({json.dumps(lid)}, {json.dumps(str(layer["path"]))}));',
                     f'{v}.name = {json.dumps(lid)};',
                     f'{v}.property("Anchor Point").setValue([{layer["pivot"][0]},{layer["pivot"][1]},0]);',
-                    f'{v}.property("Position").setValue([{layer["pivot"][0]},{layer["pivot"][1]},0]);']
+                    f'{v}.property("Position").setValue([{layer["pivot"][0] + sx},{layer["pivot"][1] + sy},0]);']
             if blur and layer.get('motionBlur', True):
                 out.append(f'{v}.motionBlur = true;')
         # Every parent link is made before any keyframe exists: EffectCraft keeps a child's world
@@ -263,14 +273,15 @@ def build_jsx(spec, project, work, blur):
                 keys, expression = channel(track, spec, lid, prop, fps, duration)
                 handle = f'{v}.property({json.dumps(name)})'
                 for t, value in keys:
-                    out.append(f'{handle}.setValueAtTime({t:.5f}, {jsx_value(prop, value, layer["pivot"])});')
+                    origin = [layer['pivot'][0] + (0.0 if layer.get('parent') else shift[0]), layer['pivot'][1] + (0.0 if layer.get('parent') else shift[1])]
+                    out.append(f'{handle}.setValueAtTime({t:.5f}, {jsx_value(prop, value, origin)});')
                 if expression:
                     out.append(f'{handle}.expression = {json.dumps(expression)};')
     out.append(f'app.project.save(new File({json.dumps(str(project))}));')
     return '\n'.join(out) + '\n'
 
 
-def run(spec_path, out_dir, only=None, stills=0, video=True):
+def run(spec_path, out_dir, only=None, stills=0, video=True, gpu=True, crf=24):
     out_dir = Path(out_dir).resolve()
     work = out_dir / 'work'
     work.mkdir(parents=True, exist_ok=True)
@@ -288,6 +299,8 @@ def run(spec_path, out_dir, only=None, stills=0, video=True):
     script = work / 'layered_motion.jsx'
     script.write_text(build_jsx(spec, project, work, blur))
     binary = require_craft_cli('effectcraft-cli')
+    ffmpeg = require_craft_cli('ffmpeg')
+    gpu_flag = ['--gpu'] if gpu else []
     run_script = subprocess.run([binary, 'script', str(script)], capture_output=True, text=True, timeout=600)
     if run_script.returncode:
         raise RuntimeError((run_script.stderr.strip() or run_script.stdout.strip()).splitlines()[-1])
@@ -301,7 +314,7 @@ def run(spec_path, out_dir, only=None, stills=0, video=True):
             for i in range(stills):
                 at = track['duration'] * (i + 0.5) / stills
                 still = folder / f'{i:02d}.png'
-                done = subprocess.run([binary, '--project', str(project), 'render-frame', '--comp', track['id'], '--time', f'{at:.4f}',
+                done = subprocess.run([binary, '--project', str(project), *gpu_flag, 'render-frame', '--comp', track['id'], '--time', f'{at:.4f}',
                                        '--transparent', '--out', str(still)], capture_output=True, text=True, timeout=600)
                 if done.returncode or not still.is_file():
                     raise RuntimeError(f"Still {i} of track {track['id']} failed: " + ((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1])
@@ -310,12 +323,38 @@ def run(spec_path, out_dir, only=None, stills=0, video=True):
             outputs.append(entry)
             continue
         target = out_dir / f"{track['id']}.webm"
-        done = subprocess.run([binary, '--project', str(project), 'render', '--comp', track['id'], '--out', str(target),
-                               '--format', 'webm', '--channels', 'rgba'], capture_output=True, text=True, timeout=1800)
-        if done.returncode or not target.is_file() or target.stat().st_size == 0:
-            raise RuntimeError(f"Render of track {track['id']} failed: " + ((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1])
-        outputs.append({**entry, 'file': str(target)})
-    return {'ok': True, 'spec': str(Path(spec_path).resolve()), 'project': str(project), 'outputs': outputs}
+        # Frames are rendered as PNGs (on the GPU when asked) and encoded to VP9 with alpha by ffmpeg,
+        # which is several times faster than EffectCraft's own WebM encode and keeps the CPU free.
+        frames_dir = work / 'frames' / track['id']
+        if frames_dir.exists():
+            shutil.rmtree(frames_dir)
+        frames_dir.mkdir(parents=True)
+        done = subprocess.run([binary, '--project', str(project), *gpu_flag, 'render', '--comp', track['id'], '--out', str(frames_dir / 'f.png'),
+                               '--format', 'png', '--channels', 'rgba'], capture_output=True, text=True, timeout=3600)
+        rendered = sorted(frames_dir.glob('f_*.png'))
+        if done.returncode or len(rendered) != entry['frames']:
+            raise RuntimeError(f"Render of track {track['id']} failed ({len(rendered)}/{entry['frames']} frames): " + ((done.stderr or done.stdout).strip().splitlines() or ['no output'])[-1])
+        encoded = subprocess.run([ffmpeg, '-v', 'error', '-y', '-framerate', f"{spec['fps']:g}", '-i', str(frames_dir / 'f_%05d.png'),
+                                  '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-auto-alt-ref', '0', '-b:v', '0', '-crf', str(crf),
+                                  '-row-mt', '1', '-deadline', 'good', '-cpu-used', '2', str(target)], capture_output=True, text=True, timeout=3600)
+        if encoded.returncode or not target.is_file() or target.stat().st_size == 0:
+            raise RuntimeError(f"Encode of track {track['id']} failed: " + ((encoded.stderr or '').strip().splitlines() or ['no output'])[-1])
+        shutil.rmtree(frames_dir)
+        entry['renderer'] = 'gpu' if gpu else 'cpu'
+        reference = spec.get('reference')
+        report = analyze(target, expected_frames=entry['frames'], expected_fps=spec['fps'], loop=bool(track.get('loop')),
+                         reference=(Path(spec_path).resolve().parent / reference) if reference else None)
+        entry['size'] = [int(spec['canvas'][0] + sum(spec.get('margin', [0, 0, 0, 0])[0::2])), int(spec['canvas'][1] + sum(spec.get('margin', [0, 0, 0, 0])[1::2]))]
+        ref_path = (Path(spec_path).resolve().parent / reference) if reference else None
+        entry['review_sheets'] = [contact_sheet(target, out_dir / 'review' / f"{track['id']}{suffix}.png", reference=ref_path, mode=mode)['sheet']
+                                  for mode, suffix in (('path', ''), ('detail', '_detail'))]
+        outputs.append({**entry, 'file': str(target), 'validation': {'ok': report['ok'], 'metrics': report['metrics'],
+                                                                   'failed': [c for c in report['checks'] if not c['ok']]}})
+    lint = lint_spec(json.loads(Path(spec_path).read_text()))
+    problems = [o['track'] for o in outputs if 'validation' in o and not o['validation']['ok']]
+    return {'ok': True, 'spec': str(Path(spec_path).resolve()), 'project': str(project), 'outputs': outputs,
+            'spec_lint': lint, 'validation_ok': not problems and not any(i['level'] == 'error' for i in lint),
+            'validation_failed_tracks': problems}
 
 
 def main():
@@ -324,11 +363,13 @@ def main():
     parser.add_argument('--out-dir', required=True)
     parser.add_argument('--tracks', help='comma-separated track ids to build (default: all)')
     parser.add_argument('--stills', type=int, default=0, help='also render this many evenly spaced transparent stills per track')
+    parser.add_argument('--cpu', action='store_true', help='render on the CPU instead of the GPU (default: GPU)')
+    parser.add_argument('--crf', type=int, default=24, help='VP9 quality (lower is better, default 24)')
     parser.add_argument('--no-video', action='store_true', help='skip the WebM export (use with --stills for quick review)')
     args = parser.parse_args()
     try:
         only = [t for t in (args.tracks or '').split(',') if t] or None
-        print(json.dumps(run(args.spec, args.out_dir, only, args.stills, not args.no_video)))
+        print(json.dumps(run(args.spec, args.out_dir, only, args.stills, not args.no_video, not args.cpu, args.crf)))
     except Exception as exc:
         text = str(exc).strip().splitlines()
         parser.exit(1, f'{text[-1] if text else type(exc).__name__}\n')

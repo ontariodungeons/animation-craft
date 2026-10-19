@@ -148,8 +148,19 @@ fn tool_input_schema(id: &str) -> Value {
                 "regions": {
                     "type": "object",
                     "minProperties": 1,
-                    "description": "Part id -> polygon points [[x, y], ...]",
-                    "additionalProperties": { "type": "array", "items": point }
+                    "description": "Part id -> polygon [[x, y], ...] (keeps what is inside), or {polygons: [polygon, ...], keep: \"inside\"|\"outside\"}",
+                    "additionalProperties": {
+                        "oneOf": [
+                            { "type": "array", "items": point },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "polygons": { "type": "array", "items": { "type": "array", "items": point } },
+                                    "keep": { "enum": ["inside", "outside"] }
+                                }
+                            }
+                        ]
+                    }
                 },
                 "out_dir": { "type": "string" }
             },
@@ -204,6 +215,18 @@ fn tool_input_schema(id: &str) -> Value {
             },
             "required": ["select"]
         }),
+        "validate.motion" => json!({
+            "type": "object",
+            "properties": {
+                "video": { "type": "string", "description": "Rendered transparent clip (WebM)" },
+                "frames": { "type": "integer", "minimum": 1, "description": "Expected frame count" },
+                "fps": { "type": "number", "description": "Expected frame rate" },
+                "loop": { "type": "boolean", "description": "Require the last frame to match the first" },
+                "reference": { "type": "string", "description": "Image of the expected look, compared by colour and size" },
+                "spec": { "type": "string", "description": "Layered motion spec to lint for aliasing" }
+            },
+            "required": ["video"]
+        }),
         "export.layered_motion" => json!({
             "type": "object",
             "properties": {
@@ -211,7 +234,9 @@ fn tool_input_schema(id: &str) -> Value {
                 "out_dir": { "type": "string", "description": "Output folder for the transparent WebM per track" },
                 "tracks": { "description": "Track ids to build (array or comma-separated); default all" },
                 "stills": { "type": "integer", "minimum": 0, "description": "Also render this many evenly spaced transparent stills per track" },
-                "video": { "type": "boolean", "description": "false skips the WebM export (stills only)" }
+                "video": { "type": "boolean", "description": "false skips the WebM export (stills only)" },
+                "gpu": { "type": "boolean", "description": "Render on the GPU (default true); false uses the CPU" },
+                "crf": { "type": "integer", "minimum": 0, "maximum": 63, "description": "VP9 quality, lower is better (default 24)" }
             },
             "required": ["spec"]
         }),

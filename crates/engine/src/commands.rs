@@ -3925,7 +3925,7 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
         .filter(|r| !r.is_empty())
         .ok_or_else(|| {
             EngineError::InvalidParams(
-                "image.break_apart requires `regions`: a map of part id to polygon points".into(),
+                "image.break_apart requires `regions`: a map of part id to a polygon, or {polygons, keep}".into(),
             )
         })?;
     let parts: Vec<String> = regions.keys().cloned().collect();
@@ -3938,22 +3938,47 @@ fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     for part_id in &parts {
         let part_out = out_dir.join(format!("{part_id}.png"));
 
-        // One PhotoCraft session per part: select the polygon, invert, clear the rest.
-        // The source is already matted at intake, so no background removal happens here.
-        let args = vec![
+        // One PhotoCraft session per part. A region is a polygon ([[x, y], ...]) or an object
+        // {"polygons": [polygon, ...], "keep": "inside" | "outside"}: select the polygon(s), then clear
+        // everything else (inside) or the selection itself (outside). The source is already matted at
+        // intake, so no background removal happens here.
+        let region = &regions[part_id.as_str()];
+        let (polygons, keep_outside): (Vec<Value>, bool) = match region {
+            Value::Object(obj) => (
+                obj.get("polygons")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .or_else(|| obj.get("points").map(|p| vec![p.clone()]))
+                    .unwrap_or_default(),
+                obj.get("keep").and_then(Value::as_str) == Some("outside"),
+            ),
+            other => (vec![other.clone()], false),
+        };
+        if polygons.is_empty() {
+            errors.push(format!("{part_id}: region has no polygon"));
+            continue;
+        }
+        let mut args = vec![
             "run".to_string(),
             source_path.to_string_lossy().into_owned(),
-            "--cmd".to_string(),
-            "select.lasso".to_string(),
-            "--params".to_string(),
-            json!({"points": regions[part_id.as_str()]}).to_string(),
-            "--cmd".to_string(),
-            "select.inverse".to_string(),
+        ];
+        for (i, polygon) in polygons.iter().enumerate() {
+            args.extend([
+                "--cmd".to_string(),
+                "select.lasso".to_string(),
+                "--params".to_string(),
+                json!({"points": polygon, "mode": if i == 0 { "replace" } else { "add" }}).to_string(),
+            ]);
+        }
+        if !keep_outside {
+            args.extend(["--cmd".to_string(), "select.inverse".to_string()]);
+        }
+        args.extend([
             "--cmd".to_string(),
             "edit.clear".to_string(),
             "--out".to_string(),
             part_out.to_string_lossy().into_owned(),
-        ];
+        ]);
         if let Err(e) = run_tool_in(&root, &bin, &args) {
             errors.push(format!("{part_id}: {e}"));
             continue;
@@ -4285,6 +4310,12 @@ fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
     if params.get("video").and_then(Value::as_bool) == Some(false) {
         args.push("--no-video".into());
     }
+    if params.get("gpu").and_then(Value::as_bool) == Some(false) {
+        args.push("--cpu".into());
+    }
+    if let Some(crf) = params.get("crf").and_then(Value::as_u64) {
+        args.extend(["--crf".into(), crf.to_string()]);
+    }
     let stdout = run_tool_in(&root, "python3", &args)?;
     let mut result: Value = stdout
         .lines()
@@ -4298,6 +4329,41 @@ fn cmd_export_layered_motion(s: &mut Session, params: &Value) -> Result<Value> {
         obj.insert("out_dir".into(), json!(out_dir.to_string_lossy()));
     }
     Ok(result)
+}
+
+fn cmd_validate_motion(s: &mut Session, params: &Value) -> Result<Value> {
+    let video_raw = params.get("video").and_then(Value::as_str).ok_or_else(|| {
+        EngineError::InvalidParams("validate.motion requires `video`: a rendered transparent clip".into())
+    })?;
+    let video = resolve_workspace_path(s, video_raw);
+    if !video.is_file() {
+        return Err(EngineError::InvalidParams(format!("clip not found: {}", video.display())));
+    }
+    let root = workspace_root(s);
+    let script = root.join("pipeline/motion_validate.py");
+    let mut args = vec![script.to_string_lossy().into_owned(), "--video".into(), video.to_string_lossy().into_owned()];
+    if let Some(frames) = params.get("frames").and_then(Value::as_u64) {
+        args.extend(["--frames".into(), frames.to_string()]);
+    }
+    if let Some(fps) = params.get("fps").and_then(Value::as_f64) {
+        args.extend(["--fps".into(), fps.to_string()]);
+    }
+    if params.get("loop").and_then(Value::as_bool) == Some(true) {
+        args.push("--loop".into());
+    }
+    for key in ["reference", "spec"] {
+        if let Some(path) = params.get(key).and_then(Value::as_str) {
+            args.extend([format!("--{key}"), resolve_workspace_path(s, path).to_string_lossy().into_owned()]);
+        }
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut report: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok()).ok_or_else(|| {
+        EngineError::CommandFailed("validate.motion".into(), "motion_validate.py returned no result".into())
+    })?;
+    if let Some(obj) = report.as_object_mut() {
+        obj.insert("command".into(), json!("validate.motion"));
+    }
+    Ok(report)
 }
 
 fn build() -> Vec<CommandSpec> {
@@ -4399,11 +4465,20 @@ fn build() -> Vec<CommandSpec> {
             cmd_image_content_aware_fill
         ),
         cmd!(
+            "validate.motion",
+            "Validate Motion Clip",
+            ["Export"],
+            None,
+            "{\"video\":\"clip.webm\",\"frames\":0,\"fps\":30,\"loop\":false,\"reference\":\"optional_image\",\"spec\":\"optional_spec\"}",
+            always,
+            cmd_validate_motion
+        ),
+        cmd!(
             "export.layered_motion",
             "Export Layered Motion Video",
             ["Export"],
             None,
-            "{\"spec\":\"layered_motion_spec.json\",\"out_dir\":\"optional_dir\",\"tracks\":\"optional_csv\",\"stills\":0,\"video\":true}",
+            "{\"spec\":\"layered_motion_spec.json\",\"out_dir\":\"optional_dir\",\"tracks\":\"optional_csv\",\"stills\":0,\"video\":true,\"gpu\":true,\"crf\":24}",
             always,
             cmd_export_layered_motion
         ),
