@@ -3488,10 +3488,13 @@ fn stage_brief(dir: &Path, stage: &str, target: &str) -> String {
     format!("{}\n{}\n", brief_header(dir), stage_body(dir, stage, target))
 }
 
+/// The studio's intent, at the top of every agent brief and storyboard.
+pub const BRAND_LINE: &str = "Magic Workshop — made in the spirit of Jim Henson: teaching through play and song. Art is timed to the lyrics: imagery, animated drawn tracks and animated lyrics, in mixed media (references: ~/main-vault/Creative/Design).";
+
 fn brief_header(dir: &Path) -> String {
     let project = dir.display();
     format!(
-        "Project folder: {project}\nWorkshop state: animationcraft-cli exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
+        "{BRAND_LINE}\nProject folder: {project}\nWorkshop state: animationcraft-cli exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
     )
 }
 
@@ -3539,6 +3542,14 @@ fn workshop_status(s: &Session) -> Result<Value> {
         "filmcraft" => json!({"target": target, "path": fcproj, "ready": fcproj.is_some()}),
         _ => json!({"target": target, "path": null, "ready": false, "note": format!("{target} starter project is not built yet")}),
     };
+    // Every video target with whether its project file exists (only FilmCraft's is made so far).
+    let targets: Vec<Value> = VIDEO_TARGETS
+        .iter()
+        .map(|t| {
+            let path = (*t == "filmcraft").then(|| fcproj.clone()).flatten();
+            json!({"target": t, "selected": *t == target, "path": path, "exists": path.is_some()})
+        })
+        .collect();
     let transcript_why = if transcripts.is_empty() { "Transcribe the song with FilmCraft." } else { "Transcript ready; it lines up the storyboard scenes." };
     let reference_why = match (panels.is_empty(), pdf.is_file(), approved) {
         (true, _, _) => "Add storyboard panels (split a storyboard grid or add panel images).",
@@ -3584,7 +3595,8 @@ fn workshop_status(s: &Session) -> Result<Value> {
             "brief": stage_brief(&dir, "animate", target)}),
     ];
     let complete = stages.iter().take(3).all(|st| st["done"] == json!(true));
-    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "video_target": target, "targets": VIDEO_TARGETS,
+    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "video_target": target, "targets": targets,
+        "brand": BRAND_LINE,
         "video_project": fcproj, "stages": stages}))
 }
 
@@ -3738,7 +3750,22 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let prompt_of = |panel: &Path| std::fs::read_to_string(panel.with_extension("prompt.md")).ok().map(|t| t.trim().to_string());
 
     let (pw, ph, m) = (842.0_f64, 595.0_f64, 36.0_f64);
-    let pages = 2 + scene_list.len();
+    // Assets page(s): static assets and imported project images, so every image is in the PDF.
+    let mut asset_images: Vec<PathBuf> = files_in(&dir.join(ASSETS_DIR), Some(IMAGE_EXTENSIONS));
+    for a in &s.project_assets {
+        if let Some(p) = &a.path
+            && p.is_file()
+            && has_extension(p, IMAGE_EXTENSIONS)
+            && !asset_images.contains(p)
+        {
+            asset_images.push(p.clone());
+        }
+    }
+    const PER_ASSET_PAGE: usize = 8;
+    let asset_pages = asset_images.len().div_ceil(PER_ASSET_PAGE).max(1);
+    let pages = 1 + scene_list.len() + asset_pages + 1;
+    // Where each image sits on each page (PDF points), so the app can drag or menu it.
+    let mut layout: Vec<Value> = Vec::new();
     let mut steps = vec![json!({"tool": "doc_create", "args": {"from": "blank", "pages": pages, "width": pw, "height": ph, "name": title}})];
     // A single text line in a full-width box from `at` (top-left), so pdfcraft never wraps it narrow.
     let text = |page: usize, at: [f64; 2], t: String, size: f64, bold: bool| {
@@ -3749,7 +3776,8 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         json!({"tool": "page_add_text", "args": {"doc": 1, "page": page, "rect": rect, "text": t, "size": size}})
     };
     // Page 1: overview and scene index.
-    steps.push(text(1, [m, 30.0], format!("{title} — storyboard"), 24.0, true));
+    steps.push(text(1, [m, 30.0], format!("{title} — Magic Workshop storyboard"), 24.0, true));
+    steps.push(block(1, [m, 64.0, pw - m, 86.0], BRAND_LINE.to_string(), 9.0));
     let mut overview = vec![
         format!("Song: {}", s.song_audio.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "not set".into())),
         format!("Project: {}", dir.display()),
@@ -3759,7 +3787,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     ];
     let liner = files_in(&dir.join("liner-notes"), None);
     overview.push(format!("Liner notes: {}", if liner.is_empty() { "missing".to_string() } else { liner.iter().filter_map(|p| p.file_name()?.to_str()).collect::<Vec<_>>().join(", ") }));
-    steps.push(block(1, [m, 80.0, pw - m, 200.0], overview.join("\n"), 11.0));
+    steps.push(block(1, [m, 96.0, pw - m, 210.0], overview.join("\n"), 11.0));
     steps.push(text(1, [m, 225.0], "Scenes".into(), 14.0, true));
     for (i, scene) in scene_list.iter().enumerate() {
         let y = 250.0 + i as f64 * 22.0;
@@ -3786,6 +3814,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
                     let (iw, ih) = image::image_dimensions(panel)?;
                     let thumb_w = thumb_h * f64::from(iw) / f64::from(ih.max(1));
                     steps.push(json!({"tool": "page_add_image", "args": {"doc": 1, "page": page, "path": panel, "rect": [m, y, m + thumb_w, y + thumb_h]}}));
+                    layout.push(json!({"page": page, "path": panel, "rect": [m, y, m + thumb_w, y + thumb_h]}));
                     let name = panel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
                     let prompt = prompt_of(panel).unwrap_or_else(|| "(no prompt recorded for this panel)".into());
                     let x = m + thumb_w + 12.0;
@@ -3794,6 +3823,28 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
                 }
                 None => steps.push(text(page, [m, y], format!("{lyric}    (no panel {})", j + 1), 12.0, false)),
             }
+        }
+    }
+    // Assets pages: a grid of every static asset and imported image.
+    let first_asset_page = 2 + scene_list.len();
+    for k in 0..asset_pages {
+        let page = first_asset_page + k;
+        steps.push(text(page, [m, 24.0], if asset_pages > 1 { format!("Assets ({}/{asset_pages})", k + 1) } else { "Assets".into() }, 18.0, true));
+        let chunk: Vec<&PathBuf> = asset_images.iter().skip(k * PER_ASSET_PAGE).take(PER_ASSET_PAGE).collect();
+        if chunk.is_empty() {
+            steps.push(text(page, [m, 70.0], "No static assets yet. Cut-outs, drawn tracks and imported images appear here.".into(), 12.0, false));
+        }
+        let (cols, cell_w, cell_h) = (4usize, (pw - 2.0 * m) / 4.0, 230.0);
+        for (n, img) in chunk.iter().enumerate() {
+            let (cx, cy) = (m + (n % cols) as f64 * cell_w, 70.0 + (n / cols) as f64 * cell_h);
+            let (iw, ih) = image::image_dimensions(img)?;
+            let scale = ((cell_w - 16.0) / f64::from(iw)).min((cell_h - 40.0) / f64::from(ih));
+            let (w, h) = (f64::from(iw) * scale, f64::from(ih) * scale);
+            let rect = [cx + 8.0, cy, cx + 8.0 + w, cy + h];
+            steps.push(json!({"tool": "page_add_image", "args": {"doc": 1, "page": page, "path": img, "rect": rect}}));
+            layout.push(json!({"page": page, "path": img, "rect": rect}));
+            let name = img.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+            steps.push(text(page, [cx + 8.0, cy + h + 4.0], name, 9.0, false));
         }
     }
     // Last page: agent brief.
@@ -3808,6 +3859,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     for (i, scene) in scene_list.iter().enumerate() {
         steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": scene_label(i, scene), "page": i + 2}}));
     }
+    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Assets", "page": first_asset_page}}));
     steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Agent brief", "page": pages}}));
     let out_dir = dir.join(STORYBOARD_DIR);
     std::fs::create_dir_all(&out_dir)?;
@@ -3830,6 +3882,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         run_tool_in(&dir, "pdfcraft-cli", &["render".into(), pdf.to_string_lossy().into_owned(), "--page".into(), page.to_string(), "--dpi".into(), "110".into(), "--out".into(), png.to_string_lossy().into_owned()])?;
         preview_files.push(png);
     }
+    std::fs::write(previews.join("layout.json"), json!({"page_size": [pw, ph], "images": layout}).to_string())?;
     s.draft_approved = false;
     write_project_file(s)?;
     let mut status = workshop_status(s)?;
@@ -3868,7 +3921,12 @@ fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .map(|t| scenes(&t, song_seconds(&dir)).iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect::<Vec<_>>())
         .unwrap_or_default();
-    Ok(json!({"ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews, "scene_titles": titles}))
+    let layout = std::fs::read_to_string(dir.join(STORYBOARD_DIR).join(".preview").join("layout.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    Ok(json!({"ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
+        "scene_titles": titles, "layout": layout}))
 }
 
 fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
