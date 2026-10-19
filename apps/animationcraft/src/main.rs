@@ -37,9 +37,12 @@ fn main() -> eframe::Result {
         let _ = app.dispatch("intake.validate", json!({ "image": path }));
     }
 
+    let window_title = args.control_port.map(|port| format!("AnimationCraft Studio — Review {port}"))
+        .unwrap_or_else(|| "AnimationCraft Studio".into());
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("AnimationCraft Studio")
+            .with_title(window_title)
             .with_inner_size([1600.0, 980.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)
