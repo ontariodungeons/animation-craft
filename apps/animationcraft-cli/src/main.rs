@@ -77,6 +77,7 @@ OPTIONS
 SUBCOMMANDS
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
+  doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
   exec <id> [key=value ...]           run one command; prints its result as JSON
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
@@ -589,6 +590,21 @@ fn main() {
         }
         "mcp" => {
             run_mcp_stdio(a.bridge_addr());
+        }
+        "doctor" => {
+            let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));
+            if a.flag_clean {
+                if let Some(obj) = params.as_object_mut() {
+                    obj.insert("clean".to_string(), Value::Bool(true));
+                }
+            }
+            let mut s = Session::default();
+            match s.execute("app.doctor", params) {
+                Ok(v) => {
+                    outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                }
+                Err(e) => fail(format!("doctor: {e}")),
+            }
         }
         other => usage(format!("unknown subcommand `{other}`")),
     }

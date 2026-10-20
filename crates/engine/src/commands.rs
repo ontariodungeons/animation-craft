@@ -53,6 +53,7 @@ use crate::exports::{
     cmd_export_character_iteration, cmd_scene_farm_school_lineup, cmd_validate_motion,
 };
 use crate::vision::cmd_vision_analyze;
+use crate::doctor::cmd_app_doctor;
 use crate::workshop::{
     cmd_audio_transcribe, cmd_assets_assess, cmd_assets_fixlist, cmd_assets_fixlist_add,
     cmd_assets_request_sheet, cmd_project_search, cmd_query_list, cmd_storyboard_approve,
@@ -549,6 +550,12 @@ pub fn build() -> Vec<CommandSpec> {
             "Direct Pixel Vision Analysis",
             "{\"character\": \"optional_slug\", \"image\": \"optional_path\"}",
             cmd_vision_analyze
+        ),
+        query!(
+            "app.doctor",
+            "Doctor: Lingering Processes, Cleanup & Ponytail Smells",
+            "{\"clean\": false, \"keep_port\": 0}",
+            cmd_app_doctor
         ),
         query!("command.list", "List Commands", "{}", cmd_query_list),
     ]

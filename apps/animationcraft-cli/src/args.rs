@@ -27,6 +27,7 @@ pub struct Args {
     pub help: bool,
     pub version: bool,
     pub flag_keep_going: bool,
+    pub flag_clean: bool,
     inner: CliArgs,
 }
 
@@ -102,6 +103,7 @@ impl Args {
             help: inner.flag("--help"),
             version: inner.wants_version(),
             flag_keep_going: inner.flag("--keep-going"),
+            flag_clean: inner.flag("--clean") || inner.flag("-c"),
             inner,
         }
     }

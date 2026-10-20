@@ -20,6 +20,7 @@
 
 pub mod commands;
 pub mod control_bindings;
+pub mod doctor;
 pub mod exports;
 pub mod image_cmds;
 pub mod mesh_geometry;
