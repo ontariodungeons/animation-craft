@@ -1114,7 +1114,7 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
         .collect();
     lum.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = lum.get(lum.len() / 2).copied().unwrap_or(0.0);
-    let dark = lum.iter().filter(|l| **l < median * 0.45).count() as f64 / lum.len().max(1) as f64;
+    let (smear, smear_aspect) = smear_band(&img, median);
     let mut reasons = Vec::new();
     if touching > 0.15 {
         reasons.push(format!(
@@ -1125,10 +1125,10 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     if raggedness > 9.0 {
         reasons.push(format!("ragged edge ({raggedness:.1} edge px per sqrt(area))"));
     }
-    if dark > 0.08 {
+    if smear >= 0.02 && smear_aspect >= 3.0 {
         reasons.push(format!(
-            "{:.0}% of the asset is a dark band (smeared hidden overlap?)",
-            dark * 100.0
+            "{:.0}% of the asset is a flat dark band (smeared hidden overlap?)",
+            smear * 100.0
         ));
     }
     if opaque == 0.0 {
@@ -1143,13 +1143,79 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     };
     Ok(
         json!({"ok": true, "path": path, "size": [w, h], "suggestion": suggestion, "reasons": reasons,
-        "measures": {"clipped_border": touching, "raggedness": raggedness, "dark_band": dark, "soft_edge_pixels": partial / opaque.max(1.0)},
+        "measures": {"clipped_border": touching, "raggedness": raggedness, "smear_band": smear, "smear_aspect": smear_aspect, "soft_edge_pixels": partial / opaque.max(1.0)},
         "next": [match suggestion {
             "recreate" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=recreate problem=<what is wrong>".to_string(),
             "clean" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=clean problem=<what> tool=<exact command that fixes it>".to_string(),
             _ => "Looks fine by measure; still check it at full size before using it.".to_string(),
         }]}),
     )
+}
+
+/// Largest flat dark band: (share of visible pixels, long/short side of its box).
+/// A painted hidden-overlap strip is dark, blurred (5x5 brightness spread < 4) and elongated;
+/// dark stripes keep the material's texture and pupils are round, so neither counts.
+fn smear_band(img: &image::RgbaImage, median: f64) -> (f64, f64) {
+    let (w, h) = img.dimensions();
+    let (wu, hu) = (w as usize, h as usize);
+    let lum: Vec<f64> = img
+        .pixels()
+        .map(|p| 0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2]))
+        .collect();
+    let visible: Vec<bool> = img.pixels().map(|p| p[3] > 16).collect();
+    let spread = |x: usize, y: usize| {
+        let (mut n, mut sum, mut sq) = (0.0, 0.0, 0.0);
+        for yy in y.saturating_sub(2)..(y + 3).min(hu) {
+            for xx in x.saturating_sub(2)..(x + 3).min(wu) {
+                let l = lum[yy * wu + xx];
+                n += 1.0;
+                sum += l;
+                sq += l * l;
+            }
+        }
+        (sq / n - (sum / n) * (sum / n)).max(0.0).sqrt()
+    };
+    let mut flat: Vec<bool> = (0..wu * hu)
+        .map(|i| visible[i] && lum[i] < median * 0.45 && spread(i % wu, i / wu) < 4.0)
+        .collect();
+    let (mut best, mut best_aspect) = (0usize, 0.0);
+    for start in 0..flat.len() {
+        if !flat[start] {
+            continue;
+        }
+        flat[start] = false;
+        let (mut stack, mut size) = (vec![start], 0usize);
+        let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % wu, i / wu);
+            size += 1;
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            let mut push = |j: usize| {
+                if flat[j] {
+                    flat[j] = false;
+                    stack.push(j);
+                }
+            };
+            if x > 0 {
+                push(i - 1);
+            }
+            if x + 1 < wu {
+                push(i + 1);
+            }
+            if y > 0 {
+                push(i - wu);
+            }
+            if y + 1 < hu {
+                push(i + wu);
+            }
+        }
+        if size > best {
+            let (bw, bh) = ((x1 - x0 + 1) as f64, (y1 - y0 + 1) as f64);
+            (best, best_aspect) = (size, bw.max(bh) / bw.min(bh));
+        }
+    }
+    let total = visible.iter().filter(|v| **v).count().max(1);
+    (best as f64 / total as f64, best_aspect)
 }
 
 pub fn cmd_assets_fixlist(s: &mut Session, _: &Value) -> Result<Value> {
@@ -1423,4 +1489,32 @@ pub fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
         "word_count": transcript["words"].as_array().map_or(0, Vec::len),
         "paragraphs": transcript["paragraphs"],
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::smear_band;
+
+    /// Light part with either a flat dark strip across the top (a painted overlap smear) or
+    /// textured dark stripes (material colour).
+    fn part(smeared: bool) -> image::RgbaImage {
+        image::RgbaImage::from_fn(120, 60, |x, y| {
+            let dark = if smeared { y < 8 } else { (x / 10) % 2 == 0 };
+            let base = if dark { 30 } else { 200 };
+            let grain = if smeared && dark { 0 } else { ((x * 7 + y * 13) % 5) as u8 * 6 };
+            image::Rgba([base + grain, base + grain, base, 255])
+        })
+    }
+
+    #[test]
+    fn flat_elongated_dark_band_counts_as_smear() {
+        let (share, aspect) = smear_band(&part(true), 200.0);
+        assert!(share >= 0.02 && aspect >= 3.0, "share {share}, aspect {aspect}");
+    }
+
+    #[test]
+    fn textured_dark_stripes_are_not_a_smear() {
+        let (share, aspect) = smear_band(&part(false), 200.0);
+        assert!(share < 0.02 || aspect < 3.0, "share {share}, aspect {aspect}");
+    }
 }
