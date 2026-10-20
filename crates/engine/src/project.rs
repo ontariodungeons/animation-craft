@@ -208,9 +208,26 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         .clone()
         .or_else(|| super::workspace::try_sanitize_asset_id(name))
         .unwrap_or_else(|| super::workspace::sanitize_asset_id(stem));
+    // An image from outside the open project is copied in; its asset folder holds every result.
+    let copy_into = s
+        .project_path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .filter(|dir| {
+            path.as_ref().is_some_and(|p| {
+                !p.starts_with(dir)
+                    && p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                        ["png", "jpg", "jpeg", "webp"].contains(&e.to_ascii_lowercase().as_str())
+                    })
+            })
+        })
+        .map(|dir| dir.join("assets"));
     let mut id = base_id.clone();
     let mut suffix = 2;
-    while s.project_assets.iter().any(|a| a.id == id) || s.assets.contains_key(&id) {
+    while s.project_assets.iter().any(|a| a.id == id)
+        || s.assets.contains_key(&id)
+        || copy_into.as_ref().is_some_and(|d| d.join(&id).exists())
+    {
         if explicit_id.is_some() {
             return Err(EngineError::InvalidParams(format!(
                 "asset id '{id}' already exists"
@@ -219,17 +236,35 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         id = format!("{base_id}_{suffix}");
         suffix += 1;
     }
+    let mut stored = path.clone();
+    if let (Some(assets), Some(source)) = (&copy_into, &path) {
+        let dir = assets.join(&id);
+        std::fs::create_dir_all(&dir)?;
+        let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let copy = dir.join(format!("original.{}", ext.to_ascii_lowercase()));
+        std::fs::copy(source, &copy)?;
+        let meta = std::fs::metadata(source)?;
+        let unix = |t: std::time::SystemTime| {
+            t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+        };
+        let link = json!({"original": source, "bytes": meta.len(),
+            "modified_unix": meta.modified().map(unix).unwrap_or(0),
+            "copied_unix": unix(std::time::SystemTime::now())});
+        std::fs::write(dir.join("source.json"), format!("{link:#}\n"))?;
+        stored = Some(copy);
+    }
     s.project_assets.push(crate::ProjectAsset {
         id: id.clone(),
         name: name.into(),
         preset,
-        path,
+        path: stored.clone(),
         kind: kind.into(),
     });
     if load {
         cmd_project_load_asset(s, &json!({"id": id}))?;
     }
-    Ok(json!({"ok": true, "asset_id": id, "loaded": load, "assets": s.project_assets}))
+    Ok(json!({"ok": true, "asset_id": id, "loaded": load, "assets": s.project_assets,
+        "copied_to": copy_into.is_some().then_some(&stored)}))
 }
 
 /// Remove a connected project asset and unload it.
@@ -427,6 +462,26 @@ mod tests {
         assert_eq!(res["assets"][0]["name"], "Hero");
         assert_eq!(s2.active_asset, None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn outside_image_is_copied_in_with_a_link_to_its_source() {
+        let dir = temp_dir("project_copy_in");
+        let outside = temp_dir("project_copy_src");
+        image::RgbaImage::new(8, 8).save(outside.join("hero.png")).unwrap();
+        let mut s = Session::default();
+        s.cwd = dir.clone();
+        s.execute("project.new", json!({"path": dir.join("demo.acproj")})).unwrap();
+        s.execute("project.add_asset", json!({"path": outside.join("hero.png")})).unwrap();
+        let copy = dir.join("assets/hero/original.png");
+        assert_eq!(s.project_assets[0].path.as_deref(), Some(copy.as_path()));
+        assert!(copy.is_file() && outside.join("hero.png").is_file());
+        let link: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("assets/hero/source.json")).unwrap())
+                .unwrap();
+        assert_eq!(link["original"], json!(outside.join("hero.png")));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

@@ -53,7 +53,11 @@ pub fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
 
     // STEP 1 OF IMAGE IMPORT: photocraft-cli `layer.removeBackground` strips the background (including enclosed gaps) to a transparent RGBA PNG.
     let root = super::workspace::workspace_root(s);
-    let import_dir = root.join("exports/pose_and_parts").join(&asset_id);
+    // With a project open, results sit beside the asset's original in <project>/assets/<id>/.
+    let import_dir = match s.project_path.as_ref().and_then(|p| p.parent()) {
+        Some(dir) => dir.join("assets").join(&asset_id),
+        None => root.join("exports/pose_and_parts").join(&asset_id),
+    };
     std::fs::create_dir_all(&import_dir)?;
     let stem_clean = resolved_path
         .file_stem()
