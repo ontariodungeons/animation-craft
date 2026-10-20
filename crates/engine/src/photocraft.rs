@@ -1253,6 +1253,87 @@ pub fn cmd_asset_make_transparent(s: &mut Session, params: &Value) -> Result<Val
     Ok(result)
 }
 
+/// Split an image into its subject and a filled background plate with two headless
+/// `photocraft-cli run`s: select the subject (`rect`/`point` → Object Selection, else Select
+/// Subject), then (1) clear everything else → `subject.png`, (2) grow the selection by `expand`
+/// px and Content-Aware Fill it → `background.png`. Both land beside the asset's original.
+pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<Value> {
+    let id = params
+        .get("asset")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| s.active_asset.clone())
+        .ok_or_else(|| EngineError::InvalidParams("no active asset; pass asset=<id>".into()))?;
+    let source = s
+        .project_assets
+        .iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.path.clone())
+        .or_else(|| s.assets.get(&id).map(|a| a.path.clone()))
+        .ok_or_else(|| EngineError::InvalidParams(format!("asset '{id}' has no image path")))?;
+    let select = match (params.get("rect"), params.get("point")) {
+        (Some(rect), _) => json!({"rect": rect}),
+        (None, Some(point)) => json!({"point": point}),
+        (None, None) => Value::Null,
+    };
+    let (select_cmd, select_params) = if select.is_null() {
+        ("select.subject", "{}".to_string())
+    } else {
+        ("select.object", select.to_string())
+    };
+    let expand = params.get("expand").and_then(Value::as_u64).unwrap_or(6).clamp(1, 500);
+    let root = super::workspace::workspace_root(s);
+    let out_dir = match s.project_path.as_ref().and_then(|p| p.parent()) {
+        Some(dir) => dir.join("assets").join(&id),
+        None => root.join("exports/pose_and_parts").join(&id),
+    };
+    std::fs::create_dir_all(&out_dir)?;
+    let (subject, background) = (out_dir.join("subject.png"), out_dir.join("background.png"));
+    let bin = super::workspace::resolve_craft_cli("photocraft-cli");
+    let run = |steps: &[(&str, String)], out: &Path| -> Result<String> {
+        let mut args = vec!["run".to_string(), source.to_string_lossy().into_owned()];
+        for (cmd, p) in steps {
+            args.extend(["--cmd".to_string(), cmd.to_string(), "--params".to_string(), p.clone()]);
+        }
+        args.extend(["--out".to_string(), out.to_string_lossy().into_owned()]);
+        super::workspace::run_tool_in(&root, &bin, &args)
+    };
+    let cut = run(
+        &[
+            ("layer.new.layerFromBackground", "{}".into()),
+            (select_cmd, select_params.clone()),
+            ("select.inverse", "{}".into()),
+            ("edit.clear", "{}".into()),
+        ],
+        &subject,
+    )?;
+    let fill = run(
+        &[
+            (select_cmd, select_params),
+            ("select.modify.expand", json!({"radius": expand}).to_string()),
+            ("edit.contentAwareFill", "{\"sampling\":\"auto\",\"output\":\"current\"}".into()),
+        ],
+        &background,
+    )?;
+    let selection = cut
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|v| v["command"] == json!(select_cmd))
+        .map(|v| v["result"].clone());
+    let filled = fill
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|v| v["command"] == json!("edit.contentAwareFill"))
+        .map(|v| v["result"]["filled"].clone());
+    Ok(json!({"ok": true, "asset": id, "source": source, "subject": subject, "background": background,
+        "selection": {"command": select_cmd, "params": select, "result": selection}, "filled_pixels": filled,
+        "next": [
+            "Look at subject.png on a solid colour and background.png at full size before using them.",
+            "Thin or see-through parts (wings, whiskers, antennae) may be missed: if they stay painted on background.png, record it with assets.fixlist_add.",
+            "Wrong object? Re-run with rect=[x,y,w,h] around the subject (or point=[x,y])."
+        ]}))
+}
+
 /// Build a guided cutout rig plan via `pipeline/guided_cutout_rig_builder.py`.
 pub fn cmd_asset_build_cutout_rig(s: &mut Session, _params: &Value) -> Result<Value> {
     let asset = s

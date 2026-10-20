@@ -36,8 +36,8 @@ pub use crate::project::write_project_file;
 use crate::image_cmds::{cmd_image_break_apart, cmd_image_color_to_alpha, cmd_image_content_aware_fill, cmd_image_puppet_warp};
 use crate::parts::{cmd_part_set_state, cmd_part_show_all};
 use crate::photocraft::{
-    cmd_asset_build_cutout_rig, cmd_asset_cut_sheet, cmd_asset_load_manifest,
-    cmd_asset_make_transparent, cmd_export_agent_prompt, cmd_intake_compare_reference,
+    cmd_asset_build_cutout_rig, cmd_asset_cut_sheet, cmd_asset_extract_background,
+    cmd_asset_load_manifest, cmd_asset_make_transparent, cmd_export_agent_prompt, cmd_intake_compare_reference,
     cmd_intake_three_question, cmd_intake_validate,
 };
 use crate::project::{
@@ -92,6 +92,7 @@ const fn is_long_running_id(id: &str) -> bool {
         b"intake.validate"
             | b"intake.three_question"
             | b"asset.make_transparent"
+            | b"asset.extract_background"
             | b"asset.build_cutout_rig"
             | b"asset.cut_sheet"
             | b"turnaround.optimize_accuracy"
@@ -268,6 +269,15 @@ pub fn build() -> Vec<CommandSpec> {
             "{\"tolerance\":25}",
             has_asset,
             cmd_asset_make_transparent
+        ),
+        cmd!(
+            "asset.extract_background",
+            "Extract Background",
+            ["Rig & Matting"],
+            None,
+            "{\"asset\":\"optional_id\",\"rect\":\"optional [x,y,w,h] around the subject\",\"point\":\"optional [x,y] on the subject\",\"expand\":6}",
+            has_asset,
+            cmd_asset_extract_background
         ),
         cmd!(
             "asset.build_cutout_rig",

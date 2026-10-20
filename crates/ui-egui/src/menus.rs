@@ -253,6 +253,16 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
             if action_button(
                 app,
                 ui,
+                "menu.extract_background",
+                &format!("{} Extract Background", ICON_EXPORT),
+                has_asset,
+            ) {
+                command(app, "asset.extract_background", json!({}));
+                ui.close();
+            }
+            if action_button(
+                app,
+                ui,
                 "menu.build_rig",
                 &format!("{} Build Cutout Rig", ICON_RIG),
                 has_asset,

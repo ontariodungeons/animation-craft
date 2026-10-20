@@ -769,6 +769,7 @@ impl AnimationCraftApp {
                     "project.add_asset"
                         | "project.load_asset"
                         | "asset.make_transparent"
+                        | "asset.extract_background"
                         | "asset.build_cutout_rig"
                         | "asset.load_manifest"
                         | "asset.cut_sheet"
