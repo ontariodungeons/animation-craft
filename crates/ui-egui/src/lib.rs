@@ -235,7 +235,7 @@ impl Default for UiState {
             explode_pct: 0.0,
             bump_strength: 35.0,
             proj_blend_pct: 65.0,
-            playing: true,
+            playing: false,
             playback_phase: 0.0,
             auto_turntable: false,
             selected_pose_idx: 0,
@@ -412,6 +412,37 @@ impl AnimationCraftApp {
         let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
         let handle = ctx.load_texture(&cache_key, color_image, egui::TextureOptions::LINEAR);
         self.textures.insert(cache_key, handle.clone());
+        Some(handle)
+    }
+
+    /// Load a downsampled thumbnail progressively (at most 2 new decodes per frame) so large
+    /// asset folders never stall the first UI frame.
+    pub fn load_thumbnail_progressive(
+        &mut self,
+        ctx: &egui::Context,
+        path: &str,
+        decoded_this_frame: &mut usize,
+    ) -> Option<egui::TextureHandle> {
+        let cache_key = format!("thumb:{path}");
+        if let Some(tex) = self.textures.get(&cache_key) {
+            return Some(tex.clone());
+        }
+        if *decoded_this_frame >= 2 {
+            ctx.request_repaint();
+            return None;
+        }
+        *decoded_this_frame += 1;
+        let dyn_img = image::open(path).ok()?;
+        let img = if dyn_img.width() > 320 || dyn_img.height() > 320 {
+            dyn_img.thumbnail(320, 320).into_rgba8()
+        } else {
+            dyn_img.into_rgba8()
+        };
+        let size = [img.width() as usize, img.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &img.into_raw());
+        let handle = ctx.load_texture(&cache_key, color_image, egui::TextureOptions::LINEAR);
+        self.textures.insert(cache_key, handle.clone());
+        ctx.request_repaint();
         Some(handle)
     }
 
@@ -1040,8 +1071,13 @@ impl eframe::App for AnimationCraftApp {
         self.drain_live_control_requests(ui.ctx());
         self.render_workspace(ui);
 
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(33));
+        if self.ui_state.busy_command.is_some()
+            || self.pending_screenshot.is_some()
+            || self.pending_vision.is_some()
+        {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+        }
     }
 }
 

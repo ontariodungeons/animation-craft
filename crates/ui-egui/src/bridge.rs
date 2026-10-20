@@ -397,13 +397,13 @@ impl AnimationCraftApp {
             std::thread::spawn(move || {
                 let headless_ctx = egui::Context::default();
                 loop {
-                    std::thread::sleep(Duration::from_millis(25));
+                    std::thread::sleep(Duration::from_millis(100));
                     let frame_age = last_frame_clone
                         .lock()
                         .map(|t| t.elapsed())
                         .unwrap_or(Duration::ZERO);
-                    if frame_age >= Duration::from_millis(120)
-                        && let Ok(mut app) = app_clone.lock()
+                    if frame_age >= Duration::from_millis(500)
+                        && let Ok(mut app) = app_clone.try_lock()
                     {
                         app.service_headless_control_tick(
                             &headless_ctx,

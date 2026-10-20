@@ -6,7 +6,7 @@ use crate::{AnimationCraftApp, UiCommand};
 use egui::{FontId, Rect, RichText, Sense, Ui, pos2, vec2};
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Where new song projects go unless the user picks another folder.
 pub(crate) fn default_projects_root() -> PathBuf {
@@ -20,15 +20,10 @@ fn music_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Music"))
 }
 
-/// The open project's checklist, refreshed at most once a second (it reads the project folder).
+/// The open project's checklist, cached until a project/workshop command invalidates it.
 pub(crate) fn status(app: &mut AnimationCraftApp) -> Option<Value> {
     app.session.project_path.as_ref()?;
-    let fresh = app
-        .ui_state
-        .workshop_status
-        .as_ref()
-        .is_some_and(|(at, _)| at.elapsed() < Duration::from_secs(1));
-    if !fresh {
+    if app.ui_state.workshop_status.is_none() {
         let value = app.session.execute("workshop.status", json!({})).ok()?;
         app.ui_state.workshop_status = Some((Instant::now(), value));
         app.ui_state.workshop_files = app
@@ -677,7 +672,7 @@ fn file_name_chip(app: &mut AnimationCraftApp, ui: &mut Ui, chip: &Value, key: &
     let text = RichText::new(&name).size(11.5).color(if exists { chrome::BLUE } else { MUTED });
     let r = ui.add(egui::Label::new(if exists { text } else { text.italics() }).sense(Sense::click()));
     let image = ["png", "jpg", "jpeg", "webp"].iter().any(|e| name.to_ascii_lowercase().ends_with(e));
-    let r = if image && exists && let Some(tex) = app.load_texture(ui.ctx(), &path) {
+    let r = if image && exists && r.hovered() && let Some(tex) = app.load_texture(ui.ctx(), &path) {
         r.on_hover_ui(|ui| {
             ui.add(egui::Image::new(&tex).max_size(vec2(260.0, 200.0)));
             ui.label(RichText::new(&path).size(10.5).color(MUTED));
@@ -743,10 +738,15 @@ fn assets_panel(app: &mut AnimationCraftApp, ui: &mut Ui, status: &Value, ready:
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
+                        let mut decoded_this_frame = 0usize;
                         for (idx, item) in assets.iter().enumerate() {
                             let path = item["path"].as_str().unwrap_or_default().to_string();
                             let name = item["name"].as_str().unwrap_or_default().to_string();
-                            let thumb = app.load_texture(ui.ctx(), &path);
+                            let thumb = app.load_thumbnail_progressive(
+                                ui.ctx(),
+                                &path,
+                                &mut decoded_this_frame,
+                            );
                             let card_size = vec2(96.0, 68.0);
                             let (rect, response) = ui.allocate_exact_size(card_size, Sense::click_and_drag());
                             app.automation.add_response(format!("workshop.asset_card.{idx}"), "button", &name, &response);
@@ -960,16 +960,9 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
     if !open {
         return;
     }
-    // Re-read the storyboard every couple of seconds; when agents or tools add panels, prompts,
-    // assets or notes, rebuild it automatically so new work shows up without asking.
-    let fresh = app.ui_state.storyboard_checked.is_some_and(|t| t.elapsed() < Duration::from_secs(2));
-    if (!fresh || app.ui_state.storyboard_info.is_none()) && app.ui_state.busy_command.is_none() {
+    if app.ui_state.storyboard_info.is_none() && app.ui_state.busy_command.is_none() {
         app.ui_state.storyboard_checked = Some(Instant::now());
         app.ui_state.storyboard_info = app.session.execute("workshop.storyboard", json!({})).ok();
-        if app.ui_state.storyboard_info.as_ref().is_some_and(|i| i["stale"] == json!(true)) {
-            run(app, "workshop.build_storyboard", json!({}));
-            app.ui_state.status_line = "New files found: updating the storyboard…".into();
-        }
     }
     let Some(info) = app.ui_state.storyboard_info.clone() else { return };
     let previews: Vec<String> = info["previews"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
@@ -1034,7 +1027,11 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 ui.painter().rect_stroke(rect.expand(2.0), 3.0, egui::Stroke::new(2.0, chrome::TEAL), egui::StrokeKind::Outside);
             }
             response.dnd_set_drag_payload(path.clone());
-            let thumb = app.load_texture(ui.ctx(), &path);
+            let thumb = if response.hovered() || response.dragged() {
+                app.load_texture(ui.ctx(), &path)
+            } else {
+                None
+            };
             if response.dragged()
                 && let (Some(tex), Some(pointer)) = (&thumb, ui.ctx().pointer_interact_pos())
             {

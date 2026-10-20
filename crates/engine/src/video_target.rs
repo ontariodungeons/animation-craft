@@ -118,23 +118,10 @@ pub(crate) fn target_project_chip(s: &Session, dir: &Path, target: &str) -> Valu
     }
 }
 
-fn probe_http_server(port: u16) -> Option<String> {
-    use std::io::{Read, Write};
+fn port_open(port: u16) -> bool {
     use std::net::{SocketAddr, TcpStream};
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(60)).ok()?;
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(80)));
-    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(60)));
-    stream
-        .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .ok()?;
-    let mut buf = [0u8; 2048];
-    let n = stream.read(&mut buf).ok()?;
-    if n == 0 {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&buf[..n]).to_string();
-    text.starts_with("HTTP/").then_some(text)
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(5)).is_ok()
 }
 
 pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
@@ -143,7 +130,7 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
         && let Ok(saved) = serde_json::from_str::<Value>(&raw)
         && saved.get("target").and_then(Value::as_str) == Some(target)
         && let Some(port) = saved.get("port").and_then(Value::as_u64).map(|p| p as u16)
-        && probe_http_server(port).is_some()
+        && port_open(port)
     {
         return json!({
             "running": true,
@@ -160,23 +147,15 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
         _ => &[],
     };
     for &port in candidate_ports {
-        if let Some(resp) = probe_http_server(port) {
-            let lower = resp.to_ascii_lowercase();
-            let matches = match target {
-                "remotion" => lower.contains("remotion") || port == 3057,
-                "hyperframes" => lower.contains("hyperframes") || port == 3058,
-                _ => false,
-            };
-            if matches {
-                return json!({
-                    "running": true,
-                    "target": target,
-                    "port": port,
-                    "url": format!("http://localhost:{port}"),
-                    "pid": null,
-                    "managed": false,
-                });
-            }
+        if port_open(port) {
+            return json!({
+                "running": true,
+                "target": target,
+                "port": port,
+                "url": format!("http://localhost:{port}"),
+                "pid": null,
+                "managed": false,
+            });
         }
     }
     json!({
@@ -361,7 +340,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
         serde_json::to_string_pretty(&state).unwrap_or_default(),
     )?;
     for _ in 0..30 {
-        if probe_http_server(port).is_some() {
+        if port_open(port) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
