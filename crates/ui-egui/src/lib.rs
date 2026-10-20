@@ -17,6 +17,7 @@
 )]
 
 pub mod automation;
+mod bridge;
 mod menus;
 mod face_preview;
 mod preview_export;
@@ -27,8 +28,6 @@ mod panels;
 use animationcraft_engine::Session;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -53,12 +52,12 @@ pub struct AnimationCraftApp {
     face_preview: face_preview::FacePreview,
     control_preview: control_preview::ControlPreview,
     pub automation: automation::Registry,
-    control_rx: Option<Receiver<ControlRequest>>,
-    control_port: Option<u16>,
-    repaint_ctx: Arc<Mutex<Option<egui::Context>>>,
-    pending_screenshot: Option<(String, Sender<Result<Value, String>>, Instant)>,
-    pending_vision: Option<(Sender<Result<Value, String>>, Instant)>,
-    pending_clicks: Vec<egui::Pos2>,
+    pub(crate) control_rx: Option<Receiver<ControlRequest>>,
+    pub(crate) control_port: Option<u16>,
+    pub(crate) repaint_ctx: Arc<Mutex<Option<egui::Context>>>,
+    pub(crate) pending_screenshot: Option<(String, Sender<Result<Value, String>>, Instant)>,
+    pub(crate) pending_vision: Option<(Sender<Result<Value, String>>, Instant)>,
+    pub(crate) pending_clicks: Vec<egui::Pos2>,
     job_tx: Sender<BackgroundJobResult>,
     job_rx: Receiver<BackgroundJobResult>,
 }
@@ -397,86 +396,6 @@ impl AnimationCraftApp {
             self.ui_state.recent_projects = panels::start::load_recent(&file);
             self.ui_state.recent_file = Some(file);
         }
-    }
-
-    /// Start a localhost JSON-lines TCP control server (`--control <port>`).
-    pub fn start_control_server(&mut self, port: u16) {
-        let (tx, rx) = mpsc::channel::<ControlRequest>();
-        self.control_rx = Some(rx);
-        self.control_port = Some(port);
-        self.ui_state.status_line = format!(
-            "Live CLI Bridge listening on 127.0.0.1:{port} (`animationcraft-cli --bridge {port} ...`)"
-        );
-        let repaint_ctx = Arc::clone(&self.repaint_ctx);
-
-        std::thread::spawn(move || {
-            let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) else {
-                return;
-            };
-            for stream in listener.incoming().flatten() {
-                let tx_clone = tx.clone();
-                let repaint_clone = Arc::clone(&repaint_ctx);
-                std::thread::spawn(move || {
-                    let Ok(peer) = stream.try_clone() else {
-                        return;
-                    };
-                    let reader = BufReader::new(stream);
-                    let mut writer = peer;
-                    for line in reader.lines().map_while(Result::ok) {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-                        let parsed: Value = match serde_json::from_str(trimmed) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let err_line =
-                                    json!({"ok": false, "error": e.to_string()}).to_string();
-                                let _ = writeln!(writer, "{err_line}");
-                                continue;
-                            }
-                        };
-                        let id = parsed
-                            .get("id")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_string();
-                        let params = parsed.get("params").cloned().unwrap_or_else(|| json!({}));
-                        let (reply_tx, reply_rx) = mpsc::channel();
-                        if tx_clone
-                            .send(ControlRequest {
-                                id: id.clone(),
-                                params,
-                                reply: reply_tx,
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                        if let Ok(guard) = repaint_clone.lock()
-                            && let Some(ctx) = guard.as_ref()
-                        {
-                            ctx.request_repaint();
-                        }
-                        match reply_rx.recv() {
-                            Ok(Ok(res)) => {
-                                let out = json!({"ok": true, "id": id, "result": res}).to_string();
-                                let _ = writeln!(writer, "{out}");
-                            }
-                            Ok(Err(err)) => {
-                                let out = json!({"ok": false, "id": id, "error": err}).to_string();
-                                let _ = writeln!(writer, "{out}");
-                            }
-                            Err(e) => {
-                                let out = json!({"ok": false, "id": id, "error": e.to_string()})
-                                    .to_string();
-                                let _ = writeln!(writer, "{out}");
-                            }
-                        }
-                    }
-                });
-            }
-        });
     }
 
     /// Display source/prepared pixels as authored. Matting belongs to explicit pipeline commands.
@@ -909,29 +828,29 @@ impl AnimationCraftApp {
     }
     pub fn poll_background_jobs_for_test(&mut self) {
         while let Ok(done) = self.job_rx.try_recv() {
-            self.session = done.session;
+            // Merge worker session mutations without clobbering any live part-visibility or
+            // preview settings that were adjusted while the background job ran.
+            for (aid, worker_asset) in done.session.assets {
+                if let Some(live_asset) = self.session.assets.get(&aid) {
+                    let mut merged = worker_asset;
+                    for p in &mut merged.parts {
+                        if let Some(lp) = live_asset.parts.iter().find(|lp| lp.name == p.name) {
+                            p.visible = lp.visible;
+                            p.solo = lp.solo;
+                            p.verified = lp.verified;
+                        }
+                    }
+                    self.session.assets.insert(aid, merged);
+                } else {
+                    self.session.assets.insert(aid, worker_asset);
+                }
+            }
+            self.session.project_assets = done.session.project_assets;
+            self.session.active_asset = done.session.active_asset;
+            self.session.draft_approved = done.session.draft_approved;
+            self.session.last_result = done.session.last_result;
             self.ui_state.busy_command = None;
             self.sync_ui_after_command(&done.id, &done.result);
-        }
-    }
-
-    pub fn expire_stale_screenshots(&mut self, max_age: Duration) {
-        let msg = "Viewport screenshot timed out because the window surface is suspended or unmapped by the compositor; focus the window or use headless vision.analyze";
-        if self
-            .pending_screenshot
-            .as_ref()
-            .is_some_and(|(_, _, t)| t.elapsed() >= max_age)
-            && let Some((_, reply_tx, _)) = self.pending_screenshot.take()
-        {
-            let _ = reply_tx.send(Err(msg.to_string()));
-        }
-        if self
-            .pending_vision
-            .as_ref()
-            .is_some_and(|(_, t)| t.elapsed() >= max_age)
-            && let Some((reply_tx, _)) = self.pending_vision.take()
-        {
-            let _ = reply_tx.send(Err(msg.to_string()));
         }
     }
 
@@ -1060,207 +979,6 @@ impl AnimationCraftApp {
             crate::panels::right::right_panel(self, &mut right_ui);
         }
     }
-
-    pub fn render_headless_frame(&mut self, ctx: &egui::Context) {
-        let mut events = Vec::new();
-        for pos in self.pending_clicks.drain(..) {
-            events.push(egui::Event::PointerMoved(pos));
-            for pressed in [true, false] {
-                events.push(egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                });
-            }
-        }
-        let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 980.0));
-        if events.is_empty() {
-            let mut out = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen_rect),
-                    ..Default::default()
-                },
-                |ui| {
-                    self.render_workspace(ui);
-                },
-            );
-            out.textures_delta.clear();
-        } else {
-            for ev in events {
-                let mut out = ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(screen_rect),
-                        events: vec![ev],
-                        ..Default::default()
-                    },
-                    |ui| {
-                        self.render_workspace(ui);
-                    },
-                );
-                out.textures_delta.clear();
-            }
-            let mut out = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen_rect),
-                    ..Default::default()
-                },
-                |ui| {
-                    self.render_workspace(ui);
-                },
-            );
-            out.textures_delta.clear();
-        }
-    }
-
-    /// Service pending control requests and background jobs when the native window is hidden or
-    /// suspended by the compositor (e.g., on an inactive Wayland workspace).
-    pub fn service_headless_control_tick(
-        &mut self,
-        headless_ctx: &egui::Context,
-        screenshot_timeout: Duration,
-    ) {
-        self.poll_background_jobs_for_test();
-        self.expire_stale_screenshots(screenshot_timeout);
-
-        let mut pending = Vec::new();
-        if let Some(rx) = &self.control_rx {
-            while let Ok(req) = rx.try_recv() {
-                pending.push(req);
-            }
-        }
-        if pending.is_empty() {
-            return;
-        }
-
-        if self.automation.elements.is_empty() {
-            self.render_headless_frame(headless_ctx);
-        }
-
-        for req in pending {
-            if req.id == "ui.screenshot" {
-                let out_path = req
-                    .params
-                    .get("output")
-                    .and_then(Value::as_str)
-                    .unwrap_or("exports/animationcraft_window.png")
-                    .to_string();
-                self.pending_screenshot = Some((out_path, req.reply, Instant::now()));
-                if let Ok(guard) = self.repaint_ctx.lock()
-                    && let Some(ctx) = guard.as_ref()
-                {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
-                        egui::UserData::default(),
-                    ));
-                    ctx.request_repaint();
-                }
-            } else if req.id == "ui.vision" {
-                self.pending_vision = Some((req.reply, Instant::now()));
-                if let Ok(guard) = self.repaint_ctx.lock()
-                    && let Some(ctx) = guard.as_ref()
-                {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
-                        egui::UserData::default(),
-                    ));
-                    ctx.request_repaint();
-                }
-            } else if req.id == "app.quit" {
-                // The window is suspended (inactive workspace/occluded) and the UI thread is not
-                // drawing, but the context can still ask the viewport to close.
-                let sent = match self.repaint_ctx.lock() {
-                    Ok(guard) => match guard.as_ref() {
-                        Some(ctx) => {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            ctx.request_repaint();
-                            true
-                        }
-                        None => false,
-                    },
-                    Err(_) => false,
-                };
-                let _ = req.reply.send(if sent {
-                    Ok(json!({"closing": true}))
-                } else {
-                    Err(
-                        "app.quit needs the native window: start `animationcraft --control <port>` and use `--bridge <port>`"
-                            .into(),
-                    )
-                });
-            } else {
-                let reply_val = self.dispatch(&req.id, req.params);
-                if !self.pending_clicks.is_empty() || req.id == "ui.set_view" {
-                    self.render_headless_frame(headless_ctx);
-                }
-                let _ = req.reply.send(reply_val);
-                if let Ok(guard) = self.repaint_ctx.lock()
-                    && let Some(ctx) = guard.as_ref()
-                {
-                    ctx.request_repaint();
-                }
-            }
-        }
-    }
-
-    /// Wrap this app in a shared native runner that keeps `--control <port>` responsive even when
-    /// the Wayland compositor suspends `eframe::App::ui` on an inactive workspace.
-    pub fn into_native_app(self, ctx: egui::Context) -> Box<dyn eframe::App> {
-        if let Ok(mut guard) = self.repaint_ctx.lock() {
-            *guard = Some(ctx);
-        }
-        let has_control = self.control_port.is_some();
-        let shared = Arc::new(Mutex::new(self));
-        let last_ui_frame = Arc::new(Mutex::new(Instant::now()));
-
-        if has_control {
-            let app_clone = Arc::clone(&shared);
-            let last_frame_clone = Arc::clone(&last_ui_frame);
-            std::thread::spawn(move || {
-                let headless_ctx = egui::Context::default();
-                loop {
-                    std::thread::sleep(Duration::from_millis(25));
-                    let frame_age = last_frame_clone
-                        .lock()
-                        .map(|t| t.elapsed())
-                        .unwrap_or(Duration::ZERO);
-                    if frame_age >= Duration::from_millis(120)
-                        && let Ok(mut app) = app_clone.lock()
-                    {
-                        app.service_headless_control_tick(
-                            &headless_ctx,
-                            Duration::from_millis(1200),
-                        );
-                    }
-                }
-            });
-        }
-
-        Box::new(SharedNativeApp {
-            app: shared,
-            last_ui_frame,
-        })
-    }
-}
-
-struct SharedNativeApp {
-    app: Arc<Mutex<AnimationCraftApp>>,
-    last_ui_frame: Arc<Mutex<Instant>>,
-}
-
-impl eframe::App for SharedNativeApp {
-    fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
-        if let Ok(mut app) = self.app.lock() {
-            app.raw_input_hook(ctx, input);
-        }
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        if let Ok(mut t) = self.last_ui_frame.lock() {
-            *t = Instant::now();
-        }
-        if let Ok(mut app) = self.app.lock() {
-            app.ui(ui, frame);
-        }
-    }
 }
 
 impl eframe::App for AnimationCraftApp {
@@ -1270,7 +988,6 @@ impl eframe::App for AnimationCraftApp {
         {
             *guard = Some(ctx.clone());
         }
-        // Feed bridge clicks before egui processes input, rather than appending to processed input.
         for pos in self.pending_clicks.drain(..) {
             input.events.push(egui::Event::PointerMoved(pos));
             for pressed in [true, false] {
@@ -1285,11 +1002,9 @@ impl eframe::App for AnimationCraftApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Poll completed background subprocess commands so the UI thread never blocks
         self.poll_background_jobs_for_test();
         self.expire_stale_screenshots(Duration::from_millis(1200));
 
-        // Handle drag-and-drop image import directly into the active character's sheet tab
         let dropped_paths: Vec<String> = ui.ctx().input(|i| {
             i.raw
                 .dropped_files
@@ -1301,149 +1016,30 @@ impl eframe::App for AnimationCraftApp {
         for dropped in dropped_paths {
             let slot = match self.ui_state.center_tab {
                 CenterTab::TurnaroundSheet | CenterTab::ThreeD | CenterTab::FivePoseLineup => {
-                    "turnaround_sheet".to_string()
+                    "turnaround_sheet"
                 }
-                _ => "asset_sheet".to_string(),
+                _ => "asset_sheet",
             };
             let tolerance = self.ui_state.bg_tolerance;
             let use_ocr = self.ui_state.use_ocr;
             self.ui_state.image_path = Some(dropped.clone());
-            self.exec_ui_command(UiCommand::IntakeValidate {
-                image_path: dropped,
-                slot,
-                attach_to_active: true,
-                auto_cut: true,
-                tolerance,
-                use_ocr,
+            self.exec_ui_command(UiCommand::Engine {
+                id: "intake.validate",
+                params: json!({
+                    "image": dropped,
+                    "slot": slot,
+                    "attach_to_active": true,
+                    "auto_cut": true,
+                    "tolerance": tolerance,
+                    "use_ocr": use_ocr,
+                }),
             });
         }
 
-        // Check if a requested viewport screenshot event arrived on this frame
-        let screenshot_img = ui.ctx().input(|i| {
-            for ev in &i.raw.events {
-                if let egui::Event::Screenshot { image, .. } = ev {
-                    return Some(image.clone());
-                }
-            }
-            None
-        });
-        if let Some(color_img) = screenshot_img {
-            let w = color_img.width() as u32;
-            let h = color_img.height() as u32;
-            let mut raw = Vec::with_capacity((w * h * 4) as usize);
-            for px in &color_img.pixels {
-                raw.extend_from_slice(&px.to_srgba_unmultiplied());
-            }
-            // Window backdrop, 2D stage fill, and 2D stage grid lines.
-            let bg_colors: &[[u8; 3]] = if self.ui_state.light_backdrop {
-                &[[235, 238, 244], [225, 228, 235], [191, 197, 208]]
-            } else {
-                &[[16, 18, 24], [20, 24, 32], [31, 37, 49]]
-            };
-            // Measure the stage canvas, not the whole window; fall back to the window if no canvas is shown.
-            let ppp = ui.ctx().pixels_per_point();
-            let region = ["stage.viewport_2d", "pose.canvas"].iter().find_map(|id| {
-                let el = self.automation.elements.iter().find(|e| e.id == *id)?;
-                let x0 = ((el.rect[0] * ppp).round().max(0.0) as u32).min(w);
-                let y0 = ((el.rect[1] * ppp).round().max(0.0) as u32).min(h);
-                let x1 = (((el.rect[0] + el.rect[2]) * ppp).round() as u32).min(w);
-                let y1 = (((el.rect[1] + el.rect[3]) * ppp).round() as u32).min(h);
-                (x1 > x0 && y1 > y0).then(|| (*id, [x0, y0, x1 - x0, y1 - y0]))
-            });
-            let mut vision_metrics = match region {
-                Some((id, [x0, y0, rw, rh])) => {
-                    let mut crop = Vec::with_capacity((rw * rh * 4) as usize);
-                    for y in y0..y0 + rh {
-                        let start = ((y * w + x0) * 4) as usize;
-                        crop.extend_from_slice(&raw[start..start + (rw * 4) as usize]);
-                    }
-                    let mut m = animationcraft_engine::commands::analyze_viewport_region(
-                        &crop, rw, rh, bg_colors,
-                    );
-                    m["region"] = json!({ "id": id, "rect_px": [x0, y0, rw, rh] });
-                    m
-                }
-                None => {
-                    let mut m =
-                        animationcraft_engine::commands::analyze_viewport_region(&raw, w, h, bg_colors);
-                    m["region"] = json!({ "id": "window", "rect_px": [0, 0, w, h] });
-                    m
-                }
-            };
-            vision_metrics["note"] =
-                json!("pixel coordinates are relative to region.rect_px within the window screenshot");
-            if let Some((reply_tx, _)) = self.pending_vision.take() {
-                let _ = reply_tx.send(Ok(json!({
-                    "active_asset": self.session.active_asset,
-                    "controls": control_params::snapshot(&self.ui_state),
-                    "tab": format!("{:?}", self.ui_state.center_tab),
-                    "anim_mode": format!("{:?}", self.ui_state.anim_mode),
-                    "viewport": vision_metrics,
-                    "element_count": self.automation.elements.len(),
-                })));
-            }
-            if let Some((out_path, reply_tx, _)) = self.pending_screenshot.take() {
-                let save_res = match image::RgbaImage::from_raw(w, h, raw) {
-                    Some(buf) => buf
-                        .save(&out_path)
-                        .map(|()| {
-                            json!({
-                                "saved": out_path,
-                                "width": w,
-                                "height": h,
-                                "vision": vision_metrics,
-                            })
-                        })
-                        .map_err(|e| e.to_string()),
-                    None => Err("Failed to construct RgbaImage from screenshot buffer".to_string()),
-                };
-                let _ = reply_tx.send(save_res);
-            }
-        }
-
-        // Process any incoming live CLI control commands (`--control <port>`)
-        let mut pending = Vec::new();
-        if let Some(rx) = &self.control_rx {
-            while let Ok(req) = rx.try_recv() {
-                pending.push(req);
-            }
-        }
-        for req in pending {
-            if req.id == "ui.screenshot" {
-                let out_path = req
-                    .params
-                    .get("output")
-                    .and_then(Value::as_str)
-                    .unwrap_or("exports/animationcraft_window.png")
-                    .to_string();
-                self.pending_screenshot = Some((out_path, req.reply, Instant::now()));
-                ui.ctx()
-                    .send_viewport_cmd(
-                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
-                    );
-                ui.ctx().request_repaint();
-            } else if req.id == "ui.vision" {
-                self.pending_vision = Some((req.reply, Instant::now()));
-                ui.ctx()
-                    .send_viewport_cmd(
-                        egui::ViewportCommand::Screenshot(egui::UserData::default()),
-                    );
-                ui.ctx().request_repaint();
-            } else if req.id == "app.quit" {
-                // Answer before asking the viewport to close. The instance owns this port and
-                // every other bridge call becomes unreachable once the window is gone.
-                let _ = req.reply.send(Ok(json!({"closing": true})));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                let reply_val = self.dispatch(&req.id, req.params);
-                let _ = req.reply.send(reply_val);
-                ui.ctx().request_repaint();
-            }
-        }
-
+        self.handle_screenshot_events(ui.ctx());
+        self.drain_live_control_requests(ui.ctx());
         self.render_workspace(ui);
 
-        // Keep repainting smoothly for live 2D sprite animation and TCP control responsiveness
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -1456,82 +1052,6 @@ pub enum UiCommand {
         id: &'static str,
         params: Value,
     },
-    IntakeValidate {
-        image_path: String,
-        slot: String,
-        attach_to_active: bool,
-        auto_cut: bool,
-        tolerance: u32,
-        use_ocr: bool,
-    },
-    IntakeThreeQuestion {
-        archetype: String,
-        q1: String,
-        q2: String,
-        q3: String,
-        strip_costume: bool,
-    },
-    AssetCutSheet {
-        asset_id: String,
-        tolerance: u32,
-        use_ocr: bool,
-    },
-    CutReviewedSheet {
-        asset_id: String,
-        source: String,
-        kind: String,
-        layout: Option<String>,
-        tolerance: u32,
-        use_ocr: bool,
-    },
-    LoadPreset {
-        preset: String,
-    },
-    SetPartState {
-        part: String,
-        visible: Option<bool>,
-        solo: Option<bool>,
-        verified: Option<bool>,
-    },
-    PartShowAll,
-    TurnaroundRegister,
-    AnimPreview2d {
-        mode: String,
-    },
-    MeshBuild4Dir {
-        recon_mode: String,
-        inflation_depth_pct: u32,
-        relief_detail_pct: u32,
-        mesh_res: u32,
-        proj_blend_pct: u32,
-        bump_intensity: u32,
-    },
-    ExportAgentPrompt {
-        output: String,
-    },
-    ExportEffectcraft {
-        output: String,
-    },
-    ExportFilmcraft {
-        output: String,
-    },
-    ExportBlender {
-        output: String,
-        script: String,
-    },
-    ExportCharacterIteration {
-        character: String,
-    },
-    ExportLayeredMotion {
-        spec: String,
-        out_dir: Option<String>,
-    },
-    ValidateMotion {
-        video: String,
-        reference: Option<String>,
-        spec: Option<String>,
-        loop_clip: bool,
-    },
 }
 
 impl UiCommand {
@@ -1539,180 +1059,12 @@ impl UiCommand {
     pub fn to_engine_call(&self) -> (&'static str, Value) {
         match self {
             UiCommand::Engine { id, params } => (id, params.clone()),
-            UiCommand::IntakeValidate {
-                image_path,
-                slot,
-                attach_to_active,
-                auto_cut,
-                tolerance,
-                use_ocr,
-            } => (
-                "intake.validate",
-                serde_json::json!({
-                    "image": image_path,
-                    "slot": slot,
-                    "attach_to_active": attach_to_active,
-                    "auto_cut": auto_cut,
-                    "tolerance": tolerance,
-                    "use_ocr": use_ocr,
-                }),
-            ),
-            UiCommand::IntakeThreeQuestion {
-                archetype,
-                q1,
-                q2,
-                q3,
-                strip_costume,
-            } => (
-                "intake.three_question",
-                serde_json::json!({
-                    "archetype": archetype,
-                    "q1": q1,
-                    "q2": q2,
-                    "q3": q3,
-                    "strip_costume": strip_costume,
-                }),
-            ),
-            UiCommand::AssetCutSheet {
-                asset_id,
-                tolerance,
-                use_ocr,
-            } => (
-                "asset.cut_sheet",
-                serde_json::json!({
-                    "asset": asset_id,
-                    "tolerance": tolerance,
-                    "use_ocr": use_ocr,
-                }),
-            ),
-            UiCommand::CutReviewedSheet { asset_id, source, kind, layout, tolerance, use_ocr } => {
-                let revision = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-                let mut params = serde_json::json!({"asset":asset_id,"source":source,"kind":kind,"tolerance":tolerance,"use_ocr":use_ocr,
-                    "out_dir":format!("exports/sheet_reviews/{asset_id}/{revision}")});
-                if let Some(layout) = layout { params["layout"] = serde_json::json!(layout); }
-                ("asset.cut_sheet", params)
-            },
-            UiCommand::LoadPreset { preset } => (
-                "asset.load_manifest",
-                serde_json::json!({ "preset": preset }),
-            ),
-            UiCommand::SetPartState {
-                part,
-                visible,
-                solo,
-                verified,
-            } => (
-                "part.set_state",
-                serde_json::json!({
-                    "part": part,
-                    "visible": visible,
-                    "solo": solo,
-                    "verified": verified,
-                }),
-            ),
-            UiCommand::PartShowAll => ("part.show_all", serde_json::json!({})),
-            UiCommand::TurnaroundRegister => {
-                ("turnaround.optimize_accuracy", serde_json::json!({}))
-            }
-            UiCommand::AnimPreview2d { mode } => {
-                ("anim.preview_2d", serde_json::json!({ "mode": mode }))
-            }
-            UiCommand::MeshBuild4Dir {
-                recon_mode,
-                inflation_depth_pct,
-                relief_detail_pct,
-                mesh_res,
-                proj_blend_pct,
-                bump_intensity,
-            } => (
-                "mesh.build_4dir",
-                serde_json::json!({
-                    "recon_mode": recon_mode,
-                    "inflation_depth_pct": inflation_depth_pct,
-                    "relief_detail_pct": relief_detail_pct,
-                    "mesh_res": mesh_res,
-                    "proj_blend_pct": proj_blend_pct,
-                    "bump_intensity": bump_intensity,
-                }),
-            ),
-            UiCommand::ExportAgentPrompt { output } => (
-                "export.agent_prompt",
-                serde_json::json!({ "output": output }),
-            ),
-            UiCommand::ExportEffectcraft { output } => (
-                "export.effectcraft",
-                serde_json::json!({ "output": output }),
-            ),
-            UiCommand::ExportFilmcraft { output } => {
-                ("export.filmcraft", serde_json::json!({ "output": output }))
-            }
-            UiCommand::ExportBlender { output, script } => (
-                "export.blender",
-                serde_json::json!({ "out_mp4": output, "script": script }),
-            ),
-            UiCommand::ExportCharacterIteration { character } => (
-                "export.character_iteration",
-                serde_json::json!({ "character": character }),
-            ),
-            UiCommand::ExportLayeredMotion { spec, out_dir } => {
-                let mut params = serde_json::json!({ "spec": spec });
-                if let Some(dir) = out_dir {
-                    params["out_dir"] = serde_json::json!(dir);
-                }
-                ("export.layered_motion", params)
-            }
-            UiCommand::ValidateMotion {
-                video,
-                reference,
-                spec,
-                loop_clip,
-            } => {
-                let mut params = serde_json::json!({
-                    "video": video,
-                    "loop": loop_clip,
-                });
-                if let Some(r) = reference {
-                    params["reference"] = serde_json::json!(r);
-                }
-                if let Some(s) = spec {
-                    params["spec"] = serde_json::json!(s);
-                }
-                ("validate.motion", params)
-            }
         }
     }
 
     fn is_long_running(&self) -> bool {
-        if let UiCommand::Engine { id, .. } = self {
-            return matches!(
-                *id,
-                "intake.validate"
-                    | "asset.make_transparent"
-                    | "asset.build_cutout_rig"
-                    | "export.cutout_mp4"
-                    | "export.layered_motion"
-                    | "validate.motion"
-                    | "audio.transcribe"
-                    | "workshop.build_storyboard"
-                    | "workshop.split_panels"
-                    | "video.place_references"
-            );
-        }
-        matches!(
-            self,
-            UiCommand::IntakeValidate { .. }
-                | UiCommand::IntakeThreeQuestion { .. }
-                | UiCommand::AssetCutSheet { .. }
-                | UiCommand::CutReviewedSheet { .. }
-                | UiCommand::TurnaroundRegister
-                | UiCommand::MeshBuild4Dir { .. }
-                | UiCommand::ExportEffectcraft { .. }
-                | UiCommand::ExportFilmcraft { .. }
-                | UiCommand::ExportBlender { .. }
-                | UiCommand::ExportCharacterIteration { .. }
-                | UiCommand::ExportLayeredMotion { .. }
-                | UiCommand::ValidateMotion { .. }
-        )
+        let UiCommand::Engine { id, .. } = self;
+        animationcraft_engine::find_command(id).is_some_and(|c| c.long_running)
     }
 }
 
@@ -1725,12 +1077,25 @@ impl AnimationCraftApp {
             self.ui_state.status_line = error;
             return;
         }
-        if matches!(cmd, UiCommand::AssetCutSheet { .. }) {
-            let slot = if self.ui_state.center_tab == CenterTab::TurnaroundSheet { "turnaround_sheet" } else { "asset_sheet" };
-            let source = self.session.current_asset().and_then(|a| panels::sheet_path(a, slot));
-            let Some(source) = source else { self.ui_state.status_line = "Attach a sheet before slicing.".into(); return; };
+        if id == "asset.cut_sheet" && params.get("source").is_none() {
+            let slot = if self.ui_state.center_tab == CenterTab::TurnaroundSheet {
+                "turnaround_sheet"
+            } else {
+                "asset_sheet"
+            };
+            let source = self
+                .session
+                .current_asset()
+                .and_then(|a| panels::sheet_path(a, slot));
+            let Some(source) = source else {
+                self.ui_state.status_line = "Attach a sheet before slicing.".into();
+                return;
+            };
             params["source"] = serde_json::json!(source);
-            let revision = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+            let revision = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
             params["out_dir"] = serde_json::json!(format!("exports/sheet_reviews/{revision}"));
         }
         if cmd.is_long_running() {
@@ -1743,9 +1108,14 @@ impl AnimationCraftApp {
             let export_textures = if snapshot_export {
                 match self.export_control_textures() {
                     Ok(textures) => textures,
-                    Err(error) => { self.ui_state.status_line = error; return; }
+                    Err(error) => {
+                        self.ui_state.status_line = error;
+                        return;
+                    }
                 }
-            } else { std::collections::BTreeMap::new() };
+            } else {
+                std::collections::BTreeMap::new()
+            };
             let export_state = self.ui_state.clone();
             self.sync_ui_before_command(id, &params);
             self.ui_state.busy_command = Some(id.to_string());
@@ -1755,9 +1125,17 @@ impl AnimationCraftApp {
             let id_owned = id.to_string();
             std::thread::spawn(move || {
                 let result = if snapshot_export {
-                    preview_export::export(&mut session_clone, &export_state, &params, &export_textures, id_owned == "export.cutout_mp4")
+                    preview_export::export(
+                        &mut session_clone,
+                        &export_state,
+                        &params,
+                        &export_textures,
+                        id_owned == "export.cutout_mp4",
+                    )
                 } else {
-                    session_clone.execute(&id_owned, params).map_err(|e| e.to_string())
+                    session_clone
+                        .execute(&id_owned, params)
+                        .map_err(|e| e.to_string())
                 };
                 let _ = tx.send(BackgroundJobResult {
                     id: id_owned,
@@ -1774,120 +1152,6 @@ impl AnimationCraftApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_ui_command_maps_to_a_registered_engine_command() {
-        let sample_commands = vec![
-            UiCommand::Engine {
-                id: "project.list_assets",
-                params: json!({}),
-            },
-            UiCommand::Engine {
-                id: "project.add_asset",
-                params: json!({"preset": "hopper"}),
-            },
-            UiCommand::Engine {
-                id: "project.remove_asset",
-                params: json!({"id": "hopper"}),
-            },
-            UiCommand::Engine {
-                id: "project.update_asset",
-                params: json!({"id": "hopper", "name": "Hopper"}),
-            },
-            UiCommand::Engine {
-                id: "project.load_asset",
-                params: json!({"id": "hopper"}),
-            },
-            UiCommand::Engine {
-                id: "asset.make_transparent",
-                params: json!({}),
-            },
-            UiCommand::Engine {
-                id: "asset.build_cutout_rig",
-                params: json!({}),
-            },
-            UiCommand::Engine {
-                id: "export.cutout_mp4",
-                params: json!({}),
-            },
-            UiCommand::IntakeValidate {
-                image_path: "test.png".into(),
-                slot: "asset_sheet".into(),
-                attach_to_active: true,
-                auto_cut: true,
-                tolerance: 25,
-                use_ocr: false,
-            },
-            UiCommand::IntakeThreeQuestion {
-                archetype: "humanoid_biped".into(),
-                q1: "walk_jump_talk".into(),
-                q2: "head,torso".into(),
-                q3: "filmcraft_mp4".into(),
-                strip_costume: false,
-            },
-            UiCommand::AssetCutSheet {
-                asset_id: "hopper".into(),
-                tolerance: 25,
-                use_ocr: true,
-            },
-            UiCommand::LoadPreset {
-                preset: "hopper".into(),
-            },
-            UiCommand::SetPartState {
-                part: "head".into(),
-                visible: Some(true),
-                solo: Some(false),
-                verified: Some(true),
-            },
-            UiCommand::PartShowAll,
-            UiCommand::TurnaroundRegister,
-            UiCommand::AnimPreview2d {
-                mode: "walk".into(),
-            },
-            UiCommand::MeshBuild4Dir {
-                recon_mode: "volumetric".into(),
-                inflation_depth_pct: 58,
-                relief_detail_pct: 44,
-                mesh_res: 32,
-                proj_blend_pct: 65,
-                bump_intensity: 35,
-            },
-            UiCommand::ExportAgentPrompt {
-                output: "exports/prompt.md".into(),
-            },
-            UiCommand::ExportEffectcraft {
-                output: "exports/effectcraft_demo/build_scene.jsx".into(),
-            },
-            UiCommand::ExportFilmcraft {
-                output: "exports/hopper_filmcraft.fcproj".into(),
-            },
-            UiCommand::ExportBlender {
-                output: "exports/hopper_4dir_blender53.mp4".into(),
-                script: "pipeline/blender53_bridge.py".into(),
-            },
-            UiCommand::ExportCharacterIteration {
-                character: "hopper".into(),
-            },
-            UiCommand::ExportLayeredMotion {
-                spec: "spec.json".into(),
-                out_dir: None,
-            },
-            UiCommand::ValidateMotion {
-                video: "clip.webm".into(),
-                reference: None,
-                spec: None,
-                loop_clip: false,
-            },
-        ];
-
-        for cmd in sample_commands {
-            let (id, _params) = cmd.to_engine_call();
-            assert!(
-                animationcraft_engine::commands::find(id).is_some(),
-                "UiCommand mapped to unregistered engine command `{id}`"
-            );
-        }
-    }
 
     #[test]
     fn headless_control_tick_services_commands_and_times_out_screenshots_when_window_suspended() {

@@ -47,10 +47,16 @@ fn source_sheet_card(
                     let path = file.display().to_string();
                     app.ui_state.image_path = Some(path.clone());
                     app.ui_state.center_tab = tab;
-                    app.exec_ui_command(UiCommand::IntakeValidate {
-                        image_path: path, slot: slot.into(), attach_to_active: true,
-                        auto_cut: true, tolerance: app.ui_state.bg_tolerance,
-                        use_ocr: app.ui_state.use_ocr,
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "intake.validate",
+                        params: serde_json::json!({
+                            "image": path,
+                            "slot": slot,
+                            "attach_to_active": true,
+                            "auto_cut": true,
+                            "tolerance": app.ui_state.bg_tolerance,
+                            "use_ocr": app.ui_state.use_ocr,
+                        }),
                     });
                 }
             });
@@ -181,15 +187,16 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 );
                 if r_val.clicked() {
                     let path = app.ui_state.image_path.clone().unwrap_or_default();
-                    let tolerance = app.ui_state.bg_tolerance;
-                    let use_ocr = app.ui_state.use_ocr;
-                    app.exec_ui_command(UiCommand::IntakeValidate {
-                        image_path: path,
-                        slot: "auto".to_string(),
-                        attach_to_active: true,
-                        auto_cut: true,
-                        tolerance,
-                        use_ocr,
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "intake.validate",
+                        params: serde_json::json!({
+                            "image": path,
+                            "slot": "auto",
+                            "attach_to_active": true,
+                            "auto_cut": true,
+                            "tolerance": app.ui_state.bg_tolerance,
+                            "use_ocr": app.ui_state.use_ocr,
+                        }),
                     });
                 }
                 let r_3q = chrome::button(ui, "Analyze intake", false);
@@ -201,12 +208,15 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 );
                 if r_3q.clicked() {
                     let st = app.ui_state.clone();
-                    app.exec_ui_command(UiCommand::IntakeThreeQuestion {
-                        archetype: st.archetype,
-                        q1: st.q1_motion,
-                        q2: st.q2_parts,
-                        q3: st.q3_target,
-                        strip_costume: st.strip_costume,
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "intake.three_question",
+                        params: serde_json::json!({
+                            "archetype": st.archetype,
+                            "q1": st.q1_motion,
+                            "q2": st.q2_parts,
+                            "q3": st.q3_target,
+                            "strip_costume": st.strip_costume,
+                        }),
                     });
                 }
                 let r_cut = chrome::button(ui, "Slice sheet", false);
@@ -222,12 +232,13 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .current_asset()
                         .map(|a| a.id.clone())
                         .unwrap_or_else(|| "current".to_string());
-                    let tolerance = app.ui_state.bg_tolerance;
-                    let use_ocr = app.ui_state.use_ocr;
-                    app.exec_ui_command(UiCommand::AssetCutSheet {
-                        asset_id: active_id,
-                        tolerance,
-                        use_ocr,
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "asset.cut_sheet",
+                        params: serde_json::json!({
+                            "asset": active_id,
+                            "tolerance": app.ui_state.bg_tolerance,
+                            "use_ocr": app.ui_state.use_ocr,
+                        }),
                     });
                 }
                 let r_reg = chrome::button(ui, "Align views", false);
@@ -238,7 +249,10 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     &r_reg,
                 );
                 if r_reg.clicked() {
-                    app.exec_ui_command(UiCommand::TurnaroundRegister);
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "turnaround.optimize_accuracy",
+                        params: serde_json::json!({}),
+                    });
                 }
                 let r_prompt = chrome::button(ui, "Export agent brief", false);
                 app.automation.add_response(
@@ -253,8 +267,9 @@ pub(crate) fn left_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .active_asset
                         .clone()
                         .unwrap_or_else(|| "hopper".to_string());
-                    app.exec_ui_command(UiCommand::ExportAgentPrompt {
-                        output: format!("exports/{slug}_agent_prompt.md"),
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "export.agent_prompt",
+                        params: serde_json::json!({ "output": format!("exports/{slug}_agent_prompt.md") }),
                     });
                 }
             });

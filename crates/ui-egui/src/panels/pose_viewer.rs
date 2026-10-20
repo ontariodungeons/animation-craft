@@ -492,13 +492,16 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
                 .pick_file()
             {
-                app.exec_ui_command(UiCommand::IntakeValidate {
-                    image_path: path.to_string_lossy().into_owned(),
-                    slot: "reference".into(),
-                    attach_to_active: true,
-                    auto_cut: false,
-                    tolerance: app.ui_state.bg_tolerance,
-                    use_ocr: app.ui_state.use_ocr,
+                app.exec_ui_command(UiCommand::Engine {
+                    id: "intake.validate",
+                    params: serde_json::json!({
+                        "image": path,
+                        "slot": "reference",
+                        "attach_to_active": true,
+                        "auto_cut": false,
+                        "tolerance": app.ui_state.bg_tolerance,
+                        "use_ocr": app.ui_state.use_ocr,
+                    }),
                 });
             }
             let choices = sources(&asset);
@@ -507,7 +510,18 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let ready = app.ui_state.busy_command.is_none();
                 if button(app, ui, "pose.import_sheet", "Replace pose sheet…", ready, "Replace and slice the active pose sheet. Use Add sheet to keep existing references.")
                     && let Some(path) = rfd::FileDialog::new().add_filter("Images", &["png","jpg","jpeg","webp"]).pick_file() {
-                    app.exec_ui_command(UiCommand::IntakeValidate { image_path: path.to_string_lossy().into_owned(), slot: "asset_sheet".into(), attach_to_active: true, auto_cut: true, tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
+                    app.exec_ui_command(UiCommand::Engine {
+                        id: "intake.validate",
+                        params: serde_json::json!({
+                            "image": path,
+                            "slot": "asset_sheet",
+                            "attach_to_active": true,
+                            "auto_cut": true,
+                            "tolerance": app.ui_state.bg_tolerance,
+                            "use_ocr": app.ui_state.use_ocr,
+                        }),
+                    });
+                    ui.close();
                 }
                 ui.separator();
                 ui.label("Slice the open sheet as:");
@@ -525,7 +539,20 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .or_else(|| rfd::FileDialog::new().add_filter("Layout JSON", &["json"]).pick_file())
                 } else { None };
                 if (recut || layout.is_some()) && let Some(source) = selected_source {
-                    app.exec_ui_command(UiCommand::CutReviewedSheet { asset_id: asset.id.clone(), source: source.path.to_string_lossy().into_owned(), kind: state.slice_kind.clone(), layout: layout.map(|p|p.to_string_lossy().into_owned()), tolerance: app.ui_state.bg_tolerance, use_ocr: app.ui_state.use_ocr }); ui.close();
+                    let revision = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+                    let mut params = serde_json::json!({
+                        "asset": asset.id,
+                        "source": source.path,
+                        "kind": state.slice_kind,
+                        "tolerance": app.ui_state.bg_tolerance,
+                        "use_ocr": app.ui_state.use_ocr,
+                        "out_dir": format!("exports/sheet_reviews/{}/{revision}", asset.id),
+                    });
+                    if let Some(layout) = layout {
+                        params["layout"] = serde_json::json!(layout);
+                    }
+                    app.exec_ui_command(UiCommand::Engine { id: "asset.cut_sheet", params });
+                    ui.close();
                 }
             });
             app.automation

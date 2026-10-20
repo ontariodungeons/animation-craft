@@ -5,7 +5,7 @@
 //! and keyboard shortcuts are shown inline. Menus are deliberately narrow
 //! and stable so opening/closing them doesn't reflow the surrounding UI.
 use crate::panels::header::{action_button, command, export_mp4, reload};
-use crate::{AnimationCraftApp, CenterTab, UiCommand};
+use crate::{AnimationCraftApp, CenterTab};
 use egui::{Color32, RichText, Ui};
 use serde_json::json;
 
@@ -268,11 +268,15 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 has_asset,
             ) && let Some(id) = app.session.active_asset.clone()
             {
-                app.exec_ui_command(UiCommand::AssetCutSheet {
-                    asset_id: id,
-                    tolerance: app.ui_state.bg_tolerance,
-                    use_ocr: app.ui_state.use_ocr,
-                });
+                command(
+                    app,
+                    "asset.cut_sheet",
+                    json!({
+                        "asset": id,
+                        "tolerance": app.ui_state.bg_tolerance,
+                        "use_ocr": app.ui_state.use_ocr,
+                    }),
+                );
                 ui.close();
             }
             if action_button(
@@ -282,11 +286,11 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 &format!("{} Register Turnaround", ICON_REFRESH),
                 has_asset,
             ) {
-                app.exec_ui_command(UiCommand::TurnaroundRegister);
+                command(app, "turnaround.optimize_accuracy", json!({}));
                 ui.close();
             }
             if action_button(app, ui, "menu.show_parts", "{} Show All Parts", has_asset) {
-                app.exec_ui_command(UiCommand::PartShowAll);
+                command(app, "part.show_all", json!({}));
                 ui.close();
             }
             ui.separator();
@@ -330,9 +334,7 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .add_filter("EffectCraft Script", &["jsx"])
                 .save_file()
             {
-                app.exec_ui_command(UiCommand::ExportEffectcraft {
-                    output: path.to_string_lossy().into_owned(),
-                });
+                command(app, "export.effectcraft", json!({"output": path}));
                 ui.close();
             }
             if action_button(
@@ -358,10 +360,7 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .add_filter("Layered Motion Spec", &["json"])
                 .pick_file()
             {
-                app.exec_ui_command(UiCommand::ExportLayeredMotion {
-                    spec: path.to_string_lossy().into_owned(),
-                    out_dir: None,
-                });
+                command(app, "export.layered_motion", json!({"spec": path}));
                 ui.close();
             }
             ui.separator();
@@ -376,23 +375,19 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .add_filter("Rendered Clip", &["webm", "mp4"])
                 .pick_file()
             {
-                let reference = app
-                    .session
-                    .current_asset()
-                    .filter(|a| a.path.is_file())
-                    .map(|a| a.path.to_string_lossy().into_owned());
-                let spec = app
+                let mut params = json!({"video": path, "loop": false});
+                if let Some(r) = app.session.current_asset().filter(|a| a.path.is_file()) {
+                    params["reference"] = json!(r.path);
+                }
+                if let Some(r) = app
                     .session
                     .current_asset()
                     .and_then(|a| a.cutout_rig.as_ref())
                     .filter(|r| r.rig_type == "layered_motion")
-                    .map(|r| r.plan_path.to_string_lossy().into_owned());
-                app.exec_ui_command(UiCommand::ValidateMotion {
-                    video: path.to_string_lossy().into_owned(),
-                    reference,
-                    spec,
-                    loop_clip: false,
-                });
+                {
+                    params["spec"] = json!(r.plan_path);
+                }
+                command(app, "validate.motion", params);
                 ui.close();
             }
             ui.separator();
@@ -407,9 +402,7 @@ pub(super) fn menu_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 .add_filter("FilmCraft", &["fcproj"])
                 .save_file()
             {
-                app.exec_ui_command(UiCommand::ExportFilmcraft {
-                    output: path.to_string_lossy().into_owned(),
-                });
+                command(app, "export.filmcraft", json!({"output": path}));
                 ui.close();
             }
         });

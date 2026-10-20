@@ -155,8 +155,9 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 &resp,
                             );
                             if resp.clicked() {
-                                app.exec_ui_command(UiCommand::AnimPreview2d {
-                                    mode: label.to_string(),
+                                app.exec_ui_command(UiCommand::Engine {
+                                    id: "anim.preview_2d",
+                                    params: serde_json::json!({ "mode": label }),
                                 });
                             }
                         }
@@ -285,8 +286,9 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     if r_iter.clicked() {
                         let out = format!("exports/design_share/{slug}/{slug}_6actions_track.mp4");
                         app.ui_state.last_export = Some(out);
-                        app.exec_ui_command(UiCommand::ExportCharacterIteration {
-                            character: slug.clone(),
+                        app.exec_ui_command(UiCommand::Engine {
+                            id: "export.character_iteration",
+                            params: serde_json::json!({ "character": slug }),
                         });
                     }
                     let r_ec = widgets::action_card(ui, "EffectCraft", "Build a composition from an existing script.", "Requires a prepared JSX script", "Run script", app.ui_state.busy_command.is_none(), ("Executes the existing EffectCraft JSX script.", "Build the composition described by that script in EffectCraft.", "Requires exports/effectcraft_demo/build_scene.jsx. It does not generate a new script from the current preview."));
@@ -299,7 +301,10 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     if r_ec.clicked() {
                         let out = "exports/effectcraft_demo/build_scene.jsx".to_string();
                         app.ui_state.last_export = Some(out.clone());
-                        app.exec_ui_command(UiCommand::ExportEffectcraft { output: out });
+                        app.exec_ui_command(UiCommand::Engine {
+                            id: "export.effectcraft",
+                            params: serde_json::json!({ "output": out }),
+                        });
                     }
                     let (active_layered_spec, layered_spec_tracks): (
                         Option<String>,
@@ -394,9 +399,9 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         });
                         if let Some(spec_path) = chosen_spec {
                             app.ui_state.last_export = Some(spec_path.clone());
-                            app.exec_ui_command(UiCommand::ExportLayeredMotion {
-                                spec: spec_path,
-                                out_dir: None,
+                            app.exec_ui_command(UiCommand::Engine {
+                                id: "export.layered_motion",
+                                params: serde_json::json!({ "spec": spec_path }),
                             });
                         }
                     }
@@ -448,16 +453,16 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                 .map(|p| p.to_string_lossy().into_owned())
                         });
                         if let Some(video_path) = chosen_video {
-                            let reference = app
-                                .session()
-                                .current_asset()
-                                .filter(|a| a.path.is_file())
-                                .map(|a| a.path.to_string_lossy().into_owned());
-                            app.exec_ui_command(UiCommand::ValidateMotion {
-                                video: video_path,
-                                reference,
-                                spec: active_layered_spec.clone(),
-                                loop_clip: false,
+                            let mut params = serde_json::json!({ "video": video_path, "loop": false });
+                            if let Some(r) = app.session().current_asset().filter(|a| a.path.is_file()) {
+                                params["reference"] = serde_json::json!(r.path);
+                            }
+                            if let Some(ref s) = active_layered_spec {
+                                params["spec"] = serde_json::json!(s);
+                            }
+                            app.exec_ui_command(UiCommand::Engine {
+                                id: "validate.motion",
+                                params,
                             });
                         }
                     }
@@ -471,7 +476,10 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     if r_fc.clicked() {
                         let out = format!("exports/{slug}_filmcraft.fcproj");
                         app.ui_state.last_export = Some(out.clone());
-                        app.exec_ui_command(UiCommand::ExportFilmcraft { output: out });
+                        app.exec_ui_command(UiCommand::Engine {
+                            id: "export.filmcraft",
+                            params: serde_json::json!({ "output": out }),
+                        });
                     }
                     let r_glb = widgets::action_card(ui, "3D mesh", "Build a volume from the available image views.", "GLB + OBJ · volume only", "Build mesh", app.ui_state.busy_command.is_none(), ("Builds a volume mesh and writes GLB and OBJ files.", "Move the generated shape into a 3D editor.", "Adjust 3D shape settings, then click. Missing views may reuse the first image; neither selection currently creates an articulated rig."));
                     app.automation.add_response(
@@ -484,13 +492,16 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         let st = app.ui_state.clone();
                         let out = format!("exports/blender_ingest/{slug}/{slug}_4dir.glb");
                         app.ui_state.last_export = Some(out);
-                        app.exec_ui_command(UiCommand::MeshBuild4Dir {
-                            recon_mode: st.recon_mode,
-                            inflation_depth_pct: st.inflation_depth_pct,
-                            relief_detail_pct: st.relief_detail_pct,
-                            mesh_res: st.mesh_res,
-                            proj_blend_pct: st.proj_blend_pct as u32,
-                            bump_intensity: st.bump_strength as u32,
+                        app.exec_ui_command(UiCommand::Engine {
+                            id: "mesh.build_4dir",
+                            params: serde_json::json!({
+                                "recon_mode": st.recon_mode,
+                                "inflation_depth_pct": st.inflation_depth_pct,
+                                "relief_detail_pct": st.relief_detail_pct,
+                                "mesh_res": st.mesh_res,
+                                "proj_blend_pct": st.proj_blend_pct as u32,
+                                "bump_intensity": st.bump_strength as u32,
+                            }),
                         });
                     }
                     let r_blend = widgets::action_card(ui, "Blender", "Render animation through the connected Blender app.", "Requires a live Blender connection", "Render animation", app.ui_state.busy_command.is_none(), ("Runs the Blender character pipeline through its live connection.", "Render a character animation in Blender.", "Requires the Blender service on port 9876. The current pipeline uses character IDs; verify source identity for custom imports before running."));
@@ -503,9 +514,12 @@ pub(crate) fn right_panel(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     if r_blend.clicked() {
                         let out = format!("exports/blender_characters/{slug}/{slug}_blender53.mp4");
                         app.ui_state.last_export = Some(out.clone());
-                        app.exec_ui_command(UiCommand::ExportBlender {
-                            output: out,
-                            script: "pipeline/blender53_bridge.py".to_string(),
+                        app.exec_ui_command(UiCommand::Engine {
+                            id: "export.blender",
+                            params: serde_json::json!({
+                                "out_mp4": out,
+                                "script": "pipeline/blender53_bridge.py",
+                            }),
                         });
                     }
 

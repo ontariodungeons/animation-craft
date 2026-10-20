@@ -186,11 +186,15 @@ pub(super) fn parts(app: &mut AnimationCraftApp, ui: &mut Ui) {
             ui.horizontal_wrapped(|ui| {
                 let response = chrome::button(ui, "Show all", false).on_hover_text("Make all parts visible and clear every Solo selection.");
                 app.automation.add_response("parts.show_all", "button", "Show all parts", &response);
-                if response.clicked() { app.exec_ui_command(UiCommand::PartShowAll); }
+                if response.clicked() {
+                    app.exec_ui_command(UiCommand::Engine { id: "part.show_all", params: serde_json::json!({}) });
+                }
                 let response = chrome::help(chrome::button(ui, "Mark all reviewed", false),
                     "Marks every part as manually reviewed.", "Record that you have inspected the cutouts and their joints.", "Click only after inspecting all parts. This does not run validation; individual review marks can be cleared below.");
                 app.automation.add_response("btn.verify_all_parts", "button", "Mark all reviewed", &response);
-                if response.clicked() { app.exec_ui_command(UiCommand::SetPartState { part: "*".into(), visible: None, solo: None, verified: Some(true) }); }
+                if response.clicked() {
+                    app.exec_ui_command(UiCommand::Engine { id: "part.set_state", params: serde_json::json!({"part": "*", "verified": true}) });
+                }
             });
         });
         ui.add_space(4.0);
@@ -216,9 +220,14 @@ pub(super) fn parts(app: &mut AnimationCraftApp, ui: &mut Ui) {
                                     let response = chrome::help(ui.checkbox(&mut value, label), what, why, how);
                                     app.automation.add_response(format!("part.{kind}.{}", part.name), "checkbox", format!("{}: {label}", part.name), &response);
                                     if response.changed() {
-                                        app.exec_ui_command(UiCommand::SetPartState {
-                                            part: part.name.clone(), visible: (kind == "visible").then_some(value),
-                                            solo: (kind == "solo").then_some(value), verified: (kind == "reviewed").then_some(value),
+                                        app.exec_ui_command(UiCommand::Engine {
+                                            id: "part.set_state",
+                                            params: serde_json::json!({
+                                                "part": part.name,
+                                                "visible": (kind == "visible").then_some(value),
+                                                "solo": (kind == "solo").then_some(value),
+                                                "verified": (kind == "reviewed").then_some(value),
+                                            }),
                                         });
                                     }
                                 }

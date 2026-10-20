@@ -20,8 +20,20 @@
 
 pub mod commands;
 pub mod control_bindings;
+pub mod exports;
+pub mod image_cmds;
 pub mod mesh_geometry;
+pub mod parts;
+pub mod photocraft;
+pub mod project;
+pub mod rig;
 pub mod session;
+pub mod storyboard;
+pub mod turnaround;
+pub mod video_target;
+pub mod vision;
+pub mod workshop;
+pub mod workspace;
 
 pub use commands::{CommandSpec, command_specs, find as find_command};
 pub use session::{
