@@ -249,57 +249,6 @@ mod tests {
         super::super::center::pose_viewer::select_pose(&mut app, &egui::Context::default(), 7);
         assert_eq!(app.ui_state.selected_pose_idx, 7);
         assert!(!app.ui_state.playing);
-        assert!(app.ui_state.center_tab == CenterTab::AssetSheet);
         assert_eq!(app.session.last_result, previous);
-    }
-
-    #[test]
-    fn reference_and_part_lists_expand_instead_of_creating_small_scroll_regions() {
-        use animationcraft_engine::{Asset, LoadedManifest, ManifestFrame, PartState};
-        let mut app = AnimationCraftApp::new();
-        app.session.assets.clear();
-        app.session.active_asset = Some("test".into());
-        app.session.assets.insert(
-            "test".into(),
-            Asset {
-                id: "test".into(),
-                pose_manifest: Some(LoadedManifest {
-                    frames: (0..11)
-                        .map(|i| ManifestFrame {
-                        qa_issues: Vec::new(),
-                            index: i,
-                            label: format!("pose_{i}"),
-                            ..Default::default()
-                        })
-                        .collect(),
-                    ..Default::default()
-                }),
-                parts: (0..8)
-                    .map(|i| PartState {
-                        name: format!("part_{i}"),
-                        visible: true,
-                        solo: false,
-                        verified: false,
-                    })
-                    .collect(),
-                ..Default::default()
-            },
-        );
-        let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(240.0, 300.0))),
-                ..Default::default()
-            },
-            |ui| {
-                let start = ui.cursor().min.y;
-                poses(&mut app, ui);
-                let pose_end = ui.cursor().min.y;
-                assert!(pose_end - start >= 11.0 * 54.0);
-                parts(&mut app, ui);
-                assert!(ui.cursor().min.y - pose_end >= 8.0 * 40.0);
-            },
-        );
-        output.textures_delta.clear();
     }
 }

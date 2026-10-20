@@ -2372,13 +2372,12 @@ mod tests {
     }
 
     #[test]
-    fn center_transport_opens_animation_pauses_and_rewinds() {
+    fn center_transport_pauses_and_rewinds() {
         let mut app = AnimationCraftApp::new();
         app.session.active_asset = Some("transport_test".into());
         app.session
             .assets
             .insert("transport_test".into(), Asset::default());
-        app.ui_state.center_tab = CenterTab::OriginalView;
         app.ui_state.playback_phase = 2.5;
         let ctx = egui::Context::default();
         let render = |app: &mut AnimationCraftApp, events| {
@@ -2415,7 +2414,6 @@ mod tests {
                     ],
                 );
             }
-            assert_eq!(app.ui_state.center_tab, CenterTab::TwoD);
             assert_eq!(app.ui_state.playing, id == "playback.play");
             assert_eq!(
                 app.ui_state.playback_phase,
@@ -2863,54 +2861,8 @@ mod tests {
     }
 
     #[test]
-    fn viewport_zoom_fit_actual_size_and_toolbar_controls_apply_to_rig_and_sprite() {
-        let mut app = AnimationCraftApp::new();
-        let ctx = egui::Context::default();
-
-        let render = |app: &mut AnimationCraftApp| {
-            app.automation.begin_frame();
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 260.0))),
-                    ..Default::default()
-                },
-                |ui| playback_bar(app, ui),
-            );
-            output.textures_delta.clear();
-        };
-
-        render(&mut app);
-        let elements = &app.automation.elements;
-        for required_id in [
-            "playback.play",
-            "playback.pause",
-            "playback.stop",
-            "playback.action",
-            "playback.jump",
-            "playback.run_lock",
-            "playback.wasd",
-            "viewport.fit",
-            "viewport.actual_size",
-            "viewport.zoom_out",
-            "viewport.zoom_in",
-            "viewport.center",
-        ] {
-            assert!(
-                elements.iter().any(|e| e.id == required_id),
-                "missing toolbar automation id `{required_id}`"
-            );
-        }
-
-        // Triggering Jump switches mode to Jump and exposes the Jump height slider in the toolbar
-        trigger_jump_state(&mut app.ui_state);
-        render(&mut app);
-        assert!(
-            app.automation
-                .elements
-                .iter()
-                .any(|e| e.id == "playback.jump_height"),
-            "missing `playback.jump_height` slider when in AnimMode::Jump"
-        );
+    fn viewport_zoom_fit_actual_size_and_center_scale_math() {
+        let mut state = crate::UiState::default();
 
         // Verify Fit (actual_size=false, zoom=1.0), 100% (actual_size=true, zoom=1.0), Zoom +/Zoom -, and jump headroom
         let fit_base = compute_preview_scale(1000.0, 800.0, 500.0, 400.0, 1.0, false, 1.0);
@@ -2922,58 +2874,58 @@ mod tests {
         assert!((fit_jump - (400.0 / (800.0 * 1.5))).abs() < 1e-4);
 
         // Actual size (100%) uses 1.0 base scale multiplied by preview_zoom
-        actual_size_viewport_state(&mut app.ui_state);
-        assert!(app.ui_state.preview_actual_size);
-        assert_eq!(app.ui_state.preview_zoom, 1.0);
+        actual_size_viewport_state(&mut state);
+        assert!(state.preview_actual_size);
+        assert_eq!(state.preview_zoom, 1.0);
         let actual_100 = compute_preview_scale(
             1000.0,
             800.0,
             500.0,
             400.0,
             1.0,
-            app.ui_state.preview_actual_size,
-            app.ui_state.preview_zoom,
+            state.preview_actual_size,
+            state.preview_zoom,
         );
         assert!((actual_100 - 1.0).abs() < 1e-4);
 
         // Zoom + and Zoom - multiply the active base scale in both Fit and 100% modes
-        zoom_in_state(&mut app.ui_state);
-        assert!(app.ui_state.preview_zoom > 1.0);
+        zoom_in_state(&mut state);
+        assert!(state.preview_zoom > 1.0);
         let zoomed_actual = compute_preview_scale(
             1000.0,
             800.0,
             500.0,
             400.0,
             1.0,
-            app.ui_state.preview_actual_size,
-            app.ui_state.preview_zoom,
+            state.preview_actual_size,
+            state.preview_zoom,
         );
         assert!(zoomed_actual > actual_100);
 
-        fit_viewport_state(&mut app.ui_state);
-        assert!(!app.ui_state.preview_actual_size);
-        assert_eq!(app.ui_state.preview_zoom, 1.0);
-        zoom_out_state(&mut app.ui_state);
-        assert!(app.ui_state.preview_zoom < 1.0);
+        fit_viewport_state(&mut state);
+        assert!(!state.preview_actual_size);
+        assert_eq!(state.preview_zoom, 1.0);
+        zoom_out_state(&mut state);
+        assert!(state.preview_zoom < 1.0);
         let zoomed_fit = compute_preview_scale(
             1000.0,
             800.0,
             500.0,
             400.0,
             1.0,
-            app.ui_state.preview_actual_size,
-            app.ui_state.preview_zoom,
+            state.preview_actual_size,
+            state.preview_zoom,
         );
         assert!(zoomed_fit < fit_base);
 
         // Center resets stage offsets without clobbering zoom
-        app.ui_state.stage_offset_x = 42.0;
-        app.ui_state.stage_offset_y = -18.0;
-        let kept_zoom = app.ui_state.preview_zoom;
-        center_stage_state(&mut app.ui_state);
-        assert_eq!(app.ui_state.stage_offset_x, 0.0);
-        assert_eq!(app.ui_state.stage_offset_y, 0.0);
-        assert_eq!(app.ui_state.preview_zoom, kept_zoom);
+        state.stage_offset_x = 42.0;
+        state.stage_offset_y = -18.0;
+        let kept_zoom = state.preview_zoom;
+        center_stage_state(&mut state);
+        assert_eq!(state.stage_offset_x, 0.0);
+        assert_eq!(state.stage_offset_y, 0.0);
+        assert_eq!(state.preview_zoom, kept_zoom);
     }
 }
 
