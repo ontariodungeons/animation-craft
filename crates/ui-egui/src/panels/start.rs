@@ -20,9 +20,12 @@ const RECENT_KEPT: usize = 10;
 /// Height of one Home-screen recent-project row.
 const HOME_RECENT_ROW: f32 = 30.0;
 
-/// Whether a project is open (or assets were connected without one, e.g. from the CLI).
+/// Whether a project is open (or assets were connected / standalone studio was opened without one, e.g. from the CLI).
 pub(crate) fn project_open(app: &AnimationCraftApp) -> bool {
-    app.session.project_path.is_some() || !app.session.project_assets.is_empty()
+    app.session.project_path.is_some()
+        || !app.session.project_assets.is_empty()
+        || app.session.current_asset().is_some()
+        || app.ui_state.standalone_studio
 }
 
 /// The user's recent-projects file (`$XDG_CONFIG_HOME/animationcraft/recent_projects.json`).
@@ -149,7 +152,16 @@ pub(crate) fn start_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     }
                 });
             });
-            ui.add_space(22.0);
+            ui.add_space(12.0);
+            let standalone = pill_button(ui, "Open AnimationStudio", 220.0, false)
+                .on_hover_text("Open the 3-column 2D/3D rigging & layered motion studio directly without a song project");
+            app.automation
+                .add_response("home.standalone_studio", "button", "Open AnimationStudio", &standalone);
+            if standalone.clicked() {
+                app.ui_state.show_workshop = false;
+                app.ui_state.standalone_studio = true;
+            }
+            ui.add_space(14.0);
             ui.label(
                 egui::RichText::new("A project keeps your characters together. Import them one at a time.")
                     .size(12.5)

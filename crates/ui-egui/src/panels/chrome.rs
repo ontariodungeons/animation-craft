@@ -44,7 +44,7 @@ pub(super) fn button(ui: &mut Ui, label: &str, primary: bool) -> Response {
         ui.add(
             egui::Button::new(RichText::new(label).size(12.0).strong().color(TEXT))
                 .min_size(egui::vec2(0.0, 30.0))
-                .wrap(),
+                .wrap_mode(egui::TextWrapMode::Extend),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand)
     })

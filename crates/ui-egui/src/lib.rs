@@ -85,6 +85,12 @@ pub struct UiState {
     pub recent_file: Option<std::path::PathBuf>,
     /// Show the Workshop checklist even when it is complete (File ▸ Workshop).
     pub show_workshop: bool,
+    /// Active stage tab in the top header bar (1 = Song, 2 = Transcribe, 3 = Storyboard, 4 = Animate Assets).
+    pub active_stage: usize,
+    /// Sub-layout inside Stage 4 (0 = Split Canvas + Inspector, 1 = Canvas Only, 2 = Parts & Sheets, 3 = Motion & Export).
+    pub stage4_drawer: usize,
+    /// When true, renders the classic full-window 3-column Standalone Animation Studio even when no `.acproj` is open (or when expanded from Stage 4).
+    pub standalone_studio: bool,
     /// Last `workshop.status`, refreshed about once a second.
     pub workshop_status: Option<(Instant, Value)>,
     /// Last `workshop.files`, refreshed with the status.
@@ -96,6 +102,10 @@ pub struct UiState {
     pub storyboard_page: usize,
     pub storyboard_info: Option<Value>,
     pub storyboard_checked: Option<Instant>,
+    pub new_subject_open: bool,
+    pub new_subject_path: String,
+    pub new_subject_name: String,
+    pub new_subject_target_id: Option<String>,
     pub new_project_open: bool,
     pub new_project_name: String,
     pub new_project_audio: String,
@@ -173,7 +183,10 @@ impl Default for UiState {
             demo_preset: None,
             recent_projects: Vec::new(),
             recent_file: None,
-            show_workshop: false,
+            show_workshop: true,
+            active_stage: 1,
+            stage4_drawer: 0,
+            standalone_studio: false,
             workshop_status: None,
             workshop_files: Vec::new(),
             workshop_remove: None,
@@ -181,6 +194,10 @@ impl Default for UiState {
             storyboard_page: 0,
             storyboard_info: None,
             storyboard_checked: None,
+            new_subject_open: false,
+            new_subject_path: String::new(),
+            new_subject_name: String::new(),
+            new_subject_target_id: None,
             new_project_open: false,
             new_project_name: String::new(),
             new_project_audio: String::new(),
@@ -483,15 +500,25 @@ impl AnimationCraftApp {
     pub fn dispatch(&mut self, id: &str, params: Value) -> Result<Value, String> {
         preview_export::validate_params(id, &params)?;
         match id {
-            "ui.inspect" | "ui.elements" => {
+            "ui.inspect" | "ui.elements" | "ui.audit" => {
                 let filter = params.get("filter").and_then(Value::as_str);
                 let elements = self.automation.query(filter);
+                let (win_w, win_h) = self
+                    .automation
+                    .find("panel.header")
+                    .map(|h| (h.rect[0] + h.rect[2], 1400.0_f32))
+                    .unwrap_or((1600.0, 980.0));
+                let layout_audit = self.automation.layout_audit(win_w, win_h);
+                if id == "ui.audit" {
+                    return Ok(layout_audit);
+                }
                 return Ok(json!({
                     "active_asset": self.session.active_asset,
                     "controls": control_params::snapshot(&self.ui_state),
                     "project_assets": self.session.project_assets,
                     "tab": format!("{:?}", self.ui_state.center_tab),
                     "anim_mode": format!("{:?}", self.ui_state.anim_mode),
+                    "layout_audit": layout_audit,
                     "element_count": elements.len(),
                     "elements": elements,
                 }));
@@ -553,6 +580,10 @@ impl AnimationCraftApp {
                     .unwrap_or(0);
                 return Ok(json!({
                     "project_assets": self.session.project_assets,
+                    "active_stage": self.ui_state.active_stage,
+                    "standalone_studio": self.ui_state.standalone_studio,
+                    "stage4_drawer": self.ui_state.stage4_drawer,
+                    "show_workshop": self.ui_state.show_workshop,
                     "tab": match self.ui_state.center_tab {
                         CenterTab::OriginalView => "original",
                         CenterTab::AssetSheet => "asset_sheet",
@@ -669,16 +700,43 @@ impl AnimationCraftApp {
                         st.solo = false;
                     }
                 }
+                if let Some(stage_num) = params.get("stage").and_then(Value::as_u64) {
+                    let s_idx = (stage_num as usize).clamp(1, 4);
+                    self.ui_state.active_stage = s_idx;
+                    self.ui_state.show_workshop = s_idx < 4;
+                    self.ui_state.standalone_studio = false;
+                }
+                if let Some(standalone) = params.get("standalone").and_then(Value::as_bool) {
+                    self.ui_state.standalone_studio = standalone;
+                    if !standalone && self.session.project_path.is_some() && self.ui_state.active_stage == 0 {
+                        self.ui_state.active_stage = 4;
+                    }
+                }
+                if let Some(drawer) = params.get("drawer") {
+                    if let Some(d_idx) = drawer.as_u64() {
+                        self.ui_state.stage4_drawer = (d_idx as usize).min(3);
+                    } else if let Some(d_str) = drawer.as_str() {
+                        self.ui_state.stage4_drawer = match d_str.to_ascii_lowercase().as_str() {
+                            "canvas" | "canvas_only" => 1,
+                            "parts" | "sheets" | "parts_sheets" => 2,
+                            "motion" | "export" | "motion_export" => 3,
+                            _ => 0,
+                        };
+                    }
+                }
                 self.ui_state.status_line = format!(
-                    "CLI updated view: asset={:?}, tab={:?}, mode={:?}, yaw={:.0}°, range={:.0}%",
+                    "CLI updated view: stage={}, standalone={}, asset={:?}, tab={:?}, mode={:?}",
+                    self.ui_state.active_stage,
+                    self.ui_state.standalone_studio,
                     self.session.active_asset,
                     self.ui_state.center_tab,
                     self.ui_state.anim_mode,
-                    self.ui_state.yaw_deg,
-                    self.ui_state.pose_range_pct
                 );
                 return Ok(json!({
                     "updated": true,
+                    "active_stage": self.ui_state.active_stage,
+                    "standalone_studio": self.ui_state.standalone_studio,
+                    "stage4_drawer": self.ui_state.stage4_drawer,
                     "active_asset": self.session.active_asset,
                     "controls": control_params::snapshot(&self.ui_state),
                     "tab": format!("{:?}", self.ui_state.center_tab),
@@ -734,14 +792,39 @@ impl AnimationCraftApp {
                     .map(|asset| asset.path.to_string_lossy().into_owned());
                 if matches!(
                     id,
-                    "project.load_asset"
+                    "project.open"
+                        | "project.new"
+                        | "project.close"
+                        | "project.add_asset"
+                        | "project.remove_asset"
+                ) || id.starts_with("workshop.")
+                    || id.starts_with("video.")
+                    || id.starts_with("storyboard.")
+                {
+                    self.ui_state.workshop_status = None;
+                    self.ui_state.storyboard_info = None;
+                    self.ui_state.storyboard_checked = None;
+                    if matches!(id, "project.open" | "project.new" | "project.close") {
+                        self.ui_state.storyboard_page = 0;
+                        self.ui_state.new_subject_open = false;
+                        self.ui_state.workshop_remove = None;
+                        self.ui_state.active_stage = 1;
+                        self.ui_state.show_workshop = true;
+                        self.ui_state.standalone_studio = false;
+                        self.textures.clear();
+                    }
+                }
+                if matches!(
+                    id,
+                    "project.add_asset"
+                        | "project.load_asset"
                         | "asset.make_transparent"
                         | "asset.build_cutout_rig"
                         | "asset.load_manifest"
                         | "asset.cut_sheet"
                         | "intake.validate"
                 ) {
-                    self.textures.clear();
+                    self.ui_state.workshop_status = None;
                 }
                 if id == "export.cutout_mp4" {
                     self.ui_state.last_export =

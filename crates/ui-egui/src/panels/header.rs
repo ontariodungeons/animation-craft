@@ -8,13 +8,11 @@ pub(crate) fn command(app: &mut AnimationCraftApp, id: &'static str, params: Val
     app.exec_ui_command(UiCommand::Engine { id, params });
 }
 
-pub(crate) fn connect(app: &mut AnimationCraftApp, params: Value) {
-    if let Ok(result) = app.dispatch("project.add_asset", params)
-        && let Some(id) = result.get("asset_id").and_then(Value::as_str)
-    {
-        command(app, "project.load_asset", json!({"id": id}));
-        app.ui_state.center_tab = CenterTab::OriginalView;
-    }
+pub(crate) fn connect(app: &mut AnimationCraftApp, mut params: Value) {
+    params["load"] = json!(true);
+    params["if_not_exists"] = json!(true);
+    command(app, "project.add_asset", params);
+    app.ui_state.center_tab = CenterTab::OriginalView;
 }
 
 pub(crate) fn reload(app: &mut AnimationCraftApp) {
@@ -98,11 +96,14 @@ pub(crate) fn action_button(
 pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
     crate::menus::menu_bar(app, ui);
     ui.separator();
+    let has_project = app.session.project_path.is_some();
+    let in_workshop = has_project && app.ui_state.show_workshop && !app.ui_state.standalone_studio;
     let has_asset = app.session.current_asset().is_some();
     let has_rig = app
         .session
         .current_asset()
         .is_some_and(|a| a.cutout_rig.is_some());
+
     egui::ScrollArea::horizontal()
         .id_salt("header_actions")
         .show(ui, |ui| {
@@ -113,36 +114,102 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         .strong()
                         .color(chrome::TEXT),
                 );
-                ui.separator();
-                if action_button(app, ui, "toolbar.import", "+ Import Asset", super::start::project_open(app)) {
-                    app.ui_state.connect_asset_open = true;
-                }
-                if action_button(
-                    app,
-                    ui,
-                    "toolbar.transparent",
-                    "Make Transparent",
-                    has_asset,
-                ) {
-                    command(
-                        app,
-                        "asset.make_transparent",
-                        json!({"tolerance": app.ui_state.bg_tolerance}),
+                if super::start::project_open(app) {
+                    ui.separator();
+                    let workshop_tab = ui
+                        .add_enabled_ui(has_project, |ui| {
+                            chrome::tab(ui, "AnimationProject", in_workshop)
+                        })
+                        .inner
+                        .on_hover_text("AnimationProject Mode: 4-stage song checklist, Video Project server, Assets pool, and Storyboard PDF")
+                        .on_disabled_hover_text("Open or create a song project (.acproj) to use AnimationProject mode");
+                    app.automation.add_response(
+                        "header.mode.workshop",
+                        "button",
+                        "AnimationProject",
+                        &workshop_tab,
                     );
+                    if workshop_tab.clicked() {
+                        app.ui_state.show_workshop = true;
+                        app.ui_state.standalone_studio = false;
+                    }
+
+                    let studio_label = match app.session.active_asset.as_deref() {
+                        Some(active) => format!("AnimationStudio · {active}"),
+                        None => "AnimationStudio".to_string(),
+                    };
+                    let studio_tab = chrome::tab(ui, &studio_label, !in_workshop).on_hover_text(
+                        "AnimationStudio Mode: Full-window 3-column 2D/3D Rigging & Layered Motion Studio",
+                    );
+                    app.automation.add_response(
+                        "header.mode.studio",
+                        "button",
+                        &studio_label,
+                        &studio_tab,
+                    );
+                    if studio_tab.clicked() {
+                        app.ui_state.show_workshop = false;
+                        app.ui_state.standalone_studio = true;
+                    }
                 }
-                if action_button(app, ui, "toolbar.build_rig", "Build Cutout Rig", has_asset) {
-                    command(app, "asset.build_cutout_rig", json!({}));
-                }
-                if action_button(app, ui, "toolbar.reload", "Reload Manifest", has_asset) {
-                    reload(app);
-                }
-                let export_label = if has_asset && !has_rig {
-                    "Export MP4 (Build Rig First)"
+
+                if in_workshop {
+                    super::workshop::header_project_bar(app, ui);
                 } else {
-                    "Export MP4"
-                };
-                if action_button(app, ui, "toolbar.export_mp4", export_label, has_rig) {
-                    export_mp4(app);
+                    if !app.session.project_assets.is_empty() {
+                        ui.separator();
+                        ui.label(RichText::new("Subject:").size(12.0).color(chrome::MUTED));
+                        let entries = app.session.project_assets.clone();
+                        for entry in entries {
+                            let active = app.session.active_asset.as_deref() == Some(entry.id.as_str());
+                            let r = ui
+                                .selectable_label(
+                                    active,
+                                    RichText::new(&entry.name).size(12.0).strong(),
+                                )
+                                .on_hover_text(format!("Switch active animated subject to '{}'", entry.name));
+                            app.automation.add_response(
+                                format!("header.subject.{}", entry.id),
+                                "button",
+                                &entry.name,
+                                &r,
+                            );
+                            if r.clicked() && !active {
+                                command(app, "project.load_asset", json!({"id": entry.id}));
+                            }
+                        }
+                    }
+                    ui.separator();
+                    if action_button(app, ui, "toolbar.import", "+ Import Asset", true) {
+                        app.ui_state.connect_asset_open = true;
+                    }
+                    if action_button(
+                        app,
+                        ui,
+                        "toolbar.transparent",
+                        "Make Transparent",
+                        has_asset,
+                    ) {
+                        command(
+                            app,
+                            "asset.make_transparent",
+                            json!({"tolerance": app.ui_state.bg_tolerance}),
+                        );
+                    }
+                    if action_button(app, ui, "toolbar.build_rig", "Build Cutout Rig", has_asset) {
+                        command(app, "asset.build_cutout_rig", json!({}));
+                    }
+                    if action_button(app, ui, "toolbar.reload", "Reload Manifest", has_asset) {
+                        reload(app);
+                    }
+                    let export_label = if has_asset && !has_rig {
+                        "Export MP4 (Build Rig First)"
+                    } else {
+                        "Export MP4"
+                    };
+                    if action_button(app, ui, "toolbar.export_mp4", export_label, has_rig) {
+                        export_mp4(app);
+                    }
                 }
             });
         });

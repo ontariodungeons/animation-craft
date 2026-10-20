@@ -33,9 +33,13 @@ fn main() -> eframe::Result {
         app.start_control_server(port);
     }
 
-    // If an image was passed on the command line, run intake.validate on it.
+    // If a project (.acproj) or image was passed on the command line, open or import it.
     if let Some(path) = args.image_path {
-        let _ = app.dispatch("intake.validate", json!({ "image": path }));
+        if path.to_ascii_lowercase().ends_with(".acproj") {
+            let _ = app.dispatch("project.open", json!({ "path": path }));
+        } else {
+            let _ = app.dispatch("intake.validate", json!({ "image": path }));
+        }
     }
 
     let window_title = args.control_port.map(|port| format!("AnimationCraft Studio — Review {port}"))

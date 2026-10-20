@@ -305,7 +305,7 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
         })
         .unwrap_or_else(|| asset_id_for_import(None, &resolved_path));
 
-    // STEP 1 OF IMAGE IMPORT: Use photocraft-cli (paint.magicEraser at 4 corners) to strip background to transparent RGBA PNG!
+    // STEP 1 OF IMAGE IMPORT: photocraft-cli `layer.removeBackground` strips the background (including enclosed gaps) to a transparent RGBA PNG.
     let root = workspace_root(s);
     let import_dir = root.join("exports/pose_and_parts").join(&asset_id);
     std::fs::create_dir_all(&import_dir)?;
@@ -482,56 +482,27 @@ fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
-/// Use `photocraft-cli run` (`layer.new.layerFromBackground` + 4-corner `paint.magicEraser`)
-/// to strip a studio background to transparent RGBA PNG as Step 1 of import.
+/// Use `photocraft-cli run` with PhotoCraft's subject-aware `layer.removeBackground` to strip
+/// the background to a transparent RGBA PNG as Step 1 of import. Unlike corner flood-fills, it
+/// also clears background enclosed by the subject (between legs, inside arm loops).
 pub fn run_photocraft_transparent_step1(
     input_path: &Path,
     output_path: &Path,
     width: u32,
     height: u32,
-    tolerance: u32,
+    _tolerance: u32,
 ) -> std::result::Result<(), String> {
     if width < 8 || height < 8 {
         return Err(format!("image is {width}x{height}; background removal needs at least 8x8"));
     }
     let bin = resolve_craft_cli("photocraft-cli");
-    let tol = tolerance.clamp(8, 35);
-    let x_right = width.saturating_sub(3);
-    let y_bot = height.saturating_sub(3);
-    let p_tl =
-        format!("{{\"x\":2,\"y\":2,\"tolerance\":{tol},\"antiAlias\":true,\"contiguous\":true}}");
-    let p_tr = format!(
-        "{{\"x\":{x_right},\"y\":2,\"tolerance\":{tol},\"antiAlias\":true,\"contiguous\":true}}"
-    );
-    let p_bl = format!(
-        "{{\"x\":2,\"y\":{y_bot},\"tolerance\":{tol},\"antiAlias\":true,\"contiguous\":true}}"
-    );
-    let p_br = format!(
-        "{{\"x\":{x_right},\"y\":{y_bot},\"tolerance\":{tol},\"antiAlias\":true,\"contiguous\":true}}"
-    );
     let args = vec![
         "run".to_string(),
         input_path.to_string_lossy().into_owned(),
         "--cmd".to_string(),
-        "layer.new.layerFromBackground".to_string(),
+        "layer.removeBackground".to_string(),
         "--params".to_string(),
-        "{\"ifPresent\":true}".to_string(),
-        "--cmd".to_string(),
-        "paint.magicEraser".to_string(),
-        "--params".to_string(),
-        p_tl,
-        "--cmd".to_string(),
-        "paint.magicEraser".to_string(),
-        "--params".to_string(),
-        p_tr,
-        "--cmd".to_string(),
-        "paint.magicEraser".to_string(),
-        "--params".to_string(),
-        p_bl,
-        "--cmd".to_string(),
-        "paint.magicEraser".to_string(),
-        "--params".to_string(),
-        p_br,
+        "{\"refine\":true}".to_string(),
         "--out".to_string(),
         output_path.to_string_lossy().into_owned(),
     ];
@@ -541,7 +512,7 @@ pub fn run_photocraft_transparent_step1(
         .map_err(|e| format!("cannot run {bin}: {e}"))?;
     if !out.status.success() || !output_path.is_file() {
         let msg = String::from_utf8_lossy(&out.stderr);
-        return Err(msg.lines().last().unwrap_or("magic eraser produced no output").to_string());
+        return Err(msg.lines().last().unwrap_or("PhotoCraft background removal produced no output").to_string());
     }
     Ok(())
 }
@@ -3182,9 +3153,21 @@ fn cmd_vision_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
-fn cmd_query_list(_s: &mut Session, _params: &Value) -> Result<Value> {
+fn cmd_query_list(_s: &mut Session, params: &Value) -> Result<Value> {
+    let f = params
+        .get("filter")
+        .or_else(|| params.get("query"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
     let list: Vec<Value> = command_specs()
         .iter()
+        .filter(|c| {
+            f.is_empty()
+                || c.id.to_ascii_lowercase().contains(&f)
+                || c.label.to_ascii_lowercase().contains(&f)
+                || c.params.to_ascii_lowercase().contains(&f)
+        })
         .map(|c| {
             json!({
                 "id": c.id,
@@ -3196,7 +3179,84 @@ fn cmd_query_list(_s: &mut Session, _params: &Value) -> Result<Value> {
             })
         })
         .collect();
-    Ok(json!({"commands": list}))
+    Ok(json!({"count": list.len(), "commands": list}))
+}
+
+/// Unified CLI search across commands, connected subjects, workshop files, and storyboard scenes.
+fn cmd_project_search(s: &mut Session, params: &Value) -> Result<Value> {
+    let q = params
+        .get("query")
+        .or_else(|| params.get("filter"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let q_lower = q.to_ascii_lowercase();
+
+    let commands: Vec<Value> = command_specs()
+        .iter()
+        .filter(|c| {
+            q_lower.is_empty()
+                || c.id.to_ascii_lowercase().contains(&q_lower)
+                || c.label.to_ascii_lowercase().contains(&q_lower)
+                || c.params.to_ascii_lowercase().contains(&q_lower)
+        })
+        .map(|c| json!({"id": c.id, "label": c.label, "params": c.params}))
+        .collect();
+
+    let subjects: Vec<Value> = s
+        .project_assets
+        .iter()
+        .filter(|a| {
+            q_lower.is_empty()
+                || a.id.to_ascii_lowercase().contains(&q_lower)
+                || a.name.to_ascii_lowercase().contains(&q_lower)
+                || a.path
+                    .as_ref()
+                    .is_some_and(|p| p.display().to_string().to_ascii_lowercase().contains(&q_lower))
+        })
+        .map(|a| {
+            let parts: Vec<String> = s
+                .assets
+                .get(&a.id)
+                .map(|loaded| loaded.parts.iter().map(|p| p.name.clone()).collect())
+                .unwrap_or_default();
+            json!({
+                "id": a.id,
+                "name": a.name,
+                "kind": a.kind,
+                "path": a.path,
+                "parts": parts,
+            })
+        })
+        .collect();
+
+    let files = cmd_workshop_files(s, &json!({"filter": q}))
+        .ok()
+        .and_then(|v| v.get("files").cloned())
+        .unwrap_or_else(|| json!([]));
+
+    let storyboard_hits = if !q.is_empty() {
+        cmd_storyboard_search(s, &json!({"query": q}))
+            .ok()
+            .and_then(|v| v.get("matches").cloned())
+            .unwrap_or_else(|| json!([]))
+    } else {
+        cmd_storyboard_toc(s, &json!({}))
+            .ok()
+            .and_then(|v| v.get("scenes").cloned())
+            .unwrap_or_else(|| json!([]))
+    };
+
+    Ok(json!({
+        "ok": true,
+        "query": q,
+        "project": s.project_path,
+        "active_asset": s.active_asset,
+        "subjects": subjects,
+        "files": files,
+        "storyboard": storyboard_hits,
+        "commands": commands,
+    }))
 }
 
 fn project_index(s: &Session, params: &Value) -> Result<usize> {
@@ -3383,10 +3443,252 @@ fn panel_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn video_project_path(dir: &Path) -> Option<PathBuf> {
-    transcript_files(dir).iter().find_map(|t| {
-        let name = t.file_name()?.to_str()?.replace(".transcript.json", ".fcproj");
-        let fcproj = t.with_file_name(name);
-        fcproj.is_file().then_some(fcproj)
+    transcript_files(dir)
+        .iter()
+        .find_map(|t| {
+            let name = t.file_name()?.to_str()?.replace(".transcript.json", ".fcproj");
+            let fcproj = t.with_file_name(name);
+            fcproj.is_file().then_some(fcproj)
+        })
+        .or_else(|| files_in(dir, Some(&["fcproj"])).into_iter().next())
+}
+
+/// Static and cutout image assets in the song project folder (`assets/`, `layer-sources/`, and any
+/// `animationcraft-*/parts/` or `animationcraft-*/reference/` subdirectories).
+fn workshop_asset_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut push_unique = |paths: Vec<PathBuf>| {
+        for p in paths {
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    };
+    push_unique(files_in(&dir.join(ASSETS_DIR), Some(IMAGE_EXTENSIONS)));
+    push_unique(files_in(&dir.join(ASSETS_DIR).join("images"), Some(IMAGE_EXTENSIONS)));
+    push_unique(files_in(&dir.join(ASSETS_DIR).join("characters/approved-crops"), Some(IMAGE_EXTENSIONS)));
+    if let Ok(chars) = std::fs::read_dir(dir.join(ASSETS_DIR).join("characters")) {
+        let mut char_dirs: Vec<PathBuf> = chars.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        char_dirs.sort();
+        for cdir in char_dirs {
+            push_unique(files_in(&cdir.join("parts"), Some(IMAGE_EXTENSIONS)));
+        }
+    }
+    if let Ok(bgs) = std::fs::read_dir(dir.join(ASSETS_DIR).join("backgrounds")) {
+        let mut bg_dirs: Vec<PathBuf> = bgs.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        bg_dirs.sort();
+        for bdir in bg_dirs {
+            push_unique(files_in(&bdir, Some(IMAGE_EXTENSIONS)));
+        }
+    }
+    push_unique(files_in(&dir.join("layer-sources"), Some(IMAGE_EXTENSIONS)));
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut subdirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_dir()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("animationcraft-"))
+            })
+            .collect();
+        subdirs.sort();
+        for sub in subdirs {
+            push_unique(files_in(&sub.join("parts"), Some(IMAGE_EXTENSIONS)));
+            push_unique(files_in(&sub.join("reference"), Some(IMAGE_EXTENSIONS)));
+        }
+    }
+    if let Some(composer) = remotion_composer_dir(dir) {
+        let folder = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let slug = folder
+            .strip_prefix("kathy-cd-track-")
+            .map(|num| format!("track{}", num.replace('-', "")))
+            .unwrap_or_else(|| sanitize_asset_id(folder));
+        let pub_dir = composer.join("public").join(&slug);
+        push_unique(files_in(&pub_dir.join("layers"), Some(IMAGE_EXTENSIONS)));
+        push_unique(files_in(&pub_dir.join("bee"), Some(IMAGE_EXTENSIONS)));
+    }
+    out
+}
+
+fn remotion_composer_dir(dir: &Path) -> Option<PathBuf> {
+    for ancestor in dir.ancestors().skip(1).take(3) {
+        let candidate = ancestor.join("remotion-composer");
+        if candidate.join("package.json").is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn remotion_track_slug(s: &Session, dir: &Path) -> String {
+    let folder = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if let Some(num) = folder.strip_prefix("kathy-cd-track-") {
+        return format!("track{}", num.replace('-', ""));
+    }
+    let stem = s
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|n| n.to_str())
+        .unwrap_or(if folder.is_empty() { "song" } else { folder });
+    sanitize_asset_id(stem)
+}
+
+fn target_project_path(s: &Session, dir: &Path, target: &str) -> Option<PathBuf> {
+    match target {
+        "filmcraft" => video_project_path(dir),
+        "hyperframes" => {
+            let hf_json = dir.join("hyperframes/hyperframes.json");
+            let hf_html = dir.join("hyperframes/index.html");
+            if hf_json.is_file() {
+                Some(hf_json)
+            } else if hf_html.is_file() {
+                Some(hf_html)
+            } else {
+                None
+            }
+        }
+        "remotion" => {
+            let local_pkg = dir.join("remotion/package.json");
+            if local_pkg.is_file() {
+                return Some(local_pkg);
+            }
+            if let Some(composer) = remotion_composer_dir(dir) {
+                let slug = remotion_track_slug(s, dir);
+                let comp_dir = composer.join("src").join(&slug);
+                if comp_dir.is_dir() {
+                    return Some(comp_dir);
+                }
+                let folder_slug = sanitize_asset_id(
+                    dir.file_name().and_then(|n| n.to_str()).unwrap_or("song"),
+                );
+                let alt_dir = composer.join("src").join(&folder_slug);
+                if alt_dir.is_dir() {
+                    return Some(alt_dir);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn target_project_chip(s: &Session, dir: &Path, target: &str) -> Value {
+    if let Some(path) = target_project_path(s, dir, target) {
+        let label = match target {
+            "remotion" => format!(
+                "remotion/{}",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or("remotion")
+            ),
+            "hyperframes" => "hyperframes/hyperframes.json".to_string(),
+            _ => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project.fcproj")
+                .to_string(),
+        };
+        json!({"name": label, "path": path, "exists": true, "target": target})
+    } else {
+        let expected = match target {
+            "remotion" => {
+                let slug = remotion_track_slug(s, dir);
+                let path = remotion_composer_dir(dir)
+                    .map(|c| c.join("src").join(&slug))
+                    .unwrap_or_else(|| dir.join("remotion"));
+                (format!("remotion/{slug}"), path)
+            }
+            "hyperframes" => (
+                "hyperframes/hyperframes.json".to_string(),
+                dir.join("hyperframes/hyperframes.json"),
+            ),
+            _ => {
+                let stem = sanitize_asset_id(
+                    s.project_path
+                        .as_ref()
+                        .and_then(|p| p.file_stem())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("song"),
+                );
+                (format!("{stem}.fcproj"), dir.join(format!("{stem}.fcproj")))
+            }
+        };
+        json!({"name": expected.0, "path": expected.1, "exists": false, "target": target})
+    }
+}
+
+fn probe_http_server(port: u16) -> Option<String> {
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(60)).ok()?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(80)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(60)));
+    stream
+        .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .ok()?;
+    let mut buf = [0u8; 2048];
+    let n = stream.read(&mut buf).ok()?;
+    if n == 0 {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+    text.starts_with("HTTP/").then_some(text)
+}
+
+fn video_server_info(dir: &Path, target: &str) -> Value {
+    let state_file = dir.join(".video-server.json");
+    if let Ok(raw) = std::fs::read_to_string(&state_file)
+        && let Ok(saved) = serde_json::from_str::<Value>(&raw)
+        && saved.get("target").and_then(Value::as_str) == Some(target)
+        && let Some(port) = saved.get("port").and_then(Value::as_u64).map(|p| p as u16)
+        && probe_http_server(port).is_some()
+    {
+        return json!({
+            "running": true,
+            "target": target,
+            "port": port,
+            "url": format!("http://localhost:{port}"),
+            "pid": saved.get("pid"),
+            "managed": true,
+        });
+    }
+    let candidate_ports: &[u16] = match target {
+        "remotion" => &[3057, 3001, 3002],
+        "hyperframes" => &[3058, 4321, 5173],
+        _ => &[],
+    };
+    for &port in candidate_ports {
+        if let Some(resp) = probe_http_server(port) {
+            let lower = resp.to_ascii_lowercase();
+            let matches = match target {
+                "remotion" => lower.contains("remotion") || port == 3057,
+                "hyperframes" => lower.contains("hyperframes") || port == 3058,
+                _ => false,
+            };
+            if matches {
+                return json!({
+                    "running": true,
+                    "target": target,
+                    "port": port,
+                    "url": format!("http://localhost:{port}"),
+                    "pid": null,
+                    "managed": false,
+                });
+            }
+        }
+    }
+    json!({
+        "running": false,
+        "target": target,
+        "port": null,
+        "url": null,
+        "pid": null,
+        "managed": false,
     })
 }
 
@@ -3577,7 +3879,7 @@ fn workshop_status(s: &Session) -> Result<Value> {
     let transcripts = transcript_files(&dir);
     let fcproj = video_project_path(&dir);
     let panels = panel_files(&dir);
-    let assets = files_in(&dir.join(ASSETS_DIR), Some(IMAGE_EXTENSIONS));
+    let assets = workshop_asset_files(&dir);
     let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
     // Approved when every scene's own status is approved (storyboard/scene-N.md); projects
     // without scene files fall back to the single storyboard approval.
@@ -3592,22 +3894,31 @@ fn workshop_status(s: &Session) -> Result<Value> {
 
     let song_why = match (audio_ok, liner.is_empty()) {
         (false, _) => "Choose the song's audio.",
-        (true, true) => "Add the artist's liner notes.",
+        (true, true) => "Song audio linked and ready (liner notes optional).",
         (true, false) => "Song and liner notes are in place.",
     };
-    let target_project = match target {
-        "filmcraft" => json!({"target": target, "path": fcproj, "ready": fcproj.is_some()}),
-        _ => json!({"target": target, "path": null, "ready": false, "note": format!("{target} starter project is not built yet")}),
-    };
-    // Every video target with whether its project file exists (only FilmCraft's is made so far).
+    let active_target_path = target_project_path(s, &dir, target);
+    let target_chip = target_project_chip(s, &dir, target);
+    let target_project = json!({
+        "target": target,
+        "path": active_target_path,
+        "ready": active_target_path.is_some(),
+        "chip": target_chip,
+    });
+    // Every video target with whether its project file exists.
     let targets: Vec<Value> = VIDEO_TARGETS
         .iter()
         .map(|t| {
-            let path = (*t == "filmcraft").then(|| fcproj.clone()).flatten();
+            let path = target_project_path(s, &dir, t);
             json!({"target": t, "selected": *t == target, "path": path, "exists": path.is_some()})
         })
         .collect();
-    let transcript_why = if transcripts.is_empty() { "Transcribe the song with FilmCraft." } else { "Transcript ready; it lines up the storyboard scenes." };
+    let server = video_server_info(&dir, target);
+    let transcript_why = if transcripts.is_empty() {
+        "Transcribe the song to timestamp lyrics and initialize the video project."
+    } else {
+        "Transcript ready; timestamps line up the video project and storyboard scenes."
+    };
     let reference_why = match (panels.is_empty(), pdf.is_file(), approved) {
         (true, _, _) => "Add storyboard panels (split a storyboard grid or add panel images).",
         (false, false, _) => "Build the storyboard PDF from the panels and transcript.",
@@ -3619,22 +3930,37 @@ fn workshop_status(s: &Session) -> Result<Value> {
         .iter()
         .map(|a| {
             let loaded = s.assets.get(&a.id);
-            let parts = loaded.and_then(|x| x.cutout_rig.as_ref()).map(|r| r.parts.len());
-            let controls: Vec<&str> = loaded
-                .and_then(|x| x.cutout_rig.as_ref())
+            let rig = loaded.and_then(|x| x.cutout_rig.as_ref());
+            let parts = rig.map(|r| r.parts.len());
+            let tracks = rig
+                .and_then(|r| r.effectcraft.get("tracks"))
+                .and_then(Value::as_array)
+                .map(|t| t.len());
+            let controls: Vec<&str> = rig
                 .map(|r| crate::control_bindings::CONTROLS.iter().copied().filter(|c| r.control_bindings.supports(c)).collect())
                 .unwrap_or_default();
-            json!({"id": a.id, "name": a.name, "path": a.path, "parts": parts, "controls": controls})
+            json!({
+                "id": a.id,
+                "name": a.name,
+                "kind": a.kind,
+                "path": a.path,
+                "parts": parts,
+                "tracks": tracks,
+                "controls": controls,
+                "animatable": rig.is_some_and(|r| r.parts.len() >= 2),
+            })
         })
         .collect();
+    let mut transcript_outputs: Vec<Value> = transcripts.iter().map(|p| file_chip(p)).collect();
+    transcript_outputs.push(target_chip.clone());
     let stages = vec![
-        json!({"id": "song", "title": "Song", "done": audio_ok && !liner.is_empty(), "why": song_why,
+        json!({"id": "song", "title": "Song", "done": audio_ok, "why": song_why,
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).chain(liner.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
-            "outputs": s.project_path.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
+            "outputs": vec![target_chip],
             "brief": stage_brief(s, &dir, "song")}),
         json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty(), "why": transcript_why,
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
-            "outputs": transcripts.iter().chain(fcproj.iter()).map(|p| file_chip(p)).collect::<Vec<_>>(),
+            "outputs": transcript_outputs,
             "target": target_project, "brief": stage_brief(s, &dir, "transcript")}),
         json!({"id": "reference", "title": "Reference art", "done": !panels.is_empty() && approved, "why": reference_why,
             "inputs": panels.iter().enumerate().map(|(i, p)| {
@@ -3646,16 +3972,25 @@ fn workshop_status(s: &Session) -> Result<Value> {
             }).collect::<Vec<_>>(),
             "outputs": std::iter::once(file_chip(&pdf)).chain(assets.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
             "approved": approved, "pdf": pdf, "brief": stage_brief(s, &dir, "reference")}),
-        json!({"id": "animate", "title": "Animate assets", "done": false, "optional": true,
-            "why": if animated.is_empty() { "Import an asset to animate (only the ones that need motion)." } else { "Pick an asset to animate; the others stay static." },
+        json!({"id": "animate", "title": "Animate assets", "done": !animated.is_empty(), "optional": true,
+            "why": if animated.is_empty() { "Drag an asset into Stage 4 to create an animated subject (static scenes need none)." } else { "Pick an animated subject to rig or preview; static assets stay on video tracks." },
             "inputs": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(), "assets": animated,
             "brief": stage_brief(s, &dir, "animate")}),
     ];
     let complete = stages.iter().take(3).all(|st| st["done"] == json!(true));
     let studio_info = studio(&dir);
-    Ok(json!({"ok": true, "project_dir": dir, "complete": complete, "video_target": target, "targets": targets,
+    Ok(json!({
+        "ok": true,
+        "project_dir": dir,
+        "complete": complete,
+        "video_target": target,
+        "targets": targets,
+        "video_server": server,
+        "asset_files": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
         "studio": {"name": studio_info.name, "intent": studio_info.intent, "source": studio_info.source},
-        "video_project": fcproj, "stages": stages}))
+        "video_project": active_target_path.or(fcproj),
+        "stages": stages
+    }))
 }
 
 fn cmd_workshop_status(s: &mut Session, _: &Value) -> Result<Value> {
@@ -3663,24 +3998,26 @@ fn cmd_workshop_status(s: &mut Session, _: &Value) -> Result<Value> {
 }
 
 fn cmd_workshop_set_audio(s: &mut Session, params: &Value) -> Result<Value> {
-    project_dir(s)?;
+    let dir = project_dir(s)?;
     let raw = params
         .get("path")
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::InvalidParams("missing audio 'path'".into()))?;
     s.song_audio = Some(song_audio_path(s, raw)?);
     write_project_file(s)?;
+    let _ = ensure_video_target_project(s, &dir, &s.video_target);
     workshop_status(s)
 }
 
 fn cmd_workshop_set_target(s: &mut Session, params: &Value) -> Result<Value> {
-    project_dir(s)?;
+    let dir = project_dir(s)?;
     let target = params.get("target").and_then(Value::as_str).unwrap_or_default();
     if !VIDEO_TARGETS.contains(&target) {
         return Err(EngineError::InvalidParams(format!("target must be one of {VIDEO_TARGETS:?}")));
     }
     s.video_target = target.into();
     write_project_file(s)?;
+    let _ = ensure_video_target_project(s, &dir, target);
     workshop_status(s)
 }
 
@@ -3731,8 +4068,37 @@ fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
         }
         added.push(dest);
     }
+    let animate = params
+        .get("animate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || params.get("subject").and_then(Value::as_str).is_some();
+    let mut connected_subjects = Vec::new();
+    if folder == ASSETS_DIR && animate {
+        let explicit_name = params.get("subject").and_then(Value::as_str);
+        for dest in &added {
+            let mut add_params = json!({
+                "path": dest,
+                "kind": "auto",
+                "if_not_exists": true,
+                "load": true,
+            });
+            if let Some(name) = explicit_name {
+                add_params["name"] = json!(name);
+            }
+            if let Ok(res) = cmd_project_add_asset(s, &add_params)
+                && let Some(id) = res.get("asset_id").and_then(Value::as_str)
+            {
+                connected_subjects.push(id.to_string());
+            }
+        }
+        write_project_file(s)?;
+    }
     let mut status = workshop_status(s)?;
     status["added"] = json!(added);
+    if !connected_subjects.is_empty() {
+        status["connected_subjects"] = json!(connected_subjects);
+    }
     Ok(status)
 }
 
@@ -3870,6 +4236,7 @@ fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result<Val
         std::fs::copy(&fcproj, &to)?;
         copied.push(to);
     }
+    let _ = ensure_video_target_project(s, &dir, &s.video_target);
     let mut status = workshop_status(s)?;
     status["imported"] = json!(copied);
     Ok(status)
@@ -4031,36 +4398,77 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let kicker = format!("{} · STORYBOARD", studio_info.name.clone().unwrap_or_else(|| "WORKSHOP".into()).to_uppercase());
     steps.extend(header(1, kicker, title.clone()));
     if let Some(intent) = &studio_info.intent {
-        steps.push(block(1, [m, 72.0, pw - m, 96.0], intent.replace('\n', " "), 8.5, "helvetica", MUTE));
+        let first_line = intent.lines().find(|l| !l.trim().is_empty()).unwrap_or_default();
+        let short_intent = if first_line.chars().count() > 145 {
+            format!("{}…", first_line.chars().take(145).collect::<String>())
+        } else {
+            first_line.to_string()
+        };
+        steps.push(block(1, [m, 70.0, pw - m, 92.0], short_intent, 8.5, "helvetica", MUTE));
     }
     let liner = files_in(&dir.join("liner-notes"), None);
     let facts = [
         format!("SONG        {}", s.song_audio.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "not set".into())),
         format!("TRANSCRIPT  {}", transcript_path.file_name().and_then(|n| n.to_str()).unwrap_or_default()),
-        format!("LINER NOTES {}", if liner.is_empty() { "missing".to_string() } else { liner.iter().filter_map(|p| p.file_name()?.to_str()).collect::<Vec<_>>().join(", ") }),
-        format!("EDIT IN     {}", s.video_target),
+        format!("LINER NOTES {}", if liner.is_empty() { "optional (none attached)".to_string() } else { liner.iter().filter_map(|p| p.file_name()?.to_str()).collect::<Vec<_>>().join(", ") }),
+        format!("EDIT IN     {} ({})", s.video_target, target_project_path(s, &dir, &s.video_target).map(|p| p.display().to_string()).unwrap_or_else(|| "ready".into())),
         format!("STATUS      {}", if s.draft_approved { "APPROVED" } else { "DRAFT — NEEDS REVIEW" }),
     ];
-    steps.push(block(1, [m, 104.0, pw - m, 172.0], facts.join("\n"), 8.5, "courier", CREAM));
-    steps.push(text(1, [m, 184.0], pw - m, "SCENES".into(), 9.0, "courier", AMBER, true));
+    steps.push(block(1, [m, 100.0, pw - m - 270.0, 172.0], facts.join("\n"), 8.5, "courier", CREAM));
+    // Place 3x2 reference sheets (storyboard-grid & teaching-cues) on Page 1 top-right when present.
+    let grid_sheet = [
+        dir.join("assets/references/storyboard-grid-v1.png"),
+        dir.join("storyboard/storyboard-grid.png"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file());
+    let teach_sheet = [
+        dir.join("assets/references/teaching-cues-v1.png"),
+        dir.join("storyboard/teaching-cues.png"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file());
+    if let Some(ref g) = grid_sheet {
+        let box_r = if teach_sheet.is_some() {
+            [pw - m - 260.0, 96.0, pw - m - 134.0, 168.0]
+        } else {
+            [pw - m - 260.0, 96.0, pw - m, 168.0]
+        };
+        if let Ok(r) = fit(g, box_r) {
+            steps.push(image(1, g, r));
+            layout.push(json!({"page": 1, "path": g, "rect": r}));
+            steps.push(text(1, [box_r[0], 170.0], box_r[2], "STORYBOARD 3x2".into(), 7.5, "courier", AMBER, true));
+        }
+    }
+    if let Some(ref tc) = teach_sheet {
+        let box_r = [pw - m - 126.0, 96.0, pw - m, 168.0];
+        if let Ok(r) = fit(tc, box_r) {
+            steps.push(image(1, tc, r));
+            layout.push(json!({"page": 1, "path": tc, "rect": r}));
+            steps.push(text(1, [box_r[0], 170.0], box_r[2], "TEACHING CUES 3x2".into(), 7.5, "courier", AMBER, true));
+        }
+    }
+    steps.push(text(1, [m, 184.0], pw - m, "SCENES · CLICK A SCENE ROW TO JUMP TO ITS PACKET".into(), 9.0, "courier", AMBER, true));
+    let row_step = ((ph - 206.0) / scene_list.len().max(1) as f64).min(44.0);
+    let card_h = (row_step - 5.0).max(26.0);
     for (i, scene) in scene_list.iter().enumerate() {
-        let y = 202.0 + i as f64 * 44.0;
-        steps.push(image(1, &card_dark, [m, y, pw - m, y + 38.0]));
+        let y = 202.0 + i as f64 * row_step;
+        steps.push(image(1, &card_dark, [m, y, pw - m, y + card_h]));
         // The scene's reference panel, else the first line's panel.
         let reference = scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file());
         let first_panel = reference.as_ref().or_else(|| scene["lines"].as_array().filter(|l| !l.is_empty()).and_then(|_| panels.first()));
         // Every row keeps the thumbnail column so the labels line up.
         let x = m + 14.0 + 56.0;
         if let Some(p) = first_panel {
-            let r = fit(p, [m + 14.0, y + 4.0, m + 14.0 + 50.0, y + 34.0])?;
+            let r = fit(p, [m + 14.0, y + 3.0, m + 14.0 + 50.0, y + card_h - 3.0])?;
             steps.push(image(1, p, r));
         }
-        steps.push(text(1, [x, y + 6.0], pw - m - 120.0, scene_label(i, scene), 12.0, "helvetica", CREAM, true));
+        steps.push(text(1, [x, y + (card_h - 14.0) * 0.45], pw - m - 120.0, scene_label(i, scene), 11.5, "helvetica", CREAM, true));
         let lines = scene["lines"].as_array().map_or(0, Vec::len);
         let status = scene["status"].as_str().unwrap_or("draft");
         let note = if lines == 0 { format!("instrumental · {status}") } else { format!("{lines} lines · {status}") };
-        steps.push(text(1, [pw - m - 110.0, y + 9.0], pw - m - 8.0, note, 9.0, "courier", AMBER, false));
-        steps.push(json!({"tool": "link_add", "args": {"doc": 1, "page": 1, "rect": [m, y, pw - m, y + 38.0], "to_page": i + 2, "visible": false}}));
+        steps.push(text(1, [pw - m - 110.0, y + (card_h - 12.0) * 0.5], pw - m - 8.0, note, 9.0, "courier", AMBER, false));
+        steps.push(json!({"tool": "link_add", "args": {"doc": 1, "page": 1, "rect": [m, y, pw - m, y + card_h], "to_page": i + 2, "visible": false}}));
     }
 
     // One page per scene: each sung line on a screenplay card with its panel framed as film.
@@ -4081,18 +4489,49 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         }
         let lines = scene["lines"].as_array().cloned().unwrap_or_default();
         if let Some(reference) = scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file()) {
-            // Scene packet: the approved reference framed as film on the left, timed lyrics on the
-            // right, the packet sections (skills, prompts, layer stack, checks) below.
-            let frame = [m, 74.0, m + 360.0, 74.0 + 230.0];
-            let window = [frame[0] + 18.0, frame[1] + 22.0, frame[2] - 18.0, frame[3] - 22.0];
-            let r = fit(&reference, window)?;
-            steps.push(image(page, &reference, r));
-            layout.push(json!({"page": page, "path": reference, "rect": r}));
-            let lyric_text = if lines.is_empty() { "Instrumental — no sung words.".to_string() } else {
-                lines.iter().map(|l| format!("{}  {}", clock(l["start"].as_f64().unwrap_or(0.0)), l["text"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n")
+            // Scene packet: approved story reference (+ optional teaching cue reference) on the left,
+            // timed lyrics + parent teaching cues on the right, and packet sections (layer stack,
+            // teaching cues, visual review expectations, prompts, checks) below.
+            let teach_ref = scene["teaching_reference"].as_str().map(PathBuf::from).filter(|p| p.is_file());
+            let right_card_left = if let Some(ref teach) = teach_ref {
+                let story_box = [m, 74.0, m + 216.0, 74.0 + 212.0];
+                let r1 = fit(&reference, [story_box[0] + 6.0, story_box[1] + 6.0, story_box[2] - 6.0, story_box[3] - 18.0])?;
+                steps.push(image(page, &reference, r1));
+                layout.push(json!({"page": page, "path": reference, "rect": r1}));
+                steps.push(text(page, [story_box[0] + 6.0, story_box[3] - 14.0], story_box[2], "STORY PANEL".into(), 7.5, "courier", AMBER, true));
+
+                let teach_box = [m + 222.0, 74.0, m + 412.0, 74.0 + 212.0];
+                let r2 = fit(teach, [teach_box[0] + 6.0, teach_box[1] + 6.0, teach_box[2] - 6.0, teach_box[3] - 18.0])?;
+                steps.push(image(page, teach, r2));
+                layout.push(json!({"page": page, "path": teach, "rect": r2}));
+                steps.push(text(page, [teach_box[0] + 6.0, teach_box[3] - 14.0], teach_box[2], "TEACHING CUE".into(), 7.5, "courier", AMBER, true));
+                teach_box[2] + 10.0
+            } else {
+                let frame = [m, 74.0, m + 360.0, 74.0 + 230.0];
+                let window = [frame[0] + 18.0, frame[1] + 22.0, frame[2] - 18.0, frame[3] - 22.0];
+                let r = fit(&reference, window)?;
+                steps.push(image(page, &reference, r));
+                layout.push(json!({"page": page, "path": reference, "rect": r}));
+                frame[2] + 12.0
             };
-            steps.push(image(page, &card_cream, [frame[2] + 12.0, 74.0, pw - m, 74.0 + 230.0]));
-            steps.push(block(page, [frame[2] + 28.0, 84.0, pw - m - 10.0, 74.0 + 224.0], lyric_text, 9.0, "courier", INK));
+            let lyric_text = if lines.is_empty() {
+                "Instrumental — no sung words.".to_string()
+            } else {
+                lines
+                    .iter()
+                    .map(|l| {
+                        let base = format!("{}  {}", clock(l["start"].as_f64().unwrap_or(0.0)), l["text"].as_str().unwrap_or(""));
+                        match l["cue"].as_str().filter(|c| !c.trim().is_empty()) {
+                            Some(cue) => format!("{base}\n       ACTION -> {cue}"),
+                            None => base,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let card_bottom = if teach_ref.is_some() { 74.0 + 212.0 } else { 74.0 + 230.0 };
+            steps.push(image(page, &card_cream, [right_card_left, 74.0, pw - m, card_bottom]));
+            steps.push(block(page, [right_card_left + 16.0, 82.0, pw - m - 10.0, card_bottom - 6.0], lyric_text, 8.5, "courier", INK));
             let sections = scene["sections"].as_object().cloned().unwrap_or_default();
             // pdfcraft does not clip text to its box, so each section is shortened to fit the page;
             // the full text stays in the scene file.
@@ -4109,7 +4548,8 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
             }));
             if !packet.is_empty() {
                 packet.push(format!("Full packet: storyboard/scene-{}.md", i + 1));
-                steps.push(block(page, [m, 316.0, pw - m, ph - 16.0], packet.join("\n\n"), 7.0, "courier", CREAM));
+                let packet_top = card_bottom + 10.0;
+                steps.push(block(page, [m, packet_top, pw - m, ph - 16.0], packet.join("\n\n"), 7.0, "courier", CREAM));
             }
             continue;
         }
@@ -4127,6 +4567,7 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
             steps.push(image(page, &card_cream, card));
             let time = clock(line["start"].as_f64().unwrap_or(0.0));
             let lyric = line["text"].as_str().unwrap_or("").to_string();
+            let cue = line["cue"].as_str().filter(|c| !c.trim().is_empty());
             let mut x = m + 16.0;
             if let Some(panel) = panels.get(j) {
                 let frame_h = row_h - 14.0;
@@ -4139,9 +4580,17 @@ fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
                 x = frame[2] + 14.0;
                 let name = panel.file_name().and_then(|n| n.to_str()).unwrap_or_default();
                 let prompt = prompt_of(j).unwrap_or_else(|| "(no prompt recorded for this panel)".into());
-                steps.push(block(page, [x, y + 30.0, pw - m - 12.0, y + row_h - 10.0], format!("{name} — {prompt}"), 7.5, "courier", INK));
+                let detail = match cue {
+                    Some(c) => format!("ACTION -> {c}\n{name} — {prompt}"),
+                    None => format!("{name} — {prompt}"),
+                };
+                steps.push(block(page, [x, y + 28.0, pw - m - 12.0, y + row_h - 10.0], detail, 7.5, "courier", INK));
             } else {
-                steps.push(text(page, [x, y + 30.0], pw - m - 12.0, format!("(no panel {} yet)", j + 1), 8.0, "courier", INK, false));
+                let detail = match cue {
+                    Some(c) => format!("ACTION -> {c}"),
+                    None => format!("(no panel {} yet)", j + 1),
+                };
+                steps.push(text(page, [x, y + 30.0], pw - m - 12.0, detail, 8.0, "courier", INK_TIME, cue.is_some()));
             }
             steps.push(text(page, [x, y + 8.0], x + 44.0, time, 11.0, "courier", INK_TIME, true));
             steps.push(text(page, [x + 48.0, y + 7.0], pw - m - 12.0, lyric, 13.0, "courier", INK, true));
@@ -4296,9 +4745,14 @@ fn write_backlot_mirror(
 fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
     let mut files: Vec<PathBuf> = files_in(&dir.join(STORYBOARD_DIR), None)
         .into_iter()
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("panel-")))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("panel-") || n.starts_with("scene-"))
+        })
         .collect();
     files.extend(files_in(&dir.join(ASSETS_DIR), None));
+    files.extend(files_in(&dir.join("assets/references"), None));
     files.extend(files_in(&dir.join("liner-notes"), None));
     files.extend(transcript_files(dir));
     files.push(dir.join("intent.md"));
@@ -4338,7 +4792,8 @@ fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
 
 /// Every file the workshop knows about, grouped by stage, plus anything else at the top of the
 /// project folder (so stray files an agent dropped there can be seen and removed).
-fn cmd_workshop_files(s: &mut Session, _: &Value) -> Result<Value> {
+/// Optional `filter` or `query` filters by name, group, or path substring; `group` filters by group.
+fn cmd_workshop_files(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let mut files = Vec::new();
     if let Some(audio) = &s.song_audio {
@@ -4356,7 +4811,7 @@ fn cmd_workshop_files(s: &mut Session, _: &Value) -> Result<Value> {
     for f in files_in(&dir.join(STORYBOARD_DIR), None) {
         files.push(file_entry("storyboard", &f, true));
     }
-    for f in files_in(&dir.join(ASSETS_DIR), None) {
+    for f in workshop_asset_files(&dir) {
         files.push(file_entry("assets", &f, true));
     }
     let listed: Vec<PathBuf> = files.iter().filter_map(|f| f["path"].as_str().map(PathBuf::from)).collect();
@@ -4365,7 +4820,29 @@ fn cmd_workshop_files(s: &mut Session, _: &Value) -> Result<Value> {
             files.push(file_entry("other", &f, true));
         }
     }
-    Ok(json!({"ok": true, "project_dir": dir, "files": files}))
+    if let Some(group_filter) = params.get("group").and_then(Value::as_str).map(str::to_ascii_lowercase)
+        && !group_filter.is_empty()
+    {
+        files.retain(|f| {
+            f["group"]
+                .as_str()
+                .is_some_and(|g| g.to_ascii_lowercase() == group_filter)
+        });
+    }
+    if let Some(q) = params
+        .get("filter")
+        .or_else(|| params.get("query"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        && !q.is_empty()
+    {
+        files.retain(|f| {
+            f["name"].as_str().is_some_and(|n| n.to_ascii_lowercase().contains(&q))
+                || f["path"].as_str().is_some_and(|p| p.to_ascii_lowercase().contains(&q))
+                || f["group"].as_str().is_some_and(|g| g.to_ascii_lowercase().contains(&q))
+        });
+    }
+    Ok(json!({"ok": true, "project_dir": dir, "count": files.len(), "files": files}))
 }
 
 /// Removes a workshop file: the song audio is only unlinked (the original is never touched); files
@@ -4399,6 +4876,297 @@ fn cmd_workshop_remove(s: &mut Session, params: &Value) -> Result<Value> {
     let mut status = workshop_status(s)?;
     status["trashed"] = json!(path);
     Ok(status)
+}
+
+fn probe_audio_duration(audio: Option<&Path>, dir: &Path) -> f64 {
+    if let Some(secs) = song_seconds(dir) {
+        return secs;
+    }
+    if let Some(t) = transcript_files(dir)
+        .first()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| {
+            v.get("words")
+                .and_then(Value::as_array)
+                .and_then(|w| w.last())
+                .and_then(|w| w.get("end"))
+                .and_then(Value::as_f64)
+        })
+        && t > 0.5
+    {
+        return t;
+    }
+    if let Some(audio) = audio
+        && let Ok(out) = std::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(audio)
+            .output()
+        && let Ok(secs) = String::from_utf8_lossy(&out.stdout).trim().parse::<f64>()
+        && secs > 0.5
+    {
+        return secs;
+    }
+    30.0
+}
+
+fn ensure_video_target_project(s: &Session, dir: &Path, target: &str) -> Result<PathBuf> {
+    if let Some(existing) = target_project_path(s, dir, target) {
+        return Ok(existing);
+    }
+    let title = s
+        .project_path
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|n| n.to_str())
+        .unwrap_or("Song")
+        .to_string();
+    let duration_secs = probe_audio_duration(s.song_audio.as_deref(), dir);
+    match target {
+        "remotion" => {
+            let slug = remotion_track_slug(s, dir);
+            let has_ancestor_composer = remotion_composer_dir(dir).is_some();
+            let comp_dir = if let Some(composer) = remotion_composer_dir(dir) {
+                composer.join("src").join(&slug)
+            } else {
+                let remotion_root = dir.join("remotion");
+                std::fs::create_dir_all(remotion_root.join("src"))?;
+                let pkg_json = remotion_root.join("package.json");
+                if !pkg_json.exists() {
+                    std::fs::write(
+                        &pkg_json,
+                        serde_json::to_string_pretty(&json!({
+                            "name": format!("remotion-{slug}"),
+                            "private": true,
+                            "scripts": {
+                                "dev": "npx remotion studio src/index.ts",
+                                "render": format!("npx remotion render src/index.ts {slug}")
+                            }
+                        }))
+                        .unwrap_or_default(),
+                    )?;
+                }
+                let index_ts = remotion_root.join("src/index.ts");
+                if !index_ts.exists() {
+                    std::fs::write(
+                        &index_ts,
+                        format!(
+                            "import React from \"react\";\nimport {{ Composition, registerRoot }} from \"remotion\";\nimport {{ {slug}_Composition }} from \"./{slug}/Composition\";\nimport {{ DURATION_FRAMES, FPS }} from \"./{slug}/beats\";\n\nexport const RemotionRoot: React.FC = () => (\n  <Composition id={slug:?} component={{{slug}_Composition}} durationInFrames={{DURATION_FRAMES}} fps={{FPS}} width={{1920}} height={{1080}} />\n);\n\nregisterRoot(RemotionRoot);\n"
+                        ),
+                    )?;
+                }
+                remotion_root.join("src").join(&slug)
+            };
+            std::fs::create_dir_all(&comp_dir)?;
+            let beats_ts = comp_dir.join("beats.ts");
+            if !beats_ts.exists() {
+                let frames = (duration_secs * 30.0).ceil() as u64;
+                let audio_str = s
+                    .song_audio
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                std::fs::write(
+                    &beats_ts,
+                    format!(
+                        "// Auto-generated bed for {title} ({slug})\nexport const FPS = 30;\nexport const DURATION_SECONDS = {duration_secs:.2};\nexport const DURATION_FRAMES = {frames};\nexport const AUDIO_SOURCE = {audio_str:?};\n"
+                    ),
+                )?;
+            }
+            let comp_tsx = comp_dir.join("Composition.tsx");
+            if !comp_tsx.exists() {
+                std::fs::write(
+                    &comp_tsx,
+                    format!(
+                        "import React from \"react\";\nimport {{ AbsoluteFill }} from \"remotion\";\nimport {{ DURATION_FRAMES, FPS }} from \"./beats\";\n\nexport const {slug}_Composition: React.FC = () => {{\n  return (\n    <AbsoluteFill style={{{{ backgroundColor: \"#0f141c\", color: \"#f2e9d5\", justifyContent: \"center\", alignItems: \"center\", fontFamily: \"sans-serif\" }}}}>\n      <h1>{title}</h1>\n      <p>{{DURATION_FRAMES}} frames @ {{FPS}} fps</p>\n    </AbsoluteFill>\n  );\n}};\n"
+                    ),
+                )?;
+            }
+            if has_ancestor_composer {
+                Ok(comp_dir)
+            } else {
+                Ok(dir.join("remotion/package.json"))
+            }
+        }
+        "hyperframes" => {
+            let hf_dir = dir.join("hyperframes");
+            std::fs::create_dir_all(hf_dir.join("compositions"))?;
+            std::fs::create_dir_all(hf_dir.join("assets"))?;
+            let hf_json = hf_dir.join("hyperframes.json");
+            if !hf_json.exists() {
+                std::fs::write(
+                    &hf_json,
+                    serde_json::to_string_pretty(&json!({
+                        "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+                        "paths": {
+                            "blocks": "compositions",
+                            "components": "compositions/components",
+                            "assets": "assets"
+                        },
+                        "media": { "autoProxy": false },
+                        "authoringSkill": "hyperframes-animation"
+                    }))
+                    .unwrap_or_default(),
+                )?;
+            }
+            let pkg_json = hf_dir.join("package.json");
+            if !pkg_json.exists() {
+                std::fs::write(
+                    &pkg_json,
+                    serde_json::to_string_pretty(&json!({
+                        "name": "hyperframes",
+                        "private": true,
+                        "type": "module",
+                        "scripts": {
+                            "dev": "npx --yes hyperframes@0.8.166 preview",
+                            "check": "npx --yes hyperframes@0.8.166 check",
+                            "render": "npx --yes hyperframes@0.8.166 render"
+                        }
+                    }))
+                    .unwrap_or_default(),
+                )?;
+            }
+            let index_html = hf_dir.join("index.html");
+            if !index_html.exists() {
+                std::fs::write(
+                    &index_html,
+                    format!(
+                        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"hyperframes-studio-preview\">\n  <title>{title} — HyperFrames</title>\n</head>\n<body style=\"margin:0;background:#0f141c;color:#f2e9d5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;\">\n  <div id=\"stage\" data-duration=\"{duration_secs:.2}\">\n    <h1>{title}</h1>\n    <p>Duration: {duration_secs:.2}s</p>\n  </div>\n</body>\n</html>\n"
+                    ),
+                )?;
+            }
+            Ok(hf_json)
+        }
+        "filmcraft" => {
+            if let Some(p) = video_project_path(dir) {
+                return Ok(p);
+            }
+            let stem = sanitize_asset_id(&title);
+            Ok(dir.join(format!("{stem}.fcproj")))
+        }
+        other => Err(EngineError::InvalidParams(format!("unknown target: {other}"))),
+    }
+}
+
+fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let target = params
+        .get("target")
+        .and_then(Value::as_str)
+        .unwrap_or(&s.video_target)
+        .to_string();
+    let created = ensure_video_target_project(s, &dir, &target)?;
+    let mut status = workshop_status(s)?;
+    status["initialized"] = json!(created);
+    Ok(status)
+}
+
+fn find_free_port(preferred: u16) -> u16 {
+    for port in preferred..(preferred + 25) {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
+    preferred
+}
+
+fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let target = params
+        .get("target")
+        .and_then(Value::as_str)
+        .unwrap_or(&s.video_target)
+        .to_string();
+    let current = video_server_info(&dir, &target);
+    if current["running"] == json!(true) {
+        return workshop_status(s);
+    }
+    let _ = ensure_video_target_project(s, &dir, &target)?;
+    let preferred_port = params
+        .get("port")
+        .and_then(Value::as_u64)
+        .map(|p| p as u16)
+        .unwrap_or(if target == "hyperframes" { 3058 } else { 3057 });
+    let port = find_free_port(preferred_port);
+    let log_file = std::fs::File::create(dir.join(".video-server.log"))?;
+    let err_file = log_file.try_clone()?;
+
+    let child = match target.as_str() {
+        "remotion" => {
+            let work_dir = remotion_composer_dir(&dir).unwrap_or_else(|| dir.join("remotion"));
+            std::process::Command::new("npx")
+                .args(["remotion", "studio", "--port", &port.to_string(), "--no-open"])
+                .current_dir(&work_dir)
+                .stdout(log_file)
+                .stderr(err_file)
+                .spawn()
+                .map_err(|e| EngineError::ExternalTool("remotion".into(), e.to_string()))?
+        }
+        "hyperframes" => {
+            let work_dir = dir.join("hyperframes");
+            std::process::Command::new("python3")
+                .args(["-m", "http.server", &port.to_string(), "--bind", "127.0.0.1"])
+                .current_dir(&work_dir)
+                .stdout(log_file)
+                .stderr(err_file)
+                .spawn()
+                .map_err(|e| EngineError::ExternalTool("hyperframes-server".into(), e.to_string()))?
+        }
+        other => {
+            return Err(EngineError::InvalidParams(format!(
+                "target '{other}' does not use a web dev server"
+            )));
+        }
+    };
+    let pid = child.id();
+    let state = json!({
+        "target": target,
+        "port": port,
+        "pid": pid,
+        "url": format!("http://localhost:{port}"),
+    });
+    std::fs::write(
+        dir.join(".video-server.json"),
+        serde_json::to_string_pretty(&state).unwrap_or_default(),
+    )?;
+    for _ in 0..30 {
+        if probe_http_server(port).is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    workshop_status(s)
+}
+
+fn is_managed_video_server_pid(pid: u64) -> bool {
+    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&cmdline).to_ascii_lowercase();
+    text.contains("remotion") || text.contains("http.server") || text.contains("hyperframes")
+}
+
+fn cmd_video_server_stop(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let state_path = dir.join(".video-server.json");
+    if let Ok(raw) = std::fs::read_to_string(&state_path)
+        && let Ok(saved) = serde_json::from_str::<Value>(&raw)
+        && let Some(pid) = saved.get("pid").and_then(Value::as_u64)
+        && is_managed_video_server_pid(pid)
+    {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+    let _ = std::fs::remove_file(&state_path);
+    workshop_status(s)
 }
 
 /// Puts the storyboard panels on the song's FilmCraft sequence as placeholders: back to back on one
@@ -4488,6 +5256,8 @@ const SCENE_SECTIONS: &[(&str, &str)] = &[
     ("reference_prompt", "Reference prompt"),
     ("animation_prompt", "Animation prompt"),
     ("layer_stack", "Layer stack"),
+    ("teaching_cues", "Teaching cues"),
+    ("visual_review", "Visual review expectations"),
     ("build_steps", "Build steps"),
     ("acceptance_checks", "Acceptance checks"),
     ("plan_vs_actual", "Plan vs actual"),
@@ -4501,8 +5271,11 @@ struct SceneDoc {
     time: Option<(f64, f64)>,
     /// The scene's approved reference image, relative to the project folder.
     reference: Option<String>,
+    /// Optional parent/teaching cue reference image for this scene, relative to the project folder.
+    teaching_reference: Option<String>,
     notes: Vec<String>,
     lyrics: std::collections::BTreeMap<usize, String>,
+    cues: std::collections::BTreeMap<usize, String>,
     sections: std::collections::BTreeMap<String, String>,
 }
 
@@ -4528,6 +5301,8 @@ fn read_scene_doc(dir: &Path, n: usize) -> SceneDoc {
                 doc.status = st.trim().to_string();
             } else if let Some(r) = t.strip_prefix("reference:") {
                 doc.reference = Some(r.trim().to_string()).filter(|r| !r.is_empty());
+            } else if let Some(tr) = t.strip_prefix("teaching_reference:") {
+                doc.teaching_reference = Some(tr.trim().to_string()).filter(|r| !r.is_empty());
             } else if let Some(tm) = t.strip_prefix("time:")
                 && let Some((a, b)) = tm.trim().split_once(['-', '–'])
                 && let (Ok(a), Ok(b)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>())
@@ -4543,6 +5318,12 @@ fn read_scene_doc(dir: &Path, n: usize) -> SceneDoc {
                 && let Ok(n) = n.trim().parse::<usize>()
             {
                 doc.lyrics.insert(n, words.trim().to_string());
+            }
+        } else if section == "cues" {
+            if let Some((n, cue)) = t.split_once(':')
+                && let Ok(n) = n.trim().parse::<usize>()
+            {
+                doc.cues.insert(n, cue.trim().to_string());
             }
         } else if !t.starts_with("<!--") {
             let entry = doc.sections.entry(section.clone()).or_default();
@@ -4567,6 +5348,9 @@ fn write_scene_doc(dir: &Path, n: usize, label: &str, doc: &SceneDoc) -> Result<
     if let Some(r) = &doc.reference {
         out.push_str(&format!("reference: {r}\n"));
     }
+    if let Some(tr) = &doc.teaching_reference {
+        out.push_str(&format!("teaching_reference: {tr}\n"));
+    }
     out.push_str("\n## Notes\n");
     for note in &doc.notes {
         out.push_str(&format!("- {note}\n"));
@@ -4574,6 +5358,12 @@ fn write_scene_doc(dir: &Path, n: usize, label: &str, doc: &SceneDoc) -> Result<
     out.push_str("\n## Lyrics\n<!-- corrections only: line number: words (the transcript keeps what was heard) -->\n");
     for (n, words) in &doc.lyrics {
         out.push_str(&format!("{n}: {words}\n"));
+    }
+    if !doc.cues.is_empty() {
+        out.push_str("\n## Cues\n<!-- teaching / parent action cues per line: line number: instruction -->\n");
+        for (n, cue) in &doc.cues {
+            out.push_str(&format!("{n}: {cue}\n"));
+        }
     }
     for (key, heading) in SCENE_SECTIONS {
         if let Some(text) = doc.sections.get(*key) {
@@ -4612,18 +5402,37 @@ fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
     };
     for (i, scene) in list.iter_mut().enumerate() {
         let sd = docs.get(i).map(|_| read_scene_doc(dir, i + 1)).unwrap_or_else(|| read_scene_doc(dir, i + 1));
+        let start_sec = scene["start"].as_f64().unwrap_or(0.0);
         if let Some(lines) = scene["lines"].as_array_mut() {
             for (j, line) in lines.iter_mut().enumerate() {
                 if let Some(words) = sd.lyrics.get(&(j + 1)) {
                     line["heard"] = line["text"].clone();
                     line["text"] = json!(words);
                 }
+                if let Some(cue) = sd.cues.get(&(j + 1)) {
+                    line["cue"] = json!(cue);
+                }
+            }
+            let max_idx = sd.lyrics.keys().chain(sd.cues.keys()).copied().max().unwrap_or(0);
+            for k in (lines.len() + 1)..=max_idx {
+                let mut entry = json!({
+                    "start": start_sec,
+                    "text": sd.lyrics.get(&k).cloned().unwrap_or_default()
+                });
+                if let Some(cue) = sd.cues.get(&k) {
+                    entry["cue"] = json!(cue);
+                }
+                lines.push(entry);
+            }
+            if !lines.is_empty() {
+                scene["kind"] = json!("scene");
             }
         }
         scene["status"] = json!(sd.status);
         scene["notes"] = json!(sd.notes);
         scene["title"] = json!(sd.title);
         scene["reference"] = json!(sd.reference.as_ref().map(|r| dir.join(r)));
+        scene["teaching_reference"] = json!(sd.teaching_reference.as_ref().map(|r| dir.join(r)));
         scene["sections"] = json!(sd.sections);
     }
     Ok(list)
@@ -4688,12 +5497,12 @@ fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
         .map(|(j, l)| {
             let panel = panels.get(j);
             json!({"line": j + 1, "start": l["start"], "time": clock(l["start"].as_f64().unwrap_or(0.0)), "lyric": l["text"], "heard": l.get("heard"),
-                "panel": panel, "prompt": panel.and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())})
+                "cue": l.get("cue"), "panel": panel, "prompt": panel.and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())})
         })
         .collect();
     Ok(json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
-        "status": scene["status"], "notes": scene["notes"], "reference": scene["reference"], "sections": scene["sections"],
-        "lines": lines, "source": scene_doc_path(&dir, n), "page": n + 1}))
+        "status": scene["status"], "notes": scene["notes"], "reference": scene["reference"], "teaching_reference": scene["teaching_reference"],
+        "sections": scene["sections"], "lines": lines, "source": scene_doc_path(&dir, n), "page": n + 1}))
 }
 
 fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {
@@ -4742,6 +5551,9 @@ fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
         "lyric" => {
             doc.lyrics.insert(need_line()?, value.clone());
         }
+        "cue" => {
+            doc.cues.insert(need_line()?, value.clone());
+        }
         "note" => doc.notes.push(value.clone()),
         "prompt" => {
             let l = need_line()?;
@@ -4773,6 +5585,18 @@ fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
             }
             doc.reference = Some(rel);
         }
+        "teaching_reference" => {
+            let src = resolve_workspace_path(s, &value);
+            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
+                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
+            }
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
+            let rel = format!("{STORYBOARD_DIR}/scene-{n}-teaching.{ext}");
+            if src != dir.join(&rel) {
+                std::fs::copy(&src, dir.join(&rel))?;
+            }
+            doc.teaching_reference = Some(rel);
+        }
         key if SCENE_SECTIONS.iter().any(|(k, _)| *k == key) => {
             doc.sections.insert(key.to_string(), value.clone());
         }
@@ -4782,7 +5606,7 @@ fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
             }
         }
         _ => return Err(EngineError::InvalidParams(format!(
-            "field must be lyric, prompt, panel, note, status, time, reference or a section: {}",
+            "field must be lyric, cue, prompt, panel, note, status, time, reference, teaching_reference or a section: {}",
             SCENE_SECTIONS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
         ))),
     }
@@ -5167,6 +5991,7 @@ fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
     let text = serde_json::to_string_pretty(&transcript)
         .map_err(|e| EngineError::InvalidParams(format!("cannot encode transcript: {e}")))?;
     std::fs::write(&transcript_path, text)?;
+    let _ = ensure_video_target_project(s, &out_dir, &s.video_target);
     Ok(json!({
         "ok": true,
         "filmcraft_project": fcproj,
@@ -5229,6 +6054,26 @@ fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
             "asset name cannot be empty".into(),
         ));
     }
+    let if_not_exists = params
+        .get("if_not_exists")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let load = params
+        .get("load")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if if_not_exists
+        && let Some(existing_id) = s
+            .project_assets
+            .iter()
+            .find(|a| (path.is_some() && a.path == path) || (preset.is_some() && a.preset == preset))
+            .map(|a| a.id.clone())
+    {
+        if load {
+            cmd_project_load_asset(s, &json!({"id": existing_id}))?;
+        }
+        return Ok(json!({"ok": true, "asset_id": existing_id, "loaded": load, "assets": s.project_assets}));
+    }
     let explicit_id = params
         .get("id")
         .and_then(Value::as_str)
@@ -5255,7 +6100,10 @@ fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         path,
         kind: kind.into(),
     });
-    Ok(json!({"ok": true, "asset_id": id, "assets": s.project_assets}))
+    if load {
+        cmd_project_load_asset(s, &json!({"id": id}))?;
+    }
+    Ok(json!({"ok": true, "asset_id": id, "loaded": load, "assets": s.project_assets}))
 }
 
 fn cmd_project_remove_asset(s: &mut Session, params: &Value) -> Result<Value> {
@@ -6275,8 +7123,9 @@ fn build() -> Vec<CommandSpec> {
             cmd_export_cutout_mp4
         ),
         query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
-        query!("workshop.files", "Workshop Files", "{}", cmd_workshop_files),
+        query!("workshop.files", "Workshop Files", "{\"filter\": \"optional substring\", \"group\": \"optional audio|liner_notes|transcript|storyboard|assets|other\"}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
+        query!("project.search", "Search Project, Files, Storyboard & Commands", "{\"query\": \"search text\"}", cmd_project_search),
         query!("assets.assess", "Assess Asset (clean or recreate?)", "{\"path\": \"layer.png\"}", cmd_assets_assess),
         query!("assets.fixlist", "Asset Fix List", "{}", cmd_assets_fixlist),
         cmd!("assets.fixlist_add", "Add to Asset Fix List", ["Workshop"], None,
@@ -6307,6 +7156,12 @@ fn build() -> Vec<CommandSpec> {
             "{\"approved\": true}", always, cmd_workshop_approve_draft),
         cmd!("workshop.remove", "Remove Workshop File", ["Workshop"], None,
             "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}", always, cmd_workshop_remove),
+        cmd!("video.init", "Initialize Target Video Project", ["Workshop"], None,
+            "{\"target\": \"optional remotion|filmcraft|hyperframes\"}", always, cmd_video_init),
+        cmd!("video.server_start", "Start Video Editor Web Server", ["Workshop"], None,
+            "{\"target\": \"optional remotion|hyperframes\", \"port\": 3057}", always, cmd_video_server_start),
+        cmd!("video.server_stop", "Stop Video Editor Web Server", ["Workshop"], None,
+            "{}", always, cmd_video_server_stop),
         cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
             "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
         cmd!(
@@ -7426,9 +8281,13 @@ elif argv[0] == "compare-reference":
     fn loaded_test_asset(name: &str, asset: &str) -> (Session, std::path::PathBuf) {
         let dir = temporary_directory(name);
         let img_path = dir.join("test.png");
-        image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 255, 255, 255]))
-            .save(&img_path)
-            .unwrap();
+        let mut img = image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 255, 255, 255]));
+        for y in 8..24 {
+            for x in 8..24 {
+                img.put_pixel(x, y, image::Rgba([40, 80, 200, 255]));
+            }
+        }
+        img.save(&img_path).unwrap();
         let mut s = Session::default();
         s.cwd = dir.clone();
         s.execute(
@@ -7469,18 +8328,7 @@ elif argv[0] == "compare-reference":
 
     #[test]
     fn image_color_to_alpha_produces_output_for_existing_asset() {
-        let dir = temporary_directory("image_color_to_alpha");
-        let img_path = dir.join("test.png");
-        image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 255, 255, 255]))
-            .save(&img_path)
-            .unwrap();
-        let mut s = Session::default();
-        s.cwd = dir.clone();
-        s.execute(
-            "intake.validate",
-            json!({"image": img_path.to_string_lossy(), "asset": "alpha_test"}),
-        )
-        .unwrap();
+        let (mut s, dir) = loaded_test_asset("image_color_to_alpha", "alpha_test");
 
         let result = s.execute("image.color_to_alpha", json!({"asset": "alpha_test"})).unwrap();
         assert_eq!(result["command"], "image.color_to_alpha");

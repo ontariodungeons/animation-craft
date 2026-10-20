@@ -67,7 +67,7 @@ impl Registry {
             .find(|e| e.id == id)
     }
 
-    /// Elements matching optional `filter` (by id or label substring).
+    /// Elements matching optional `filter` (by id, kind, or label substring).
     pub fn query(&self, filter: Option<&str>) -> Vec<Element> {
         let source = if self.previous.is_empty() {
             &self.elements
@@ -80,9 +80,82 @@ impl Registry {
             .filter(|e| {
                 f.is_empty()
                     || e.id.to_ascii_lowercase().contains(&f)
+                    || e.kind.to_ascii_lowercase().contains(&f)
                     || e.label.to_ascii_lowercase().contains(&f)
             })
             .cloned()
             .collect()
+    }
+
+    /// Detect overlapping sibling widgets (same kind or interactive buttons/tabs) and widgets
+    /// clipped outside their parent panel or window bounds (`[0, 0, win_w, win_h]`).
+    pub fn layout_audit(&self, win_w: f32, win_h: f32) -> serde_json::Value {
+        let source = if self.previous.is_empty() {
+            &self.elements
+        } else {
+            &self.previous
+        };
+        let interactive: Vec<&Element> = source
+            .iter()
+            .filter(|e| e.kind != "panel" && e.rect[2] > 1.0 && e.rect[3] > 1.0)
+            .collect();
+
+        let mut overlaps = Vec::new();
+        for i in 0..interactive.len() {
+            for j in (i + 1)..interactive.len() {
+                let a = interactive[i];
+                let b = interactive[j];
+                if a.id == b.id {
+                    continue;
+                }
+                let x_overlap =
+                    (a.rect[0] + a.rect[2]).min(b.rect[0] + b.rect[2]) - a.rect[0].max(b.rect[0]);
+                let y_overlap =
+                    (a.rect[1] + a.rect[3]).min(b.rect[1] + b.rect[3]) - a.rect[1].max(b.rect[1]);
+                if x_overlap > 2.0 && y_overlap > 2.0 {
+                    overlaps.push(serde_json::json!({
+                        "a": { "id": a.id, "label": a.label, "rect": a.rect },
+                        "b": { "id": b.id, "label": b.label, "rect": b.rect },
+                        "overlap_px": [x_overlap, y_overlap],
+                    }));
+                }
+            }
+        }
+
+        let mut clipped = Vec::new();
+        for e in &interactive {
+            let right = e.rect[0] + e.rect[2];
+            let bottom = e.rect[1] + e.rect[3];
+            if e.rect[0] < -1.0 || e.rect[1] < -1.0 || right > win_w + 1.0 {
+                clipped.push(serde_json::json!({
+                    "id": e.id,
+                    "label": e.label,
+                    "rect": e.rect,
+                    "window_size": [win_w, win_h],
+                    "clipped_bottom": bottom > win_h + 1.0,
+                }));
+            }
+        }
+
+        let mut multi_line_buttons = Vec::new();
+        for e in &interactive {
+            if e.kind == "button" && e.rect[3] > 42.0 && e.rect[2] < 110.0 {
+                multi_line_buttons.push(serde_json::json!({
+                    "id": e.id,
+                    "label": e.label,
+                    "rect": e.rect,
+                }));
+            }
+        }
+
+        serde_json::json!({
+            "clean": overlaps.is_empty() && clipped.is_empty() && multi_line_buttons.is_empty(),
+            "overlap_count": overlaps.len(),
+            "overlaps": overlaps,
+            "clipped_count": clipped.len(),
+            "clipped": clipped,
+            "wrapped_button_count": multi_line_buttons.len(),
+            "wrapped_buttons": multi_line_buttons,
+        })
     }
 }
