@@ -53,11 +53,7 @@ pub fn cmd_intake_validate(s: &mut Session, params: &Value) -> Result<Value> {
 
     // STEP 1 OF IMAGE IMPORT: photocraft-cli `layer.removeBackground` strips the background (including enclosed gaps) to a transparent RGBA PNG.
     let root = super::workspace::workspace_root(s);
-    // With a project open, results sit beside the asset's original in <project>/assets/<id>/.
-    let import_dir = match s.project_path.as_ref().and_then(|p| p.parent()) {
-        Some(dir) => dir.join("assets").join(&asset_id),
-        None => root.join("exports/pose_and_parts").join(&asset_id),
-    };
+    let import_dir = results_dir(s, &resolved_path, &root, &asset_id);
     std::fs::create_dir_all(&import_dir)?;
     let stem_clean = resolved_path
         .file_stem()
@@ -1253,10 +1249,19 @@ pub fn cmd_asset_make_transparent(s: &mut Session, params: &Value) -> Result<Val
     Ok(result)
 }
 
+/// Where a step writes its results: beside the source when it lives in the open project
+/// (its destination folder), else the workspace's `exports/pose_and_parts/<id>/`.
+fn results_dir(s: &Session, source: &Path, root: &Path, id: &str) -> PathBuf {
+    match (s.project_path.as_ref().and_then(|p| p.parent()), source.parent()) {
+        (Some(dir), Some(parent)) if source.starts_with(dir) => parent.to_path_buf(),
+        _ => root.join("exports/pose_and_parts").join(id),
+    }
+}
+
 /// Split an image into its subject and a filled background plate with two headless
 /// `photocraft-cli run`s: select the subject (`rect`/`point` → Object Selection, else Select
-/// Subject), then (1) clear everything else → `subject.png`, (2) grow the selection by `expand`
-/// px and Content-Aware Fill it → `background.png`. Both land beside the asset's original.
+/// Subject), then (1) clear everything else → `<stem>_subject.png`, (2) grow the selection by `expand`
+/// px and Content-Aware Fill it → `<stem>_background.png`. Both land beside the source (see `results_dir`).
 pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<Value> {
     let id = params
         .get("asset")
@@ -1283,12 +1288,11 @@ pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<V
     };
     let expand = params.get("expand").and_then(Value::as_u64).unwrap_or(6).clamp(1, 500);
     let root = super::workspace::workspace_root(s);
-    let out_dir = match s.project_path.as_ref().and_then(|p| p.parent()) {
-        Some(dir) => dir.join("assets").join(&id),
-        None => root.join("exports/pose_and_parts").join(&id),
-    };
+    let out_dir = results_dir(s, &source, &root, &id);
     std::fs::create_dir_all(&out_dir)?;
-    let (subject, background) = (out_dir.join("subject.png"), out_dir.join("background.png"));
+    let stem = source.file_stem().and_then(|st| st.to_str()).unwrap_or("image");
+    let (subject, background) =
+        (out_dir.join(format!("{stem}_subject.png")), out_dir.join(format!("{stem}_background.png")));
     let bin = super::workspace::resolve_craft_cli("photocraft-cli");
     let run = |steps: &[(&str, String)], out: &Path| -> Result<String> {
         let mut args = vec!["run".to_string(), source.to_string_lossy().into_owned()];
@@ -1328,8 +1332,8 @@ pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<V
     Ok(json!({"ok": true, "asset": id, "source": source, "subject": subject, "background": background,
         "selection": {"command": select_cmd, "params": select, "result": selection}, "filled_pixels": filled,
         "next": [
-            "Look at subject.png on a solid colour and background.png at full size before using them.",
-            "Thin or see-through parts (wings, whiskers, antennae) may be missed: if they stay painted on background.png, record it with assets.fixlist_add.",
+            "Look at the subject on a solid colour and the background at full size before using them.",
+            "Thin or see-through parts (wings, whiskers, antennae) may be missed: if they stay painted on the background, record it with assets.fixlist_add.",
             "Wrong object? Re-run with rect=[x,y,w,h] around the subject (or point=[x,y])."
         ]}))
 }

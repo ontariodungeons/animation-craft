@@ -230,7 +230,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Connect Project Asset",
             ["Project Assets"],
             None,
-            "{\"path\":\"image_or_manifest\",\"preset\":\"alternative_to_path\",\"name\":\"optional\",\"id\":\"optional\",\"kind\":\"auto|image|poses|turnaround|cutout_rig\"}",
+            "{\"path\":\"image_or_manifest\",\"preset\":\"alternative_to_path\",\"name\":\"optional\",\"id\":\"optional\",\"kind\":\"auto|image|poses|turnaround|cutout_rig\",\"character\":\"name (outside image -> assets/characters/<name>/parts/)\",\"background\":\"name (outside image -> assets/backgrounds/<name>/)\"}",
             always,
             cmd_project_add_asset
         ),

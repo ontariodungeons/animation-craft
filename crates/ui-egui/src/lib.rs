@@ -75,6 +75,10 @@ pub struct UiState {
     pub connect_asset_path: String,
     pub connect_asset_name: String,
     pub connect_asset_kind: String,
+    /// Where an imported image goes in the project: `character` or `background`.
+    pub connect_asset_dest: String,
+    /// The character or background folder name it goes into.
+    pub connect_asset_dest_name: String,
     pub rename_asset: Option<(String, String)>,
     pub image_path: Option<String>,
     pub demo_preset: Option<DemoPreset>,
@@ -177,6 +181,8 @@ impl Default for UiState {
             connect_asset_path: String::new(),
             connect_asset_name: String::new(),
             connect_asset_kind: "auto".into(),
+            connect_asset_dest: "character".into(),
+            connect_asset_dest_name: String::new(),
             rename_asset: None,
             image_path: None,
             demo_preset: None,

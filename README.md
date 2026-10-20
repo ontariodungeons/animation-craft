@@ -123,9 +123,9 @@ Each result includes `next` steps for an agent.
 | Split a storyboard grid into panels (PhotoCraft) | `animationcraft-cli exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>` |
 | Rebuild the storyboard PDF | `animationcraft-cli exec workshop.build_storyboard` |
 | Approve a scene (user only) | `animationcraft-cli exec storyboard.approve scene=1` |
-| Add one image (copied to `assets/<id>/original.png` + `source.json` link back) | `animationcraft-cli --bridge 19897 exec project.add_asset path=<image.png> load=true` |
-| Make it transparent (PhotoCraft; writes `assets/<id>/original_transparent.png`) | `animationcraft-cli --bridge 19897 exec asset.make_transparent` |
-| Split an image into subject + filled background (PhotoCraft; writes `assets/<id>/subject.png`, `background.png`) | `animationcraft-cli --bridge 19897 exec asset.extract_background asset=<id> rect=[x,y,w,h]` |
+| Add one image to its destination (copied to `assets/characters/<name>/parts/` or `assets/backgrounds/<name>/`, source recorded in `provenance.json`) | `animationcraft-cli --bridge 19897 exec project.add_asset path=<image.png> character=bee load=true` |
+| Make it transparent (PhotoCraft; writes `<name>_transparent.png` beside it) | `animationcraft-cli --bridge 19897 exec asset.make_transparent` |
+| Split an image into subject + filled background (PhotoCraft; writes `<name>_subject.png`, `<name>_background.png` beside it) | `animationcraft-cli --bridge 19897 exec asset.extract_background asset=<id> rect=[x,y,w,h]` |
 | Assess an asset: clean or recreate? | `animationcraft-cli exec assets.assess path=<layer.png>` |
 | Add to the asset fix list | `animationcraft-cli exec assets.fixlist_add asset=<id> path=<png> decision=recreate problem="torn edge"` |
 | Show the fix list | `animationcraft-cli exec assets.fixlist` |

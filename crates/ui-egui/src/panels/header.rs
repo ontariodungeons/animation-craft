@@ -257,14 +257,44 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
                                 ui.selectable_value(&mut app.ui_state.connect_asset_kind, kind.into(), label);
                             }
                         });
-                    if action_button(app, ui, "project.connect", "Import Asset", !app.ui_state.connect_asset_path.trim().is_empty()) {
+                    // With a project open, an image needs a destination (workshop assets/ layout).
+                    let needs_dest = app.session.project_path.is_some()
+                        && !app.ui_state.connect_asset_path.trim().to_ascii_lowercase().ends_with(".json");
+                    if needs_dest {
+                        ui.horizontal(|ui| {
+                            ui.label("Goes to");
+                            for (dest, label) in [("character", "Character"), ("background", "Background")] {
+                                ui.selectable_value(&mut app.ui_state.connect_asset_dest, dest.into(), label);
+                            }
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut app.ui_state.connect_asset_dest_name)
+                                    .hint_text("name, e.g. bee or far-barn-sky"),
+                            );
+                            app.automation.add_response("project.dest_name", "text", "Destination name", &resp);
+                        });
+                    }
+                    let ready = !app.ui_state.connect_asset_path.trim().is_empty()
+                        && (!needs_dest || !app.ui_state.connect_asset_dest_name.trim().is_empty());
+                    if action_button(app, ui, "project.connect", "Import Asset", ready) {
                         let path = app.ui_state.connect_asset_path.trim().to_string();
                         let name = app.ui_state.connect_asset_name.trim().to_string();
                         let path_ref = std::path::Path::new(&path);
                         let is_manifest = path_ref.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
                             || path_ref.is_dir();
                         let count = app.session.project_assets.len();
-                        if is_manifest {
+                        if needs_dest && !is_manifest {
+                            let mut params = json!({"path": path, "kind": "image"});
+                            params[app.ui_state.connect_asset_dest.as_str()] =
+                                json!(app.ui_state.connect_asset_dest_name.trim());
+                            if !name.is_empty() {
+                                params["name"] = json!(name);
+                            }
+                            connect(app, params);
+                            connected = app.session.project_assets.len() > count;
+                            if connected {
+                                command(app, "asset.make_transparent", json!({}));
+                            }
+                        } else if is_manifest {
                             let mut params = json!({"path": path, "kind": app.ui_state.connect_asset_kind});
                             if !name.is_empty() {
                                 params["name"] = json!(name);
@@ -290,13 +320,14 @@ pub(crate) fn asset_dialogs(app: &mut AnimationCraftApp, ctx: &egui::Context) {
                                 || app.session.project_assets.len() > count;
                         }
                     }
-                    ui.small("Images run PhotoCraft background removal via intake.validate; .json manifests connect directly.");
+                    ui.small("Images are copied into the project's character or background folder, then PhotoCraft removes the background; .json manifests connect directly.");
                 });
             });
         app.ui_state.connect_asset_open = open && !connected;
         if connected {
             app.ui_state.connect_asset_path.clear();
             app.ui_state.connect_asset_name.clear();
+            app.ui_state.connect_asset_dest_name.clear();
         }
     }
     if let Some((id, mut name)) = app.ui_state.rename_asset.clone() {

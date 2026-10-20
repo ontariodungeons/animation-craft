@@ -208,26 +208,51 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         .clone()
         .or_else(|| super::workspace::try_sanitize_asset_id(name))
         .unwrap_or_else(|| super::workspace::sanitize_asset_id(stem));
-    // An image from outside the open project is copied in; its asset folder holds every result.
-    let copy_into = s
-        .project_path
-        .as_ref()
-        .and_then(|p| p.parent())
-        .filter(|dir| {
-            path.as_ref().is_some_and(|p| {
+    // With a project open, an image from outside it is copied to its destination in the workshop
+    // layout: a character's parts or a background. No destination, no copy: the asset is refused.
+    let copy_into = match s.project_path.as_ref().and_then(|p| p.parent()) {
+        Some(dir)
+            if path.as_ref().is_some_and(|p| {
                 !p.starts_with(dir)
                     && p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
                         ["png", "jpg", "jpeg", "webp"].contains(&e.to_ascii_lowercase().as_str())
                     })
-            })
-        })
-        .map(|dir| dir.join("assets"));
+            }) =>
+        {
+            let dest = |key: &str| {
+                params
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    // A plain folder name: nothing that could climb out of assets/.
+                    .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && *n != "." && *n != "..")
+                    .map(str::to_owned)
+            };
+            let (folder, files) = match (dest("character"), dest("background")) {
+                (Some(c), None) => {
+                    let folder = dir.join("assets/characters").join(&c);
+                    (folder.clone(), folder.join("parts"))
+                }
+                (None, Some(b)) => {
+                    let folder = dir.join("assets/backgrounds").join(&b);
+                    (folder.clone(), folder)
+                }
+                _ => {
+                    return Err(EngineError::InvalidParams(
+                        "an image from outside the project needs one destination: \
+                         character=<name> (copied to assets/characters/<name>/parts/) or \
+                         background=<name> (copied to assets/backgrounds/<name>/)"
+                            .into(),
+                    ));
+                }
+            };
+            Some((folder, files))
+        }
+        _ => None,
+    };
     let mut id = base_id.clone();
     let mut suffix = 2;
-    while s.project_assets.iter().any(|a| a.id == id)
-        || s.assets.contains_key(&id)
-        || copy_into.as_ref().is_some_and(|d| d.join(&id).exists())
-    {
+    while s.project_assets.iter().any(|a| a.id == id) || s.assets.contains_key(&id) {
         if explicit_id.is_some() {
             return Err(EngineError::InvalidParams(format!(
                 "asset id '{id}' already exists"
@@ -237,20 +262,35 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         suffix += 1;
     }
     let mut stored = path.clone();
-    if let (Some(assets), Some(source)) = (&copy_into, &path) {
-        let dir = assets.join(&id);
-        std::fs::create_dir_all(&dir)?;
-        let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("png");
-        let copy = dir.join(format!("original.{}", ext.to_ascii_lowercase()));
+    if let (Some((folder, files)), Some(source)) = (&copy_into, &path) {
+        let copy = files.join(source.file_name().unwrap_or_default());
+        if copy.exists() {
+            return Err(EngineError::InvalidParams(format!(
+                "{} is already in the project; connect that file instead",
+                copy.display()
+            )));
+        }
+        std::fs::create_dir_all(files)?;
         std::fs::copy(source, &copy)?;
+        // provenance.json beside the destination lists where every copied file came from.
         let meta = std::fs::metadata(source)?;
         let unix = |t: std::time::SystemTime| {
             t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
         };
-        let link = json!({"original": source, "bytes": meta.len(),
+        let provenance = folder.join("provenance.json");
+        let mut doc: Value = std::fs::read_to_string(&provenance)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| json!({}));
+        if !doc["files"].is_array() {
+            doc["files"] = json!([]);
+        }
+        let assets_dir = folder.ancestors().nth(2).unwrap_or(folder);
+        doc["files"].as_array_mut().unwrap().push(json!({
+            "file": copy.strip_prefix(assets_dir).unwrap_or(&copy), "source": source, "bytes": meta.len(),
             "modified_unix": meta.modified().map(unix).unwrap_or(0),
-            "copied_unix": unix(std::time::SystemTime::now())});
-        std::fs::write(dir.join("source.json"), format!("{link:#}\n"))?;
+            "copied_unix": unix(std::time::SystemTime::now())}));
+        std::fs::write(&provenance, format!("{doc:#}\n"))?;
         stored = Some(copy);
     }
     s.project_assets.push(crate::ProjectAsset {
@@ -465,21 +505,29 @@ mod tests {
     }
 
     #[test]
-    fn outside_image_is_copied_in_with_a_link_to_its_source() {
+    fn outside_image_is_copied_to_its_destination_with_provenance() {
         let dir = temp_dir("project_copy_in");
         let outside = temp_dir("project_copy_src");
         image::RgbaImage::new(8, 8).save(outside.join("hero.png")).unwrap();
         let mut s = Session::default();
         s.cwd = dir.clone();
         s.execute("project.new", json!({"path": dir.join("demo.acproj")})).unwrap();
-        s.execute("project.add_asset", json!({"path": outside.join("hero.png")})).unwrap();
-        let copy = dir.join("assets/hero/original.png");
+        let err = s.execute("project.add_asset", json!({"path": outside.join("hero.png")}));
+        assert!(err.is_err(), "an outside image without a destination is refused");
+        s.execute("project.add_asset", json!({"path": outside.join("hero.png"), "character": "hero"}))
+            .unwrap();
+        let copy = dir.join("assets/characters/hero/parts/hero.png");
         assert_eq!(s.project_assets[0].path.as_deref(), Some(copy.as_path()));
         assert!(copy.is_file() && outside.join("hero.png").is_file());
-        let link: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("assets/hero/source.json")).unwrap())
-                .unwrap();
-        assert_eq!(link["original"], json!(outside.join("hero.png")));
+        let provenance: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("assets/characters/hero/provenance.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(provenance["files"][0]["source"], json!(outside.join("hero.png")));
+        assert_eq!(provenance["files"][0]["file"], json!("characters/hero/parts/hero.png"));
+        s.execute("project.add_asset", json!({"path": outside.join("hero.png"), "background": "sky"}))
+            .unwrap();
+        assert!(dir.join("assets/backgrounds/sky/hero.png").is_file());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
     }
