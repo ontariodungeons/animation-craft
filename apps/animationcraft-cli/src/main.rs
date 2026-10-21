@@ -81,11 +81,12 @@ SUBCOMMANDS
   exec <id> [key=value ...]           run one command; prints its result as JSON
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
-  mcp                                 MCP server on stdio
+  mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
+                                      register it with your agent as: command `animationcraft-cli`, args [\"mcp\"]
   help                                this text
   --version                           print the version
 
-LIVE UI CONTROL COMMANDS (via `--bridge <port>`)
+LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec ui.state`)
   ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
   ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
   ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
@@ -98,6 +99,9 @@ LIVE UI CONTROL COMMANDS (via `--bridge <port>`)
 
 VALUES
   key=value parses value as JSON when it can (3.5, true, [1,2], {\"a\":1}), else as a string.
+
+AGENT GUIDE
+  ~/.agents/skills/animationcraft/SKILL.md  workflow, tools and gotchas (the `animationcraft` skill)
 
 EXIT STATUS
   0 success · 1 a command failed · 2 usage error
@@ -298,6 +302,17 @@ fn schema_from_description(id: &str) -> Value {
     json!({ "type": "object", "properties": properties, "additionalProperties": true })
 }
 
+/// Sent with `initialize` so a client knows where to start without reading the code.
+const MCP_INSTRUCTIONS: &str = "AnimationCraft turns still character artwork into animated characters and plans \
+song videos (storyboard, transcript, video target). Every tool is an engine command (command_list shows ids and \
+params; tool names are the dotted ids with underscores). Start with project_open or project_new, then \
+workshop_status (song, transcript, storyboard, assets) or project_list_assets. Assets need a destination: \
+project_add_asset {path, character: <name>} copies an outside image to assets/characters/<name>/parts/, \
+{background: <name>} to assets/backgrounds/<name>/; a rig spec connects with kind: cutout_rig. Without --bridge \
+these tools run a headless engine; to drive the user's open window start the server as \
+`animationcraft-cli --bridge <port> mcp` (the app runs with `animationcraft --control <port>`). Full guide: the \
+animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `animationcraft-cli help`.";
+
 fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
@@ -311,7 +326,10 @@ fn run_mcp_stdio(bridge: Option<String>) {
         let Ok(req) = serde_json::from_str::<Value>(trimmed) else {
             continue;
         };
-        let id = req.get("id").cloned().unwrap_or(Value::Null);
+        // A message without an id is a notification (e.g. notifications/initialized): never answered.
+        let Some(id) = req.get("id").cloned() else {
+            continue;
+        };
         let method = req.get("method").and_then(Value::as_str).unwrap_or("");
         let resp = match method {
             "initialize" => json!({
@@ -323,7 +341,8 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     "serverInfo": {
                         "name": "animationcraft-mcp",
                         "version": env!("CARGO_PKG_VERSION")
-                    }
+                    },
+                    "instructions": MCP_INSTRUCTIONS
                 }
             }),
             "tools/list" => {

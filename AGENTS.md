@@ -3,6 +3,14 @@
 Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
 UI, engine, pipeline, and test work from overwriting one another.
 
+## Drive the app: CLI, MCP and skill
+
+- Skill: `~/.agents/skills/animationcraft/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
+- CLI: `animationcraft-cli help`; `animationcraft-cli exec <command> key=value`, or add
+  `--bridge <port>` to drive an open `animationcraft --control <port>` window.
+- MCP: register command `animationcraft-cli`, args `["mcp"]` (headless engine) or
+  `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
+
 ## Start with an isolated checkout
 
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
