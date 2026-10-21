@@ -145,3 +145,51 @@ body.split main { padding-bottom: 14px; }
 .frame-handle .icon { width: 22px; height: 14px; opacity: 0; transition: opacity var(--fast) var(--ease); }
 .frame-handle:hover .icon { opacity: 1; }
 .frame-handle .icon svg { width: 14px; height: 14px; }
+
+/* Agent drawer: slides in from the right over any view. */
+.agent-toggle { margin-left: auto; }
+.agent-toggle.on { color: var(--accent); background: var(--surface-2); }
+.target { margin-left: 0; }
+.agent { position: fixed; top: 48px; right: 0; bottom: 0; width: min(400px, 92vw); display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent); backdrop-filter: blur(12px); border-left: 1px solid var(--line);
+  box-shadow: -24px 0 60px #0007; transform: translateX(102%); transition: transform var(--slow) var(--ease); z-index: 20; }
+.agent.open { transform: none; }
+.agent-head { display: flex; align-items: center; justify-content: space-between; }
+.agent-title { font-weight: 600; font-size: 14px; }
+.agent-pickers { display: grid; gap: 6px; }
+.agent select { width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
+.agent-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; scrollbar-width: thin; }
+.msg { line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; animation: fade var(--slow) var(--ease); }
+.msg.user { align-self: flex-end; max-width: 88%; background: #64d7c21a; border: 1px solid #64d7c240; color: var(--text); padding: 8px 10px; border-radius: 12px 12px 4px 12px; }
+.msg.assistant { color: var(--text); }
+.msg.tool { color: var(--faint); font: 11px ui-monospace, monospace; }
+.msg.done { color: var(--faint); font-size: 11px; }
+.msg img { display: block; max-width: 160px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--line); }
+.card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.card .q { font-weight: 600; color: var(--amber); }
+.card .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.card .opt { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); transition: all var(--fast) var(--ease); }
+.card .opt:hover { border-color: var(--accent); color: var(--accent); }
+.card input { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: var(--text); font: inherit; }
+.agent-attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.att { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 4px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-size: 11px; color: var(--muted); max-width: 100%; }
+.att img { width: 40px; height: 28px; object-fit: cover; border-radius: 4px; }
+.att button { color: var(--faint); }
+.agent-compose { display: flex; flex-direction: column; gap: 6px; }
+.agent textarea { resize: none; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: inherit;
+  transition: border-color var(--fast) var(--ease); }
+.agent textarea:focus { outline: none; border-color: var(--accent); }
+.agent-actions { display: flex; align-items: center; gap: 8px; }
+.agent-actions .start { margin: 0 0 0 auto; padding: 6px 14px; }
+.ghost { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); transition: all var(--fast) var(--ease); }
+.ghost:hover { color: var(--accent); border-color: var(--accent); }
+.ghost svg { width: 15px; height: 15px; }
+.agent-status { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-watch { color: var(--faint); font: 10.5px ui-monospace, monospace; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-watch:hover { color: var(--muted); }
+/* Pointing: dim the app, ring what is under the mouse. */
+.point-overlay { position: fixed; inset: 0; z-index: 50; display: none; cursor: crosshair; background: #0005; }
+.point-overlay.on { display: block; }
+.point-box { position: fixed; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 4px #64d7c230; pointer-events: none; transition: all 90ms var(--ease); }
+.point-hint { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
+.agent.drop { box-shadow: -24px 0 60px #0007, inset 0 0 0 2px var(--accent); }

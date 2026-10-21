@@ -20,3 +20,6 @@ tauri = { version = "2.12", features = ["unstable", "protocol-asset", "devtools"
 # The window's webviews stack in one GTK box on Linux; the shell sets their packing directly.
 gtk = "0.18"
 webkit2gtk = "2.0"
+# Point: WebKit's own snapshot of the page, cropped to what was pointed at.
+cairo-rs = { version = "0.18", features = ["png"] }
+gio = "0.18"

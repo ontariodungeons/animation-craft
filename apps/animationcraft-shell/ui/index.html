@@ -18,6 +18,9 @@
       <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
       <span class="tab-ink" aria-hidden="true"></span>
     </nav>
+    <button class="icon agent-toggle" id="agent-toggle" aria-label="Agent" title="Agent · chat, point at anything (Ctrl+/)">
+      <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>
+    </button>
     <button class="target" id="target" aria-label="Studio server: click to start or stop" title="Studio server · click to start or stop">
       <span class="dot off" id="server-dot"></span><span id="target-name">—</span>
     </button>
@@ -54,7 +57,31 @@
     <button class="icon" id="collapse-top" aria-label="Collapse the project view (studio only)" title="Studio only"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
     <button class="icon" id="collapse-bottom" aria-label="Collapse the studio (project only)" title="Project only"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
   </div>
+  <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
+    <div class="agent-head">
+      <span class="agent-title">Agent</span>
+      <button class="icon" id="agent-close" aria-label="Close the agent" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="agent-pickers">
+      <select id="agent-target" aria-label="Send to" title="Send to"></select>
+      <select id="agent-model" aria-label="Model" title="The session's model (you, the agent or Claude can switch it)"></select>
+    </div>
+    <div class="agent-log" id="agent-log" aria-live="polite"></div>
+    <div class="agent-attachments" id="agent-attachments"></div>
+    <div class="agent-compose">
+      <textarea id="agent-input" rows="3" placeholder="Ask, point at something, or paste a picture…  (Ctrl+Enter sends)" aria-label="Message"></textarea>
+      <div class="agent-actions">
+        <button class="ghost" id="agent-point" title="Point: click anything in the app to attach a picture of it">
+          <svg viewBox="0 0 24 24"><path d="M4 4l7 16 2.5-6.5L20 11z"/></svg><span>Point</span></button>
+        <span class="agent-status" id="agent-status"></span>
+        <button class="start" id="agent-send">Send</button>
+      </div>
+      <button class="agent-watch" id="agent-watch" title="Copy the command to watch this session in a terminal"></button>
+    </div>
+  </aside>
+  <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="app.js"></script>
+  <script src="agent.js"></script>
 </body>
 </html>

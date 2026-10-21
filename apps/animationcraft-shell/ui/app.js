@@ -230,7 +230,7 @@ async function load() {
   const start = await invoke("startup");
   state.project = start.project || localStorage.getItem("project");
   state.studioUrl = start.studio || null;
-  if (start.open) state.open = start.open;
+  if (start.open && start.open !== "agent") state.open = start.open;
   if (!state.project) { $("project-name").textContent = "Open a project: animationcraft-shell <project.acproj>"; return; }
   localStorage.setItem("project", state.project);
   $("project-name").textContent = state.project.split("/").pop().replace(/\.acproj$/, "");
@@ -240,6 +240,7 @@ async function load() {
   renderBlocks();
   renderStoryboard();
   if (start.view) setView(start.view);
+  if (start.open === "agent") agentToggle(true);
 }
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));

@@ -244,6 +244,8 @@ name = "animationcraft-shell"
 version = "0.1.0"
 dependencies = [
  "animationcraft-engine",
+ "cairo-rs",
+ "gio",
  "gtk",
  "serde_json",
  "tauri",
