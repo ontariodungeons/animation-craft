@@ -2,7 +2,7 @@
 //! `animationcraft-engine`) and, as a tab, the project's video studio (HyperFrames or Remotion
 //! Studio) in a second webview of the same window.
 //!
-//!   animationcraft-shell [<project.acproj>] [<studio url>] [--view project|studio] [--open <block>|agent]
+//!   animationcraft-shell [<project.acproj>] [<studio url>] [--view project|studio] [--open <block>|agent] [--control <port>]
 
 use animationcraft_engine::Session;
 use serde_json::{Value, json};
@@ -18,20 +18,46 @@ fn startup() -> Value {
         match a.as_str() {
             "--view" => view = args.next(),
             "--open" => open = args.next(),
+            "--control" => {
+                args.next();
+            }
             _ => positional.push(a),
         }
     }
     json!({"project": positional.first(), "studio": positional.get(1), "view": view, "open": open})
 }
 
-/// The project's workshop state and storyboard, straight from the engine.
-#[tauri::command]
-fn project_state(path: String) -> Result<Value, String> {
-    let mut s = Session::default();
-    s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
+mod bridge;
+
+/// The engine session of the open project: one for the window, shared by the page's commands and
+/// the `--control` bridge (the CLI and MCP), like the session of the older UI.
+#[derive(Default)]
+pub struct Engine(pub std::sync::Mutex<Session>);
+
+impl Engine {
+    /// Runs `f` on the session with `path` open (opened first when another project is).
+    pub fn with<T>(&self, path: Option<&str>, f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, String> {
+        let mut s = self.0.lock().map_err(|e| e.to_string())?;
+        if let Some(path) = path
+            && s.project_path.as_deref() != Some(std::path::Path::new(path))
+        {
+            s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
+        }
+        f(&mut s)
+    }
+}
+
+/// The open project's workshop state and storyboard.
+pub fn state_of(s: &mut Session) -> Result<Value, String> {
     let status = s.execute("workshop.status", json!({})).map_err(|e| e.to_string())?;
     let storyboard = s.execute("workshop.storyboard", json!({})).unwrap_or(Value::Null);
     Ok(json!({"status": status, "storyboard": storyboard}))
+}
+
+/// The project's workshop state and storyboard, straight from the engine.
+#[tauri::command]
+fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, String> {
+    engine.with(Some(&path), state_of)
 }
 
 /// An object's layers stacked and cropped to what is drawn, cached in the project's
@@ -47,15 +73,119 @@ fn object_preview(project: String, name: String, layers: Vec<String>) -> Result<
         .ok_or_else(|| format!("{name}: its layers do not share one canvas"))
 }
 
+/// Recent projects (`$XDG_CONFIG_HOME/animationcraft/recent_projects.json`, the same list the
+/// older UI kept), newest first.
+fn recent_file() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    Some(base.join("animationcraft").join("recent_projects.json"))
+}
+
+fn recent_list() -> Vec<String> {
+    recent_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn recent_save(list: &[String]) -> Result<(), String> {
+    let file = recent_file().ok_or("no config folder")?;
+    std::fs::create_dir_all(file.parent().ok_or("no config folder")?).map_err(|e| e.to_string())?;
+    std::fs::write(file, json!(list).to_string()).map_err(|e| e.to_string())
+}
+
+/// Puts a project at the top of Recent (ten kept).
+fn recent_record(path: &str) -> Result<(), String> {
+    let mut list = recent_list();
+    list.retain(|p| p != path);
+    list.insert(0, path.to_string());
+    list.truncate(10);
+    recent_save(&list)
+}
+
+/// Home: recent projects with name, folder, whether it still exists, and a thumbnail (the
+/// storyboard's first page when it has been drawn).
+#[tauri::command]
+fn recent_projects() -> Value {
+    // One card per project: paths through compatibility symlinks resolve to the real file.
+    let mut seen = std::collections::HashSet::new();
+    let (mut found, missing): (Vec<String>, Vec<String>) = recent_list()
+        .into_iter()
+        .map(|p| std::fs::canonicalize(&p).map_or(p, |c| c.to_string_lossy().into_owned()))
+        .filter(|p| seen.insert(p.clone()))
+        .partition(|p| std::path::Path::new(p).is_file());
+    found.extend(missing);
+    let items: Vec<Value> = found
+        .into_iter()
+        .map(|p| {
+            let path = std::path::Path::new(&p);
+            let dir = path.parent().unwrap_or(path);
+            let thumb = dir.join("storyboard").join(".preview").join("page-01.png");
+            json!({
+                "path": p,
+                "name": path.file_stem().and_then(|n| n.to_str()).unwrap_or(&p),
+                "folder": dir.to_string_lossy(),
+                "exists": path.is_file(),
+                "thumb": thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+            })
+        })
+        .collect();
+    json!(items)
+}
+
+/// Takes a project off Recent (the files are untouched).
+#[tauri::command]
+fn recent_forget(path: String) -> Result<(), String> {
+    let mut list = recent_list();
+    list.retain(|p| *p != path);
+    recent_save(&list)
+}
+
+/// Where a new song project goes by default: beside the most recent project that still exists.
+#[tauri::command]
+fn projects_root() -> Option<String> {
+    recent_list().iter().map(std::path::Path::new).find(|p| p.is_file())
+        .and_then(|p| p.parent()?.parent().map(|d| d.to_string_lossy().into_owned()))
+}
+
+/// Opens a project with the engine's `project.open` (so a bad file is refused here), records it in
+/// Recent and returns its state.
+#[tauri::command]
+fn project_open(engine: tauri::State<Engine>, path: String) -> Result<Value, String> {
+    let state = engine.with(None, |s| {
+        s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
+        state_of(s)
+    })?;
+    recent_record(&path)?;
+    Ok(state)
+}
+
+/// New song project: `<root>/<slug>/<Name>.acproj` with the song audio, through the engine's
+/// `project.new` and `video.init` (the same commands as the CLI and MCP). Returns the project path.
+#[tauri::command]
+fn project_create(engine: tauri::State<Engine>, name: String, audio: String, root: String) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("the song needs a name".into());
+    }
+    let slug = animationcraft_engine::commands::sanitize_asset_id(name).replace('_', "-");
+    let path = std::path::Path::new(root.trim()).join(slug).join(format!("{name}.acproj"));
+    engine.with(None, |s| {
+        s.execute("project.new", json!({"path": path, "audio": audio})).map_err(|e| e.to_string())?;
+        s.execute("video.init", json!({})).map_err(|e| e.to_string()).map(|_| ())
+    })?;
+    let path = path.to_string_lossy().into_owned();
+    recent_record(&path)?;
+    Ok(path)
+}
+
 /// Starts (`on`) or stops the project's studio server with the engine's own commands
 /// (`video.server_start` / `video.server_stop`), then returns the project's fresh state.
 /// Nothing starts a server on its own: quick one-off work costs no memory.
 #[tauri::command]
-fn studio_server(path: String, on: bool) -> Result<Value, String> {
-    let mut s = Session::default();
-    s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
-    s.execute(if on { "video.server_start" } else { "video.server_stop" }, json!({})).map_err(|e| e.to_string())?;
-    project_state(path)
+fn studio_server(engine: tauri::State<Engine>, path: String, on: bool) -> Result<Value, String> {
+    engine.with(Some(&path), |s| {
+        s.execute(if on { "video.server_start" } else { "video.server_stop" }, json!({})).map_err(|e| e.to_string())?;
+        state_of(s)
+    })
 }
 
 /// The project folder of a `.acproj` path.
@@ -119,12 +249,19 @@ async fn herdr(args: Vec<String>) -> Result<Value, String> {
 /// `<project>/.agent/points/`; returns the file.
 #[tauri::command]
 async fn snapshot(app: tauri::AppHandle, project: String, rect: [f64; 4]) -> Result<String, String> {
-    let view = app.get_webview("project").ok_or("no project view")?;
-    let scale = app.get_window("main").and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
     let dir = project_dir(&project)?.join(".agent").join("points");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let out = dir.join(format!("point-{stamp}.png"));
+    snapshot_to(&app, Some(rect), &out)?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// WebKit's picture of the project view, cropped to `rect` (CSS px; None = all of it), as PNG.
+pub fn snapshot_to(app: &tauri::AppHandle, rect: Option<[f64; 4]>, out: &std::path::Path) -> Result<(), String> {
+    let view = app.get_webview("project").ok_or("no project view")?;
+    let scale = app.get_window("main").and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+    let out = out.to_path_buf();
     let (tx, rx) = std::sync::mpsc::channel();
     let target = out.clone();
     view.with_webview(move |platform| {
@@ -136,7 +273,13 @@ async fn snapshot(app: tauri::AppHandle, project: String, rect: [f64; 4]) -> Res
                 webkit2gtk::SnapshotOptions::NONE,
                 None::<&gio::Cancellable>,
                 move |res| {
-                    let saved = res.map_err(|e| e.to_string()).and_then(|surface| crop_png(&surface, rect, scale, &target));
+                    let saved = res.map_err(|e| e.to_string()).and_then(|surface| {
+                        let rect = rect.unwrap_or_else(|| {
+                            let s = cairo::ImageSurface::try_from(surface.clone()).ok();
+                            s.map_or([0.0, 0.0, 1.0, 1.0], |s| [0.0, 0.0, f64::from(s.width()) / scale, f64::from(s.height()) / scale])
+                        });
+                        crop_png(&surface, rect, scale, &target)
+                    });
                     let _ = tx.send(saved);
                 },
             );
@@ -145,8 +288,7 @@ async fn snapshot(app: tauri::AppHandle, project: String, rect: [f64; 4]) -> Res
         let _ = (platform, tx.send(Err("Point needs Linux for now".into())), &target, rect, scale);
     })
     .map_err(|e| e.to_string())?;
-    rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "the snapshot did not arrive".to_string())??;
-    Ok(out.to_string_lossy().into_owned())
+    rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "the snapshot did not arrive".to_string())?
 }
 
 #[cfg(target_os = "linux")]
@@ -307,8 +449,11 @@ fn studio_hide(app: tauri::AppHandle) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(View::default())
-        .invoke_handler(tauri::generate_handler![startup, project_state, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, studio_show, studio_hide, set_split, window_height])
+        .manage(Engine::default())
+        .manage(bridge::Pending::default())
+        .invoke_handler(tauri::generate_handler![startup, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("AnimationCraft").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
@@ -317,6 +462,11 @@ fn main() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(size.width, size.height),
             )?;
+            // `--control <port>`: the CLI and MCP drive this window (same protocol as before).
+            if let Some(port) = std::env::args().skip_while(|a| a != "--control").nth(1) {
+                let port: u16 = port.parse().map_err(|_| format!("--control needs a port, got {port}"))?;
+                bridge::serve(app.handle().clone(), port);
+            }
             // Every resize re-applies the layout for the open tab.
             let handle = app.handle().clone();
             window.on_window_event(move |event| {

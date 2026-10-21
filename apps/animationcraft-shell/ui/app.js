@@ -228,18 +228,25 @@ async function toggleServer() {
 
 async function load() {
   const start = await invoke("startup");
-  state.project = start.project || localStorage.getItem("project");
   state.studioUrl = start.studio || null;
+  if (!start.project) return showHome();
+  await openProject(start.project, start);
+}
+
+// Opens a project (engine `project.open`, recorded in Recent) and shows the Project view.
+async function openProject(path, start = {}) {
+  try { state.data = await invoke("project_open", { path }); }
+  catch (e) { toast(String(e)); return showHome(); }
+  state.project = path;
+  state.page = 0;
   if (start.open && start.open !== "agent") state.open = start.open;
-  if (!state.project) { $("project-name").textContent = "Open a project: animationcraft-shell <project.acproj>"; return; }
-  localStorage.setItem("project", state.project);
-  $("project-name").textContent = state.project.split("/").pop().replace(/\.acproj$/, "");
-  try { state.data = await invoke("project_state", { path: state.project }); }
-  catch (e) { toast(String(e)); return; }
+  document.body.classList.remove("at-home");
+  $("project-name").textContent = path.split("/").pop().replace(/\.acproj$/, "");
+  document.title = `${$("project-name").textContent} · AnimationCraft`;
   renderTarget();
   renderBlocks();
   renderStoryboard();
-  if (start.view) setView(start.view);
+  await setView(start.view || "project");
   if (start.open === "agent") agentToggle(true);
 }
 

@@ -4,5 +4,5 @@
   "description": "The project view's access to the shell's commands.",
   "windows": ["main"],
   "webviews": ["project"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

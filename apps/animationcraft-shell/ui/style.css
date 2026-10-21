@@ -193,3 +193,49 @@ body.split main { padding-bottom: 14px; }
 .point-box { position: fixed; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 4px #64d7c230; pointer-events: none; transition: all 90ms var(--ease); }
 .point-hint { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
 .agent.drop { box-shadow: -24px 0 60px #0007, inset 0 0 0 2px var(--accent); }
+
+/* Home: no project open. New, Open, and recent projects as cards. */
+.brand[role="button"] { cursor: pointer; border-radius: 8px; padding: 4px 6px; margin-left: -6px; transition: background var(--fast) var(--ease); }
+.brand[role="button"]:hover { background: var(--surface-2); }
+body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibility: hidden; }
+#view-home { overflow-y: auto; justify-content: center; background: radial-gradient(1200px 700px at 50% -10%, #17202a, var(--bg)); }
+.home { width: min(980px, 100%); padding: 56px 24px 40px; display: flex; flex-direction: column; gap: 14px; }
+.home-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; flex-wrap: wrap; }
+.home-mark { width: 56px; height: 56px; color: var(--accent); stroke-width: 1.4; }
+.home h1 { margin: 0; font-size: 26px; font-weight: 650; letter-spacing: -.01em; }
+.home-hero p { margin: 2px 0 0; }
+.home-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.home-actions .start, .sheet .start { margin: 0; display: flex; align-items: center; gap: 6px; }
+.home-actions .start svg { width: 16px; height: 16px; stroke-width: 2.2; }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.proj { position: relative; display: flex; flex-direction: column; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease); }
+.proj:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 14px 34px #0007; }
+.proj .thumb { aspect-ratio: 4/3; background: #0b0d11 center top / cover no-repeat; display: grid; place-items: center; color: var(--faint); }
+.proj .thumb svg { width: 34px; height: 34px; stroke-width: 1.3; }
+.proj .meta { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.proj .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj .folder { color: var(--faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.proj.missing { opacity: .55; }
+.proj.missing .folder { direction: ltr; color: var(--rust); }
+.proj .forget { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%; background: #000a; color: var(--muted); display: grid; place-items: center;
+  opacity: 0; transition: opacity var(--fast) var(--ease); }
+.proj:hover .forget, .proj .forget:focus-visible { opacity: 1; }
+.proj .forget:hover { color: var(--text); background: #000d; }
+.proj .forget svg { width: 14px; height: 14px; }
+.home-empty { color: var(--muted); padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
+.faint { color: var(--faint); }
+/* The New song sheet */
+.sheet-backdrop { position: fixed; inset: 48px 0 0; background: #0009; backdrop-filter: blur(4px); display: grid; place-items: center; opacity: 0; pointer-events: none;
+  transition: opacity var(--fast) var(--ease); z-index: 30; }
+.sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+.sheet { width: min(520px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 30px 80px #000a; transform: translateY(8px); transition: transform var(--slow) var(--ease); }
+.sheet-backdrop.open .sheet { transform: none; }
+.sheet h2 { margin: 0 0 4px; font-size: 17px; }
+.sheet label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 12px; }
+.sheet input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; font-size: 13px; min-width: 0; flex: 1; }
+.sheet input:focus { outline: none; border-color: var(--accent); }
+.sheet .pick { display: flex; gap: 6px; }
+.sheet p { margin: 0; font-size: 11.5px; word-break: break-all; }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

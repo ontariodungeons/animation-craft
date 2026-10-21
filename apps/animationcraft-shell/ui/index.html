@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="bar">
-    <div class="brand" title="AnimationCraft">
+    <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
       <span id="project-name">AnimationCraft</span>
     </div>
@@ -27,6 +27,42 @@
   </header>
 
   <main>
+    <section class="view" id="view-home" aria-label="Home">
+      <div class="home">
+        <div class="home-hero">
+          <svg class="home-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
+          <div>
+            <h1>AnimationCraft</h1>
+            <p class="muted">Songs into animated films.</p>
+          </div>
+          <div class="home-actions">
+            <button class="start" id="home-new" title="New song project (Ctrl+N)">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New song</span></button>
+            <button class="ghost" id="home-open" title="Open a project (Ctrl+O)">
+              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open…</span></button>
+          </div>
+        </div>
+        <div class="group-label" id="recent-label">Recent</div>
+        <div class="recent" id="recent"></div>
+      </div>
+      <div class="sheet-backdrop" id="new-sheet" aria-hidden="true">
+        <form class="sheet" id="new-form" aria-label="New song project">
+          <h2>New song</h2>
+          <label>Song name<input id="new-name" placeholder="Bumble Bee" autocomplete="off" required /></label>
+          <label>Song audio
+            <span class="pick"><input id="new-audio" placeholder="Choose the song's audio file" readonly required />
+              <button type="button" class="ghost" id="new-audio-pick" title="Choose the audio file">Choose…</button></span></label>
+          <label>Folder
+            <span class="pick"><input id="new-root" readonly required />
+              <button type="button" class="ghost" id="new-root-pick" title="Choose where the project folder goes">Choose…</button></span></label>
+          <p class="faint" id="new-where"></p>
+          <div class="sheet-actions">
+            <button type="button" class="ghost" id="new-cancel">Cancel</button>
+            <button type="submit" class="start" id="new-create">Create</button>
+          </div>
+        </form>
+      </div>
+    </section>
     <section class="view active" id="view-project">
       <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
       <section class="storyboard" aria-label="Storyboard">
@@ -83,5 +119,7 @@
   <div class="toast" id="toast" role="status"></div>
   <script src="app.js"></script>
   <script src="agent.js"></script>
+  <script src="home.js"></script>
+  <script src="bridge.js"></script>
 </body>
 </html>
