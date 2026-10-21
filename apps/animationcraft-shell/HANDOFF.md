@@ -5,6 +5,12 @@ The Tauri shell in `apps/animationcraft-shell` **is AnimationCraft now**. The eg
 `older-egui-ui`. Don't maintain or extend it. Port every feature into the shell in the shell's design.
 The user deletes the older UI after they confirm the checklist below.
 
+## Ownership
+
+You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and the running shell on port
+19897 from now on. No other agent commits here while you work. If you run the older UI to compare
+(port 19898), close it when you're done, following craft-app-lifecycle.
+
 ## Read these skills first (in this order)
 
 0. **`.agents/skills/animationcraft-shell-ui/SKILL.md` (repo): the shell's design system. Study it first; every screen follows it.**
@@ -35,7 +41,8 @@ The user deletes the older UI after they confirm the checklist below.
 - Projects are self-contained: outputs go inside the song folder (never `/tmp`, `.codex`, `~/Documents`).
 - Rig and Matting become automated CLI chains, not manual slider screens. In the shell they appear as
   steps: run, green/red light, result picture.
-- Always upgrade dependencies that are behind to their latest stable release, as part of the work.
+- Upgrade a dependency you touch to its latest **stable** release (never alpha or beta: e.g. Tauri stays on
+  2.x while 3.0 is in alpha) and note the version change in the commit. Don't start unrelated upgrade sweeps.
 - Commit at every pause, with messages that read as a memory trace. Never push merriweather to upstream.
 - Delete only your own files, by exact path. Use `gio trash` and `xdg-open`.
 - Don't start the studio server unless it's needed (it's the red/green switch in the top bar).
@@ -68,12 +75,16 @@ The user deletes the older UI after they confirm the checklist below.
 
 ## Next: the Animation view (top bar: Home · Project | Animation | Studio; Split only while the server is on)
 
-- **Engine evaluates, page draws.** Add engine commands, e.g. `motion.tracks {character}` and
-  `motion.sample {character, track, fps}`, which return per-frame layer transforms (position, rotation, scale,
-  opacity, with pivots and parents applied). They must follow exactly the rules of `pipeline/layered_motion.py`
-  (`keys_at`, `oscillate_at`, `envelope_at`, `sampled_term`, `channel`). Add a parity test against the
-  exporter on the bee spec. The page plays the samples on a canvas with the layer PNGs. No third, hand-written
-  evaluator in JS.
+- **Gate first:** do the research in `.agents/skills/animationcraft-shell-ui/` (`research.md`), present the
+  proposed Animation view to the user, and build only after they approve it.
+- **Engine evaluates, page draws. Move the evaluator, don't write a new one.** The older stage already
+  evaluates this spec in Rust: `evaluate_layered_motion_spec` and `eval_oscillate_term` in
+  `crates/ui-egui/src/panels/center_motion.rs`, written to match `pipeline/layered_motion.py` (the exporter, which
+  renders the final video and so is the truth). Move that code into `crates/engine` (it's pure; adapt its
+  inputs from `UiState` to plain params) and expose it as commands, e.g. `motion.tracks {character}` and
+  `motion.sample {character, track, fps}`, returning per-frame layer transforms with pivots and parents applied.
+  Add a parity test against the exporter's numbers on the bee spec. The page only plays the samples on a canvas
+  with the layer PNGs. There is no evaluator in JS.
 - The stage: the character in its **rest pose** (no blink lids or alternate states stacked), track picker,
   play/scrub, timing against the song.
 - Clicking an object opens its **layer panel**: stack order, thumbnails, show/hide, states (eyes open/closed),
@@ -119,7 +130,8 @@ For each ported feature: tick it in the checklist below, with the commit hash.
 
 ## Feature checklist: older UI → shell (the user confirms this, then the older UI is deleted)
 
-Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell shows a step).
+Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell shows a step) · ❓ ask the user first:
+a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
 
 **Home and project**
 - ✅ Home: New song (name, audio, folder), Open, Recent (remove from list)
@@ -142,8 +154,8 @@ Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell show
 - ◻ Asset list: load, rename/reorder, remove (`project.load_asset`, `project.update_asset`, `project.remove_asset`)
 - ⚙ Make transparent (`asset.make_transparent`, PhotoCraft), extract background, assess, fix list, request sheet
 - ⚙ Build cutout rig, cut sheet (PhotoCraft), break apart, puppet warp, color to alpha, content-aware fill
-- ◻ Intake: validate, three-question, compare to reference
-- ◻ Pose sheet viewer: slice kinds, sheet tools, OCR labels, overlays (anchors, crops, names), fit/100%
+- ❓ Intake: validate, three-question, compare to reference
+- ❓ Pose sheet viewer: slice kinds, sheet tools, OCR labels, overlays (anchors, crops, names), fit/100%
 - ◻ Turnaround views (front/right/back/left), optimize accuracy
 
 **Animation view**
@@ -152,7 +164,7 @@ Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell show
 - ◻ Pose controls: head turn and tilt, eye blink and gaze, mouth opening and smile, arm spread, elbow and knee
   bend, ear tilt and spread, reset
 - ◻ Parts: show/hide, solo, show all, mark reviewed, joint anchors, labels, separation preview
-- ◻ 3D: mesh detail, depth, view blending, surface relief and bump; 4-direction mesh (`mesh.build_4dir`)
+- ❓ 3D: mesh detail, depth, view blending, surface relief and bump; 4-direction mesh (`mesh.build_4dir`)
 
 **Exports and checks**
 - ◻ Exports menu: layered motion video, cutout MP4, EffectCraft (.jsx, run script), FilmCraft, Blender 5.3,

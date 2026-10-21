@@ -57,12 +57,16 @@ fn page(app: &AppHandle, name: &str, args: &[&Value]) -> Result<Value, String> {
     eval(app, &format!("return await acBridge.{name}({});", args.join(", ")))
 }
 
-/// A png path for a picture: `output`, or one in the scratch folder.
-fn output(params: &Value, name: &str) -> std::path::PathBuf {
-    params["output"].as_str().map(std::path::PathBuf::from).unwrap_or_else(|| {
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-        std::env::temp_dir().join(format!("animationcraft-{name}-{stamp}.png"))
-    })
+/// A png path for a picture: `output`, else `<project>/.agent/looks/` (projects stay self-contained).
+fn output(app: &AppHandle, params: &Value, name: &str) -> Result<std::path::PathBuf, String> {
+    if let Some(out) = params["output"].as_str() {
+        return Ok(out.into());
+    }
+    let project = app.state::<Engine>().with(None, |s| Ok(s.project_path.clone()))?;
+    let dir = project.as_deref().and_then(std::path::Path::parent).ok_or("no project open: pass output=<png>")?.join(".agent").join("looks");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    Ok(dir.join(format!("{name}-{stamp}.png")))
 }
 
 fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
@@ -75,7 +79,7 @@ fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
         "ui.set" => page(app, "set", &[params.get("id").or(params.get("target")).unwrap_or(&none), params.get("value").unwrap_or(&none)]),
         "ui.key" => page(app, "key", &[params.get("key").unwrap_or(&none), params.get("id").unwrap_or(&none)]),
         "ui.screenshot" => {
-            let out = output(params, "screenshot");
+            let out = output(app, params, "screenshot")?;
             crate::snapshot_to(app, None, &out)?;
             Ok(json!({"output": out}))
         }
@@ -89,7 +93,7 @@ fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
             let region = params.get("region").unwrap_or(&none);
             let pad = params.get("pad").cloned().unwrap_or(json!(0));
             let rect: Option<[f64; 4]> = serde_json::from_value(page(app, "rect", &[region, &pad])?).map_err(|e| e.to_string())?;
-            let out = output(params, "look");
+            let out = output(app, params, "look")?;
             crate::snapshot_to(app, rect, &out)?;
             Ok(json!({"output": out, "state": page(app, "state", &[])?, "elements": page(app, "elements", &[region])?}))
         }
