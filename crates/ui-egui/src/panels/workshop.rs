@@ -678,10 +678,19 @@ fn file_name_chip(app: &mut AnimationCraftApp, ui: &mut Ui, chip: &Value, key: &
             ui.label(RichText::new(&path).size(10.5).color(MUTED));
         })
     } else {
-        r.on_hover_text(format!("{path}{}\nClick to copy the path", if exists { "" } else { "\n(not made yet)" }))
+        r.on_hover_text(format!(
+            "{path}{}",
+            if exists { "\nClick to open · right-click to copy the path" } else { "\n(not made yet)" }
+        ))
     };
     app.automation.add_response(format!("workshop.chip.{key}"), "button", &name, &r);
-    if r.clicked() {
+    if r.clicked() && exists {
+        app.ui_state.status_line = match std::process::Command::new("xdg-open").arg(&path).spawn() {
+            Ok(_) => format!("Opened {path}"),
+            Err(e) => format!("Could not open {path}: {e}"),
+        };
+    }
+    if r.secondary_clicked() {
         ui.ctx().copy_text(path.clone());
         app.ui_state.status_line = format!("Copied {path}");
     }

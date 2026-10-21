@@ -401,6 +401,13 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         })
         .collect();
     let mut transcript_outputs: Vec<Value> = transcripts.iter().map(|p| file_chip(p)).collect();
+    // The target's own song analysis (audio.analyze), listed as plain files to open and review.
+    for name in ["transcript.json", "transcript.srt", "audiomap.json", "STORYBOARD.md"] {
+        let file = dir.join(&s.video_target).join(name);
+        if file.is_file() {
+            transcript_outputs.push(file_chip(&file));
+        }
+    }
     transcript_outputs.push(target_chip.clone());
     let stages = vec![
         json!({"id": "song", "title": "Song", "done": audio_ok, "why": song_why,
@@ -1322,7 +1329,7 @@ fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
 /// Transcribes a song with FilmCraft's speech-to-text (headless `filmcraft-cli`).
 /// The song analysis for the HyperFrames target in one call, using that target's own tools:
 /// copy the song to `hyperframes/assets/bgm.mp3`, transcribe it with `hyperframes transcribe`
-/// (`transcript.json`, words), and map its structure with the music-to-video skill's
+/// (`transcript.json`, words; `transcript.srt`, its caption lines), and map its structure with the music-to-video skill's
 /// `analyze-beatgrid.py` (`audiomap.json`). Writing the STORYBOARD.md skeleton from these stays
 /// the agent's step, as music-to-video requires.
 pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
@@ -1366,15 +1373,24 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
             .map(String::from))?;
         ran.push("hyperframes transcribe → transcript.json");
     }
-    super::workspace::run_tool_in(&hf, "python3", &[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)])?;
-    ran.push("analyze-beatgrid.py → audiomap.json");
+    let srt = hf.join("transcript.srt");
+    if overwrite || !srt.is_file() {
+        // Exported from transcript.json: the tool's caption lines, no second transcription.
+        super::workspace::run_tool_in(&hf, "npx", &["hyperframes", "transcribe", &arg(&transcript), "--to", "srt",
+            "-o", &arg(&srt)].map(String::from))?;
+        ran.push("hyperframes transcribe --to srt → transcript.srt");
+    }
+    if overwrite || !audiomap.is_file() {
+        super::workspace::run_tool_in(&hf, "python3", &[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)])?;
+        ran.push("analyze-beatgrid.py → audiomap.json");
+    }
     let map: Value = serde_json::from_str(&std::fs::read_to_string(&audiomap)?)
         .map_err(|e| EngineError::InvalidParams(format!("unreadable audiomap.json: {e}")))?;
     let words: Value = serde_json::from_str(&std::fs::read_to_string(&transcript)?)
         .map_err(|e| EngineError::InvalidParams(format!("unreadable transcript.json: {e}")))?;
     let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
     Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,
-        "files": {"audio": bgm, "transcript": transcript, "audiomap": audiomap},
+        "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap},
         "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
         "silences": map["silences"], "phrases": map["phrases"], "words": words.len(),
         "next": [
