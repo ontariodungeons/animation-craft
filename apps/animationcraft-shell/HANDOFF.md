@@ -96,6 +96,19 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
 
 ## Known issues seen in the shell
 
+- Fixed in `1cedbfc`: chat polling replayed every message's fade animation and lost selections/question
+  drafts. Transcript nodes now persist; model options avoid needless replacement. Enter sends,
+  Shift+Enter adds a line, and failed/in-flight sends preserve draft text and attachments. Verified live
+  on 19897 (zero repeated fades over 5.2s) and with `tests/agent-drawer.mjs` (25 assertions).
+- Global OpenCode `animationcraft` MCP now uses `animationcraft-cli --bridge 19897 mcp`, authorized
+  by the user. It follows the shell's project; no project path is in the command. Config was backed up
+  and reloaded, and the inner agent verified the connection after switching projects. Restart persistence
+  still needs a restart check. Coordinate with the inner agent through the session API, not its composer.
+- Design proposal and all 76 review acceptance criteria: `.agents/skills/animationcraft-shell-ui/research.md`.
+  User requires the animation inspector on the left and useful artwork after import. Full Animation
+  frame still awaits approval. Permanent app knowledge is `apps/animationcraft-shell/agent.md`; keep
+  earlier-app/migration instructions here and in coordinator messages, never in that permanent file.
+
 - A project with no storyboard shows a broken image. It needs an empty state with the next step.
 - A layered object whose layers don't share one canvas raises an error toast on open (Hey Ho, `older-fish`).
   Show it quietly on the card instead.
