@@ -3,7 +3,7 @@
 // Same session and payloads as the native app's agent pane (<project>/.agent/opencode-session).
 const SESSION = "session";
 const agent = { open: false, session: null, target: SESSION, models: [], herdr: [], messages: [], permissions: [], forms: [],
-  attachments: [], polling: false, timer: null, loaded: false };
+  attachments: [], polling: false, timer: null, loaded: false, sending: false };
 
 const oc = (args, data) => invoke("opencode", { project: state.project, args, data: data ?? null });
 const status = (text) => { $("agent-status").textContent = text; $("agent-status").title = text; };
@@ -38,10 +38,16 @@ function renderModels() {
   select.hidden = agent.target !== SESSION;
   const cur = currentModel();
   const key = (p, id) => `${p}/${id}`;
-  const opts = agent.models.map((m) => el("option", { value: key(m.providerID, m.id) }, `${m.name || m.id}  ·  ${m.providerID}`));
-  if (!cur) opts.unshift(el("option", { value: "" }, "default model"));
-  select.replaceChildren(...opts);
-  select.value = cur ? key(cur.providerID, cur.id) : "";
+  const wanted = agent.models.map((m) => ({ value: key(m.providerID, m.id), label: `${m.name || m.id}  ·  ${m.providerID}` }));
+  if (!cur) wanted.unshift({ value: "", label: "default model" });
+  // Rebuild the options only when the list really changed: replacing them every poll closed an
+  // open menu and churned the DOM every two seconds.
+  const have = [...select.options].map((o) => o.value);
+  if (have.length !== wanted.length || have.some((v, i) => v !== wanted[i].value)) {
+    select.replaceChildren(...wanted.map((o) => el("option", { value: o.value }, o.label)));
+  }
+  const value = cur ? key(cur.providerID, cur.id) : "";
+  if (select.value !== value && document.activeElement !== select) select.value = value;
 }
 
 function renderWatch() {
@@ -68,31 +74,68 @@ async function agentPoll() {
   } finally { agent.polling = false; }
 }
 
-function renderLog() {
-  const log = $("agent-log");
-  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+// The log is polled every two seconds. It is described here as keyed items, not DOM, so the
+// render below can keep the nodes it already has: rebuilding the log replayed the entry
+// animation on the whole conversation, dropped the reader's scroll and selection, and threw away
+// an answer being typed into a permission or question card.
+function logItems() {
   const items = [];
   if (agent.target !== SESSION) {
-    items.push(el("div", { class: "msg done" }, "Messages go to that agent's pane in Herdr; watch the reply there."));
+    items.push({ key: "notice:herdr", cls: "msg done", text: "Messages go to that agent's pane in Herdr; watch the reply there." });
   } else if (!agent.messages.length) {
-    items.push(el("div", { class: "msg done" }, "Ask the agent anything about this project. Point at something to show it what you mean."));
+    items.push({ key: "notice:empty", cls: "msg done", text: "Ask the agent anything about this project. Point at something to show it what you mean." });
   }
   if (agent.target === SESSION) {
     for (const m of agent.messages) {
-      if (m.type === "user") items.push(el("div", { class: "msg user" }, m.text || ""));
-      else if (m.type === "idle") items.push(el("div", { class: "msg done" }, "— done"));
+      const id = m.id ?? m.role;
+      if (m.type === "user") items.push({ key: `u:${id}`, cls: "msg user", text: m.text || "" });
+      else if (m.type === "idle") items.push({ key: `i:${id}`, cls: "msg done", text: "— done" });
       else if (m.type === "assistant") {
-        for (const part of m.content || []) {
-          if (part.type === "text" && part.text) items.push(el("div", { class: "msg assistant" }, part.text));
-          else if (part.type?.includes("tool")) items.push(el("div", { class: "msg tool" }, `· ${part.name || part.tool || part.type}`));
-        }
+        (m.content || []).forEach((part, i) => {
+          if (part.type === "text" && part.text) items.push({ key: `a:${id}:${i}`, cls: "msg assistant", text: part.text });
+          else if (part.type?.includes("tool")) items.push({ key: `t:${id}:${i}`, cls: "msg tool", text: `· ${part.name || part.tool || part.type}` });
+        });
       }
     }
-    for (const p of agent.permissions) items.push(permissionCard(p));
-    for (const f of agent.forms) for (const field of f.fields || []) items.push(questionCard(f, field));
+    for (const p of agent.permissions) items.push({ key: `p:${p.sessionID}:${p.id}`, build: () => permissionCard(p) });
+    for (const f of agent.forms) for (const field of f.fields || []) items.push({ key: `q:${f.sessionID}:${f.id}:${field.key}`, build: () => questionCard(f, field) });
   }
-  log.replaceChildren(...items);
+  return items;
+}
+
+function renderLog() {
+  const log = $("agent-log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  const top = log.scrollTop;
+
+  const existing = new Map();
+  for (const child of log.children) if (child.dataset?.k) existing.set(child.dataset.k, child);
+
+  const next = logItems().map((item) => {
+    const node = existing.get(item.key);
+    if (!node) {
+      const made = item.build ? item.build() : el("div", { class: item.cls }, item.text);
+      made.dataset.k = item.key;
+      return made;
+    }
+    existing.delete(item.key);
+    // Same message, more text: update it in place, so the node keeps its place in the log.
+    if (item.text !== undefined && node.textContent !== item.text) node.textContent = item.text;
+    return node;
+  });
+
+  for (const gone of existing.values()) gone.remove();
+  for (let i = 0; i < next.length; i++) {
+    const node = next[i];
+    if (node.parentNode === log) continue;
+    // Only new nodes are inserted: moving a node that is already there restarts its animation.
+    let anchor = null;
+    for (let j = i + 1; j < next.length; j++) if (next[j].parentNode === log) { anchor = next[j]; break; }
+    log.insertBefore(node, anchor);
+  }
+
   if (atBottom) log.scrollTop = log.scrollHeight;
+  else log.scrollTop = top;
   renderModels();
 }
 
@@ -141,36 +184,56 @@ function renderAttachments() {
       el("button", { "aria-label": "Remove", title: "Remove", onclick: () => { agent.attachments.splice(i, 1); renderAttachments(); } }, "×"))));
 }
 
+// The draft and its pictures are handed over only once the message is delivered: a failed send
+// keeps them, and anything typed or attached while it was in flight stays in the composer.
+function clearSent(input, raw, attachments) {
+  if (input.value === raw) input.value = "";
+  const sent = new Set(attachments);
+  if (agent.attachments.some((a) => sent.has(a))) {
+    agent.attachments = agent.attachments.filter((a) => !sent.has(a));
+    renderAttachments();
+  }
+}
+
 async function agentSend() {
   const input = $("agent-input");
-  const text = input.value.trim();
+  if (agent.sending) return;
+  const raw = input.value;
+  const text = raw.trim();
   if (!text && !agent.attachments.length) return;
-  const attachments = agent.attachments.splice(0);
-  input.value = "";
-  renderAttachments();
-  if (agent.target !== SESSION) {
-    const body = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft — picture: ${a.path}]`)].join("\n");
-    status(`Sending to ${agent.target} in Herdr…`);
-    try { await invoke("herdr", { args: ["agent", "prompt", agent.target, body] }); status(`Sent to ${agent.target} in Herdr.`); }
-    catch (e) { status(`Herdr: ${e}`); }
-    return;
-  }
-  status("Sending…");
+  const attachments = agent.attachments.slice();
+  agent.sending = true;
+  $("agent-send").disabled = true;
   try {
-    if (!agent.session) {
-      const name = state.project.split("/").pop().replace(/\.acproj$/, "");
-      const made = await oc(["session.create"], { title: `AnimationCraft · ${name}` });
-      const id = made?.data?.id || made?.id;
-      if (!id) throw new Error("opencode did not return a session id");
-      agent.session = await invoke("agent_session", { project: state.project, set: id });
-      renderWatch();
+    if (agent.target !== SESSION) {
+      const body = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft — picture: ${a.path}]`)].join("\n");
+      status(`Sending to ${agent.target} in Herdr…`);
+      await invoke("herdr", { args: ["agent", "prompt", agent.target, body] });
+      status(`Sent to ${agent.target} in Herdr.`);
+    } else {
+      status("Sending…");
+      if (!agent.session) {
+        const name = state.project.split("/").pop().replace(/\.acproj$/, "");
+        const made = await oc(["session.create"], { title: `AnimationCraft · ${name}` });
+        const id = made?.data?.id || made?.id;
+        if (!id) throw new Error("opencode did not return a session id");
+        agent.session = await invoke("agent_session", { project: state.project, set: id });
+        renderWatch();
+      }
+      const files = attachments.map((a) => ({ uri: `file://${a.path}`, name: a.path.split("/").pop(), description: a.what }));
+      const full = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
+      await oc(["session.prompt", "--param", `sessionID=${agent.session}`], { text: full, files });
+      status("Sent. The agent is working…");
     }
-    const files = attachments.map((a) => ({ uri: `file://${a.path}`, name: a.path.split("/").pop(), description: a.what }));
-    const full = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
-    await oc(["session.prompt", "--param", `sessionID=${agent.session}`], { text: full, files });
-    status("Sent. The agent is working…");
-  } catch (e) { status(String(e)); }
-  agentPoll();
+    clearSent(input, raw, attachments);
+    agentPoll();
+  } catch (e) {
+    status(String(e));
+    input.focus();
+  } finally {
+    agent.sending = false;
+    $("agent-send").disabled = false;
+  }
 }
 
 // Pointing: the overlay rings the element under the mouse; a click snapshots that rectangle.
@@ -277,7 +340,12 @@ $("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
 $("agent-point").addEventListener("click", pointStart);
 $("agent-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentSend(); }
+  // An IME candidate is not a send: Enter only picks the candidate.
+  if (e.isComposing || e.key === "Process") return;
+  if (e.key !== "Enter") return;
+  if (e.shiftKey) return; // Shift+Enter is a line break.
+  e.preventDefault();
+  agentSend();
 });
 $("agent-target").addEventListener("change", (e) => { agent.target = e.target.value; renderLog(); agentPoll(); });
 $("agent-model").addEventListener("change", async (e) => {
