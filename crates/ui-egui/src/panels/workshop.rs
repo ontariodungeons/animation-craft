@@ -271,7 +271,7 @@ pub(crate) fn workshop_screen(app: &mut AnimationCraftApp, ui: &mut Ui) {
     storyboard_pane(app, &mut right_ui);
 
     // Left Panel is a drop target for assets dragged from the Right Column.
-    let drop = ui.interact(left, ui.id().with("workshop.drop"), Sense::hover());
+    let drop = ui.interact(left, ui.scope_id().with("workshop.drop"), Sense::hover());
     let dragging = egui::DragAndDrop::has_payload_of_type::<String>(ui.ctx());
     if dragging && drop.contains_pointer() {
         ui.painter().rect_stroke(
@@ -801,7 +801,7 @@ fn assets_panel(app: &mut AnimationCraftApp, ui: &mut Ui, status: &Value, ready:
                                 let s = 96.0 / tw.max(th).max(1) as f32;
                                 let r = Rect::from_min_size(pointer + vec2(12.0, 12.0), vec2(tw as f32 * s, th as f32 * s));
                                 ui.ctx()
-                                    .layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("assets.drag")))
+                                    .layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("assets.drag")))
                                     .image(
                                         tex.id(),
                                         r,
@@ -1035,7 +1035,7 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
             let at = |x: &Value, y: &Value| pos2(shown.left() + x.as_f64().unwrap_or(0.0) as f32 / pw * shown.width(), shown.top() + y.as_f64().unwrap_or(0.0) as f32 / ph * shown.height());
             let rect = Rect::from_two_pos(at(&r[0], &r[1]), at(&r[2], &r[3]));
             let path = item["path"].as_str().unwrap_or_default().to_string();
-            let response = ui.interact(rect, ui.id().with(("storyboard.image", page, n)), Sense::click_and_drag());
+            let response = ui.interact(rect, ui.scope_id().with(("storyboard.image", page, n)), Sense::click_and_drag());
             app.automation.add_response(format!("workshop.storyboard.image.{n}"), "image", &path, &response);
             if response.hovered() || response.dragged() {
                 ui.painter().rect_stroke(rect.expand(2.0), 3.0, egui::Stroke::new(2.0, chrome::TEAL), egui::StrokeKind::Outside);
@@ -1052,7 +1052,7 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let [tw, th] = tex.size();
                 let s = 120.0 / tw.max(th).max(1) as f32;
                 let r = Rect::from_min_size(pointer + vec2(12.0, 12.0), vec2(tw as f32 * s, th as f32 * s));
-                ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("storyboard.drag")))
+                ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("storyboard.drag")))
                     .image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::from_white_alpha(230));
             }
             let response = match &thumb {

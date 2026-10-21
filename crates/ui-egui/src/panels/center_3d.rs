@@ -90,7 +90,7 @@ fn shape_preview(
         proj_blend_pct: app.ui_state.proj_blend_pct as u32,
         bump_intensity: app.ui_state.bump_strength as u32,
     };
-    let id = egui::Id::new("shared-shape-preview");
+    let id = egui::Id::unique("shared-shape-preview");
     let old = ctx.data_mut(|d| d.get_temp::<ShapePreviewCache>(id));
     if let Some(cache) = &old
         && cache.sources == sources

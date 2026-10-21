@@ -86,6 +86,10 @@ SUBCOMMANDS
   help                                this text
   --version                           print the version
 
+  agent say \"<text>\" [wait=300] [project=<dir>]
+                                      talk to the project's in-app opencode agent (prints its reply);
+                                      also: agent read [last=10], agent session (not an MCP tool)
+
 LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec ui.state`)
   ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
   ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
@@ -461,6 +465,129 @@ fn mcp_tools() -> Vec<Value> {
     tools
 }
 
+/// `opencode api <args…> [-d data]` against the user's opencode background service.
+fn opencode_api(cwd: &std::path::Path, args: &[&str], data: Option<&Value>) -> Result<Value, String> {
+    let mut cmd = std::process::Command::new("opencode");
+    cmd.current_dir(cwd).arg("api").args(args);
+    if let Some(d) = data {
+        cmd.arg("-d").arg(d.to_string());
+    }
+    // opencode can exit before a pipe is drained (large replies get cut at a 64 KiB boundary),
+    // so its reply is written to a file and read back whole.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let reply = std::env::temp_dir().join(format!(
+        "animationcraft-opencode-{}-{}.json",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let file = std::fs::File::create(&reply).map_err(|e| format!("opencode reply file: {e}"))?;
+    let out = cmd.stdout(file).output().map_err(|e| format!("opencode: {e}"))?;
+    let stdout = std::fs::read(&reply).unwrap_or_default();
+    let _ = std::fs::remove_file(&reply);
+    if !out.status.success() {
+        return Err(format!("opencode {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let text = String::from_utf8_lossy(&stdout);
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("opencode reply: {e}"))
+}
+
+/// `agent say|read|session`: talk to the project's in-app opencode agent from outside the app.
+/// Deliberately not an engine command, so it is not an MCP tool the agent itself could call.
+fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<String>) -> Result<(), String> {
+    let dir = match params.get("project").and_then(Value::as_str) {
+        Some(p) if p.ends_with(".acproj") => std::path::Path::new(p).parent().map(std::path::Path::to_path_buf).ok_or("bad project path")?,
+        Some(p) => std::path::PathBuf::from(p),
+        None => match &bridge {
+            Some(addr) => bridge_call(addr, "project.list_assets", json!({}))?["project"]
+                .as_str()
+                .and_then(|p| std::path::Path::new(p).parent().map(std::path::Path::to_path_buf))
+                .ok_or("the live app has no project open; pass project=<folder>")?,
+            None => std::env::current_dir().map_err(|e| e.to_string())?,
+        },
+    };
+    let file = dir.join(".agent").join("opencode-session");
+    let session = std::fs::read_to_string(&file).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let print = |messages: &[Value]| {
+        for m in messages {
+            match m["type"].as_str() {
+                Some("user") => outln!("\n> {}", m["text"].as_str().unwrap_or("")),
+                Some("assistant") => {
+                    for part in m["content"].as_array().into_iter().flatten() {
+                        match part["type"].as_str() {
+                            Some("text") => outln!("{}", part["text"].as_str().unwrap_or("")),
+                            Some(k) if k.contains("tool") => outln!("  · {}", part["name"].as_str().unwrap_or(k)),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    let list = |sid: &str, limit: u64| -> Result<Vec<Value>, String> {
+        let v = opencode_api(&dir, &["session.message.list", "--param", &format!("sessionID={sid}"), "--param", "order=desc", "--param", &format!("limit={limit}")], None)?;
+        Ok(v["data"].as_array().cloned().unwrap_or_default().into_iter().rev().collect())
+    };
+    match verb {
+        "session" => {
+            outln!("{}", session.ok_or_else(|| format!("no agent session yet for {}", dir.display()))?);
+            Ok(())
+        }
+        "read" => {
+            let sid = session.ok_or_else(|| format!("no agent session yet for {}", dir.display()))?;
+            print(&list(&sid, params.get("last").and_then(Value::as_u64).unwrap_or(10))?);
+            Ok(())
+        }
+        "say" => {
+            let text = text.ok_or("agent say needs the message text")?;
+            let sid = match session {
+                Some(s) => s,
+                None => {
+                    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+                    let v = opencode_api(&dir, &["session.create"], Some(&json!({"title": format!("AnimationCraft · {name}")})))?;
+                    let id = v["data"]["id"].as_str().ok_or("opencode did not return a session id")?.to_string();
+                    std::fs::create_dir_all(dir.join(".agent")).map_err(|e| e.to_string())?;
+                    std::fs::write(&file, &id).map_err(|e| e.to_string())?;
+                    id
+                }
+            };
+            let sent = opencode_api(&dir, &["session.prompt", "--param", &format!("sessionID={sid}")], Some(&json!({"text": text})))?;
+            let since = sent["data"]["time"]["created"].as_u64().unwrap_or(0);
+            let wait = params.get("wait").and_then(Value::as_u64).unwrap_or(300);
+            if wait == 0 {
+                outln!("sent to {sid}");
+                return Ok(());
+            }
+            let start = std::time::Instant::now();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let new: Vec<Value> = list(&sid, 30)?.into_iter().filter(|m| m["time"]["created"].as_u64().unwrap_or(0) >= since).collect();
+                let forms = opencode_api(&dir, &["session.form.list", "--param", &format!("sessionID={sid}")], None)?;
+                let asked = forms["data"].as_array().is_some_and(|f| !f.is_empty());
+                if asked || new.iter().any(|m| m["type"] == json!("idle")) {
+                    print(&new);
+                    for f in forms["data"].as_array().into_iter().flatten() {
+                        for field in f["fields"].as_array().into_iter().flatten() {
+                            outln!("\n? {} — {}", field["title"].as_str().unwrap_or(""), field["description"].as_str().unwrap_or(""));
+                            for o in field["options"].as_array().into_iter().flatten() {
+                                outln!("  - {}", o["label"].as_str().unwrap_or(""));
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                if start.elapsed().as_secs() > wait {
+                    return Err(format!("no reply within {wait} s; see `agent read` (session {sid})"));
+                }
+            }
+        }
+        _ => Err("usage: agent say \"<text>\" [wait=300] [project=<dir>] | agent read [last=10] | agent session".into()),
+    }
+}
+
 /// `ui_look` as an MCP result: the picture as an image block, the state as text.
 fn ui_look(bridge: Option<&str>, mut args: Value) -> Value {
     let error = |e: String| json!({"content": [{"type": "text", "text": e}], "isError": true});
@@ -663,6 +790,12 @@ fn main() {
         }
         "mcp" => {
             run_mcp_stdio(a.bridge_addr());
+        }
+        "agent" => {
+            let params = a.params_from(3).unwrap_or_else(|e| usage(e));
+            if let Err(e) = agent_command(a.pos(1).unwrap_or(""), a.pos(2), &params, a.bridge_addr()) {
+                fail(e);
+            }
         }
         "doctor" => {
             let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));

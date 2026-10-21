@@ -73,7 +73,7 @@ pub(super) fn turnaround(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         let selected = angle.is_some_and(|a| ((app.ui_state.yaw_deg - a + 180.0).rem_euclid(360.0) - 180.0).abs() < 15.0);
                         let name = readable_name(&frame.label);
                         let response = ui.add_sized([width, 112.0], egui::Button::new("").selected(selected).corner_radius(5));
-                        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name));
+                        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name));
                         let rect = response.rect;
                         let bounds = Rect::from_min_max(rect.min + Vec2::splat(5.0), Pos2::new(rect.right() - 5.0, rect.bottom() - 30.0));
                         if let Some(texture) = app.load_texture(&ctx, &frame.resolved_path.to_string_lossy()) {
@@ -137,7 +137,7 @@ pub(super) fn poses(app: &mut AnimationCraftApp, ui: &mut Ui) {
                     let name = readable_name(&frame.label);
                     let selected = app.ui_state.selected_pose_idx == index;
                     let response = ui.add_sized([ui.available_width(), 54.0], egui::Button::new("").selected(selected).corner_radius(5));
-                    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name));
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name));
                     let rect = response.rect;
                     let image_rect = Rect::from_min_size(rect.min + Vec2::splat(5.0), Vec2::new(34.0, 44.0));
                     if let Some(texture) = app.load_texture(&ctx, &frame.resolved_path.to_string_lossy()) { image_fit(ui, &texture, image_rect); }

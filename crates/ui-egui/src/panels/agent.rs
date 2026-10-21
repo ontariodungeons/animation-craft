@@ -55,11 +55,22 @@ fn opencode(cwd: &Path, args: &[String], data: Option<&Value>) -> Result<Value, 
     if let Some(d) = data {
         cmd.arg("-d").arg(d.to_string());
     }
-    let out = cmd.output().map_err(|e| format!("opencode: {e}"))?;
+    // opencode can exit before a pipe is drained (large replies get cut at a 64 KiB boundary),
+    // so its reply is written to a file and read back whole.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let reply = std::env::temp_dir().join(format!(
+        "animationcraft-opencode-{}-{}.json",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let file = std::fs::File::create(&reply).map_err(|e| format!("opencode reply file: {e}"))?;
+    let out = cmd.stdout(file).output().map_err(|e| format!("opencode: {e}"))?;
+    let stdout = std::fs::read(&reply).unwrap_or_default();
+    let _ = std::fs::remove_file(&reply);
     if !out.status.success() {
         return Err(format!("opencode {}: {}", args.first().map_or("", String::as_str), String::from_utf8_lossy(&out.stderr).trim()));
     }
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = String::from_utf8_lossy(&stdout);
     if text.trim().is_empty() {
         return Ok(Value::Null);
     }
@@ -485,7 +496,7 @@ pub(crate) fn pointing_overlay(app: &mut AnimationCraftApp, ctx: &egui::Context)
             .map(|e| (e.id.clone(), e.label.clone(), e.rect))
     });
     let mut clicked = false;
-    egui::Area::new(egui::Id::new("agent.point.overlay")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("agent.point.overlay")).order(egui::Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
         let r = ui.allocate_rect(screen, Sense::click());
         ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(36));
         if let Some((id, label, rect)) = &under {

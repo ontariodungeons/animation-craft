@@ -289,7 +289,7 @@ fn workflow_strip(app: &mut AnimationCraftApp, ui: &mut Ui, rect: Rect) {
         let (row, col) = (i / per_row, i % per_row);
         let min = pos2(left + col as f32 * (STEP_W + STEP_GAP), rect.top() + 24.0 + row as f32 * (STEP_H + 18.0));
         let r = Rect::from_min_size(min, vec2(STEP_W, STEP_H));
-        let resp = ui.interact(r, ui.id().with(("workflow", i)), Sense::click());
+        let resp = ui.interact(r, ui.scope_id().with(("workflow", i)), Sense::click());
         let hot = resp.hovered();
         ui.painter().rect_filled(r, 6.0, if hot { HOVER } else { super::chrome::SURFACE });
         ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, if hot { MUTED } else { super::chrome::BORDER }), StrokeKind::Inside);
@@ -312,7 +312,7 @@ fn workflow_strip(app: &mut AnimationCraftApp, ui: &mut Ui, rect: Rect) {
             && let Some(path) = launcher_path(id)
         {
             let open = Rect::from_min_size(pos2(r.left() + 12.0, r.bottom() - 20.0), vec2(48.0, 14.0));
-            let o = ui.interact(open, ui.id().with(("workflow-open", i)), Sense::click());
+            let o = ui.interact(open, ui.scope_id().with(("workflow-open", i)), Sense::click());
             let color = if o.hovered() { TEXT } else { FAINT };
             ui.painter().text(open.left_center(), egui::Align2::LEFT_CENTER, "Open", FontId::proportional(11.5), color);
             let o = o.on_hover_text(format!("Open {} ({})", step.app, path.display()));
@@ -337,7 +337,7 @@ fn pill_button(ui: &mut Ui, label: &str, min_width: f32, primary: bool) -> Respo
     let galley = ui.painter().layout_no_wrap(label.into(), FontId::proportional(13.0), TEXT);
     let size = vec2((galley.size().x + 28.0).max(min_width), 28.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     let hot = resp.hovered() || resp.is_pointer_button_down_on();
     let radius = rect.height() / 2.0;
     if primary {
@@ -405,7 +405,7 @@ fn home_recent(app: &mut AnimationCraftApp, ui: &mut Ui, recent: &[String]) {
             let fg = elided(ui, &folder, 11.5, FAINT, folder_max);
             ui.painter().galley(pos2(right - fg.size().x, row.center().y - fg.size().y / 2.0), fg, FAINT);
         }
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         app.automation.add_response(format!("home.recent.{i}"), "button", &name, &resp);
         let resp = resp.on_hover_text(path).on_hover_cursor(egui::CursorIcon::PointingHand);
         if hovered {

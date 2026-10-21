@@ -62,6 +62,8 @@ pub struct AnimationCraftApp {
     pub(crate) pending_look: Option<(Value, Sender<Result<Value, String>>, Instant, Option<u8>)>,
     /// The docked agent pane (opencode session, Herdr targets, pointing).
     pub(crate) agent: crate::panels::agent::AgentPane,
+    /// The latest window screenshot (egui delivers it to a callback).
+    pub(crate) screenshot_inbox: Arc<Mutex<Option<Arc<egui::ColorImage>>>>,
     pub(crate) pending_clicks: Vec<egui::Pos2>,
     job_tx: Sender<BackgroundJobResult>,
     job_rx: Receiver<BackgroundJobResult>,
@@ -396,6 +398,7 @@ impl AnimationCraftApp {
             pending_vision: None,
             pending_look: None,
             agent: Default::default(),
+            screenshot_inbox: Default::default(),
             pending_clicks: Vec::new(),
             job_tx,
             job_rx,

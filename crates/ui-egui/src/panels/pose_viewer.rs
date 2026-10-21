@@ -194,7 +194,7 @@ pub(in crate::panels) fn open_source(
     let Some(index) = choices.iter().position(|s| s.path == path) else {
         return;
     };
-    let id = egui::Id::new(("pose_viewer", &asset.id));
+    let id = egui::Id::unique(("pose_viewer", &asset.id));
     let mut state = ctx
         .data_mut(|d| d.get_temp::<ViewerState>(id))
         .unwrap_or_default();
@@ -203,7 +203,7 @@ pub(in crate::panels) fn open_source(
     state.source_open = true;
     state.slice_kind = choices[index].kind.clone();
     ctx.data_mut(|d| {
-        d.remove_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset.id)));
+        d.remove_temp::<usize>(egui::Id::unique(("pose_viewer_selection", &asset.id)));
         d.insert_temp(id, state);
     });
     app.ui_state.center_tab = CenterTab::AssetSheet;
@@ -233,7 +233,7 @@ fn sheet_summary(ui: &mut Ui, asset: &Asset, path: &Path) {
                 Color32::from_rgb(238, 193, 104)
             }),
     );
-    let key = egui::Id::new(("sheet_warnings", &manifest.manifest_path));
+    let key = egui::Id::unique(("sheet_warnings", &manifest.manifest_path));
     let warnings = ui.ctx().data_mut(|d| {
         if let Some(warnings) = d.get_temp::<Vec<String>>(key) {
             return warnings;
@@ -328,7 +328,7 @@ pub(super) fn navigation(app: &mut AnimationCraftApp, ui: &mut Ui) {
         return;
     };
     let default_st = default_viewer_state_for_asset(app.session().current_asset());
-    let state_id = egui::Id::new(("pose_viewer", &asset_id));
+    let state_id = egui::Id::unique(("pose_viewer", &asset_id));
     let mut state = ui
         .ctx()
         .data_mut(|d| d.get_temp::<ViewerState>(state_id))
@@ -336,7 +336,7 @@ pub(super) fn navigation(app: &mut AnimationCraftApp, ui: &mut Ui) {
     // Sidebar selection is consumed by show(); reflect that destination in this header too.
     if ui
         .ctx()
-        .data(|d| d.get_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset_id))))
+        .data(|d| d.get_temp::<usize>(egui::Id::unique(("pose_viewer_selection", &asset_id))))
         .is_some()
     {
         state.inspect_pose();
@@ -375,14 +375,14 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .unwrap_or(&[]);
     app.ui_state.selected_pose_idx = navigate(app.ui_state.selected_pose_idx, 0, frames.len());
     let default_st = default_viewer_state_for_asset(Some(&asset));
-    let state_id = egui::Id::new(("pose_viewer", &asset.id));
+    let state_id = egui::Id::unique(("pose_viewer", &asset.id));
     let mut state = ui
         .ctx()
         .data_mut(|d| d.get_temp::<ViewerState>(state_id))
         .unwrap_or(default_st);
     if ui
         .ctx()
-        .data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("pose_viewer_selection", &asset.id))))
+        .data_mut(|d| d.remove_temp::<usize>(egui::Id::unique(("pose_viewer_selection", &asset.id))))
         .is_some()
     {
         state.inspect_pose();
@@ -535,7 +535,7 @@ pub(super) fn show(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 let recut = button(app, ui, "pose.recut", "Re-cut this sheet", enabled, "Open a sheet first. Slicing writes a new output revision and preserves previous files.");
                 let layout = if button(app, ui, "pose.apply_layout", "Apply layout…", enabled, "Choose a reviewed JSON layout for this sheet. Previous cutouts remain available if the operation fails.") {
                     ui.ctx()
-                        .data_mut(|d| d.remove_temp::<PathBuf>(egui::Id::new("pose.apply_layout_path")))
+                        .data_mut(|d| d.remove_temp::<PathBuf>(egui::Id::unique("pose.apply_layout_path")))
                         .or_else(|| rfd::FileDialog::new().add_filter("Layout JSON", &["json"]).pick_file())
                 } else { None };
                 if (recut || layout.is_some()) && let Some(source) = selected_source {
@@ -850,7 +850,7 @@ fn canvas(
             }
             let hit = bounds.intersect(rect);
             if hit.is_positive() {
-                let clicked = ui.interact(hit, ui.id().with(("crop", index)), egui::Sense::click());
+                let clicked = ui.interact(hit, ui.scope_id().with(("crop", index)), egui::Sense::click());
                 app.automation.add_response(
                     format!("pose.crop.{index}"),
                     "button",
@@ -936,7 +936,7 @@ fn tile(
             .corner_radius(6),
     );
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+        egui::WidgetInfo::selected(egui::Role::Button, true, selected, label)
     });
     let rect = response.rect;
     let bounds = Rect::from_min_max(
@@ -1212,7 +1212,7 @@ pub(in crate::panels) fn select_pose(
     app.ui_state.playing = false;
     app.ui_state.center_tab = CenterTab::AssetSheet;
     if let Some(asset_id) = app.session.active_asset.as_ref() {
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pose_viewer_selection", asset_id)), index));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("pose_viewer_selection", asset_id)), index));
     }
 }
 
@@ -1223,7 +1223,7 @@ pub(in crate::panels) fn sidebar(app: &mut AnimationCraftApp, ui: &mut Ui) {
         .and_then(|a| a.pose_manifest.as_ref())
         .map(|m| m.frames.clone())
         .unwrap_or_default();
-    let history_id = ui.id().with((
+    let history_id = ui.scope_id().with((
         "pose_sidebar_last_selection",
         app.session.active_asset.clone(),
     ));
@@ -1261,7 +1261,7 @@ pub(in crate::panels) fn sidebar(app: &mut AnimationCraftApp, ui: &mut Ui) {
                 response.scroll_to_me(Some(egui::Align::Center));
             }
             response.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name)
+                egui::WidgetInfo::selected(egui::Role::Button, true, selected, &name)
             });
             let rect = response.rect;
             let picture = Rect::from_min_size(rect.min + Vec2::splat(5.0), Vec2::new(36.0, 46.0));
@@ -1448,7 +1448,7 @@ mod tests {
                     Pos2::new(220.0, 0.0),
                     Pos2::new(900.0, 700.0),
                 )));
-                state_id = egui::Id::new(("pose_viewer", "fixture"));
+                state_id = egui::Id::unique(("pose_viewer", "fixture"));
                 navigation(app, &mut main);
                 show(app, &mut main);
             },

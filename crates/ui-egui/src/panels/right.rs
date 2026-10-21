@@ -983,7 +983,7 @@ fn capability_badge(app: &mut AnimationCraftApp, ui: &Ui, slider: &egui::Respons
     let rect = egui::Rect::from_center_size(centre, egui::Vec2::splat(16.0));
     let text = if bound { "bound in this rig" } else { "not bound in this rig: has no effect" };
     app.automation.add(format!("pose.{control}.capability"), "badge", text, rect);
-    ui.interact(rect, ui.id().with(("capability", control)), egui::Sense::hover())
+    ui.interact(rect, ui.scope_id().with(("capability", control)), egui::Sense::hover())
         .on_hover_text(if bound {
             format!("{label} is bound in this rig's control_bindings.")
         } else {

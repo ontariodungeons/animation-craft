@@ -79,7 +79,7 @@ fn pose_chart(ui: &mut Ui, id: &str, samples: &[(&str, f32)], accent: Color32) {
             egui::pos2(x, rect.top()),
             egui::pos2(x + step, rect.bottom()),
         );
-        let response = ui.interact(hit, ui.id().with((id, index)), Sense::hover());
+        let response = ui.interact(hit, ui.scope_id().with((id, index)), Sense::hover());
         let bar = egui::Rect::from_min_max(
             egui::pos2(x + 1.0, y(*value).min(zero)),
             egui::pos2((x + step - 1.0).max(x + 1.5), y(*value).max(zero) + 1.0),

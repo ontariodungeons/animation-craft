@@ -244,7 +244,7 @@ impl AnimationCraftApp {
                 self.pending_screenshot = Some((out_path, req.reply, Instant::now()));
                 self.send_viewport_cmd_and_repaint(
                     live_ctx,
-                    egui::ViewportCommand::Screenshot(egui::UserData::default()),
+                    self.screenshot_cmd(),
                 );
             } else if req.id == "ui.look" {
                 // Optionally click first; the capture waits two frames so the click is drawn.
@@ -260,7 +260,7 @@ impl AnimationCraftApp {
                 self.pending_vision = Some((req.reply, Instant::now()));
                 self.send_viewport_cmd_and_repaint(
                     live_ctx,
-                    egui::ViewportCommand::Screenshot(egui::UserData::default()),
+                    self.screenshot_cmd(),
                 );
             } else if req.id == "app.quit" {
                 if let Some(ctx) = live_ctx {
@@ -319,7 +319,7 @@ impl AnimationCraftApp {
         match look.3 {
             Some(0) => {
                 look.3 = None;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                ctx.send_viewport_cmd(self.screenshot_cmd());
             }
             Some(n) => look.3 = Some(n - 1),
             None => {}
@@ -392,15 +392,19 @@ impl AnimationCraftApp {
         }));
     }
 
-    pub(crate) fn handle_screenshot_events(&mut self, ctx: &egui::Context) {
-        let screenshot_img = ctx.input(|i| {
-            for ev in &i.raw.events {
-                if let egui::Event::Screenshot { image, .. } = ev {
-                    return Some(image.clone());
-                }
+    /// A window screenshot request whose picture lands in `screenshot_inbox`; the pending request
+    /// keeps the window repainting until `handle_screenshot_events` takes it.
+    fn screenshot_cmd(&self) -> egui::ViewportCommand {
+        let inbox = self.screenshot_inbox.clone();
+        egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |image| {
+            if let Ok(mut slot) = inbox.lock() {
+                *slot = Some(image);
             }
-            None
-        });
+        }))
+    }
+
+    pub(crate) fn handle_screenshot_events(&mut self, ctx: &egui::Context) {
+        let screenshot_img = self.screenshot_inbox.lock().ok().and_then(|mut slot| slot.take());
         let Some(color_img) = screenshot_img else {
             return;
         };
