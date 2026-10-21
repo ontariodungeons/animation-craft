@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AnimationCraft</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand" title="AnimationCraft">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
+      <span id="project-name">AnimationCraft</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="project" role="tab" aria-selected="true">Project</button>
+      <button class="tab" data-view="split" role="tab" aria-selected="false" title="Project above, the studio's animation below">Split</button>
+      <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+    <button class="target" id="target" aria-label="Studio server: click to start or stop" title="Studio server · click to start or stop">
+      <span class="dot off" id="server-dot"></span><span id="target-name">—</span>
+    </button>
+  </header>
+
+  <main>
+    <section class="view active" id="view-project">
+      <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
+      <section class="storyboard" aria-label="Storyboard">
+        <div class="sb-head">
+          <div class="chips" id="sb-chips" role="tablist"></div>
+          <div class="sb-nav">
+            <button class="icon" id="sb-prev" aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
+            <span id="sb-page">—</span>
+            <button class="icon" id="sb-next" aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></button>
+            <button class="icon" id="sb-pdf" aria-label="Open the storyboard PDF" title="Open the storyboard PDF"><svg viewBox="0 0 24 24"><path d="M14 3h7v7" /><path d="M21 3l-9 9" /><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg></button>
+          </div>
+        </div>
+        <div class="sb-page-wrap" id="sb-wrap"><img id="sb-img" alt="Storyboard page" /></div>
+      </section>
+    </section>
+
+    <section class="view" id="view-studio">
+      <div class="studio-slot" id="studio-slot"></div>
+      <div class="studio-empty" id="studio-empty">
+        <p>The studio is off.</p>
+        <p class="muted">It only runs when you need it.</p>
+        <button class="start" id="studio-start">Start the studio</button>
+      </div>
+    </section>
+  </main>
+  <div class="frame-handle" id="frame-handle" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the project view and the studio; double-click to reset" title="Drag to resize · double-click to reset">
+    <span class="grip"></span>
+    <button class="icon" id="collapse-top" aria-label="Collapse the project view (studio only)" title="Studio only"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+    <button class="icon" id="collapse-bottom" aria-label="Collapse the studio (project only)" title="Project only"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

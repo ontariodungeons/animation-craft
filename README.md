@@ -117,6 +117,7 @@ Each result includes `next` steps for an agent.
 | Create the storyboard template | `animationcraft-cli exec storyboard.init` |
 | Agent pane: header **Agent** opens your opencode session (`opencode api`, your models and MCP servers); **Point** attaches a picture of any element; send to the session or any Herdr agent | app header → Agent; watch with `opencode --session <id>` |
 | Let agents see and drive the app with egui's own inspection (egui_mcp: widget tree, click, type, resize, screenshot) | `EGUI_INSPECTION=1 animationcraft --control 19897`, then MCP server `egui-mcp` (`cargo install --git https://github.com/rerun-io/kittest_inspector egui_mcp`) |
+| Desktop shell (Tauri): project view, storyboard and the video studio as Project / Split / Studio views in one window; the studio server only runs when you switch it on (red/green light) | `animationcraft-shell <project.acproj> [--view split] [--open animate]` |
 | See the live app in one step (optional click, crop to a region, state + ids) | `animationcraft-cli --bridge 19897 exec ui.look region=workshop.storyboard click=workshop.storyboard.page.0` |
 | Analyze the song with the HyperFrames tools (words → `hyperframes/transcript.json`, structure → `hyperframes/audiomap.json`) | `animationcraft-cli exec audio.analyze` |
 | Import scenes from an OpenMontage project | `animationcraft-cli exec storyboard.import_openmontage path=<old project>` |

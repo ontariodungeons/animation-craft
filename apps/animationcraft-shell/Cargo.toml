@@ -1,0 +1,22 @@
+[package]
+name = "animationcraft-shell"
+description = "AnimationCraft desktop shell: the project view in a webview, with video studios (HyperFrames, Remotion) as tabs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+animationcraft-engine = { workspace = true }
+serde_json = { workspace = true }
+tauri = { version = "2.12", features = ["unstable", "protocol-asset", "devtools"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The window's webviews stack in one GTK box on Linux; the shell sets their packing directly.
+gtk = "0.18"
+webkit2gtk = "2.0"

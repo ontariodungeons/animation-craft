@@ -469,7 +469,7 @@ pub(crate) fn board_layout(cards: &[Card]) -> (Vec<(usize, f64, f64)>, usize) {
 
 /// A character's parts stacked in order (they share one canvas), cropped to what is drawn,
 /// written to `out`. None when they don't share a canvas.
-fn assembled_parts(parts: &[PathBuf], out: &Path) -> Option<PathBuf> {
+pub fn assembled_parts(parts: &[PathBuf], out: &Path) -> Option<PathBuf> {
     let mut canvas: Option<image::RgbaImage> = None;
     for p in parts {
         let layer = image::open(p).ok()?.to_rgba8();
