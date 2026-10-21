@@ -18,6 +18,7 @@
     )
 )]
 
+pub mod agent;
 pub mod commands;
 pub mod control_bindings;
 pub mod doctor;

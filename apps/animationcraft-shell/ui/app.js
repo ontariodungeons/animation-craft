@@ -127,12 +127,14 @@ function renderBlocks() {
 
 function renderStoryboard() {
   const sb = state.data?.storyboard;
+  document.body.classList.toggle("movie-document",sb?.template==="backlot");
   const pages = sb?.previews || [];
   const chips = $("sb-chips");
   chips.replaceChildren();
-  const img = $("sb-img");
+  let img = $("sb-img");
+  if(!img && !pages.length){$("sb-wrap").replaceChildren();img=el("img",{id:"sb-img"});$("sb-wrap").append(img);$("sb-wrap").classList.remove("document-pages");delete $("sb-wrap").dataset.document;}
   $("sb-empty")?.remove();
-  img.hidden = !pages.length;
+  if(img)img.hidden = !pages.length;
   for (const id of ["sb-prev", "sb-next", "sb-pdf"]) $(id).disabled = !pages.length;
   if (!pages.length) {
     img.onload = img.onerror = null;
@@ -155,7 +157,7 @@ function renderStoryboard() {
   }
   state.page = Math.max(0, Math.min(state.page, pages.length - 1));
   const first = (sb.first_scene_page || 2) - 1;
-  const nav = [["Lyrics", 0], ["Cast & sets", 1],
+  const nav = sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
     ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
   for (const [label, page] of nav) {
     const active = page === state.page;
@@ -164,16 +166,31 @@ function renderStoryboard() {
   }
   chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   $("sb-page").textContent = `${state.page + 1} / ${pages.length}`;
-  img.classList.add("loading");
-  img.onload = () => img.classList.remove("loading");
-  img.onerror = () => toast(`Could not load ${img.src}`);
-  img.src = convertFileSrc(pages[state.page]);
+  const wrap=$("sb-wrap");
+  const key=JSON.stringify([state.project,pages,sb.layout]);
+  if(wrap.dataset.document!==key){
+    wrap.dataset.document=key;wrap.replaceChildren();wrap.classList.add("document-pages");
+    const size=sb.layout?.page_size||[595,842];
+    pages.forEach((path,i)=>{
+      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet",style:`aspect-ratio:${size[0]}/${size[1]}`});
+      page.append(el("img",{src:convertFileSrc(path),alt:`Storyboard page ${i+1}`,loading:"lazy"}));
+      for(const [j,link] of (sb.layout?.links||[]).entries())if(link.page===i+1){
+        const [x,y,r,b]=link.rect;
+        page.append(el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${(r-x)/size[0]*100}%;height:${(b-y)/size[1]*100}%`,onclick:()=>showPage(link.to_page-1)}));
+      }
+      wrap.append(page);
+    });
+    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
+  }
+
 }
 
 function showPage(n) {
   const total = state.data?.storyboard?.previews?.length || 0;
   state.page = Math.max(0, Math.min(total - 1, n));
   renderStoryboard();
+  const page=$(`sb-sheet-${state.page}`),wrap=$("sb-wrap");
+  if(page)wrap.scrollTo({top:wrap.scrollTop+page.getBoundingClientRect().top-wrap.getBoundingClientRect().top-18,behavior:"smooth"});
 }
 
 // ---- Tabs and the studio webview ----------------------------------------------------------
@@ -313,3 +330,5 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("resize", placeInk);
 placeInk();
 load();
+
+$("project-details").addEventListener("click",()=>{document.body.classList.toggle("project-details-open");$("project-details").setAttribute("aria-pressed",String(document.body.classList.contains("project-details-open")));});

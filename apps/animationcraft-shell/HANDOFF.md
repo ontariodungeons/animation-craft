@@ -251,3 +251,27 @@ Nelly storyboard subsequently built: 37 pages / 320 editable fields. Inner valid
 edit/save/reopen on `.agent/storyboard-fieldcheck*.pdf`, confirmed text values persisted and the
 real storyboard stayed byte-identical. Its renderer/image check was still finishing at this checkpoint.
 Source CLI preparation audit remains work to do; no new Nelly segmentation or articulated rig shipped.
+
+## Visual movie document and new chat
+
+User rejected the form-packet template and asked for the prior Backlot movie design. Built and
+visually inspected an editable DeckCraft landscape document (38 slides: 3 contents + 35 scenes),
+with existing revision-03 reference art, approved transcript lyrics and script enhancement cues.
+`workshop.build_storyboard template=backlot source=<OpenMontage folder>` reproduces it through
+`pipeline/movie_board.py`. `.storyboard/movie-board.json` is actually `storyboard/movie-board.json`
+in the song folder and selects the preview document; previous files are preserved in revision folders.
+PDF link_list verified 70 real links. The shell continuously scrolls pages, follows contents/return
+links, and hides project details while reading (sidebar button restores them). Live click took scene
+02 to page 5. New chat header button invokes engine `agent.new_chat`; CLI + MCP tested, previous
+session archived, draft retained, MiniMax retained. Fresh Nelly session: ses_ea28376feffeRZ1TMZxBJQw0Hw.
+
+Important correction: initial Nelly asset was an older front puppet. User rejected that identity.
+Removed its project connection (files preserved) and imported the revised source
+`revision-03/opening/remotion/public/storybook/nelly-walk-v3.png` as asset `nelly`. It is a prepared
+transparent cutout, NOT a newly extracted or rigged character. Existing contact rig under
+`public/animated/nelly-contact/rig.json` has nine parts + walk_keyframes, but its parts canvas
+1272x1236 differs from declared export canvas1536x1728 and parent Pelvis is external. Must adapt
+with a verified generic import command, not guessed transforms. Source matte has visible edge
+contamination; user questioned cutting quality. No new cuts or rig were run. Current proposed UX:
+drop image → select subject → inspect/refine matte → review parts/joints → preview actions, all
+through shared CLI/MCP commands; this flow is NOT yet implemented.

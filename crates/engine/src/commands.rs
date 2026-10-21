@@ -186,6 +186,7 @@ pub fn build() -> Vec<CommandSpec> {
     vec![
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
+        cmd!("agent.new_chat", "Start a new project conversation", ["Agent"], None, "{\"model\":\"optional {id,providerID}\"}", always, crate::agent::new_chat),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
         query!(
@@ -385,7 +386,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("workshop.import_transcript", "Import Transcript", ["Workshop"], None,
             "{\"path\": \"transcript.json\", \"captions\": \"optional authored .srt (required for a word array)\", \"filmcraft_project\": \"optional .fcproj\"}", always, cmd_workshop_import_transcript),
         cmd!("workshop.build_storyboard", "Build Storyboard PDF", ["Workshop"], None,
-            "{}", always, cmd_workshop_build_storyboard),
+            "{\"template\":\"pdf|backlot\",\"source\":\"optional OpenMontage project folder\"}", always, cmd_workshop_build_storyboard),
         cmd!("workshop.approve_draft", "Approve Storyboard", ["Workshop"], None,
             "{\"approved\": true}", always, cmd_workshop_approve_draft),
         cmd!("workshop.remove", "Remove Workshop File", ["Workshop"], None,

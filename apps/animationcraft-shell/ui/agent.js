@@ -66,6 +66,7 @@ async function agentPoll() {
       oc(["session.permission.list", "--param", sid]),
       oc(["session.form.list", "--param", sid]),
     ]);
+    if (sid !== `sessionID=${agent.session}`) return;
     if (messages.status === "fulfilled") agent.messages = (messages.value?.data || []).slice().reverse();
     else status(String(messages.reason));
     agent.permissions = permissions.value?.data || [];
@@ -195,6 +196,19 @@ function clearSent(input, raw, attachments) {
   }
 }
 
+async function agentNewChat(){
+ if(agent.sending)throw new Error("Wait for the current message to finish sending");
+ const button=$("agent-new");button.disabled=true;
+ try{
+  const result=await motionCommand("agent.new_chat",{model:currentModel()});
+  agent.session=result.session;agent.target=SESSION;agent.messages=[];agent.permissions=[];agent.forms=[];
+  $("agent-target").value=SESSION;renderLog();renderWatch();renderModels();
+  status("New chat · previous conversation saved");$("agent-input").focus();
+  return result;
+ }finally{button.disabled=false;}
+}
+$("agent-new").addEventListener("click",()=>agentNewChat().catch(e=>status(String(e))));
+
 async function agentSend() {
   const input = $("agent-input");
   if (agent.sending) return;
@@ -212,14 +226,7 @@ async function agentSend() {
       status(`Sent to ${agent.target} in Herdr.`);
     } else {
       status("Sending…");
-      if (!agent.session) {
-        const name = state.project.split("/").pop().replace(/\.acproj$/, "");
-        const made = await oc(["session.create"], { title: `AnimationCraft · ${name}` });
-        const id = made?.data?.id || made?.id;
-        if (!id) throw new Error("opencode did not return a session id");
-        agent.session = await invoke("agent_session", { project: state.project, set: id });
-        renderWatch();
-      }
+      if (!agent.session) { const made=await motionCommand("agent.new_chat",{});agent.session=made.session;renderWatch(); }
       const files = attachments.map((a) => ({ uri: `file://${a.path}`, name: a.path.split("/").pop(), description: a.what }));
       const full = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
       await oc(["session.prompt", "--param", `sessionID=${agent.session}`], { text: full, files });

@@ -569,7 +569,21 @@ fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
 }
 
 /// Builds storyboard/storyboard.pdf with pdfcraft-cli.
-pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
+pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<Value> {
+    if params["template"]=="backlot" {
+        let dir=project_dir(s)?;
+        let transcript=transcript_files(&dir).into_iter().next().ok_or_else(||EngineError::InvalidParams("Import the approved transcript first".into()))?;
+        let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+        let out=dir.join("storyboard").join(format!("movie-board-{stamp}"));
+        let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
+        let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title.into()];
+        if let Some(source)=params["source"].as_str(){args.extend(["--source".into(),resolve_workspace_path(s,source).to_string_lossy().into_owned()]);}
+        let output=run_tool_in(&dir,"python3",&args)?;
+        let result:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+        std::fs::write(dir.join("storyboard/movie-board.json"),result.to_string())?;
+        return Ok(result);
+    }
     let dir = project_dir(s)?;
     let title = s.project_path.as_ref().and_then(|p| p.file_stem()).and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
     let transcript_path = match caption_file(&dir) {
@@ -869,6 +883,13 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
 /// Current storyboard build state: PDF exists, previews, staleness.
 pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
+    if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
+        if let Ok(mut board)=serde_json::from_str::<Value>(&text) {
+            board["layout"]=json!({"page_size":board["page_size"],"links":board["links"]});
+            board["exists"]=json!(true);board["ok"]=json!(true);
+            return Ok(board);
+        }
+    }
     let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
     let preview_dir = dir.join(STORYBOARD_DIR).join(".preview");
     let previews = files_in(&preview_dir, Some(&["png"]));

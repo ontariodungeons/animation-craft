@@ -218,3 +218,17 @@ animationcraft-cli --bridge 19897 exec workshop.build_storyboard
 `path` accepts the existing `{words, paragraphs}` document or a word array when `captions` supplies
 its authored SRT paragraphs. Invalid cue times are rejected. The selected video target receives
 `transcript.srt`, which the storyboard template uses for scene timing.
+
+Build the visual Backlot movie board as an editable DeckCraft deck plus linked PDF and scrollable
+previews (uses the project's approved transcript; optional source supplies scene artwork and acting cues):
+
+```sh
+animationcraft-cli --bridge 19897 exec workshop.build_storyboard template=backlot source=/path/to/openmontage-project
+animationcraft-cli --bridge 19897 exec agent.new_chat
+```
+
+MCP equivalents: `workshop_build_storyboard` and `agent_new_chat`. Both are engine commands and
+also work in a headless CLI session after `project.open`. New chat preserves the previous session in
+`.agent/chat-history.jsonl`, keeps the requested model, and teaches the fresh session `agent.md`.
+Deck outputs use a new revision folder; scene prompts live in editable slide notes. The source project
+is read-only. PDF contents/return links and shell hotspots share the same page destinations.

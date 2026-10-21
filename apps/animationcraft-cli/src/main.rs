@@ -182,6 +182,8 @@ fn tool_input_schema(id: &str) -> Value {
     let unit = json!({ "type": "number", "minimum": 0, "maximum": 1 });
     let point = json!({ "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 });
     match id {
+        "agent.new_chat" => json!({"type":"object","properties":{"model":{"type":"object","properties":{"id":{"type":"string"},"providerID":{"type":"string"}},"required":["id","providerID"]}},"additionalProperties":false}),
+        "workshop.build_storyboard" => json!({"type":"object","properties":{"template":{"type":"string","enum":["pdf","backlot"]},"source":{"type":"string","description":"Optional OpenMontage project folder containing scene plan, script and reference artwork"}},"additionalProperties":false}),
         "image.break_apart" => json!({
             "type": "object",
             "properties": {

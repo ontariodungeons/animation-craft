@@ -334,3 +334,13 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
 .sb-page-wrap img[hidden] { display: none; }
 
 body.agent-docked main { margin-right: min(400px, 92vw); }
+
+.sb-page-wrap.document-pages { display:block; padding:20px; }
+.sb-sheet { position:relative; width:100%; margin:0 auto 24px; max-width:1600px; }
+.sb-page-wrap .sb-sheet img { display:block; width:100%; max-width:none; height:100%; object-fit:contain; }
+.sb-link { position:absolute; background:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; }
+.sb-link:hover,.sb-link:focus-visible { background:#64d7c218; border-color:var(--accent); outline:none; }
+.agent-head .agent-title { margin-right:auto; }
+
+body.movie-document:not(.project-details-open) #blocks { display:none; }
+#project-details { flex-shrink:0; }

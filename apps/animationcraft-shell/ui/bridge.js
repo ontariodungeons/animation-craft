@@ -77,6 +77,10 @@ window.acBridge = {
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
   async refresh(id, project) {
     if (id.startsWith("motion.")) return { refreshed: id };
+    if (id === "agent.new_chat") {
+      agent.session=await invoke("agent_session",{project:state.project,set:null});agent.messages=[];agent.permissions=[];agent.forms=[];
+      renderLog();renderWatch();renderModels();return {refreshed:id,session:agent.session};
+    }
     if (project && project !== state.project) return openProject(project);
     if (!project) return showHome();
     state.data = await invoke("project_state", { path: state.project });
