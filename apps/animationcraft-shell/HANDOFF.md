@@ -93,6 +93,30 @@ The user deletes the older UI after they confirm the checklist below.
 - Agent replies show raw markdown. Render it with a vendored library, not a hand-written parser.
 - Hey Ho's `remotion/` has no installed packages (`npm error could not determine executable`).
 
+## Pull every feature from the older UI until all of it is in the shell
+
+The older UI stays in the tree (`crates/ui-egui`, `apps/animationcraft`, tag `older-egui-ui`) until the user
+confirms the checklist. It's the **source** for every feature: read its code before porting a feature, and
+run it beside the shell to compare behavior (`cargo run -p animationcraft -- --control 19898`; the shell uses
+19897). Port behavior and engine calls, never egui code or its look. Don't edit or maintain it, and don't delete it
+yourself.
+
+Where each area lives in the older UI (`crates/ui-egui/src/`):
+- Home, recent, new project: `panels/start.rs`, `panels/workshop.rs` (`new_project_dialog`)
+- Menus (every File/Edit/View/Export entry): `menus.rs`, plus the engine's command list (`animationcraft-cli exec command.list`)
+- Workshop stages, actions, briefs, subjects, storyboard pane: `panels/workshop.rs`
+- Asset header (load, rename, manage), import: `panels/header.rs`, `panels/asset_browser.rs`
+- Parts list (visibility, solo, reviewed, anchors, labels, separation), turnaround views: `panels/asset_browser.rs`
+- Pose sheet viewer (slices, OCR, overlays, zoom): `panels/pose_viewer.rs`
+- Stage, actions, cutout rig evaluation, jump kinematics, zoom: `panels/center.rs`, `panels/center_motion.rs`
+- Transport (actions, jump, run lock, WASD, zoom buttons): `panels/transport.rs`
+- Pose controls and 3D shape inspector: `panels/right.rs`, `panels/inspector_widgets.rs`, `face_preview.rs`
+- 3D preview: `panels/center_3d.rs`; left tools: `panels/left.rs`
+- Agent pane (already ported): `panels/agent.rs`
+- Bridge commands the CLI/MCP relied on (`ui.*`, `ui.look`, `vision`): `bridge.rs`, `automation.rs`, `lib.rs`
+
+For each ported feature: tick it in the checklist below, with the commit hash.
+
 ## Feature checklist: older UI → shell (the user confirms this, then the older UI is deleted)
 
 Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell shows a step).
