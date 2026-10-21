@@ -350,6 +350,14 @@ impl AnimationCraftApp {
             let (x1, y1) = inside.iter().fold((0.0f32, 0.0f32), |a, e| (a.0.max(e.rect[0] + e.rect[2]), a.1.max(e.rect[1] + e.rect[3])));
             [x0, y0, x1 - x0, y1 - y0]
         };
+        // `pad` (points) widens the crop so a small element is shown with its surroundings.
+        let pad = params.get("pad").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+        let rect = if pad > 0.0 && !region.is_empty() {
+            let (x0, y0) = ((rect[0] - pad).max(0.0), (rect[1] - pad).max(0.0));
+            [x0, y0, rect[0] + rect[2] + pad - x0, rect[1] + rect[3] + pad - y0]
+        } else {
+            rect
+        };
         let px = |v: f32, max: u32| ((v * ppp).round().max(0.0) as u32).min(max);
         let (x0, y0) = (px(rect[0], w), px(rect[1], h));
         if x0 >= w || y0 >= h {

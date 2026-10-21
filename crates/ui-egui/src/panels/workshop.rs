@@ -94,6 +94,7 @@ pub(crate) fn header_project_bar(app: &mut AnimationCraftApp, ui: &mut Ui) {
         }
     }
     ui.separator();
+    super::agent::toggle(app, ui);
     if super::header::action_button(app, ui, "toolbar.import", "+ Import Asset", true) {
         app.ui_state.connect_asset_open = true;
     }

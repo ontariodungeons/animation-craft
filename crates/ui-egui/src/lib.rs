@@ -60,6 +60,8 @@ pub struct AnimationCraftApp {
     /// A `ui.look` waiting for its frame: params, reply, start, frames to wait before capture
     /// (None once the capture is requested).
     pub(crate) pending_look: Option<(Value, Sender<Result<Value, String>>, Instant, Option<u8>)>,
+    /// The docked agent pane (opencode session, Herdr targets, pointing).
+    pub(crate) agent: crate::panels::agent::AgentPane,
     pub(crate) pending_clicks: Vec<egui::Pos2>,
     job_tx: Sender<BackgroundJobResult>,
     job_rx: Receiver<BackgroundJobResult>,
@@ -393,6 +395,7 @@ impl AnimationCraftApp {
             pending_screenshot: None,
             pending_vision: None,
             pending_look: None,
+            agent: Default::default(),
             pending_clicks: Vec::new(),
             job_tx,
             job_rx,
@@ -931,6 +934,20 @@ impl AnimationCraftApp {
 
         let body =
             egui::Rect::from_min_max(egui::pos2(full.min.x, header_rect.max.y + 1.0), full.max);
+        // The agent pane docks on the right of the body; everything else lays out beside it.
+        let body = if self.agent.open {
+            let w = (body.width() * 0.28).clamp(280.0, 420.0);
+            let agent_rect = egui::Rect::from_min_max(egui::pos2(body.max.x - w, body.min.y), body.max);
+            ui.painter().rect_filled(agent_rect, 0.0, egui::Color32::from_rgb(20, 23, 31));
+            self.automation.add("agent.pane", "panel", "Agent", agent_rect);
+            let inner = agent_rect.shrink(8.0);
+            let mut agent_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::LEFT)));
+            agent_ui.set_clip_rect(inner);
+            crate::panels::agent::agent_pane(self, &mut agent_ui);
+            egui::Rect::from_min_max(body.min, egui::pos2(agent_rect.min.x - 1.0, body.max.y))
+        } else {
+            body
+        };
         let total_w = body.width().max(300.0);
         let left_w = (total_w * 0.25).clamp(135.0, 320.0);
         let right_w = (total_w * 0.26).clamp(140.0, 330.0);
@@ -1091,6 +1108,7 @@ impl eframe::App for AnimationCraftApp {
         self.advance_look(ui.ctx());
         self.drain_live_control_requests(ui.ctx());
         self.render_workspace(ui);
+        crate::panels::agent::pointing_overlay(self, ui.ctx());
 
         if self.ui_state.busy_command.is_some()
             || self.pending_screenshot.is_some()

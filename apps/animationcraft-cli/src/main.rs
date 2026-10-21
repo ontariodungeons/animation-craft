@@ -92,7 +92,7 @@ LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec 
   ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
   ui.vision                           analyze the live stage canvas pixels (no screenshot download needed)
   ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
-  ui.look [region=<id prefix>] [click=<id>] [max_side=1000] [output=...]
+  ui.look [region=<id prefix>] [click=<id>] [pad=0] [max_side=1000] [output=...]
                                       one-step look: click (optional), then a PNG of the window or region,
                                       the app state and the ids inside it (MCP: ui_look returns the image)
   ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
@@ -441,7 +441,8 @@ fn mcp_tools() -> Vec<Value> {
             "properties": {
                 "region": {"type": "string", "description": "element id prefix to crop to; empty = whole window"},
                 "click": {"type": "string", "description": "element id to click before looking"},
-                "max_side": {"type": "number", "description": "longest side in pixels (default 1000)"}
+                "max_side": {"type": "number", "description": "longest side in pixels (default 1000)"},
+                "pad": {"type": "number", "description": "points of surroundings to include around the region"}
             },
             "additionalProperties": false
         }

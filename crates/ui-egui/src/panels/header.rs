@@ -180,6 +180,7 @@ pub(crate) fn header(app: &mut AnimationCraftApp, ui: &mut Ui) {
                         }
                     }
                     ui.separator();
+                    super::agent::toggle(app, ui);
                     if action_button(app, ui, "toolbar.import", "+ Import Asset", true) {
                         app.ui_state.connect_asset_open = true;
                     }
