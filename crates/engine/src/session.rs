@@ -71,6 +71,9 @@ pub struct ProjectAsset {
     pub path: Option<PathBuf>,
     /// `auto`, `image`, `poses`, `turnaround`, or `cutout_rig`.
     pub kind: String,
+    /// Part visibility / solo / review state as last saved; applied when the asset loads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PartState>,
 }
 
 /// A reference image attached to a character once the user likes the original design.

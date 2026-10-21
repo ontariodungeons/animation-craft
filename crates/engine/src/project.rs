@@ -13,7 +13,19 @@ const PROJECT_FORMAT: &str = "animationcraft.project";
 pub fn write_project_file(s: &Session) -> Result<()> {
     let Some(path) = &s.project_path else { return Ok(()) };
     let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
-    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": s.project_assets,
+    // Loaded assets save their current part states; unloaded ones keep what was saved before.
+    let assets: Vec<crate::ProjectAsset> = s
+        .project_assets
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.clone();
+            if let Some(loaded) = s.assets.get(&entry.id) {
+                entry.parts = loaded.parts.clone();
+            }
+            entry
+        })
+        .collect();
+    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": assets,
         "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target}});
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -299,6 +311,7 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         preset,
         path: stored.clone(),
         kind: kind.into(),
+        parts: Vec::new(),
     });
     if load {
         cmd_project_load_asset(s, &json!({"id": id}))?;
@@ -364,6 +377,7 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
         s.active_asset = Some(entry.id.clone());
         return Ok(json!({"ok": true, "asset_id": entry.id}));
     }
+    let first_load = !s.assets.contains_key(&entry.id);
     // Failed decoding/reloading must leave the previous active asset and its rig intact.
     let mut staged = s.clone();
     if let Some(preset) = &entry.preset {
@@ -459,6 +473,14 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
     staged.active_asset = Some(entry.id.clone());
     if let Some(asset) = staged.current_asset_mut() {
         asset.sync_parts_from_manifests();
+        // A reload keeps the session's part states; a first load restores the saved ones.
+        if first_load {
+            for saved in &entry.parts {
+                if let Some(part) = asset.parts.iter_mut().find(|p| p.name == saved.name) {
+                    (part.visible, part.solo, part.verified) = (saved.visible, saved.solo, saved.verified);
+                }
+            }
+        }
     }
     *s = staged;
     Ok(json!({"ok": true, "asset_id": entry.id}))

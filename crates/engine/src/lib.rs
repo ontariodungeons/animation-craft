@@ -137,6 +137,7 @@ impl Session {
                         .map(str::to_owned),
                     path,
                     kind: "auto".into(),
+                    parts: Vec::new(),
                 });
             }
         }
