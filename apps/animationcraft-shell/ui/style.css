@@ -149,6 +149,16 @@ main { flex: 1; min-height: 0; position: relative; }
   .agent { width: min(320px, 95vw); }
   body.agent-docked main { margin-right: min(320px, 95vw); }
 }
+@media (max-width: 640px) {
+  .blocks { width: 56px; }
+  .blocks .block-body { display: none; }
+  .blocks .block-head .title, .blocks .block-head .meta, .blocks .block-head .chev { display: none; }
+  .blocks .block-head { justify-content: center; padding: 10px 6px; }
+  .sb-title-cards { max-width: 100%; }
+  .sb-title-card { flex-direction: column; height: auto; }
+  .sb-title-card-thumb { width: 100%; height: 140px; border-radius: 6px 6px 0 0; }
+  .sb-title-card-body { padding: 10px; }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 /* Agent rail: docked right panel (not a slide-over drawer) */
