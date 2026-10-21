@@ -37,9 +37,9 @@
           </div>
           <div class="home-actions">
             <button class="start" id="home-new" title="New song project (Ctrl+N)">
-              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New song</span></button>
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New song</span><kbd>Ctrl+N</kbd></button>
             <button class="ghost" id="home-open" title="Open a project (Ctrl+O)">
-              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open…</span></button>
+              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open…</span><kbd>Ctrl+O</kbd></button>
           </div>
         </div>
         <div class="group-label" id="recent-label">Recent</div>
@@ -103,8 +103,17 @@
       <button class="icon" id="agent-close" aria-label="Close the agent" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="agent-pickers">
-      <select id="agent-target" aria-label="Send to" title="Send to"></select>
-      <select id="agent-model" aria-label="Model" title="The session's model (you, the agent or Claude can switch it)"></select>
+      <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
+      <button class="ghost" id="agent-config-toggle" title="Agent settings: agent, model, thinking">Settings</button>
+    </div>
+    <div class="agent-config" id="agent-config" hidden>
+      <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
+      <label>Model<input id="agent-model" placeholder="default" title="Model passed to the command" /></label>
+      <label>Thinking<select id="agent-thinking" title="Reasoning effort">
+        <option value="">default</option><option value="off">off</option><option value="low">low</option>
+        <option value="medium">medium</option><option value="high">high</option></select></label>
+      <label>Extra args<input id="agent-extra" placeholder="--flag value" title="Extra command-line arguments" /></label>
+      <button class="start" id="agent-config-save" title="Save the agent settings">Save</button>
     </div>
     <div class="agent-log" id="agent-log" aria-live="polite"></div>
     <div class="agent-attachments" id="agent-attachments"></div>
@@ -116,13 +125,13 @@
         <span class="agent-status" id="agent-status"></span>
         <button class="start" id="agent-send">Send</button>
       </div>
-      <button class="agent-watch" id="agent-watch" title="Copy the command to watch this session in a terminal"></button>
     </div>
   </aside>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="app.js"></script>
   <script src="animation.js"></script>
+  <script src="sequence.js"></script>
   <script src="agent.js"></script>
   <script src="home.js"></script>
   <script src="bridge.js"></script>

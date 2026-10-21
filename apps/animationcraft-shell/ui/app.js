@@ -47,7 +47,7 @@ async function openPath(path) {
 
 // ---- Blocks -------------------------------------------------------------------------------
 
-function block(id, icon, title, meta, done, body) {
+function block(id, icon, title, meta, done, body, blockState) {
   const open = state.open === id;
   const head = el("button", { class: "block-head", "aria-expanded": String(open), title: `${title}${meta ? " · " + meta : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
@@ -56,7 +56,7 @@ function block(id, icon, title, meta, done, body) {
     el("span", { class: "title" }, title),
     el("span", { class: "meta" }, meta || ""),
     el("span", { class: "chev", html: ICONS.chev }));
-  return el("section", { class: `block${open ? " open" : ""}` }, head,
+  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState }, head,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 
@@ -101,17 +101,20 @@ function renderBlocks() {
   const audio = song.inputs?.[0];
   const liner = (song.inputs || []).slice(1);
 
+  const songState = song.done ? "ready" : audio ? "needs" : "empty";
   box.append(block("song", ICONS.song, "Song", audio?.name, song.done,
-    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null]));
+    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null], songState));
 
   const lines = sceneLines();
+  const lyricsState = lines.length > 0 ? "ready" : "needs";
   box.append(block("lyrics", ICONS.lyrics, "Lyrics & notes", `${lines.filter((l) => l.lyric && l.lyric !== "Instrumental").length} lines`, lines.length > 0,
     [...lines.map((l) => el("div", { class: "lyric" }, el("span", { class: "t" }, l.time), el("span", {}, l.lyric))),
      el("div", { class: "group-label" }, "Liner & teaching notes"),
-     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None in this project yet.")]));
+     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None in this project yet.")], lyricsState));
 
   const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
-  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, transcript.done, outputs.map(fileButton)));
+  const transcriptState = transcript.done ? "ready" : outputs.length > 0 ? "needs" : "empty";
+  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, transcript.done, outputs.map(fileButton), transcriptState));
 
   const assets=state.data?.assets?.assets||[];
   const cards=assets.map(a=>{
@@ -120,11 +123,22 @@ function renderBlocks() {
       onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
     card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-animationcraft-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
   });
-  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,assets.length>0,[el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]));
-  box.append(block('assets',ICONS.animate,'Assets',`${(s.asset_files||[]).length} files`,assets.length>0,[
-    el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
-    el('p',{class:'why'},'Drag a character above onto a storyboard page.'),
-    el('details',{},el('summary',{},'Project files'),...(s.asset_files||[]).map(fileButton))]));
+  const animateState = assets.length > 0 ? "ready" : "empty";
+  const animateBody = assets.length > 0
+    ? [el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]
+    : [el('div',{class:'group-label'},'Objects'),
+       el('button',{id:'asset-import-animate',class:'start',onclick:importProjectAsset},'Import artwork'),
+       el('p',{class:'why'},'Drag an object onto a storyboard page once imported.')];
+  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,assets.length>0,animateBody, animateState));
+  const assetsState = (s.asset_files||[]).length > 0 ? "ready" : "empty";
+  const assetFiles = (s.asset_files||[]);
+  const assetsBody = assetFiles.length > 0
+    ? [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
+       el('p',{class:'why'},'Drag a character above onto a storyboard page.'),
+       el('details',{},el('summary',{},'Project files'),...assetFiles.map(fileButton))]
+    : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
+       el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
+  box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,assets.length>0,assetsBody, assetsState));
 
 }
 
@@ -164,9 +178,12 @@ function renderStoryboard() {
   const first = (sb.first_scene_page || 2) - 1;
   const nav = sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
     ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
-  for (const [label, page] of nav) {
+  const isBacklot = sb.template === "backlot";
+  const chapterCount = isBacklot ? first : 3;
+  for (const [i, [label, page]] of nav.entries()) {
     const active = page === state.page;
-    chips.append(el("button", { class: `chip${active ? " active" : ""}`, role: "tab", "aria-selected": String(active), title: label,
+    const isChapter = isBacklot ? i < first : i < 2 || i === nav.length - 1;
+    chips.append(el("button", { class: `chip${active ? " active" : ""}${isChapter ? " chapter" : " scene"}`, role: "tab", "aria-selected": String(active), title: label,
       onclick: () => showPage(page) }, label));
   }
   chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });

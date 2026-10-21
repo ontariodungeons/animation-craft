@@ -364,3 +364,43 @@ body.movie-document:not(.project-details-open) #blocks { display:none; }
 .design-placement { outline:1px solid color-mix(in srgb,var(--accent) 55%,transparent); }
 .design-handle { position:absolute; width:10px;height:10px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);transform:translate(-50%,-50%);touch-action:none;z-index:5;padding:0; }
 .design-handle:hover { background:var(--accent); }
+
+
+/* ---- Animation: subject and composite modes ---------------------------------------------- */
+.motion-modes { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); }
+.motion-mode { padding: 4px 10px; border-radius: 999px; color: var(--muted); font-size: 12px; transition: color var(--fast) var(--ease), background var(--fast) var(--ease); }
+.motion-mode:hover { color: var(--text); }
+.motion-mode.active { background: var(--accent); color: var(--accent-ink); }
+.seq-canvas { position: absolute; inset: 0; overflow: hidden; }
+.seq-canvas img { position: absolute; user-select: none; cursor: grab; }
+.seq-canvas img.selected { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.seq-canvas.grid { background-image: linear-gradient(to right, #ffffff14 1px, transparent 1px), linear-gradient(to bottom, #ffffff14 1px, transparent 1px); background-size: 5% 5%; }
+.seq-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.seq-field select, .seq-field input { max-width: 150px; min-width: 0; }
+.seq-side-block { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.motion-layer.selected { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent); border-radius: 6px; }
+
+/* ---- Agent settings ---------------------------------------------------------------------- */
+.agent-runtime { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-config { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.agent-config label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.agent-config[hidden] { display: none; }
+
+/* ---- Block state language ---------------------------------------------------------------- */
+.block[data-state="ready"]   .block-head .chev { color: var(--accent); }
+.block[data-state="needs"]   .block-head .chev { color: var(--amber); }
+.block[data-state="empty"]   { opacity: 0.9; }
+.block[data-state="empty"] .block-head .chev { color: var(--faint); }
+
+/* ---- kbd shortcut hints ------------------------------------------------------------------ */
+kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px solid var(--line);
+  border-radius: 4px; padding: 1px 5px; color: var(--muted); background: var(--surface-2); margin: 0 2px; }
+
+/* ---- Storyboard chip differentiation ----------------------------------------------------- */
+.chip.chapter { font-size: 11px; padding: 4px 10px; border-left: 3px solid transparent; }
+.chip.chapter.active { border-left-color: var(--accent-ink); }
+.chip.scene { min-width: 130px; }
+
+/* ---- Section-tone sliders ---------------------------------------------------------------- */
+/* Section-tone accents already cascade via --control-accent on .motion-section[data-tone];
+   the existing .motion-range rules (lines ~315-322) consume it. No extra rules needed. */
