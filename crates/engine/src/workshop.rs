@@ -1320,6 +1320,69 @@ fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
 // ━━━ Audio transcription ━━━
 
 /// Transcribes a song with FilmCraft's speech-to-text (headless `filmcraft-cli`).
+/// The song analysis for the HyperFrames target in one call, using that target's own tools:
+/// copy the song to `hyperframes/assets/bgm.mp3`, transcribe it with `hyperframes transcribe`
+/// (`transcript.json`, words), and map its structure with the music-to-video skill's
+/// `analyze-beatgrid.py` (`audiomap.json`). Writing the STORYBOARD.md skeleton from these stays
+/// the agent's step, as music-to-video requires.
+pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
+    if s.video_target != "hyperframes" {
+        return Err(EngineError::InvalidParams(format!(
+            "audio.analyze runs the HyperFrames tools; this project's target is '{}' \
+             (use that target's own transcription and analysis)",
+            s.video_target
+        )));
+    }
+    let audio = params
+        .get("audio")
+        .and_then(Value::as_str)
+        .map(|p| resolve_workspace_path(s, p))
+        .or_else(|| s.song_audio.clone())
+        .filter(|p| p.is_file())
+        .ok_or_else(|| EngineError::InvalidParams("no song audio: pass audio=<file> or workshop.set_audio".into()))?;
+    let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
+    let hf = project_dir(s)?.join("hyperframes");
+    std::fs::create_dir_all(hf.join("assets"))?;
+    let bgm = hf.join("assets/bgm.mp3");
+    let transcript = hf.join("transcript.json");
+    let audiomap = hf.join("audiomap.json");
+    let analyzer = std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".agents/skills/music-to-video/scripts/analyze-beatgrid.py"))
+        .filter(|p| p.is_file())
+        .ok_or_else(|| {
+            EngineError::InvalidParams(
+                "music-to-video skill not installed (~/.agents/skills/music-to-video); install the HyperFrames skills".into(),
+            )
+        })?;
+    let arg = |p: &Path| p.to_string_lossy().into_owned();
+    let mut ran = Vec::new();
+    if overwrite || !bgm.is_file() {
+        super::workspace::run_tool_in(&hf, "ffmpeg", &["-v", "error", "-y", "-i", &arg(&audio),
+            "-codec:a", "libmp3lame", "-q:a", "2", &arg(&bgm)].map(String::from))?;
+        ran.push("ffmpeg → assets/bgm.mp3");
+    }
+    if overwrite || !transcript.is_file() {
+        super::workspace::run_tool_in(&hf, "npx", &["hyperframes", "transcribe", &arg(&bgm), "-d", &arg(&hf), "--json"]
+            .map(String::from))?;
+        ran.push("hyperframes transcribe → transcript.json");
+    }
+    super::workspace::run_tool_in(&hf, "python3", &[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)])?;
+    ran.push("analyze-beatgrid.py → audiomap.json");
+    let map: Value = serde_json::from_str(&std::fs::read_to_string(&audiomap)?)
+        .map_err(|e| EngineError::InvalidParams(format!("unreadable audiomap.json: {e}")))?;
+    let words: Value = serde_json::from_str(&std::fs::read_to_string(&transcript)?)
+        .map_err(|e| EngineError::InvalidParams(format!("unreadable transcript.json: {e}")))?;
+    let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
+    Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,
+        "files": {"audio": bgm, "transcript": transcript, "audiomap": audiomap},
+        "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
+        "silences": map["silences"], "phrases": map["phrases"], "words": words.len(),
+        "next": [
+            "Write hyperframes/STORYBOARD.md's skeleton yourself from audiomap.json, following music-to-video references/frame-skeleton.md (frames tile the track; groups TBD).",
+            "The analyzer hears drums and energy, not voices: a 'silence' with words in transcript.json is sung, not instrumental. Only stretches with neither are instrumental placeholders."
+        ]}))
+}
+
 pub fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
     let audio = params
         .get("audio")

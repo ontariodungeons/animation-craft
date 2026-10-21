@@ -55,7 +55,7 @@ use crate::exports::{
 use crate::vision::cmd_vision_analyze;
 use crate::doctor::cmd_app_doctor;
 use crate::workshop::{
-    cmd_audio_transcribe, cmd_assets_assess, cmd_assets_fixlist, cmd_assets_fixlist_add,
+    cmd_audio_analyze, cmd_audio_transcribe, cmd_assets_assess, cmd_assets_fixlist, cmd_assets_fixlist_add,
     cmd_assets_request_sheet, cmd_project_search, cmd_query_list, cmd_storyboard_approve,
     cmd_storyboard_edit, cmd_storyboard_import_openmontage, cmd_storyboard_init,
     cmd_storyboard_read, cmd_storyboard_search, cmd_storyboard_toc,
@@ -105,6 +105,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"export.layered_motion"
             | b"validate.motion"
             | b"audio.transcribe"
+            | b"audio.analyze"
             | b"workshop.build_storyboard"
             | b"workshop.split_panels"
             | b"video.place_references"
@@ -393,6 +394,15 @@ pub fn build() -> Vec<CommandSpec> {
             "{}", always, cmd_video_server_stop),
         cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
             "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
+        cmd!(
+            "audio.analyze",
+            "Analyze Song (HyperFrames)",
+            ["File"],
+            None,
+            "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false}",
+            always,
+            cmd_audio_analyze
+        ),
         cmd!(
             "audio.transcribe",
             "Transcribe Song (FilmCraft)",
