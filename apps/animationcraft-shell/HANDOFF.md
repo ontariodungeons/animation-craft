@@ -275,3 +275,17 @@ with a verified generic import command, not guessed transforms. Source matte has
 contamination; user questioned cutting quality. No new cuts or rig were run. Current proposed UX:
 drop image → select subject → inspect/refine matte → review parts/joints → preview actions, all
 through shared CLI/MCP commands; this flow is NOT yet implemented.
+
+## Recovered friend cast (2026-10-21)
+
+User wants ONE character at a time, starting with a harder friend, not Nelly. Found mouse, bear,
+fox in `merriweather-videos/projects/kathy-cd-track-01/revision-03/opening/remotion/`:
+- `public/corrections/friends-ready-v2.png`: viewed actual group reference (holding hands).
+- `src/puppet-assets.json`: nine part entries for each mouse/bear/fox, all referenced files exist
+  under `public/full/puppets/<name>/`, with source provenance and joint/end coordinates.
+- `renders/nelly-friends-round-checkpoint-v1.mp4`: 2.453s, inspected at 2s; all four turning in a circle.
+- `renders/nelly-storybook-full-v1.mp4`: inspected at24s; all four also present in full-song draft.
+- `public/animated/grounded-cast/rig.json`: shared contact/jump rig based on group reference.
+The revision-02 dance proof is a human Snow rig, explicitly NOT Nelly cast; do not import it.
+Recovered inventory lives at Nelly `.agent/recovered-cast.json`; evidence PNGs in `.agent/looks/`.
+No friend imported/processed yet. Mouse is a useful first hard case (dress/leg overlap, thin tail).
