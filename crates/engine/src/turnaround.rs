@@ -146,15 +146,35 @@ pub fn cmd_anim_preview_2d(s: &mut Session, params: &Value) -> Result<Value> {
         .map(|m| m.frames.iter().map(|f| f.label.clone()).collect())
         .unwrap_or_default();
 
-    Ok(json!({
-        "ok": true,
+    // Only a rig moves. A reference sheet or plain image shows one still pose, so an action
+    // other than static is reported as not playing rather than as a success.
+    let rig_type = s
+        .current_asset()
+        .and_then(|a| a.cutout_rig.as_ref())
+        .map(|r| r.rig_type.clone());
+    let still = matches!(mode.as_str(), "static" | "standing");
+    let (ok, plays) = match rig_type.as_deref() {
+        Some("layered_motion") => (true, "the rig spec's own motion tracks (the action mode does not apply)".to_string()),
+        Some(_) => (true, format!("the cutout rig's {mode} motion")),
+        None if still => (true, "a still image".to_string()),
+        None => (false, "a still image: this asset has no rig, so it cannot move".to_string()),
+    };
+    let mut out = json!({
+        "ok": ok,
         "command": "anim.preview_2d",
         "mode": mode,
+        "plays": plays,
         "speed": s.preview_speed,
         "range": [s.preview_range.0, s.preview_range.1],
         "active_asset": s.active_asset,
         "available_poses": available_poses,
-    }))
+    });
+    if !ok {
+        out["next"] = json!([
+            "Build a rig for it: asset.build_cutout_rig, or connect a rig spec with project.add_asset kind=cutout_rig."
+        ]);
+    }
+    Ok(out)
 }
 
 use std::path::PathBuf;

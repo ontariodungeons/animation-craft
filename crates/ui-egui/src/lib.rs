@@ -825,10 +825,19 @@ impl AnimationCraftApp {
                     self.ui_state.selected_track_idx = 0;
                 }
                 self.ui_state.selected_pose_idx = 0;
-                self.ui_state.status_line = format!(
-                    "Executed `{id}` (active asset: {})",
-                    self.session.active_asset.as_deref().unwrap_or("none")
-                );
+                // A result that says ok: false is not a success, even though the command ran.
+                self.ui_state.status_line = if val.get("ok").and_then(Value::as_bool) == Some(false) {
+                    let why = ["error", "reason", "plays"]
+                        .iter()
+                        .find_map(|k| val.get(*k).and_then(Value::as_str))
+                        .unwrap_or("see the command result");
+                    format!("`{id}` did not succeed: {why}")
+                } else {
+                    format!(
+                        "Executed `{id}` (active asset: {})",
+                        self.session.active_asset.as_deref().unwrap_or("none")
+                    )
+                };
             }
             Err(err) => {
                 self.ui_state.status_line = format!("Command `{id}`: {err}");

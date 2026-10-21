@@ -555,6 +555,21 @@ mod tests {
     }
 
     #[test]
+    fn preview_of_an_unrigged_image_reports_it_cannot_move() {
+        let dir = temp_dir("preview_still");
+        image::RgbaImage::new(8, 8).save(dir.join("still.png")).unwrap();
+        let mut s = Session::default();
+        s.cwd = dir.clone();
+        s.execute("project.add_asset", json!({"path": dir.join("still.png"), "load": true}))
+            .unwrap();
+        let walk = s.execute("anim.preview_2d", json!({"mode": "walk"})).unwrap();
+        assert_eq!(walk["ok"], json!(false), "{walk}");
+        let still = s.execute("anim.preview_2d", json!({"mode": "static"})).unwrap();
+        assert_eq!(still["ok"], json!(true), "{still}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn project_open_reports_missing_sources_instead_of_dropping() {
         let dir = temp_dir("project_missing");
         let mut s = Session::default();
