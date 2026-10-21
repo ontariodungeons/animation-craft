@@ -15,7 +15,7 @@ token before you add a color.
 Read [research.md](research.md): official tool references, the proposed Animation frame, the ordered
 agent integration work and the 76-finding prevention ledger. Distinguish proposals from approved
 requirements. Present a new screen's layout and behavior and wait for user approval before building.
-The Animation proposal is awaiting approval. The user has specified controls on the **left** and a
+The Animation layout was approved on 2026-10-21. The user has specified controls on the **left** and a
 useful main canvas immediately after import. Progressive disclosure preserves features, not removes them.
 
 The app's permanent agent instructions are `apps/animationcraft-shell/agent.md`. Keep that document

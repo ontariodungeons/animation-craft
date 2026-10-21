@@ -87,7 +87,7 @@ function objectCard(name, layers, stacked) {
   if (stacked) invoke("object_preview", { project: state.project, name, layers: layers.map((l) => l.path) })
     .then((p) => { img.src = convertFileSrc(p) + `?v=${Date.now()}`; }).catch((e) => toast(String(e)));
   return el("button", { class: "object", title: `${name}: ${layers.map((l) => l.name).join(", ")}`, "aria-label": `${name}, ${layers.length} layers`,
-      onclick: () => toast(`${name}: ${layers.length} layers — opening in the studio comes next`) },
+      onclick: () => openAnimation(name) },
     stack, el("span", { class: "label" }, name), el("span", { class: "count" }, `${layers.length} layer${layers.length === 1 ? "" : "s"}`));
 }
 
@@ -172,6 +172,7 @@ async function showStudio() {
 }
 
 async function setView(view) {
+  if (typeof animationPause === "function") animationPause();
   state.view = view;
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
@@ -183,6 +184,7 @@ async function setView(view) {
   document.body.classList.toggle("split", view === "split");
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${page}`));
   placeInk();
+  if (view === "animation") { await invoke("studio_hide"); await animationOpen(); return; }
   if (view !== "project" && serverUrl()) requestAnimationFrame(showStudio);
   else {
     await invoke("studio_hide");
@@ -221,7 +223,7 @@ async function toggleServer() {
     toast(on ? "Studio started" : "Studio stopped");
   } catch (e) { toast(String(e)); }
   renderTarget();
-  if (state.view !== "project") (serverUrl() ? showStudio() : setView(state.view));
+  if (["studio", "split"].includes(state.view)) (serverUrl() ? showStudio() : setView(state.view));
 }
 
 // ---- Startup ------------------------------------------------------------------------------

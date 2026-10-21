@@ -60,6 +60,14 @@ fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, St
     engine.with(Some(&path), state_of)
 }
 
+/// Execute the shared engine registry without blocking the UI thread.
+#[tauri::command]
+async fn engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Engine>().with(None, |s| s.execute(&id, params).map_err(|e| e.to_string()))
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// An object's layers stacked and cropped to what is drawn, cached in the project's
 /// `storyboard/.theme/` (the engine's own assembler, also used for the PDF's cast cards).
 #[tauri::command]
@@ -453,7 +461,7 @@ fn main() {
         .manage(View::default())
         .manage(Engine::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("AnimationCraft").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);

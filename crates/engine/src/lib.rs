@@ -24,6 +24,7 @@ pub mod doctor;
 pub mod exports;
 pub mod image_cmds;
 pub mod mesh_geometry;
+pub mod motion;
 pub mod parts;
 pub mod photocraft;
 pub mod project;

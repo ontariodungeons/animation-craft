@@ -184,6 +184,8 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 pub fn build() -> Vec<CommandSpec> {
     vec![
+        query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
+        query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
         query!(
             "project.list_assets",
             "List Project Assets",

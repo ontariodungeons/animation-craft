@@ -1,6 +1,6 @@
 # AnimationCraft shell research and proposed Animation workspace
 
-Research date: 2026-10-21. **Proposal awaiting user approval; not an implementation report.**
+Research date: 2026-10-21. **Animation layout approved by the user on 2026-10-21; implementation is in progress.**
 Authority: user instructions and `apps/animationcraft-shell/HANDOFF.md` at `e1cac3a`.
 The user subsequently specified: animation inspector on the **left**, useful artwork immediately
 after import, and the in-app agent as the app's technical collaborator. Preserve all functionality

@@ -1,0 +1,634 @@
+//! Motion evaluation extracted from the Rust stage. Clients only draw engine samples.
+use crate::session::LoadedCutoutRigPlan;
+use crate::{EngineError, Result, Session};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
+#[derive(Debug, Default)]
+struct EvaluatedRigMotion {
+    angles_rad: BTreeMap<String, f64>,
+    angles_deg: BTreeMap<String, f64>,
+    pos_offset: BTreeMap<String, [f64; 2]>,
+    scale_xy: BTreeMap<String, [f64; 2]>,
+    opacity: BTreeMap<String, f64>,
+}
+fn eval_ease(ease_name: &str, u: f64) -> f64 {
+    let u = u.clamp(0.0, 1.0);
+    match ease_name {
+        "linear" => u,
+        "in" => u * u * u,
+        "out" => {
+            let inv = 1.0 - u;
+            1.0 - inv * inv * inv
+        }
+        _ => u * u * (3.0 - 2.0 * u),
+    }
+}
+
+fn eval_envelope(term: &Value, t: f64) -> f64 {
+    let Some(env_arr) = term.get("envelope").and_then(Value::as_array) else {
+        return 1.0;
+    };
+    let mut pts: Vec<(f64, f64)> = env_arr
+        .iter()
+        .filter_map(|p| {
+            let a = p.as_array()?;
+            Some((a.first()?.as_f64()? as f64, a.get(1)?.as_f64()? as f64))
+        })
+        .collect();
+    if pts.is_empty() {
+        return 1.0;
+    }
+    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if t <= pts[0].0 {
+        return pts[0].1;
+    }
+    for w in pts.windows(2) {
+        let (t0, v0) = w[0];
+        let (t1, v1) = w[1];
+        if t <= t1 {
+            let u = if t1 > t0 { (t - t0) / (t1 - t0) } else { 1.0 };
+            return v0 + (v1 - v0) * u;
+        }
+    }
+    pts.last().map(|p| p.1).unwrap_or(1.0)
+}
+
+fn eval_vec_at(val: &Value, dim: usize) -> Vec<f64> {
+    if let Some(arr) = val.as_array() {
+        (0..dim)
+            .map(|i| arr.get(i).and_then(Value::as_f64).unwrap_or(0.0) as f64)
+            .collect()
+    } else if let Some(n) = val.as_f64() {
+        vec![n as f64; dim]
+    } else {
+        vec![0.0; dim]
+    }
+}
+
+fn eval_keys_term(term: &Value, t: f64, dim: usize) -> Vec<f64> {
+    let Some(keys_arr) = term.get("keys").and_then(Value::as_array) else {
+        return vec![0.0; dim];
+    };
+    let ease_name = term.get("ease").and_then(Value::as_str).unwrap_or("smooth");
+    let mut pairs: Vec<(f64, Vec<f64>)> = keys_arr
+        .iter()
+        .filter_map(|k| {
+            let a = k.as_array()?;
+            let kt = a.first()?.as_f64()? as f64;
+            let kv = eval_vec_at(a.get(1)?, dim);
+            Some((kt, kv))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return vec![0.0; dim];
+    }
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    if t <= pairs[0].0 {
+        return pairs[0].1.clone();
+    }
+    for w in pairs.windows(2) {
+        let (t0, ref v0) = w[0];
+        let (t1, ref v1) = w[1];
+        if t <= t1 {
+            let u = if t1 > t0 {
+                eval_ease(ease_name, (t - t0) / (t1 - t0))
+            } else {
+                1.0
+            };
+            return (0..dim).map(|i| v0[i] + (v1[i] - v0[i]) * u).collect();
+        }
+    }
+    pairs
+        .last()
+        .map(|p| p.1.clone())
+        .unwrap_or_else(|| vec![0.0; dim])
+}
+
+fn eval_ellipse_term(term: &Value, t: f64) -> [f64; 2] {
+    let t0 = term.get("from").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    let t1 = term.get("to").and_then(Value::as_f64).unwrap_or(1.0) as f64;
+    let ease_name = term.get("ease").and_then(Value::as_str).unwrap_or("smooth");
+    let u = if t1 > t0 {
+        eval_ease(ease_name, (t - t0) / (t1 - t0))
+    } else {
+        1.0
+    };
+    let start = term.get("start").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    let turns = term.get("turns").and_then(Value::as_f64).unwrap_or(1.0) as f64;
+    let ang = start + std::f64::consts::TAU * turns * u;
+    let centre = term
+        .get("centre")
+        .map(|v| eval_vec_at(v, 2))
+        .unwrap_or_else(|| vec![0.0, 0.0]);
+    let rx = term.get("rx").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    let ry = term.get("ry").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    let def_orig = [centre[0] + rx * start.cos(), centre[1] + ry * start.sin()];
+    let orig = term
+        .get("relativeTo")
+        .map(|v| {
+            let o = eval_vec_at(v, 2);
+            [o[0], o[1]]
+        })
+        .unwrap_or(def_orig);
+    [
+        centre[0] + rx * ang.cos() - orig[0],
+        centre[1] + ry * ang.sin() - orig[1],
+    ]
+}
+
+fn eval_oscillate_term(term: &Value, t: f64, dim: usize) -> Vec<f64> {
+    let mut out = vec![0.0; dim];
+    let axis = term.get("axis").and_then(Value::as_u64).unwrap_or(0) as usize;
+    if axis >= dim {
+        return out;
+    }
+    let amp = term.get("amplitude").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    let hz = term.get("hz").and_then(Value::as_f64).unwrap_or(1.0) as f64;
+    let phase = term.get("phase").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+    out[axis] = amp * (std::f64::consts::TAU * hz * t + phase).sin() * eval_envelope(term, t);
+    out
+}
+
+fn eval_layer_pos_at(motion_obj: &Value, layer_id: &str, t: f64) -> [f64; 2] {
+    let Some(terms) = motion_obj
+        .get(layer_id)
+        .and_then(|m| m.get("position"))
+        .and_then(Value::as_array)
+    else {
+        return [0.0, 0.0];
+    };
+    let mut dx = 0.0;
+    let mut dy = 0.0;
+    for term in terms {
+        match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+            "keys" => {
+                let v = eval_keys_term(term, t, 2);
+                dx += v[0];
+                dy += v[1];
+            }
+            "ellipse" => {
+                let v = eval_ellipse_term(term, t);
+                dx += v[0];
+                dy += v[1];
+            }
+            "oscillate" => {
+                let v = eval_oscillate_term(term, t, 2);
+                dx += v[0];
+                dy += v[1];
+            }
+            _ => {}
+        }
+    }
+    [dx, dy]
+}
+
+fn eval_follow_lean_at(
+    motion_obj: &Value,
+    target_lid: &str,
+    gain: f64,
+    limit: f64,
+    smooth: f64,
+    fps: f64,
+    duration: f64,
+    t: f64,
+) -> f64 {
+    let fps = fps.max(1.0);
+    let frames = ((duration * fps).round() as usize).max(1) + 1;
+    let mut xs = Vec::with_capacity(frames);
+    for i in 0..frames {
+        let ti = (i as f64) / fps;
+        xs.push(eval_layer_pos_at(motion_obj, target_lid, ti)[0]);
+    }
+    let alpha = if smooth <= 0.0 {
+        1.0
+    } else {
+        1.0 - (-1.0 / (fps * smooth)).exp()
+    };
+    let mut leans = Vec::with_capacity(frames);
+    let mut lean = 0.0f64;
+    for i in 0..frames {
+        let i_next = (i + 1).min(frames - 1);
+        let i_prev = i.saturating_sub(1);
+        let span = (i_next - i_prev).max(1) as f64;
+        let v = (xs[i_next] - xs[i_prev]) * fps / span;
+        let target = (gain * v).clamp(-limit, limit);
+        lean += (target - lean) * alpha;
+        leans.push(lean);
+    }
+    let f_idx = (t * fps).clamp(0.0, (frames - 1) as f64);
+    let i0 = (f_idx.floor() as usize).min(frames - 1);
+    let i1 = (i0 + 1).min(frames - 1);
+    let frac = f_idx - (i0 as f64);
+    leans[i0] + (leans[i1] - leans[i0]) * frac
+}
+
+fn evaluate_layered_motion_spec(
+    rig: &LoadedCutoutRigPlan,
+    track: &Value,
+    t: f64,
+    rest: bool,
+    range_factor: f64,
+) -> EvaluatedRigMotion {
+    let mut angles_rad = BTreeMap::new();
+    let mut angles_deg = BTreeMap::new();
+    let mut pos_offset = BTreeMap::new();
+    let mut scale_xy = BTreeMap::new();
+    let mut opacity = BTreeMap::new();
+    let fps = rig.effectcraft["fps"].as_f64().unwrap_or(30.0);
+    let duration = track["duration"].as_f64().unwrap_or(1.0);
+    let track_layers: Option<Vec<&str>> = track
+        .get("layers")
+        .and_then(Value::as_array)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.iter().filter_map(Value::as_str).collect());
+    let motion_active = !rest;
+    let motion_obj = track.get("motion").unwrap_or(&Value::Null);
+    for part in &rig.parts {
+        let lid = part.id.as_str();
+        // Match pipeline/layered_motion.py:389 — layers omitted from track.layers are not rendered.
+        if let Some(ref allowed) = track_layers
+            && !allowed.contains(&lid)
+        {
+            opacity.insert(part.id.clone(), 0.0);
+            pos_offset.insert(part.id.clone(), [0.0, 0.0]);
+            scale_xy.insert(part.id.clone(), [1.0, 1.0]);
+            angles_deg.insert(part.id.clone(), 0.0);
+            angles_rad.insert(part.id.clone(), 0.0);
+            continue;
+        }
+
+        let layer_m = motion_obj.get(lid).unwrap_or(&Value::Null);
+
+        // 1. Opacity (evaluated even at t=0 so hidden blink/viseme layers stay hidden at rest)
+        let mut op_delta = 0.0f64;
+        if let Some(op_terms) = layer_m.get("opacity").and_then(Value::as_array) {
+            for term in op_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => op_delta += eval_keys_term(term, t, 1)[0],
+                    "oscillate" => op_delta += eval_oscillate_term(term, t, 1)[0],
+                    _ => {}
+                }
+            }
+        }
+        let op = ((100.0 + op_delta).clamp(0.0, 100.0)) / 100.0;
+        opacity.insert(part.id.clone(), op);
+
+        if !motion_active {
+            pos_offset.insert(part.id.clone(), [0.0, 0.0]);
+            scale_xy.insert(part.id.clone(), [1.0, 1.0]);
+            angles_deg.insert(part.id.clone(), 0.0);
+            angles_rad.insert(part.id.clone(), 0.0);
+            continue;
+        }
+
+        // 2. Position offset
+        let raw_pos = eval_layer_pos_at(motion_obj, lid, t);
+        pos_offset.insert(
+            part.id.clone(),
+            [raw_pos[0] * range_factor, raw_pos[1] * range_factor],
+        );
+
+        // 3. Scale offset
+        let mut sx_pct = 0.0f64;
+        let mut sy_pct = 0.0f64;
+        if let Some(sc_terms) = layer_m.get("scale").and_then(Value::as_array) {
+            for term in sc_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => {
+                        let v = eval_keys_term(term, t, 2);
+                        sx_pct += v[0];
+                        sy_pct += v[1];
+                    }
+                    "oscillate" => {
+                        let v = eval_oscillate_term(term, t, 2);
+                        sx_pct += v[0];
+                        sy_pct += v[1];
+                    }
+                    _ => {}
+                }
+            }
+        }
+        scale_xy.insert(
+            part.id.clone(),
+            [
+                (100.0 + sx_pct * range_factor) / 100.0,
+                (100.0 + sy_pct * range_factor) / 100.0,
+            ],
+        );
+
+        // 4. Rotation offset (keys, oscillate, follow with frame-stepped smoothing matching layered_motion.py)
+        let mut rot_deg = 0.0f64;
+        if let Some(rot_terms) = layer_m.get("rotation").and_then(Value::as_array) {
+            for term in rot_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "keys" => rot_deg += eval_keys_term(term, t, 1)[0],
+                    "oscillate" => rot_deg += eval_oscillate_term(term, t, 1)[0],
+                    "follow" => {
+                        let target_lid = term.get("layer").and_then(Value::as_str).unwrap_or(lid);
+                        let gain = term.get("gain").and_then(Value::as_f64).unwrap_or(0.0) as f64;
+                        let limit = term
+                            .get("limit")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(45.0)
+                            .abs() as f64;
+                        let smooth = term
+                            .get("smooth")
+                            .and_then(Value::as_f64)
+                            .unwrap_or(0.15)
+                            .max(0.0) as f64;
+                        rot_deg += eval_follow_lean_at(
+                            motion_obj, target_lid, gain, limit, smooth, fps, duration, t,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let final_deg = rot_deg * range_factor;
+        angles_deg.insert(part.id.clone(), final_deg);
+        angles_rad.insert(part.id.clone(), final_deg.to_radians());
+    }
+
+    EvaluatedRigMotion {
+        angles_rad,
+        angles_deg,
+        pos_offset,
+        scale_xy,
+        opacity,
+    }
+}
+
+fn invalid(message: impl Into<String>) -> EngineError {
+    EngineError::InvalidParams(message.into())
+}
+
+fn load_character(s: &mut Session, params: &Value) -> Result<String> {
+    let id = params["character"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| s.active_asset.clone())
+        .or_else(|| s.project_assets.first().map(|a| a.id.clone()))
+        .ok_or_else(|| invalid("Import artwork to animate"))?;
+    crate::project::cmd_project_load_asset(s, &json!({"id": id}))?;
+    Ok(id)
+}
+
+fn validate(rig: &LoadedCutoutRigPlan) -> Result<()> {
+    if rig.rig_type != "layered_motion" {
+        return Err(invalid("This artwork needs a layered motion rig"));
+    }
+    let fps = rig.effectcraft["fps"].as_f64().unwrap_or(30.0);
+    if !(1.0..=120.0).contains(&fps) {
+        return Err(invalid("Spec fps must be 1–120"));
+    }
+    let ids: BTreeSet<_> = rig.parts.iter().map(|p| p.id.as_str()).collect();
+    if ids.len() != rig.parts.len() {
+        return Err(invalid("Layer IDs must be unique"));
+    }
+    for part in &rig.parts {
+        if !part.cropped_path.is_file() {
+            return Err(invalid(format!("Missing artwork for {}", part.id)));
+        }
+        let dimensions = image::image_dimensions(&part.full_layer_path)?;
+        if [dimensions.0, dimensions.1] != rig.canvas_size {
+            return Err(invalid(format!(
+                "{} does not match the rig canvas",
+                part.id
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        let mut node = Some(part);
+        while let Some(p) = node {
+            if !seen.insert(&p.id) {
+                return Err(invalid("Layer parents contain a cycle"));
+            }
+            node = match p.parent.as_deref() {
+                Some(id) => Some(
+                    rig.parts
+                        .iter()
+                        .find(|x| x.id == id)
+                        .ok_or_else(|| invalid(format!("Unknown parent {id}")))?,
+                ),
+                None => None,
+            };
+        }
+    }
+    for track in rig.effectcraft["tracks"]
+        .as_array()
+        .ok_or_else(|| invalid("No motion tracks"))?
+    {
+        if track["duration"]
+            .as_f64()
+            .is_none_or(|v| v <= 0.0 || v > 600.0)
+        {
+            return Err(invalid("Track duration must be between 0 and 600 seconds"));
+        }
+        if let Some(layers) = track["layers"].as_array() {
+            for l in layers {
+                if !ids.contains(l.as_str().unwrap_or("")) {
+                    return Err(invalid("Unknown track layer"));
+                }
+            }
+        }
+        if let Some(motion) = track["motion"].as_object() {
+            for (layer, props) in motion {
+                if !ids.contains(layer.as_str()) {
+                    return Err(invalid(format!("Unknown motion layer {layer}")));
+                }
+                for (prop, terms) in props
+                    .as_object()
+                    .ok_or_else(|| invalid("Motion properties must be an object"))?
+                {
+                    let dim = match prop.as_str() {
+                        "position" | "scale" => 2,
+                        "rotation" | "opacity" => 1,
+                        _ => return Err(invalid("Unknown motion property")),
+                    };
+                    for term in terms
+                        .as_array()
+                        .ok_or_else(|| invalid("Motion terms must be an array"))?
+                    {
+                        let kind = term["kind"].as_str().unwrap_or("");
+                        if !["keys", "ellipse", "oscillate", "follow"].contains(&kind) {
+                            return Err(invalid("Unknown motion term"));
+                        }
+                        if let Some(ease) = term["ease"].as_str() {
+                            if !["smooth", "linear", "in", "out"].contains(&ease) {
+                                return Err(invalid("Unknown easing"));
+                            }
+                        }
+                        if kind == "ellipse" && prop != "position" {
+                            return Err(invalid("Ellipse applies to position only"));
+                        }
+                        if kind == "follow"
+                            && (prop != "rotation"
+                                || !ids.contains(term["layer"].as_str().unwrap_or(layer)))
+                        {
+                            return Err(invalid("Invalid follow target/property"));
+                        }
+                        if kind == "oscillate"
+                            && (term["axis"].as_i64().unwrap_or(0) < 0
+                                || term["axis"].as_i64().unwrap_or(0) >= dim)
+                        {
+                            return Err(invalid("Oscillation axis out of range"));
+                        }
+                        if kind == "keys" && term["keys"].as_array().is_none_or(Vec::is_empty) {
+                            return Err(invalid("Keys cannot be empty"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
+    let id = load_character(s, params)?;
+    let asset = s
+        .assets
+        .get(&id)
+        .ok_or_else(|| invalid("Asset not loaded"))?;
+    let Some(rig) = asset.cutout_rig.as_ref() else {
+        return Ok(
+            json!({"ok":true,"character":id,"image":asset.path,"layers":[],"tracks":[],"needs_rig":true}),
+        );
+    };
+    validate(rig)?;
+    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false)})).collect();
+    let layers: Vec<_> = rig.parts.iter().map(|p| json!({"id":p.id,"label":p.label,"file":p.cropped_path,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,
+        "state":asset.parts.iter().find(|x| x.name == p.id)})).collect();
+    Ok(
+        json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,"controls":rig.control_bindings,"audio":s.song_audio}),
+    )
+}
+
+// Compose canvas-space parent transforms; opacity is deliberately independent of ancestors.
+fn matrix(
+    rig: &LoadedCutoutRigPlan,
+    motion: &EvaluatedRigMotion,
+    id: &str,
+    names: Option<&Vec<Value>>,
+) -> [f64; 6] {
+    let mut m = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut current = Some(id);
+    while let Some(part) = current.and_then(|id| rig.parts.iter().find(|p| p.id == id)) {
+        let a = motion.angles_rad.get(&part.id).copied().unwrap_or(0.0);
+        let sc = motion.scale_xy.get(&part.id).copied().unwrap_or([1.0, 1.0]);
+        let pos = motion
+            .pos_offset
+            .get(&part.id)
+            .copied()
+            .unwrap_or([0.0, 0.0]);
+        let (sin, cos) = a.sin_cos();
+        let (px, py) = (part.pivot[0] as f64, part.pivot[1] as f64);
+        let n = [
+            cos * sc[0],
+            sin * sc[0],
+            -sin * sc[1],
+            cos * sc[1],
+            px + pos[0] - cos * sc[0] * px + sin * sc[1] * py,
+            py + pos[1] - sin * sc[0] * px - cos * sc[1] * py,
+        ];
+        m = [
+            n[0] * m[0] + n[2] * m[1],
+            n[1] * m[0] + n[3] * m[1],
+            n[0] * m[2] + n[2] * m[3],
+            n[1] * m[2] + n[3] * m[3],
+            n[0] * m[4] + n[2] * m[5] + n[4],
+            n[1] * m[4] + n[3] * m[5] + n[5],
+        ];
+        current = part.parent.as_deref().filter(|p| {
+            names.is_none_or(|ns| ns.is_empty() || ns.iter().any(|n| n.as_str() == Some(*p)))
+        });
+    }
+    m
+}
+
+pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
+    let id = load_character(s, params)?;
+    let asset = s
+        .assets
+        .get(&id)
+        .ok_or_else(|| invalid("Asset not loaded"))?;
+    let rig = asset
+        .cutout_rig
+        .as_ref()
+        .ok_or_else(|| invalid("Prepare a motion rig first"))?;
+    validate(rig)?;
+    let tracks = rig.effectcraft["tracks"]
+        .as_array()
+        .ok_or_else(|| invalid("No motion tracks"))?;
+    let track = match params["track"].as_str().filter(|x| !x.is_empty()) {
+        Some(id) => tracks.iter().find(|t| t["id"].as_str() == Some(id)),
+        None => tracks.first(),
+    }
+    .ok_or_else(|| invalid("Motion track not found"))?;
+    let rest = params["rest"].as_bool().unwrap_or(false);
+    let fps = params["fps"]
+        .as_f64()
+        .unwrap_or(rig.effectcraft["fps"].as_f64().unwrap_or(30.0));
+    let amount = params["amount"].as_f64().unwrap_or(100.0);
+    if !(1.0..=120.0).contains(&fps) || !(0.0..=100.0).contains(&amount) {
+        return Err(invalid("fps must be 1–120 and amount 0–100"));
+    }
+    let duration = track["duration"].as_f64().unwrap_or(1.0);
+    let count = if rest {
+        1
+    } else {
+        (duration * fps).ceil() as usize + 1
+    };
+    if count * rig.parts.len() > 200_000 {
+        return Err(invalid("Sample range too large; lower fps"));
+    }
+    let solo = asset.parts.iter().any(|p| p.solo);
+    let mut frames = Vec::with_capacity(count);
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for i in 0..count {
+        let t = (i as f64 / fps).min(duration);
+        let motion = evaluate_layered_motion_spec(rig, track, t, rest, amount / 100.0);
+        let layers: Vec<_> = rig.parts.iter().map(|p| {
+            let shown = asset.parts.iter().find(|x| x.name==p.id).is_none_or(|x| x.visible && (!solo || x.solo));
+            json!({"matrix":matrix(rig,&motion,&p.id,track["layers"].as_array()),"opacity":if shown {motion.opacity.get(&p.id).copied().unwrap_or(1.0)} else {0.0},
+                "position":motion.pos_offset.get(&p.id),"rotation":motion.angles_deg.get(&p.id),"scale":motion.scale_xy.get(&p.id)})
+        }).collect();
+        for (part, layer) in rig.parts.iter().zip(&layers) {
+            if layer["opacity"].as_f64().unwrap_or(0.0) <= 0.0 {
+                continue;
+            }
+            let m = matrix(rig, &motion, &part.id, track["layers"].as_array());
+            for (x, y) in [
+                (part.crop_box[0], part.crop_box[1]),
+                (part.crop_box[2], part.crop_box[1]),
+                (part.crop_box[2], part.crop_box[3]),
+                (part.crop_box[0], part.crop_box[3]),
+            ] {
+                let px = m[0] * x as f64 + m[2] * y as f64 + m[4];
+                let py = m[1] * x as f64 + m[3] * y as f64 + m[5];
+                bounds = [
+                    bounds[0].min(px),
+                    bounds[1].min(py),
+                    bounds[2].max(px),
+                    bounds[3].max(py),
+                ];
+            }
+        }
+        frames.push(json!({"time":t,"layers":layers}));
+    }
+    if !bounds[0].is_finite() {
+        bounds = [
+            0.0,
+            0.0,
+            rig.canvas_size[0] as f64,
+            rig.canvas_size[1] as f64,
+        ];
+    }
+    Ok(
+        json!({"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
+    )
+}

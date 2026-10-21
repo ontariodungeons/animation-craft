@@ -106,7 +106,7 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
   still needs a restart check. Coordinate with the inner agent through the session API, not its composer.
 - Design proposal and all 76 review acceptance criteria: `.agents/skills/animationcraft-shell-ui/research.md`.
   User requires the animation inspector on the left and useful artwork after import. Full Animation
-  frame still awaits approval. Permanent app knowledge is `apps/animationcraft-shell/agent.md`; keep
+  frame approved on 2026-10-21; implementation is in progress. Permanent app knowledge is `apps/animationcraft-shell/agent.md`; keep
   earlier-app/migration instructions here and in coordinator messages, never in that permanent file.
 
 - A project with no storyboard shows a broken image. It needs an empty state with the next step.

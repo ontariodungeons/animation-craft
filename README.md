@@ -188,3 +188,16 @@ feature. The user's current task and reviewed contracts define scope.
 ## License
 
 MIT OR Apache-2.0
+
+### Shell Animation frame
+
+Click **Animation** in the shell top bar, or click a connected object in Project → Animate.
+The stage draws engine samples; motion is evaluated by Rust and checked against the exporter.
+
+- Inspect tracks/layers: `animationcraft-cli --bridge 19897 exec motion.tracks character=bee`
+- Sample a track: `animationcraft-cli --bridge 19897 exec motion.sample character=bee track=bee-beat2-barn-exit fps=30`
+- Verify exporter parity: `python3 scripts/check_motion_parity.py '<song>/<Song>.acproj' '<song>/assets/characters/<name>/<spec>.json' <name>`
+- Chat regression checks: `PLAYWRIGHT_MODULE=<path-to-playwright-index.mjs> node apps/animationcraft-shell/tests/agent-drawer.mjs`
+
+The first frame includes rest/play/scrub, fit/100%/zoom and layer visibility. Pose editing, song
+placement and export controls remain in progress; visible section headings are not completion claims.

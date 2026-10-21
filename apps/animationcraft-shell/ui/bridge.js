@@ -31,6 +31,7 @@ function find(target) {
 window.acBridge = {
   state() {
     return {
+      animation: typeof motion === "undefined" ? null : { character: motion.character, track: motion.track, rest: motion.rest, time: motion.time, playing: motion.playing, selected_layer: motion.selected },
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
       storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
@@ -75,12 +76,14 @@ window.acBridge = {
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
   async refresh(id, project) {
+    if (id.startsWith("motion.")) return { refreshed: id };
     if (project && project !== state.project) return openProject(project);
     if (!project) return showHome();
     state.data = await invoke("project_state", { path: state.project });
     renderTarget();
     renderBlocks();
     renderStoryboard();
+    if (state.view === "animation") await animationRefresh();
     return { refreshed: id };
   },
 };
