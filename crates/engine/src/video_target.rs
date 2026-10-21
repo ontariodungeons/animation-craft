@@ -1,6 +1,8 @@
 //! Target video project scaffolding (Remotion, FilmCraft, HyperFrames), web dev server
 //! management (`video.server_start` / `video.server_stop`), and reference placement.
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -141,23 +143,8 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
             "managed": true,
         });
     }
-    let candidate_ports: &[u16] = match target {
-        "remotion" => &[3057, 3001, 3002],
-        "hyperframes" => &[3058, 4321, 5173],
-        _ => &[],
-    };
-    for &port in candidate_ports {
-        if port_open(port) {
-            return json!({
-                "running": true,
-                "target": target,
-                "port": port,
-                "url": format!("http://localhost:{port}"),
-                "pid": null,
-                "managed": false,
-            });
-        }
-    }
+    // Only the server this project started counts: a studio on some other port may belong to
+    // another project or another person.
     json!({
         "running": false,
         "target": target,
@@ -301,12 +288,13 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
     let log_file = std::fs::File::create(dir.join(".video-server.log"))?;
     let err_file = log_file.try_clone()?;
 
-    let child = match target.as_str() {
+    let mut child = match target.as_str() {
         "remotion" => {
             let work_dir = remotion_composer_dir(&dir).unwrap_or_else(|| dir.join("remotion"));
             std::process::Command::new("npx")
                 .args(["remotion", "studio", "--port", &port.to_string(), "--no-open"])
                 .current_dir(&work_dir)
+                .process_group(0)
                 .stdout(log_file)
                 .stderr(err_file)
                 .spawn()
@@ -314,9 +302,12 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
         }
         "hyperframes" => {
             let work_dir = dir.join("hyperframes");
-            std::process::Command::new("python3")
-                .args(["-m", "http.server", &port.to_string(), "--bind", "127.0.0.1"])
+            // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
+            // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
+            std::process::Command::new("npx")
+                .args(["hyperframes", "preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", "."])
                 .current_dir(&work_dir)
+                .process_group(0)
                 .stdout(log_file)
                 .stderr(err_file)
                 .spawn()
@@ -339,9 +330,20 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
         dir.join(".video-server.json"),
         serde_json::to_string_pretty(&state).unwrap_or_default(),
     )?;
-    for _ in 0..30 {
+    // npx resolves and boots the studio first; give it up to 30 s.
+    for _ in 0..200 {
         if port_open(port) {
             break;
+        }
+        // A studio that quits at once (no composition yet, bad config) reports why, right away.
+        if let Ok(Some(status)) = child.try_wait() {
+            let _ = std::fs::remove_file(dir.join(".video-server.json"));
+            let log = std::fs::read_to_string(dir.join(".video-server.log")).unwrap_or_default();
+            let tail: Vec<&str> = log.lines().map(str::trim).filter(|l| !l.is_empty() && !l.chars().all(|c| !c.is_alphanumeric())).collect();
+            return Err(EngineError::ExternalTool(
+                format!("{target} studio"),
+                format!("exited ({status}): {}", tail[tail.len().saturating_sub(4)..].join(" · ")),
+            ));
         }
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
@@ -356,8 +358,9 @@ pub fn cmd_video_server_stop(s: &mut Session, _: &Value) -> Result<Value> {
         && let Some(pid) = saved.get("pid").and_then(Value::as_u64)
         && is_managed_video_server_pid(pid)
     {
+        // The studio runs in its own process group (npx and the node server it starts).
         let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
+            .args(["-TERM", "--", &format!("-{pid}")])
             .status();
     }
     let _ = std::fs::remove_file(&state_path);
