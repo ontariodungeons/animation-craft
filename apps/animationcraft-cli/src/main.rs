@@ -92,6 +92,9 @@ LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec 
   ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
   ui.vision                           analyze the live stage canvas pixels (no screenshot download needed)
   ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
+  ui.look [region=<id prefix>] [click=<id>] [max_side=1000] [output=...]
+                                      one-step look: click (optional), then a PNG of the window or region,
+                                      the app state and the ids inside it (MCP: ui_look returns the image)
   ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
                                       switch live GUI viewport tab, action cycle, yaw, or pose range
   app.quit                            close the live GUI window (save the project first)
@@ -365,6 +368,10 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
+                if raw_name == "ui_look" || raw_name == "ui.look" {
+                    outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": ui_look(bridge.as_deref(), args)}));
+                    continue;
+                }
                 let res = if raw_name == "app_quit" || raw_name == "app.quit" {
                     let out = call_app_quit(bridge.as_deref(), args);
                     if out.as_ref().is_ok_and(|v| !is_payload_error(v)) {
@@ -424,6 +431,22 @@ fn mcp_tools() -> Vec<Value> {
         })
         .collect();
     tools.push(json!({
+        "name": "ui_look",
+        "description": "See the live AnimationCraft window in one call: optionally click an element first, \
+            then get a picture of the window (or of the elements whose id starts with `region`, e.g. \
+            `workshop.storyboard`, `stage`, `header`) plus the app state and the clickable ids inside it. \
+            Needs `mcp --bridge <port>`.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "region": {"type": "string", "description": "element id prefix to crop to; empty = whole window"},
+                "click": {"type": "string", "description": "element id to click before looking"},
+                "max_side": {"type": "number", "description": "longest side in pixels (default 1000)"}
+            },
+            "additionalProperties": false
+        }
+    }));
+    tools.push(json!({
         "name": "app_quit",
         "description": "Quit the live AnimationCraft window this server is bridged to. \
             Save the project first; this closes the window without a prompt. \
@@ -435,6 +458,36 @@ fn mcp_tools() -> Vec<Value> {
         }
     }));
     tools
+}
+
+/// `ui_look` as an MCP result: the picture as an image block, the state as text.
+fn ui_look(bridge: Option<&str>, mut args: Value) -> Value {
+    let error = |e: String| json!({"content": [{"type": "text", "text": e}], "isError": true});
+    let Some(addr) = bridge else {
+        return error("ui_look needs the native window: start `animationcraft --control <port>` and run this MCP server with `--bridge <port>`".into());
+    };
+    let out = std::env::temp_dir().join(format!("animationcraft-look-{}.png", std::process::id()));
+    args["output"] = json!(out);
+    match bridge_call(addr, "ui.look", args).and_then(|v| std::fs::read(&out).map(|png| (v, png)).map_err(|e| e.to_string())) {
+        Ok((state, png)) => json!({"content": [
+            {"type": "image", "data": base64(&png), "mimeType": "image/png"},
+            {"type": "text", "text": serde_json::to_string_pretty(&state).unwrap_or_default()}
+        ]}),
+        Err(e) => error(e),
+    }
+}
+
+/// Standard base64 (RFC 4648, padded).
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            s.push(if i <= chunk.len() { ABC[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    s
 }
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
@@ -669,6 +722,13 @@ mod tests {
         assert_eq!(quit.len(), 1, "app_quit must appear exactly once");
         assert_eq!(quit[0]["inputSchema"]["additionalProperties"], json!(false));
         assert!(tools.len() >= animationcraft_engine::command_specs().len());
+    }
+
+    #[test]
+    fn base64_matches_rfc_4648() {
+        for (raw, enc) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(base64(raw.as_bytes()), enc);
+        }
     }
 
     #[test]

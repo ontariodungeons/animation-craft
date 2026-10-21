@@ -123,6 +123,11 @@ impl AnimationCraftApp {
         {
             let _ = reply_tx.send(Err(msg.to_string()));
         }
+        if self.pending_look.as_ref().is_some_and(|l| l.2.elapsed() >= max_age)
+            && let Some((_, reply_tx, _, _)) = self.pending_look.take()
+        {
+            let _ = reply_tx.send(Err(msg.to_string()));
+        }
         if self
             .pending_vision
             .as_ref()
@@ -241,6 +246,16 @@ impl AnimationCraftApp {
                     live_ctx,
                     egui::ViewportCommand::Screenshot(egui::UserData::default()),
                 );
+            } else if req.id == "ui.look" {
+                // Optionally click first; the capture waits two frames so the click is drawn.
+                if let Some(id) = req.params.get("click").and_then(Value::as_str)
+                    && let Err(e) = self.dispatch("ui.click", json!({"id": id}))
+                {
+                    let _ = req.reply.send(Err(e));
+                    continue;
+                }
+                self.pending_look = Some((req.params, req.reply, Instant::now(), Some(2)));
+                self.request_repaint(live_ctx);
             } else if req.id == "ui.vision" {
                 self.pending_vision = Some((req.reply, Instant::now()));
                 self.send_viewport_cmd_and_repaint(
@@ -298,6 +313,70 @@ impl AnimationCraftApp {
         self.handle_control_requests(pending, None, Some(headless_ctx));
     }
 
+    /// Counts down a pending `ui.look`'s frames, then asks the window for its picture.
+    pub(crate) fn advance_look(&mut self, ctx: &egui::Context) {
+        let Some(look) = self.pending_look.as_mut() else { return };
+        match look.3 {
+            Some(0) => {
+                look.3 = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            }
+            Some(n) => look.3 = Some(n - 1),
+            None => {}
+        }
+        ctx.request_repaint();
+    }
+
+    /// Answers a `ui.look` from a window screenshot: crop to `region` (an element id prefix),
+    /// scale to `max_side`, save, and reply with the app state and the ids inside the crop.
+    fn reply_look(&mut self, raw: &[u8], w: u32, h: u32, ppp: f32) {
+        if !matches!(self.pending_look, Some((_, _, _, None))) {
+            return;
+        }
+        let Some((params, reply_tx, _, _)) = self.pending_look.take() else { return };
+        let region = params.get("region").and_then(Value::as_str).unwrap_or("");
+        let inside: Vec<&crate::automation::Element> =
+            self.automation.elements.iter().filter(|e| e.id.starts_with(region)).collect();
+        let rect = if region.is_empty() {
+            [0.0, 0.0, w as f32 / ppp, h as f32 / ppp]
+        } else if inside.is_empty() {
+            let mut roots: Vec<&str> = self.automation.elements.iter().filter_map(|e| e.id.split('.').next()).collect();
+            roots.sort_unstable();
+            roots.dedup();
+            let _ = reply_tx.send(Err(format!("no element id starts with `{region}`; try one of: {}", roots.join(", "))));
+            return;
+        } else {
+            let (x0, y0) = inside.iter().fold((f32::MAX, f32::MAX), |a, e| (a.0.min(e.rect[0]), a.1.min(e.rect[1])));
+            let (x1, y1) = inside.iter().fold((0.0f32, 0.0f32), |a, e| (a.0.max(e.rect[0] + e.rect[2]), a.1.max(e.rect[1] + e.rect[3])));
+            [x0, y0, x1 - x0, y1 - y0]
+        };
+        let px = |v: f32, max: u32| ((v * ppp).round().max(0.0) as u32).min(max);
+        let (x0, y0) = (px(rect[0], w), px(rect[1], h));
+        let (cw, ch) = (px(rect[2], w - x0).max(1), px(rect[3], h - y0).max(1));
+        let Some(full) = image::RgbaImage::from_raw(w, h, raw.to_vec()) else {
+            let _ = reply_tx.send(Err("screenshot buffer has the wrong size".into()));
+            return;
+        };
+        let mut shot = image::imageops::crop_imm(&full, x0, y0, cw, ch).to_image();
+        let max_side = params.get("max_side").and_then(Value::as_u64).unwrap_or(1000) as u32;
+        if cw.max(ch) > max_side {
+            let s = max_side as f32 / cw.max(ch) as f32;
+            shot = image::imageops::thumbnail(&shot, ((cw as f32 * s) as u32).max(1), ((ch as f32 * s) as u32).max(1));
+        }
+        let out = params.get("output").and_then(Value::as_str).unwrap_or("exports/animationcraft_look.png").to_string();
+        if let Some(parent) = std::path::Path::new(&out).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let ids: Vec<Value> = inside.iter().take(80).map(|e| json!({"id": e.id, "label": e.label})).collect();
+        let _ = reply_tx.send(shot.save(&out).map_err(|e| e.to_string()).map(|()| {
+            json!({"saved": out, "width": shot.width(), "height": shot.height(), "region": region,
+                "state": {"project": self.session.project_path, "active_asset": self.session.active_asset,
+                    "stage": self.ui_state.active_stage, "studio_tab": format!("{:?}", self.ui_state.center_tab),
+                    "storyboard_page": self.ui_state.storyboard_page + 1, "status": self.ui_state.status_line},
+                "elements": ids})
+        }));
+    }
+
     pub(crate) fn handle_screenshot_events(&mut self, ctx: &egui::Context) {
         let screenshot_img = ctx.input(|i| {
             for ev in &i.raw.events {
@@ -322,6 +401,7 @@ impl AnimationCraftApp {
             &[[16, 18, 24], [20, 24, 32], [31, 37, 49]]
         };
         let ppp = ctx.pixels_per_point();
+        self.reply_look(&raw, w, h, ppp);
         let region = ["stage.viewport_2d", "pose.canvas"].iter().find_map(|id| {
             let el = self.automation.elements.iter().find(|e| e.id == *id)?;
             let x0 = ((el.rect[0] * ppp).round().max(0.0) as u32).min(w);

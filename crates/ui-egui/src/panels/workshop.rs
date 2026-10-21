@@ -1023,7 +1023,9 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let page_size = info["layout"]["page_size"].as_array().map(|a| (a[0].as_f64().unwrap_or(842.0) as f32, a[1].as_f64().unwrap_or(595.0) as f32));
     let images: Vec<Value> = info["layout"]["images"].as_array().into_iter().flatten().filter(|i| i["page"] == json!(page + 1)).cloned().collect();
     egui::ScrollArea::vertical().id_salt("workshop.storyboard.page").show(ui, |ui| {
-        let shown = ui.add(egui::Image::new(&tex).fit_to_exact_size(size)).rect;
+        let page_view = ui.add(egui::Image::new(&tex).fit_to_exact_size(size));
+        app.automation.add_response("workshop.storyboard.view", "image", "Storyboard page", &page_view);
+        let shown = page_view.rect;
         let Some((pw, ph)) = page_size else { return };
         // Each image on the page is a live item: hover previews it, drag it to the left side or
         // right-click it to animate, copy, open or remove it.

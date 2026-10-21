@@ -57,6 +57,9 @@ pub struct AnimationCraftApp {
     pub(crate) repaint_ctx: Arc<Mutex<Option<egui::Context>>>,
     pub(crate) pending_screenshot: Option<(String, Sender<Result<Value, String>>, Instant)>,
     pub(crate) pending_vision: Option<(Sender<Result<Value, String>>, Instant)>,
+    /// A `ui.look` waiting for its frame: params, reply, start, frames to wait before capture
+    /// (None once the capture is requested).
+    pub(crate) pending_look: Option<(Value, Sender<Result<Value, String>>, Instant, Option<u8>)>,
     pub(crate) pending_clicks: Vec<egui::Pos2>,
     job_tx: Sender<BackgroundJobResult>,
     job_rx: Receiver<BackgroundJobResult>,
@@ -389,6 +392,7 @@ impl AnimationCraftApp {
             repaint_ctx: Arc::new(Mutex::new(None)),
             pending_screenshot: None,
             pending_vision: None,
+            pending_look: None,
             pending_clicks: Vec::new(),
             job_tx,
             job_rx,
@@ -1084,12 +1088,14 @@ impl eframe::App for AnimationCraftApp {
         }
 
         self.handle_screenshot_events(ui.ctx());
+        self.advance_look(ui.ctx());
         self.drain_live_control_requests(ui.ctx());
         self.render_workspace(ui);
 
         if self.ui_state.busy_command.is_some()
             || self.pending_screenshot.is_some()
             || self.pending_vision.is_some()
+            || self.pending_look.is_some()
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

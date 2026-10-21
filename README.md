@@ -115,6 +115,7 @@ Each result includes `next` steps for an agent.
 | Transcribe with FilmCraft (also makes `<song>.fcproj`) | `animationcraft-cli exec audio.transcribe` |
 | Use an existing transcript (checked first) | `animationcraft-cli exec workshop.import_transcript path=<song>.transcript.json` |
 | Create the storyboard template | `animationcraft-cli exec storyboard.init` |
+| See the live app in one step (optional click, crop to a region, state + ids) | `animationcraft-cli --bridge 19897 exec ui.look region=workshop.storyboard click=workshop.storyboard.page.0` |
 | Analyze the song with the HyperFrames tools (words → `hyperframes/transcript.json`, structure → `hyperframes/audiomap.json`) | `animationcraft-cli exec audio.analyze` |
 | Import scenes from an OpenMontage project | `animationcraft-cli exec storyboard.import_openmontage path=<old project>` |
 | List chapters (scenes) | `animationcraft-cli exec storyboard.toc` |
