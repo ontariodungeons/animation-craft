@@ -6,10 +6,12 @@ description: Use when working on a song's storyboard in AnimationCraft — readi
 # Storyboard (AnimationCraft)
 
 A song project is one folder with an `<Song>.acproj` file. Its storyboard is ONE shared document:
-`storyboard/storyboard.pdf`: page 1 lists every caption (number, time, lyric); page 2 is
-**Cast & sets** (backgrounds, characters, props); then one page per scene. A scene is one caption,
-or an instrumental stretch (1 s or more with no caption). The PDF is **always rebuilt from source
-files**. Never edit the PDF itself.
+`storyboard/storyboard.pdf` (portrait): page 1 lists every caption (number, time, lyric); then the
+**Cast & sets** board (master prompt, locks, a card per character and location); then one page per
+scene (image box, lyric cue, planned hold, visible cast, story beat, continuity lock, motion,
+editable caption). A scene is one caption, or an instrumental stretch (1 s or more with no caption).
+Every box is a form field: type into it, or put an image in an image box, in AnimationCraft or
+PDFCraft. `workshop.build_storyboard` redraws the pages and keeps the text typed into fields.
 
 ## Sources (the template)
 ```
