@@ -142,7 +142,7 @@ function renderBlocks() {
 
 }
 
-// ---- Storyboard ---------------------------------------------------------------------------
+// ---- Storyboard: title cards ------------------------------------------------------------
 
 function renderStoryboard() {
   const sb = state.data?.storyboard;
@@ -150,17 +150,13 @@ function renderStoryboard() {
   const pages = sb?.previews || [];
   const chips = $("sb-chips");
   chips.replaceChildren();
-  let img = $("sb-img");
-  if(!img && !pages.length){$("sb-wrap").replaceChildren();img=el("img",{id:"sb-img"});$("sb-wrap").append(img);$("sb-wrap").classList.remove("document-pages");delete $("sb-wrap").dataset.document;}
+  const cards = $("sb-cards");
+  cards.replaceChildren();
   $("sb-empty")?.remove();
-  if(img)img.hidden = !pages.length;
   for (const id of ["sb-prev", "sb-next", "sb-pdf"]) $(id).disabled = !pages.length;
   if (!pages.length) {
-    img.onload = img.onerror = null;
-    img.removeAttribute("src");
-    img.classList.remove("loading");
     $("sb-page").textContent = "no storyboard yet";
-    $("sb-wrap").append(el("div", {id:"sb-empty", class:"sb-empty"},
+    cards.append(el("div", {id:"sb-empty", class:"sb-empty"},
       el("strong", {}, `Start ${$("project-name").textContent}`),
       el("p", {}, "Add a transcript to plan the song’s scenes."),
       el("button", {id:"sb-import-transcript", class:"start", onclick:async () => {
@@ -188,30 +184,26 @@ function renderStoryboard() {
   }
   chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   $("sb-page").textContent = `${state.page + 1} / ${pages.length}`;
-  const wrap=$("sb-wrap");
-  const key=JSON.stringify([state.project,pages,sb.layout]);
-  if(wrap.dataset.document!==key){
-    wrap.dataset.document=key;wrap.replaceChildren();wrap.classList.add("document-pages");
-    const size=sb.layout?.page_size||[595,842];
-    pages.forEach((path,i)=>{
-      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet",style:`aspect-ratio:${size[0]}/${size[1]}`});
-      page.append(el("img",{src:convertFileSrc(path),alt:`Storyboard page ${i+1}`,loading:"lazy"}));
-      for(const [j,link] of (sb.layout?.links||[]).entries())if(link.page===i+1){
-        const [x,y,r,b]=link.rect;
-        page.append(el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${(r-x)/size[0]*100}%;height:${(b-y)/size[1]*100}%`,onclick:()=>showPage(link.to_page-1)}));
-      }
-      page.addEventListener('dragover',e=>{e.preventDefault();page.classList.add('drop-target');e.dataTransfer.dropEffect='copy';});
-      page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
-      page.addEventListener('drop',async e=>{
-        e.preventDefault();page.classList.remove('drop-target');
-        const id=e.dataTransfer.getData('application/x-animationcraft-asset');if(!id)return;
-        const r=page.getBoundingClientRect();
-        try{await designCommand('storyboard.place_asset',{asset:id,page:i+1,x:(e.clientX-r.left)/r.width*size[0]-80,y:(e.clientY-r.top)/r.height*size[1]-80,width:160});}catch(error){toast(String(error));}
-      });
-      wrap.append(page);
-    });
-    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
-  }
+
+  // Render one title card per storyboard page
+  const sceneTitles = sb.scene_titles || [];
+  pages.forEach((path, i) => {
+    const active = i === state.page;
+    // Extract a short title from the scene title or use the page number
+    const sceneTitle = sceneTitles[i] || `Page ${i + 1}`;
+    const titleParts = sceneTitle.split(" · ");
+    const cardTitle = titleParts.length > 1 ? titleParts.slice(0, 2).join(" · ") : sceneTitle;
+    const cardTime = titleParts.length > 2 ? titleParts[titleParts.length - 1] : "";
+    const card = el("button", { class: `sb-title-card${active ? " active" : ""}`, title: sceneTitle, "aria-label": `Storyboard page ${i + 1}: ${sceneTitle}`,
+      onclick: () => showPage(i) },
+      el("div", { class: "sb-title-card-thumb" },
+        el("img", { src: convertFileSrc(path), alt: `Storyboard page ${i + 1}`, loading: "lazy" })),
+      el("div", { class: "sb-title-card-body" },
+        el("div", { class: "sb-title-card-title" }, cardTitle),
+        cardTime ? el("div", { class: "sb-title-card-time" }, cardTime) : null,
+        el("div", { class: "sb-title-card-meta" }, `Page ${i + 1} of ${pages.length}`)));
+    cards.append(card);
+  });
 
   renderDesignPlacements();
 }
@@ -220,8 +212,6 @@ function showPage(n) {
   const total = state.data?.storyboard?.previews?.length || 0;
   state.page = Math.max(0, Math.min(total - 1, n));
   renderStoryboard();
-  const page=$(`sb-sheet-${state.page}`),wrap=$("sb-wrap");
-  if(page)wrap.scrollTo({top:wrap.scrollTop+page.getBoundingClientRect().top-wrap.getBoundingClientRect().top-18,behavior:"instant"});
 }
 
 // ---- Tabs and the studio webview ----------------------------------------------------------
@@ -250,19 +240,15 @@ async function setView(view) {
     t.classList.toggle("active", on);
     t.setAttribute("aria-selected", String(on));
   });
-  // Split keeps the project view on top; the studio fills the space under it.
-  const page = view === "split" ? "project" : view;
-  document.body.classList.toggle("split", view === "split");
+  const page = view === "studio" ? "project" : view;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${page}`));
   placeInk();
   if (view === "animation") { await invoke("studio_hide"); await animationOpen(); return; }
   if (view !== "project" && serverUrl()) requestAnimationFrame(showStudio);
   else {
     await invoke("studio_hide");
-    // With the studio off, Split and Studio show the calm "start it" card instead.
     if (view !== "project") {
       document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-studio"));
-      document.body.classList.remove("split");
       $("studio-empty").classList.add("show");
     }
   }

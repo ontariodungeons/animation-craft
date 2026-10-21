@@ -63,22 +63,65 @@
         </form>
       </div>
     </section>
-    <section class="view active" id="view-project">
-      <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
-      <section class="storyboard" aria-label="Storyboard">
-        <div class="sb-head">
-          <button class="icon" id="project-details" title="Show or hide project details" aria-label="Show or hide project details"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
-          <div class="chips" id="sb-chips" role="tablist"></div>
-          <button id="sb-save-version" class="start" hidden title="Save placements to a new editable DeckCraft document">Save new version</button>
-          <div class="sb-nav">
-            <button class="icon" id="sb-prev" aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
-            <span id="sb-page">—</span>
-            <button class="icon" id="sb-next" aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></button>
-            <button class="icon" id="sb-pdf" aria-label="Open the storyboard PDF" title="Open the storyboard PDF"><svg viewBox="0 0 24 24"><path d="M14 3h7v7" /><path d="M21 3l-9 9" /><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg></button>
+    <section class="view active" id="view-project" aria-label="Project workspace">
+      <div class="project-body">
+        <!-- Left rail: collapsible blocks (song workflow) -->
+        <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
+
+        <!-- Main: storyboard title cards -->
+        <section class="storyboard" aria-label="Storyboard">
+          <div class="sb-head">
+            <button class="icon" id="project-details" title="Show or hide project details" aria-label="Show or hide project details"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+            <div class="chips" id="sb-chips" role="tablist"></div>
+            <button id="sb-save-version" class="save-icon" title="Save new version" aria-label="Save new version"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M12 17a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg></button>
+            <div class="sb-nav">
+              <button class="icon" id="sb-prev" aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
+              <span id="sb-page">—</span>
+              <button class="icon" id="sb-next" aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></button>
+              <button class="icon" id="sb-pdf" aria-label="Open the storyboard PDF" title="Open the storyboard PDF"><svg viewBox="0 0 24 24"><path d="M14 3h7v7" /><path d="M21 3l-9 9" /><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg></button>
+            </div>
+          </div>
+          <div class="sb-title-wrap" id="sb-title-wrap">
+            <div class="sb-title-cards" id="sb-cards"></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right rail: Agent docked panel -->
+      <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
+        <div class="agent-head">
+          <span class="agent-title">Agent</span>
+          <div class="agent-head-actions">
+            <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+            <button class="icon" id="agent-new" aria-label="New chat" title="New chat · keep previous conversation"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+            <button class="icon" id="agent-close" aria-label="Close the agent panel" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           </div>
         </div>
-        <div class="sb-page-wrap" id="sb-wrap"><img id="sb-img" alt="Storyboard page" /></div>
-      </section>
+        <div class="agent-pickers">
+          <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
+          <button class="ghost" id="agent-config-toggle" title="Agent settings: agent, model, thinking">Settings</button>
+        </div>
+        <div class="agent-config" id="agent-config" hidden>
+          <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
+          <label>Model<input id="agent-model" placeholder="default" title="Model passed to the command" /></label>
+          <label>Thinking<select id="agent-thinking" title="Reasoning effort">
+            <option value="">default</option><option value="off">off</option><option value="low">low</option>
+            <option value="medium">medium</option><option value="high">high</option></select></label>
+          <label>Extra args<input id="agent-extra" placeholder="--flag value" title="Extra command-line arguments" /></label>
+          <button class="start" id="agent-config-save" title="Save the agent settings">Save</button>
+        </div>
+        <div class="agent-log" id="agent-log" aria-live="polite"></div>
+        <div class="agent-attachments" id="agent-attachments"></div>
+        <div class="agent-compose">
+          <textarea id="agent-input" rows="3" placeholder="Describe a change…" aria-label="Message" title="Enter to send · Shift+Enter for a new line · Ctrl+Enter also sends"></textarea>
+          <div class="agent-actions">
+            <button class="ghost" id="agent-point" title="Point: click anything in the app to attach a picture of it">
+              <svg viewBox="0 0 24 24"><path d="M4 4l7 16 2.5-6.5L20 11z"/></svg><span>Point</span></button>
+            <span class="agent-status" id="agent-status"></span>
+            <button class="start" id="agent-send">Send</button>
+          </div>
+        </div>
+      </aside>
     </section>
 
     <section class="view" id="view-animation" aria-label="Animation workspace"></section>
@@ -91,42 +134,6 @@
       </div>
     </section>
   </main>
-  <div class="frame-handle" id="frame-handle" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the project view and the studio; double-click to reset" title="Drag to resize · double-click to reset">
-    <span class="grip"></span>
-    <button class="icon" id="collapse-top" aria-label="Collapse the project view (studio only)" title="Studio only"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
-    <button class="icon" id="collapse-bottom" aria-label="Collapse the studio (project only)" title="Project only"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
-  </div>
-  <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
-    <div class="agent-head">
-      <span class="agent-title">Agent</span>
-      <button class="icon" id="agent-new" aria-label="New chat" title="New chat · keep previous conversation"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-      <button class="icon" id="agent-close" aria-label="Close the agent" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-    </div>
-    <div class="agent-pickers">
-      <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
-      <button class="ghost" id="agent-config-toggle" title="Agent settings: agent, model, thinking">Settings</button>
-    </div>
-    <div class="agent-config" id="agent-config" hidden>
-      <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
-      <label>Model<input id="agent-model" placeholder="default" title="Model passed to the command" /></label>
-      <label>Thinking<select id="agent-thinking" title="Reasoning effort">
-        <option value="">default</option><option value="off">off</option><option value="low">low</option>
-        <option value="medium">medium</option><option value="high">high</option></select></label>
-      <label>Extra args<input id="agent-extra" placeholder="--flag value" title="Extra command-line arguments" /></label>
-      <button class="start" id="agent-config-save" title="Save the agent settings">Save</button>
-    </div>
-    <div class="agent-log" id="agent-log" aria-live="polite"></div>
-    <div class="agent-attachments" id="agent-attachments"></div>
-    <div class="agent-compose">
-      <textarea id="agent-input" rows="3" placeholder="Describe a change…" aria-label="Message" title="Enter to send · Shift+Enter for a new line · Ctrl+Enter also sends"></textarea>
-      <div class="agent-actions">
-        <button class="ghost" id="agent-point" title="Point: click anything in the app to attach a picture of it">
-          <svg viewBox="0 0 24 24"><path d="M4 4l7 16 2.5-6.5L20 11z"/></svg><span>Point</span></button>
-        <span class="agent-status" id="agent-status"></span>
-        <button class="start" id="agent-send">Send</button>
-      </div>
-    </div>
-  </aside>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="app.js"></script>
