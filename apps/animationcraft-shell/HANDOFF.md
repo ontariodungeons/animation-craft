@@ -7,6 +7,7 @@ The user deletes the older UI after they confirm the checklist below.
 
 ## Read these skills first (in this order)
 
+0. **`.agents/skills/animationcraft-shell-ui/SKILL.md` (repo): the shell's design system. Study it first; every screen follows it.**
 1. `~/.agents/skills/artcraft-suite/SKILL.md`: the *craft apps and when to use each one.
 2. `~/.agents/skills/animationcraft/SKILL.md`: engine commands, CLI, MCP, the workflow.
 3. `.agents/skills/storyboard/SKILL.md` (repo): the storyboard PDF and scene loop.
