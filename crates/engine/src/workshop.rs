@@ -1330,8 +1330,8 @@ fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
 /// The song analysis for the HyperFrames target in one call, using that target's own tools:
 /// copy the song to `hyperframes/assets/bgm.mp3`, transcribe it with `hyperframes transcribe`
 /// (`transcript.json`, words; `transcript.srt`, its caption lines), and map its structure with the music-to-video skill's
-/// `analyze-beatgrid.py` (`audiomap.json`). Writing the STORYBOARD.md skeleton from these stays
-/// the agent's step, as music-to-video requires.
+/// `analyze-beatgrid.py` (`audiomap.json`), then write the STORYBOARD.md skeleton from the
+/// captions with `pipeline/storyboard_skeleton.py`. Steps whose output exists are skipped.
 pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     if s.video_target != "hyperframes" {
         return Err(EngineError::InvalidParams(format!(
@@ -1384,18 +1384,24 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
         super::workspace::run_tool_in(&hf, "python3", &[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)])?;
         ran.push("analyze-beatgrid.py → audiomap.json");
     }
+    let storyboard = hf.join("STORYBOARD.md");
+    if overwrite || !storyboard.is_file() {
+        let script = super::workspace::workspace_root(s).join("pipeline/storyboard_skeleton.py");
+        super::workspace::run_tool_in(&hf, "python3", &[arg(&script), "--srt".into(), arg(&srt),
+            "--audiomap".into(), arg(&audiomap), "--out".into(), arg(&storyboard)])?;
+        ran.push("storyboard_skeleton.py → STORYBOARD.md");
+    }
     let map: Value = serde_json::from_str(&std::fs::read_to_string(&audiomap)?)
         .map_err(|e| EngineError::InvalidParams(format!("unreadable audiomap.json: {e}")))?;
     let words: Value = serde_json::from_str(&std::fs::read_to_string(&transcript)?)
         .map_err(|e| EngineError::InvalidParams(format!("unreadable transcript.json: {e}")))?;
     let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
     Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,
-        "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap},
+        "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap, "storyboard": storyboard},
         "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
         "silences": map["silences"], "phrases": map["phrases"], "words": words.len(),
         "next": [
-            "Write hyperframes/STORYBOARD.md's skeleton yourself from audiomap.json, following music-to-video references/frame-skeleton.md (frames tile the track; groups TBD).",
-            "The analyzer hears drums and energy, not voices: a 'silence' with words in transcript.json is sung, not instrumental. Only stretches with neither are instrumental placeholders."
+            "Review hyperframes/STORYBOARD.md: one frame per caption (number, time, words) plus instrumental frames for gaps of 1 s or more; then fill each frame's groups (music-to-video Step 3)."
         ]}))
 }
 
