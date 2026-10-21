@@ -870,3 +870,43 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
     crate::project::cmd_project_load_asset(s, &json!({"id":id,"reload":true}))?;
     Ok(json!({"ok":true,"character":id}))
 }
+
+/// Bake the existing engine samples into exporter keys. No second evaluator.
+pub fn cmd_motion_export_track(s:&mut Session,p:&Value)->Result<Value>{
+    let sample=cmd_motion_sample(s,p)?;
+    let id=load_character(s,p)?;
+    let rig=preview_rig(s.assets.get(&id).ok_or_else(||invalid("Asset not loaded"))?)?;
+    let source_duration=sample["duration"].as_f64().ok_or_else(||invalid("Missing sampled duration"))?;
+    let duration=p["duration"].as_f64().unwrap_or(source_duration);
+    if !duration.is_finite() || duration<=0.0 || duration>600.0{return Err(invalid("duration must be in (0,600]"));}
+    let frames=sample["frames"].as_array().ok_or_else(||invalid("No sampled frames"))?;
+    let mut motion=json!({});
+    for (index,part) in rig.parts.iter().enumerate(){
+        for prop in ["position","rotation","scale","opacity"] {
+            let keys:Vec<Value>=frames.iter().map(|frame|{
+                let v=&frame["layers"][index][prop];
+                let value=match prop {
+                    "position"=>if v.is_array(){v.clone()}else{json!([0,0])},
+                    "rotation"=>json!(v.as_f64().unwrap_or(0.0)),
+                    "opacity"=>json!((v.as_f64().unwrap_or(1.0)-1.0)*100.0),
+                    _=>json!([(v[0].as_f64().unwrap_or(1.0)-1.0)*100.0,(v[1].as_f64().unwrap_or(1.0)-1.0)*100.0]),
+                };
+                json!([frame["time"].as_f64().unwrap_or(0.0)*duration/source_duration,value])
+            }).collect();
+            motion[&part.id][prop]=json!([{"kind":"keys","ease":"linear","keys":keys}]);
+        }
+    }
+    let layers:Vec<Value>=rig.parts.iter().map(|part|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":part.parent})).collect();
+    let name=crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
+    let bounds=sample["bounds"].as_array();
+    let b=|i:usize,default:f64|bounds.and_then(|a|a.get(i)).and_then(Value::as_f64).unwrap_or(default);
+    let margin=[(-b(0,0.0)).max(0.0)+8.0,(-b(1,0.0)).max(0.0)+8.0,(b(2,rig.canvas_size[0] as f64)-rig.canvas_size[0] as f64).max(0.0)+8.0,(b(3,rig.canvas_size[1] as f64)-rig.canvas_size[1] as f64).max(0.0)+8.0];
+    let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+    let out=crate::workshop::project_dir(s)?.join(format!("tracks/{id}/{name}-{stamp}"));std::fs::create_dir_all(&out)?;
+    let spec=out.join("motion.json");
+    let data=json!({"canvas":rig.canvas_size,"fps":30,"margin":margin,"layers":layers,"tracks":[{"id":name,"duration":duration,"loop":false,"motion":motion}]});
+    std::fs::write(&spec,data.to_string())?;
+    let mut result=crate::exports::cmd_export_layered_motion(s,&json!({"spec":spec,"out_dir":out,"stills":3,"video":true}))?;
+    result["spec"]=json!(spec);result["duration"]=json!(duration);result["margin"]=json!(margin);result["asset"]=json!(id);
+    Ok(result)
+}

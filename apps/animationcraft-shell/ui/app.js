@@ -113,14 +113,19 @@ function renderBlocks() {
   const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
   box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, transcript.done, outputs.map(fileButton)));
 
-  const groups = objectsFrom(s.asset_files || []);
-  const objects = [...groups].filter(([k]) => k !== "backgrounds" && k !== "loose");
-  const body = [el("div", { class: "group-label" }, "Objects"),
-    el("div", { class: "objects" }, objects.map(([name, layers]) => objectCard(name, layers, true)))];
-  if (groups.has("backgrounds")) body.push(el("div", { class: "group-label" }, "Backgrounds"),
-    el("div", { class: "objects" }, groups.get("backgrounds").map((f) => objectCard(f.name.replace(/\.[^.]+$/, ""), [f], false))));
-  if (groups.has("loose")) body.push(el("div", { class: "group-label" }, "Not grouped yet"), groups.get("loose").map(fileButton));
-  box.append(block("animate", ICONS.animate, "Animate", `${objects.length} objects`, animate.done, body));
+  const assets=state.data?.assets?.assets||[];
+  const cards=assets.map(a=>{
+    const picture=/\.(png|jpe?g|webp|gif)$/i.test(a.path||'')?el('img',{src:convertFileSrc(a.path),alt:a.name,draggable:'false'}):el('span',{html:ICONS.animate});
+    const card=el('button',{id:`asset-${a.id}`,class:'object',draggable:'true',title:`${a.name} · drag onto a storyboard page or click to animate`,'aria-label':a.name,
+      onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
+    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-animationcraft-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
+  });
+  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,assets.length>0,[el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]));
+  box.append(block('assets',ICONS.animate,'Assets',`${(s.asset_files||[]).length} files`,assets.length>0,[
+    el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
+    el('p',{class:'why'},'Drag a character above onto a storyboard page.'),
+    el('details',{},el('summary',{},'Project files'),...(s.asset_files||[]).map(fileButton))]));
+
 }
 
 // ---- Storyboard ---------------------------------------------------------------------------
@@ -178,11 +183,20 @@ function renderStoryboard() {
         const [x,y,r,b]=link.rect;
         page.append(el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${(r-x)/size[0]*100}%;height:${(b-y)/size[1]*100}%`,onclick:()=>showPage(link.to_page-1)}));
       }
+      page.addEventListener('dragover',e=>{e.preventDefault();page.classList.add('drop-target');e.dataTransfer.dropEffect='copy';});
+      page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
+      page.addEventListener('drop',async e=>{
+        e.preventDefault();page.classList.remove('drop-target');
+        const id=e.dataTransfer.getData('application/x-animationcraft-asset');if(!id)return;
+        const r=page.getBoundingClientRect();
+        try{await designCommand('storyboard.place_asset',{asset:id,page:i+1,x:(e.clientX-r.left)/r.width*size[0]-80,y:(e.clientY-r.top)/r.height*size[1]-80,width:160});}catch(error){toast(String(error));}
+      });
       wrap.append(page);
     });
     wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
   }
 
+  renderDesignPlacements();
 }
 
 function showPage(n) {
@@ -190,7 +204,7 @@ function showPage(n) {
   state.page = Math.max(0, Math.min(total - 1, n));
   renderStoryboard();
   const page=$(`sb-sheet-${state.page}`),wrap=$("sb-wrap");
-  if(page)wrap.scrollTo({top:wrap.scrollTop+page.getBoundingClientRect().top-wrap.getBoundingClientRect().top-18,behavior:"smooth"});
+  if(page)wrap.scrollTo({top:wrap.scrollTop+page.getBoundingClientRect().top-wrap.getBoundingClientRect().top-18,behavior:"instant"});
 }
 
 // ---- Tabs and the studio webview ----------------------------------------------------------
@@ -332,3 +346,49 @@ placeInk();
 load();
 
 $("project-details").addEventListener("click",()=>{document.body.classList.toggle("project-details-open");$("project-details").setAttribute("aria-pressed",String(document.body.classList.contains("project-details-open")));});
+
+async function designCommand(id,params={}){
+ const result=await motionCommand(id,params);
+ state.data=await invoke('project_state',{path:state.project});renderBlocks();renderStoryboard();return result;
+}
+async function importProjectAsset(){
+ const path=await dialog.open({title:'Add artwork',filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});if(!path)return;
+ const name=path.split('/').pop().replace(/\.[^.]+$/,'');
+ try{await designCommand('project.add_asset',{path,kind:'image',name,character:name,load:false});state.open='animate';renderBlocks();toast('Asset added · drag it onto a scene');}catch(e){toast(String(e));}
+}
+let selectedPlacement=null;
+function renderDesignPlacements(){
+ const entries=state.data?.design?.placements||[];const size=state.data?.storyboard?.page_size||[960,540];
+ document.querySelectorAll('.design-placement,.design-remove').forEach(n=>n.remove());
+ $('sb-save-version').hidden=!entries.length;
+ if(!entries.some(p=>p.id===selectedPlacement))selectedPlacement=entries.at(-1)?.id||null;
+
+ for(const item of entries){
+  const page=$(`sb-sheet-${item.page-1}`);if(!page)continue;
+  const [x,y,w,h]=item.rect;
+  const node=el('div',{id:item.id,class:'design-placement',title:'Drag to move · grab an edge to scale',style:`left:${100*x/size[0]}%;top:${100*y/size[1]}%;width:${100*w/size[0]}%;height:${100*h/size[1]}%`});
+  node.append(el('img',{src:convertFileSrc(item.path),alt:'Placed design asset',draggable:'false'}));
+  for(const [hx,hy] of [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]]){
+   const handle=el('button',{class:'design-handle',title:'Drag to scale', 'aria-label':'Scale placed image',style:`left:${(hx+1)*50}%;top:${(hy+1)*50}%;cursor:${hx===0?'ns':hy===0?'ew':hx===hy?'nwse':'nesw'}-resize`});
+   handle.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();selectedPlacement=item.id;handle.setPointerCapture(e.pointerId);
+    const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let rect=[x,y,w,h];
+    handle.onpointermove=event=>{
+     const dx=(event.clientX-start[0])*size[0]/r.width,dy=(event.clientY-start[1])*size[1]/r.height;
+     const factor=hx===0?1+hy*dy/h:hy===0?1+hx*dx/w:1+(hx*dx/w+hy*dy/h)/2;
+     const nw=Math.max(20,Math.min(size[0],w*factor)),nh=nw*h/w;
+     rect=[hx<0?x+w-nw:hx===0?x+(w-nw)/2:x,hy<0?y+h-nh:hy===0?y+(h-nh)/2:y,nw,nh];
+     node.style.left=`${rect[0]/size[0]*100}%`;node.style.top=`${rect[1]/size[1]*100}%`;node.style.width=`${nw/size[0]*100}%`;node.style.height=`${nh/size[1]*100}%`;
+    };
+    handle.onpointerup=async()=>{handle.onpointermove=null;handle.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,placement:item.id,x:rect[0],y:rect[1],width:rect[2]});}catch(error){toast(String(error));}};
+   });node.append(handle);
+  }
+  node.addEventListener('pointerdown',e=>{
+   selectedPlacement=item.id;
+   e.preventDefault();node.setPointerCapture(e.pointerId);const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let nx=x,ny=y;
+   node.onpointermove=event=>{nx=x+(event.clientX-start[0])*size[0]/r.width;ny=y+(event.clientY-start[1])*size[1]/r.height;node.style.left=`${nx/size[0]*100}%`;node.style.top=`${ny/size[1]*100}%`;};
+   node.onpointerup=async()=>{node.onpointermove=null;node.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,x:nx,y:ny,width:w,placement:item.id});}catch(error){toast(String(error));}};
+  });page.append(node,el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',style:`left:${100*(x+w)/size[0]}%;top:${100*y/size[1]}%`,onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×'));
+ }
+}
+$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.textContent='Saving…';try{await designCommand('storyboard.save_version');toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.textContent='Save new version';}});

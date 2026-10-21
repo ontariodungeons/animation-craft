@@ -32,6 +32,7 @@ pub mod project;
 pub mod rig;
 pub mod session;
 pub mod storyboard;
+pub mod storyboard_design;
 pub mod turnaround;
 pub mod video_target;
 pub mod vision;

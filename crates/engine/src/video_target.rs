@@ -437,3 +437,12 @@ pub fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Val
     let timing: Vec<Value> = images.iter().zip(&spans).map(|(img, sp)| json!({"panel": img, "begins": sp.iter().map(|(a, _)| clock(*a)).collect::<Vec<_>>()})).collect();
     Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "clips": clips, "timing": timing}))
 }
+
+/// Place a rendered track in HyperFrames without recreating the composition.
+pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
+    let dir=project_dir(s)?;
+    if s.video_target!="hyperframes"{return Err(EngineError::InvalidParams("Select HyperFrames before placing this track".into()));}
+    let script=crate::workspace::workspace_root(s).join("pipeline/place_hyperframes_track.py");
+    let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--project".into(),dir.to_string_lossy().into_owned(),"--request".into(),params.to_string()])?;
+    serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
+}

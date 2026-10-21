@@ -77,7 +77,7 @@ def build(transcript, source, out, title):
     args+=['--save',str(deck),'--export',str(pdf)]
     subprocess.run(args,check=True,capture_output=True,text=True)
     previews=out/'pages';subprocess.run(['deckcraft-cli','render',str(deck),'--all','--scale','1.5',str(previews)],check=True,capture_output=True,text=True)
-    result=dict(pdf=str(pdf),deck=str(deck),previews=[str(p) for p in sorted(previews.glob('slide-*.png'))],page_size=[960,540],links=links,scene_titles=titles,first_scene_page=first_scene+1,title=title,template='backlot')
+    result=dict(pdf=str(pdf),deck=str(deck),previews=[str(p) for p in sorted(previews.glob('slide-*.png'))],page_size=[960,540],stage_rect=[32,102,620,349],links=links,scene_titles=titles,first_scene_page=first_scene+1,title=title,template='backlot')
     (out/'manifest.json').write_text(json.dumps(result,indent=2))
     return result
 

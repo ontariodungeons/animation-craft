@@ -228,7 +228,10 @@ async function agentSend() {
       status("Sending…");
       if (!agent.session) { const made=await motionCommand("agent.new_chat",{});agent.session=made.session;renderWatch(); }
       const files = attachments.map((a) => ({ uri: `file://${a.path}`, name: a.path.split("/").pop(), description: a.what }));
-      const full = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
+      const board=state.data?.storyboard;
+      const scene=state.view==='project' && board?.first_scene_page && state.page+1>=board.first_scene_page ? state.page+2-board.first_scene_page : null;
+      const context={project:state.project,view:state.view,scene,storyboard_page:state.page+1,deck:board?.deck,placements:state.data?.design?.placements||[],animation:{asset:motion.character,track:motion.track,time:motion.time}};
+      const full = [text, `[Shared AnimationCraft context at send time: ${JSON.stringify(context)}]`, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
       await oc(["session.prompt", "--param", `sessionID=${agent.session}`], { text: full, files });
       status("Sent. The agent is working…");
     }

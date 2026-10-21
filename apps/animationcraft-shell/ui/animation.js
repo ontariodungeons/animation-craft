@@ -21,7 +21,7 @@ function motionSection(title,body,open=false){
  const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));node.open=open;return node;
 }
 function motionRange(id,label,min,max,step,value,unit,change){
- const out=el('output',{},`${value}${unit}`);
+ const out=el('output',{},`${Number(Number(value).toFixed(2))}${unit}`);
  const input=el('input',{id,type:'range',min,max,step,value,'aria-label':label,title:`${label}: ${min}–${max}${unit}`});
  const fill=()=>input.style.setProperty('--range-fill',`${100*(Number(input.value)-min)/(max-min)}%`);fill();
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
@@ -88,7 +88,14 @@ function animationControls(){
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`)));
- box.append(motionSection('Export & integrations',el('button',{class:'ghost',id:'motion-export',title:'Open the layered motion specification','aria-label':'Open motion specification',onclick:()=>openPath(meta.spec)},'Motion specification')));
+ const exportStatus=el('div',{class:'why'});
+ const exportButton=el('button',{class:'start',id:'motion-export',title:'Export this action as a transparent video track',onclick:async()=>{
+  exportButton.disabled=true;exportStatus.textContent='Rendering transparent track…';
+  try{const result=await motionCommand('motion.export_track',{character:motion.character,track:motion.track,amount:motion.amount,duration:motion.sample.duration/motion.speed});
+   const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
+  }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
+ }},'Export track');
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus]));
 }
 async function animationSample(){
  if(!motion.meta?.tracks?.length)return;

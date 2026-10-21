@@ -30,6 +30,7 @@ await page.addScriptTag({ content: `
     for (const c of children.flat()) if (c != null) node.append(c);
     return node;
   }
+  const motion = {character:null,track:null,time:0};
   const state = { project: "/tmp/proj/Test.acproj", view: "project" };
   const toast = () => {};
   const convertFileSrc = (p) => p;

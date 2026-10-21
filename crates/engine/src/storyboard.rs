@@ -885,6 +885,7 @@ pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
         if let Ok(mut board)=serde_json::from_str::<Value>(&text) {
+            if board["design"]["placements"].is_array(){let base=crate::storyboard_design::base(&board);board["previews"]=base["previews"].clone();}
             board["layout"]=json!({"page_size":board["page_size"],"links":board["links"]});
             board["exists"]=json!(true);board["ok"]=json!(true);
             return Ok(board);
@@ -964,9 +965,20 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
                 "cue": l.get("cue"), "panel": panel, "prompt": panel.and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())})
         })
         .collect();
-    Ok(json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
+    let mut result=json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
         "status": scene["status"], "notes": scene["notes"], "reference": scene["reference"], "teaching_reference": scene["teaching_reference"],
-        "sections": scene["sections"], "lines": lines, "source": scene_doc_path(&dir, n), "page": first_scene_page(&dir) + n - 1}))
+        "sections": scene["sections"], "lines": lines, "source": scene_doc_path(&dir, n), "page": first_scene_page(&dir) + n - 1});
+    if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
+        if let Ok(board)=serde_json::from_str::<Value>(&text) {
+            let page=board["first_scene_page"].as_u64().unwrap_or(1)+n as u64-1;
+            result["page"]=json!(page); result["deck"]=board["deck"].clone();
+            result["preview"]=board["previews"][page as usize-1].clone();result["page_size"]=board["page_size"].clone();
+            result["saved_placements"]=json!(board["design"]["placements"].as_array().map(|xs|xs.iter().filter(|p|p["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());
+            let design=crate::storyboard_design::inspect(s,&json!({}))?;
+            result["draft_placements"]=json!(design["placements"].as_array().map(|xs|xs.iter().filter(|p|p["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());
+        }
+    }
+    Ok(result)
 }
 
 pub fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {

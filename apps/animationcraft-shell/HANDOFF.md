@@ -1,5 +1,7 @@
 # AnimationCraft shell — handoff (2026-10-21)
 
+**Latest takeover:** user handed ownership back to Claude (`wD:pV`). Read [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md) for the current checkpoint, clipped mouse hands, scene14 and shared-work split. This supersedes the older Codex ownership paragraph below.
+
 The Tauri shell in `apps/animationcraft-shell` **is AnimationCraft now**. The egui app
 (`crates/ui-egui`, `apps/animationcraft`) is "the older UI": a reference only, tagged
 `older-egui-ui`. Don't maintain or extend it. Port every feature into the shell in the shell's design.
