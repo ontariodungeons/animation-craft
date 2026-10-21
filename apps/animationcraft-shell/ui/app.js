@@ -11,7 +11,7 @@ const ICONS = {
   chev: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
 };
 
-let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project" };
+let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
 
 function toast(text) {
   const t = $("toast");
@@ -96,6 +96,13 @@ function renderBlocks() {
   const box = $("blocks");
   box.replaceChildren();
   if (!s) return;
+  // Collapse/expand toggle for the blocks rail
+  box.append(el("button", {
+    class: `icon rail-toggle${state.blocksCollapsed ? "" : " open"}`,
+    title: state.blocksCollapsed ? "Expand blocks rail" : "Collapse blocks rail",
+    "aria-label": state.blocksCollapsed ? "Expand blocks rail" : "Collapse blocks rail",
+    onclick: () => { state.blocksCollapsed = !state.blocksCollapsed; box.classList.toggle("collapsed", state.blocksCollapsed); renderBlocks(); }
+  }, el("span", { html: state.blocksCollapsed ? '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 9l6 6 6-6"/><path d="M18 3H6c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM6 13l6-6-6-6zM12 15l-6 6 6 6z"/></svg>' : '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 9l6 6 6-6"/><path d="M18 3H6c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM6 13l6-6-6-6zM12 15l-6 6 6 6z"/></svg>' })));
   const stage = (id) => s.stages.find((x) => x.id === id) || { inputs: [], outputs: [] };
   const song = stage("song"), transcript = stage("transcript"), animate = stage("animate");
   const audio = song.inputs?.[0];
