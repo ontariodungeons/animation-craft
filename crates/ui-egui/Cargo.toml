@@ -13,7 +13,7 @@ workspace = true
 animationcraft-engine = { workspace = true }
 craft-ui = { workspace = true }
 egui = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "inspection", "wayland", "x11"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
