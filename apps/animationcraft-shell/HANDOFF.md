@@ -140,3 +140,23 @@ Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell show
 - ◻ `animationcraft-cli` help, MCP instructions, `ui_look`/`app_quit` errors and AGENTS.md/README/skills:
   point to `animationcraft-shell --control <port>` and remove references to the older app
 - ◻ After the user confirms: delete `crates/ui-egui` and `apps/animationcraft`, plus their workspace entries and references
+
+## The agent inside, and cua-style integration (core product, not a side panel)
+
+The user wants to spend their time designing with an agent: timing, matching song and visuals, polish.
+The agent drawer is where that happens. Every feature must work for the agent too, and whatever the agent
+does must be visible to the user.
+
+- **Cua-style, from the inside.** Cua Driver (github.com/trycua/cua) gives agents background computer use
+  over MCP without taking the user's mouse. The shell owns its UI, so `--control` already does this natively:
+  `ui.look` (picture, state, ids), `ui.click`/`ui.set`/`ui.key`/`ui.elements`, plus every engine command on the
+  live session. Screen-scraping and global input on Wayland are the fallback we don't need.
+- **Next improvements, in order:** (1) the inner opencode session gets the shell's MCP permanently
+  (`animationcraft-cli --bridge <port> mcp`; propose the `opencode.json` change to the user); (2) the agent's
+  actions are visible (agent cursor/highlight, action trail, undo); (3) pointing works both ways, with drawing and
+  comments on the stage or storyboard sent as notes, like HyperFrames Studio desktop, and the agent can point back;
+  (4) shared context goes with every message (view, selection, time on the timeline), so "make this blink
+  later" resolves; (5) permissions and questions stay as inline cards, long jobs show progress with a status light;
+  (6) markdown in replies is rendered with a vendored library.
+- **Verify with a real task:** ask the inner agent to do something (e.g. hide the bee's blink lids) and watch it
+  through `ui.look`.
