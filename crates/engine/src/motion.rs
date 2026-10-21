@@ -483,19 +483,106 @@ fn validate(rig: &LoadedCutoutRigPlan) -> Result<()> {
     Ok(())
 }
 
+/// Standard actions are scripts in the existing exporter vocabulary, not another evaluator.
+/// Root motion follows the stage's idle/walk/run bounce and jump anticipation/lift/settle pattern.
+fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
+    let b = rig.character_bbox;
+    let width = (b[2] - b[0]).max(1) as f64;
+    let height = (b[3] - b[1]).max(1) as f64;
+    let first = rig.effectcraft["tracks"]
+        .as_array()
+        .and_then(|ts| ts.first())
+        .cloned()
+        .unwrap_or(json!({"motion":{}}));
+    let rest = evaluate_layered_motion_spec(rig, &first, 0.0, true, 1.0);
+    let definitions = [
+        ("idle", "Idle", 4.0, true),
+        ("move", "Move", 4.0, false),
+        ("jump", "Jump", 2.0, false),
+        ("walk", "Walk", 4.0, true),
+        ("run", "Run", 2.0, true),
+        ("wave", "Wave", 3.0, true),
+        ("talk", "Talk", 3.0, true),
+    ];
+    definitions.into_iter().map(|(id,label,duration,repeat)|{
+        let mut motion=json!({});
+        for part in &rig.parts {
+            // Preserve the actual rest visibility, never infer anatomy from a name.
+            motion[&part.id]=json!({"opacity":[{"kind":"keys","keys":[[0.0,100.0*(rest.opacity.get(&part.id).copied().unwrap_or(1.0)-1.0)]]}]});
+            if part.parent.is_some() {continue;}
+            let bounce=|amplitude:f64,hz:f64|json!([{"kind":"oscillate","amplitude":amplitude,"hz":hz,"axis":1}]);
+            match id {
+                "idle"=>motion[&part.id]["position"]=bounce(height*0.012,0.25),
+                "move"=>motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration,[width*1.2,0]]]}]),
+                "jump"=>{
+                    motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration*0.18,[0,height*0.035]],[duration*0.5,[0,-height*0.45]],[duration*0.82,[0,0]],[duration*0.9,[0,height*0.02]],[duration,[0,0]]]}]);
+                    motion[&part.id]["scale"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration*0.18,[4,-5]],[duration*0.5,[-2,3]],[duration*0.82,[3,-4]],[duration,[0,0]]]}]);
+                },
+                "walk"=>motion[&part.id]["position"]=bounce(height*0.028,1.0),
+                "run"=>motion[&part.id]["position"]=bounce(height*0.045,2.0),
+                "wave"=>motion[&part.id]["rotation"]=json!([{"kind":"oscillate","amplitude":5,"hz":1.0}]),
+                "talk"=>motion[&part.id]["position"]=bounce(height*0.008,2.0),
+                _=>{},
+            }
+        }
+        json!({"id":format!("@{id}"),"label":label,"duration":duration,"loop":repeat,"standard":true,"motion":motion})
+    }).collect()
+}
+
+fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
+    let mut rig = if let Some(rig) = &asset.cutout_rig {
+        rig.clone()
+    } else {
+        let size = image::image_dimensions(&asset.path)?;
+        let rgba = image::open(&asset.path)?.into_rgba8();
+        let bounds =
+            crate::session::compute_alpha_bounds(&rgba, 16).unwrap_or([0, 0, size.0, size.1]);
+        LoadedCutoutRigPlan {
+            character_id: asset.id.clone(),
+            rig_type: "layered_motion".into(),
+            source_image: asset.path.clone(),
+            canvas_size: [size.0, size.1],
+            character_bbox: bounds,
+            parts: vec![crate::session::CutoutRigPart {
+                id: "artwork".into(),
+                label: asset.id.clone(),
+                pivot: [
+                    (bounds[0] + bounds[2]) as f32 / 2.0,
+                    (bounds[1] + bounds[3]) as f32 / 2.0,
+                ],
+                crop_box: [0, 0, size.0, size.1],
+                crop_size: [size.0, size.1],
+                cropped_path: asset.path.clone(),
+                full_layer_path: asset.path.clone(),
+                ..Default::default()
+            }],
+            effectcraft: json!({"fps":30,"tracks":[]}),
+            ..Default::default()
+        }
+    };
+    if rig.effectcraft["tracks"].is_null() {
+        rig.effectcraft["tracks"] = json!([]);
+    }
+    rig.rig_type = "layered_motion".into();
+    // The standard scripts are runtime choices; source tracks are unchanged.
+    let standards = standard_tracks(&rig);
+    rig.effectcraft["tracks"]
+        .as_array_mut()
+        .ok_or_else(|| invalid("Invalid track list"))?
+        .extend(standards);
+    Ok(rig)
+}
+
 pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let id = load_character(s, params)?;
     let asset = s
         .assets
         .get(&id)
         .ok_or_else(|| invalid("Asset not loaded"))?;
-    let Some(rig) = asset.cutout_rig.as_ref() else {
-        return Ok(
-            json!({"ok":true,"character":id,"image":asset.path,"layers":[],"tracks":[],"needs_rig":true}),
-        );
-    };
+    let rig = preview_rig(asset)?;
+    let rig = &rig;
     validate(rig)?;
-    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false),"path":t["path"]})).collect();
+    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false),"path":t["path"],"standard":t["standard"].as_bool().unwrap_or(false),"label":t["label"]})).collect();
     let layers: Vec<_> = rig.parts.iter().map(|p| json!({"id":p.id,"label":p.label,"file":p.cropped_path,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,
         "state":asset.parts.iter().find(|x| x.name == p.id)})).collect();
     Ok(
@@ -551,10 +638,8 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         .assets
         .get(&id)
         .ok_or_else(|| invalid("Asset not loaded"))?;
-    let rig = asset
-        .cutout_rig
-        .as_ref()
-        .ok_or_else(|| invalid("Prepare a motion rig first"))?;
+    let owned_rig = preview_rig(asset)?;
+    let rig = &owned_rig;
     validate(rig)?;
     let tracks = rig.effectcraft["tracks"]
         .as_array()
@@ -666,8 +751,7 @@ pub fn cmd_motion_path(s: &mut Session, params: &Value) -> Result<Value> {
     }
     .ok_or_else(|| invalid("Choose one root layer for the path"))?;
     let before_text = std::fs::read_to_string(&rig.plan_path)?;
-    let before: Value = serde_json::from_str(&before_text)
-        .map_err(|e| invalid(e.to_string()))?;
+    let before: Value = serde_json::from_str(&before_text).map_err(|e| invalid(e.to_string()))?;
     // A file changed outside the engine must be reloaded before editing it.
     if before != rig.effectcraft {
         return Err(invalid(
@@ -735,8 +819,10 @@ pub fn cmd_motion_path(s: &mut Session, params: &Value) -> Result<Value> {
     let undo = history_dir.join(format!("path-{stamp}.json"));
     std::fs::write(
         &undo,
-        serde_json::to_vec_pretty(&json!({"spec":rig.plan_path,"before":before,"before_text":before_text,"after":after}))
-            .map_err(|e| invalid(e.to_string()))?,
+        serde_json::to_vec_pretty(
+            &json!({"spec":rig.plan_path,"before":before,"before_text":before_text,"after":after}),
+        )
+        .map_err(|e| invalid(e.to_string()))?,
     )?;
     std::fs::write(
         &rig.plan_path,
@@ -777,7 +863,9 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
     }
     std::fs::write(
         &spec,
-        record["before_text"].as_str().ok_or_else(|| invalid("Undo record has no original source text"))?,
+        record["before_text"]
+            .as_str()
+            .ok_or_else(|| invalid("Undo record has no original source text"))?,
     )?;
     crate::project::cmd_project_load_asset(s, &json!({"id":id,"reload":true}))?;
     Ok(json!({"ok":true,"character":id}))

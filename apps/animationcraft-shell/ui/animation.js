@@ -1,5 +1,10 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+function animationReset(){
+ animationPause();
+ Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
+ $('view-animation').replaceChildren();
+}
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
 const MOTION_ICONS = {
  pen:'<path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/>', grid:'<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>',
@@ -66,8 +71,9 @@ function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{motion.character=e.target.value;await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
- const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{motion.track=e.target.value;motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;animationControls();}await animationSample();}},el('option',{value:''},'Rest pose'),(meta.tracks||[]).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest?'':motion.track;
- box.append(motionSection('Action',tracks,true));
+ const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;motion.track=e.target.value;motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;animationControls();}await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
+ const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{motion.track=t.id;motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
+ box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
  box.append(pathControls());
  box.append(motionSection('Motion & timing',[
  motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>motion.speed=v),
@@ -80,7 +86,7 @@ function animationControls(){
  }
  const section=motionSection('Layers',layers,true);section.id='motion-layers';box.append(section);
  const controls=meta.controls?.joints||[];
- box.append(motionSection('Expression & pose',el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'This rig uses authored motion tracks. Expression controls require explicit rig bindings.')));
+ box.append(motionSection('Expression & pose',el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`)));
  box.append(motionSection('Export & integrations',el('button',{class:'ghost',id:'motion-export',title:'Open the layered motion specification','aria-label':'Open motion specification',onclick:()=>openPath(meta.spec)},'Motion specification')));
 }
@@ -112,7 +118,7 @@ function animationDraw(){
  const frame=sample.frames[Math.min(sample.frames.length-1,Math.floor(motion.time*sample.fps))];
  frame.layers.forEach((l,i)=>{if(!l.opacity)return;ctx.save();ctx.transform(...l.matrix);ctx.globalAlpha=l.opacity;const crop=meta.layers[i].crop;ctx.drawImage(motion.images[i],crop[0],crop[1]);ctx.restore();});
  drawMotionPath(ctx,scale);
- $('motion-caption').textContent=`${motion.character} · ${motion.rest?'Rest pose':motion.track.replaceAll('-',' ')}`;
+ $('motion-caption').textContent=`${motion.character} · ${motion.rest?'Rest pose':(meta.tracks.find(t=>t.id===motion.track)?.label||motion.track.replaceAll('-',' '))}`;
  $('motion-time').textContent=`${Math.floor(motion.time/60)}:${(motion.time%60).toFixed(3).padStart(6,'0')}`;$('motion-scrub').value=motion.time;
 }
 

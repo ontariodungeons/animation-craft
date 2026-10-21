@@ -673,7 +673,7 @@ fn render_layer_contact_sheet(
     sheet.save(dest).is_ok()
 }
 
-fn compute_alpha_bounds(rgba: &image::RgbaImage, threshold: u8) -> Option<[u32; 4]> {
+pub(crate) fn compute_alpha_bounds(rgba: &image::RgbaImage, threshold: u8) -> Option<[u32; 4]> {
     let w = rgba.width();
     let h = rgba.height();
     let mut min_x = w;

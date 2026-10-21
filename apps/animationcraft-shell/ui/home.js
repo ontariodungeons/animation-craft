@@ -6,6 +6,7 @@ const FILM = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" 
 const CROSS = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 async function showHome() {
+  animationReset();
   if (agent.open) agentToggle(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
   state.project = null;

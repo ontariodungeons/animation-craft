@@ -130,7 +130,30 @@ function renderStoryboard() {
   const pages = sb?.previews || [];
   const chips = $("sb-chips");
   chips.replaceChildren();
-  if (!pages.length) { $("sb-page").textContent = "no storyboard yet"; return; }
+  const img = $("sb-img");
+  $("sb-empty")?.remove();
+  img.hidden = !pages.length;
+  for (const id of ["sb-prev", "sb-next", "sb-pdf"]) $(id).disabled = !pages.length;
+  if (!pages.length) {
+    img.onload = img.onerror = null;
+    img.removeAttribute("src");
+    img.classList.remove("loading");
+    $("sb-page").textContent = "no storyboard yet";
+    $("sb-wrap").append(el("div", {id:"sb-empty", class:"sb-empty"},
+      el("strong", {}, `Start ${$("project-name").textContent}`),
+      el("p", {}, "Add a transcript to plan the song’s scenes."),
+      el("button", {id:"sb-import-transcript", class:"start", onclick:async () => {
+        const path = await dialog.open({title:"Import transcript", filters:[{name:"Transcript", extensions:["json"]}]});
+        if (!path) return;
+        try {
+          await motionCommand("workshop.import_transcript", {path});
+          state.data = await invoke("project_state", {path:state.project});
+          renderBlocks(); renderStoryboard();
+        } catch (e) { toast(String(e)); }
+      }}, "Add transcript")));
+    return;
+  }
+  state.page = Math.max(0, Math.min(state.page, pages.length - 1));
   const first = (sb.first_scene_page || 2) - 1;
   const nav = [["Lyrics", 0], ["Cast & sets", 1],
     ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
@@ -141,7 +164,6 @@ function renderStoryboard() {
   }
   chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   $("sb-page").textContent = `${state.page + 1} / ${pages.length}`;
-  const img = $("sb-img");
   img.classList.add("loading");
   img.onload = () => img.classList.remove("loading");
   img.onerror = () => toast(`Could not load ${img.src}`);
@@ -239,9 +261,10 @@ async function load() {
 async function openProject(path, start = {}) {
   try { state.data = await invoke("project_open", { path }); }
   catch (e) { toast(String(e)); return showHome(); }
+  if (state.project !== path) animationReset();
   state.project = path;
   state.page = 0;
-  if (start.open && start.open !== "agent") state.open = start.open;
+  state.open = start.open && start.open !== "agent" ? start.open : "song";
   document.body.classList.remove("at-home");
   $("project-name").textContent = path.split("/").pop().replace(/\.acproj$/, "");
   document.title = `${$("project-name").textContent} · AnimationCraft`;
