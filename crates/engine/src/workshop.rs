@@ -1159,12 +1159,25 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     let median = lum.get(lum.len() / 2).copied().unwrap_or(0.0);
     let (smear, smear_aspect) = smear_band(&img, median);
     let (measured_cuts, full_bleed) = straight_cuts(&img);
-    // A joint part (an arm, a wing) is meant to end flat where it joins; only a whole
-    // character or object cut in a straight line is missing artwork.
-    let part = params.get("part").and_then(Value::as_bool).unwrap_or(false);
-    let cuts = if part { [0; 4] } else { measured_cuts };
+    // A joint part (an arm, a wing) ends flat on the side where it joins; only the sides named
+    // in `joints` are excused. Any other straight cut (a clipped hand) is still missing artwork.
+    let sides = ["left", "right", "top", "bottom"];
+    let joints: Vec<&str> = match params.get("joints") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(list)) => list.iter().filter_map(Value::as_str).collect(),
+        Some(_) => return Err(EngineError::InvalidParams("joints is a list of sides: left, right, top, bottom".into())),
+    };
+    if let Some(bad) = joints.iter().find(|j| !sides.contains(j)) {
+        return Err(EngineError::InvalidParams(format!("unknown joint side '{bad}' (left, right, top, bottom)")));
+    }
+    let mut cuts = measured_cuts;
+    for (i, side) in sides.iter().enumerate() {
+        if joints.contains(side) {
+            cuts[i] = 0;
+        }
+    }
     let mut reasons = Vec::new();
-    for (side, run) in ["left", "right", "top", "bottom"].iter().zip(cuts) {
+    for (side, run) in sides.iter().zip(cuts) {
         if run > 0 {
             reasons.push(format!(
                 "artwork cut off in a straight line along the {side} edge ({run} px): it was cropped through, not drawn to end there"
@@ -1218,9 +1231,10 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
 /// keeps running along the line, so a run counts as a cut only when, within 7 px past its ends,
 /// the outline recedes at least 3 px at one end and 2 px at the other (measured on cropped
 /// cast layers and complete parts). Runs are looked for on the four lines just inside the bounds,
-/// because a soft fringe can sit beyond a cut. A run over 90% of a side is the edge of a
-/// full-bleed layer (a page, a background), not a cut; such a layer also continues past the
-/// frame on its other sides that touch the canvas, so those are not cuts either.
+/// because a soft fringe can sit beyond a cut. A side lying on the canvas edge and solid for 90%
+/// of the frame is the edge of a full-bleed layer (a page, a background), not a cut; such a layer
+/// also continues past the frame on its other sides that touch the canvas, so those are not cuts
+/// either. A long edge inside the canvas is never full-bleed evidence.
 fn straight_cuts(img: &image::RgbaImage) -> ([u32; 4], bool) {
     let (w, h) = (i64::from(img.width()), i64::from(img.height()));
     let solid = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h && img.get_pixel(x as u32, y as u32)[3] > 128;
@@ -1243,6 +1257,8 @@ fn straight_cuts(img: &image::RgbaImage) -> ([u32; 4], bool) {
         (((y1 - 3).max(y0)..=y1).rev().collect(), 1, (x0, x1), false),
     ];
     let at = |vertical: bool, across: i64, along: i64| if vertical { (across, along) } else { (along, across) };
+    // A full-bleed side has to be the frame itself: on the canvas edge, solid for 90% of it.
+    let on_canvas_edge = [x0 == 0, x1 == w - 1, y0 == 0, y1 == h - 1];
     let mut runs = [0u32; 4];
     let mut bleed = [false; 4];
     for (i, (lines, out, (a0, a1), vertical)) in sides.iter().enumerate() {
@@ -1264,7 +1280,8 @@ fn straight_cuts(img: &image::RgbaImage) -> ([u32; 4], bool) {
                     (true, None) => start = Some(along),
                     (false, Some(s)) => {
                         let run = (along - s) as u32;
-                        if f64::from(run) >= length * 0.9 {
+                        let frame = if *vertical { h } else { w } as f64;
+                        if on_canvas_edge[i] && line == lines[0] && f64::from(run) >= frame * 0.9 {
                             bleed[i] = true;
                         } else {
                             // Furthest the outline pulls away within 7 px past an end (None: gone).
@@ -1284,7 +1301,6 @@ fn straight_cuts(img: &image::RgbaImage) -> ([u32; 4], bool) {
             }
         }
     }
-    let on_canvas_edge = [x0 == 0, x1 == w - 1, y0 == 0, y1 == h - 1];
     let full_bleed = bleed.iter().any(|&b| b);
     if full_bleed {
         for i in 0..4 {
@@ -1780,6 +1796,69 @@ mod tests {
             image::Rgba([90, 160, 80, if y as f64 >= top { 255 } else { 0 }])
         });
         assert_eq!(super::straight_cuts(&band), ([0, 0, 0, 0], true));
+    }
+
+    #[test]
+    fn a_long_flat_edge_inside_the_canvas_is_not_full_bleed() {
+        // Codex's review case: a D-shaped body with a flat right edge at x80 (not the canvas
+        // edge, x99), curved left edge, and a protrusion cut off at the canvas's left edge.
+        let d = image::RgbaImage::from_fn(100, 120, |x, y| {
+            let (x, y) = (x as f64, y as f64);
+            let body = (20.0..=100.0).contains(&y) && x <= 80.0 && {
+                let k = (y - 60.0) / 40.0;
+                x >= 80.0 - 50.0 * (1.0 - k * k).max(0.0).sqrt()
+            };
+            let arm = (40.0..=70.0).contains(&y) && x <= 40.0;
+            image::Rgba([200, 180, 160, if body || arm { 255 } else { 0 }])
+        });
+        let (cuts, bleed) = super::straight_cuts(&d);
+        assert!(!bleed, "flat edge inside the canvas taken for a frame edge");
+        assert!(cuts[0] > 16, "left cut lost: {cuts:?}");
+    }
+
+    /// An arm part drawn as a soft stroke (discs along a bent path, like a limb), cut flat at the
+    /// shoulder (top) where it joins; the hand is a round paw, or sliced flat on the right.
+    fn arm(clipped_hand: bool) -> std::path::PathBuf {
+        let path: Vec<(f64, f64)> = (0..=40)
+            .map(|i| {
+                let t = f64::from(i) / 40.0;
+                (70.0 + 130.0 * t * t, 10.0 + 110.0 * t)
+            })
+            .collect();
+        let img = image::RgbaImage::from_fn(240, 170, |x, y| {
+            let (x, y) = (f64::from(x), f64::from(y));
+            let limb = path.iter().any(|(px, py)| (x - px).powi(2) + (y - py).powi(2) <= 22.0 * 22.0);
+            let paw = (x - 200.0).powi(2) + (y - 125.0).powi(2) <= 30.0 * 30.0;
+            let inside = (limb || paw) && y >= 12.0 && !(clipped_hand && x > 196.0);
+            image::Rgba([150, 160, 210, if inside { 255 } else { 0 }])
+        });
+        let file = std::env::temp_dir().join(format!(
+            "animationcraft_arm_{clipped_hand}_{}_{:?}.png",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        img.save(&file).unwrap();
+        file
+    }
+
+    fn assess(path: &std::path::Path, joints: serde_json::Value) -> serde_json::Value {
+        let mut s = crate::Session::default();
+        super::cmd_assets_assess(&mut s, &serde_json::json!({"path": path, "joints": joints})).unwrap()
+    }
+
+    #[test]
+    fn a_named_joint_excuses_only_its_own_side() {
+        let whole = arm(false);
+        let r = assess(&whole, serde_json::json!(["top"]));
+        assert_eq!(r["suggestion"], "ok", "{r}");
+        // Codex's review case: the shoulder joint is allowed, the clipped hand still blocks.
+        let clipped = arm(true);
+        let r = assess(&clipped, serde_json::json!(["top"]));
+        assert_eq!(r["suggestion"], "recreate", "{r}");
+        assert!(r["reasons"].to_string().contains("right edge"), "{r}");
+        for p in [whole, clipped] {
+            let _ = std::fs::remove_file(p);
+        }
     }
 
     #[test]
