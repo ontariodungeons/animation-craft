@@ -352,6 +352,13 @@ impl AnimationCraftApp {
         };
         let px = |v: f32, max: u32| ((v * ppp).round().max(0.0) as u32).min(max);
         let (x0, y0) = (px(rect[0], w), px(rect[1], h));
+        if x0 >= w || y0 >= h {
+            let _ = reply_tx.send(Err(format!(
+                "`{region}` is outside the visible window: the window shows {:.0}x{:.0} points and the region starts at ({:.0}, {:.0}); enlarge the window or scroll the region into view",
+                w as f32 / ppp, h as f32 / ppp, rect[0], rect[1]
+            )));
+            return;
+        }
         let (cw, ch) = (px(rect[2], w - x0).max(1), px(rect[3], h - y0).max(1));
         let Some(full) = image::RgbaImage::from_raw(w, h, raw.to_vec()) else {
             let _ = reply_tx.send(Err("screenshot buffer has the wrong size".into()));
@@ -372,7 +379,7 @@ impl AnimationCraftApp {
             json!({"saved": out, "width": shot.width(), "height": shot.height(), "region": region,
                 "state": {"project": self.session.project_path, "active_asset": self.session.active_asset,
                     "stage": self.ui_state.active_stage, "studio_tab": format!("{:?}", self.ui_state.center_tab),
-                    "storyboard_page": self.ui_state.storyboard_page + 1, "status": self.ui_state.status_line},
+                    "storyboard_pdf_page_shown": self.ui_state.storyboard_page + 1, "status": self.ui_state.status_line},
                 "elements": ids})
         }));
     }
