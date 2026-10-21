@@ -89,3 +89,9 @@ check rest pose, swaps, attachment at pivots, scrub/play agreement, song timing 
 For agent features, perform a real task through the inner agent and inspect its outcome and undo.
 Upgrade only touched dependencies to stable versions; Tauri remains 2.x. Record version changes.
 Commit explicit task-owned paths at pauses, honoring hooks. Report commit, evidence and limitations.
+
+For PDF validation, inspect fields through PdfCraft's document/form tools, not by searching raw PDF
+bytes (object streams may be compressed). A `pdfcraft-cli run` process owns its open documents:
+keep open → inspect/edit → save in one `--script` invocation, then reopen the saved copy to verify.
+Never put test text in the user's storyboard. Import approved transcript word arrays with the existing
+authored SRT via `workshop.import_transcript path=… captions=…`; preserve both wording and timings.

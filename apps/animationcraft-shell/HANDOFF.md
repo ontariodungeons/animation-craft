@@ -245,3 +245,9 @@ techniques. The in-app agent validates operations and CLI configuration; coordin
   Only skill found for AnimatedDrawings, executable/service installation not established.
   HyperFrames `remove-background --info` found cached u2net_human_seg, CPU only; this is background
   removal, not semantic part separation. Three.js SkinnedMesh supplies deformation/playback, not image segmentation.
+
+`0ddb311` verifies the docked Studio/native screenshot fix and approved-transcript import adapter.
+Nelly storyboard subsequently built: 37 pages / 320 editable fields. Inner validator performed
+edit/save/reopen on `.agent/storyboard-fieldcheck*.pdf`, confirmed text values persisted and the
+real storyboard stayed byte-identical. Its renderer/image check was still finishing at this checkpoint.
+Source CLI preparation audit remains work to do; no new Nelly segmentation or articulated rig shipped.
