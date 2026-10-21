@@ -332,3 +332,5 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
 .sb-empty strong { font-size: 18px; }
 .sb-empty p { color: var(--muted); margin: 8px 0 20px; }
 .sb-page-wrap img[hidden] { display: none; }
+
+body.agent-docked main { margin-right: min(400px, 92vw); }

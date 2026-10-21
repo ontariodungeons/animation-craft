@@ -194,6 +194,7 @@ async function showStudio() {
 }
 
 async function setView(view) {
+  if (view === "split") view = "studio";
   if (typeof animationPause === "function") animationPause();
   state.view = view;
   document.querySelectorAll(".tab").forEach((t) => {

@@ -383,7 +383,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("workshop.split_panels", "Split Storyboard Grid (PhotoCraft)", ["Workshop"], None,
             "{\"image\": \"storyboard grid\", \"columns\": 3, \"rows\": 2, \"inset\": 8, \"prompts\": \"optional prompt.md with a numbered panel list\"}", always, cmd_workshop_split_panels),
         cmd!("workshop.import_transcript", "Import Transcript", ["Workshop"], None,
-            "{\"path\": \"transcript.json\", \"filmcraft_project\": \"optional .fcproj\"}", always, cmd_workshop_import_transcript),
+            "{\"path\": \"transcript.json\", \"captions\": \"optional authored .srt (required for a word array)\", \"filmcraft_project\": \"optional .fcproj\"}", always, cmd_workshop_import_transcript),
         cmd!("workshop.build_storyboard", "Build Storyboard PDF", ["Workshop"], None,
             "{}", always, cmd_workshop_build_storyboard),
         cmd!("workshop.approve_draft", "Approve Storyboard", ["Workshop"], None,

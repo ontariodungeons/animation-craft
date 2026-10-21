@@ -835,6 +835,27 @@ pub fn cmd_workshop_split_panels(s: &mut Session, params: &Value) -> Result<Valu
     Ok(status)
 }
 
+/// Preserve externally authored cue boundaries; never invent word timing from subtitle lines.
+fn import_caption_paragraphs(text: &str) -> Result<Vec<Value>> {
+    let time = |raw: &str| -> Option<f64> {
+        let value = raw.trim().replace(',', ".");
+        let p = value.split(':').map(str::parse::<f64>).collect::<std::result::Result<Vec<_>, _>>().ok()?;
+        if p.len()!=3 || p.iter().any(|n|!n.is_finite() || *n<0.0) || p[1]>=60.0 || p[2]>=60.0 { return None; }
+        Some(p[0]*3600.0+p[1]*60.0+p[2])
+    };
+    let mut cues=Vec::new(); let mut previous=0.0;
+    for block in text.trim_start_matches('\u{feff}').replace("\r\n","\n").split("\n\n").filter(|b|!b.trim().is_empty()) {
+        let lines=block.lines().collect::<Vec<_>>();
+        let cue=lines.iter().position(|l|l.contains("-->"));
+        let parsed=cue.and_then(|i| { let (a,b)=lines[i].split_once("-->")?; Some((time(a)?,time(b)?,lines[i+1..].join(" "))) });
+        let Some((start,end,text))=parsed else {return Err(EngineError::InvalidParams("invalid SRT cue timing".into()));};
+        if start<previous || end<start || text.trim().is_empty() {return Err(EngineError::InvalidParams("SRT cues must be ordered, timed and nonempty".into()));}
+        previous=start; cues.push(json!({"text":text,"start":start,"end":end}));
+    }
+    if cues.is_empty() {return Err(EngineError::InvalidParams("caption file is empty".into()));}
+    Ok(cues)
+}
+
 /// Supplies a transcript made earlier instead of transcribing again.
 pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
@@ -843,8 +864,15 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
         .and_then(Value::as_str)
         .map(|p| resolve_workspace_path(s, p))
         .ok_or_else(|| EngineError::InvalidParams("missing transcript 'path'".into()))?;
-    let doc: Value = serde_json::from_str(&std::fs::read_to_string(&source)?)
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&source)?)
         .map_err(|e| EngineError::InvalidParams(format!("not a JSON transcript: {e}")))?;
+    let captions = params["captions"].as_str().map(|p| resolve_workspace_path(s,p));
+    let caption_text = captions.as_ref().map(std::fs::read_to_string).transpose()?;
+    if doc.is_array() { doc=json!({"words":doc}); }
+    if let Some(text)=&caption_text {
+        doc["paragraphs"]=json!(import_caption_paragraphs(text)?);
+    }
+
     let mut problems = transcript_problems(&doc);
     if let (Some(recorded), Some(song)) = (doc.get("audio").and_then(Value::as_str), &s.song_audio)
         && Path::new(recorded) != song.as_path()
@@ -900,8 +928,16 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
         }
     }
     let dest = dir.join(format!("{stem}.transcript.json"));
-    std::fs::copy(&source, &dest)?;
+    let serialized=serde_json::to_vec_pretty(&doc).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+    std::fs::write(&dest, serialized)?;
     let mut copied = vec![dest];
+    if let Some(text)=caption_text {
+        let folder=dir.join(&s.video_target);
+        std::fs::create_dir_all(&folder)?;
+        let path=folder.join("transcript.srt");
+        std::fs::write(&path,text)?;
+        copied.push(path);
+    }
     if let Some(fcproj) = params
         .get("filmcraft_project")
         .and_then(Value::as_str)
@@ -1579,6 +1615,13 @@ pub fn cmd_audio_transcribe(s: &mut Session, params: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::smear_band;
+    #[test]
+    fn imported_captions_preserve_words_and_timing() {
+        let cues=super::import_caption_paragraphs("1\r\n00:00:02,240 --> 00:00:04,160\r\nNelly go cross the ocean,\r\n").unwrap();
+        assert_eq!(cues[0], serde_json::json!({"text":"Nelly go cross the ocean,","start":2.24,"end":4.16}));
+        assert!(super::import_caption_paragraphs("1\n00:00:05,000 --> 00:00:02,000\nwrong").is_err());
+        assert!(super::import_caption_paragraphs("1\n00:00:NaN --> 00:00:02,000\nwrong").is_err());
+    }
 
     /// Light part with either a flat dark strip across the top (a painted overlap smear) or
     /// textured dark stripes (material colour).

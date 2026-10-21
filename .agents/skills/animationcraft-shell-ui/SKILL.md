@@ -177,3 +177,11 @@ Use a faint border tint, a colored small icon/title, a quiet value badge with un
 slider handle. Avoid large colored panels. Sliders replace spinners and keep keyboard/touch control.
 This user-approved category coding supersedes the earlier restriction to one heading color.
 Craft processing runs headlessly by default; show previews/results inside this app.
+
+## Native Studio and project transitions
+
+User removed the Split tab: top-level views are Project, Animation, Studio. Studio fills the content
+area below the 48px bar; the open agent reserves its own right column. On Linux use the shared GTK
+allocation, not vertically packed webviews. `ui.look` must include Studio's native webview as well as
+the shell, otherwise an agent sees a blank canvas while the user sees Studio. Verify with the drawer
+open and closed. Clear storyboard image sources and animation selection when switching projects.

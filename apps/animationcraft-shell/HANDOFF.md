@@ -219,3 +219,29 @@ Inner validator checked endpoints, scale/exporter parity and byte-exact undo on 
 Visual evidence: Bumble Bee `.agent/looks/look-1792566893867.png`. Reference app 19898 closed after comparison. Remaining controls are not implied complete by section headings. Keep the user's
 drawn path, slider values and composer draft across any restart. User now prioritizes 2D; defer 3D
 techniques. The in-app agent validates operations and CLI configuration; coordinator owns UI changes.
+
+## Nelly import and native layout checkpoint (2026-10-21)
+
+- Nelly live project: `/run/media/jesse/Speedy/media/merriweather/nelly/Nelly.acproj`.
+  Imported the existing full HyperFrames composition with dereferenced local media from
+  `merriweather-videos/projects/kathy-cd-track-01/hyperframes`; server is managed on 3058.
+  The registered front reference image is connected and visible in Animation (one image, not yet an articulated rig).
+- User removed Split as a top-level concept: Project / Animation / Studio. Linux Studio now uses a GTK
+  overlay allocation under the bar, beside the docked agent, instead of vertically stacked webviews.
+  `ui.look` composites both native webviews so agents see Studio too.
+- Inner validator found the raw transcript is not the approved wording and an alternative transcription
+  stops at 45.31s. Imported **artifacts/lyric-verification/lyrics.words.json** plus **assets/subtitles.srt**
+  (32 approved cues) through the repaired `workshop.import_transcript` command. Never guess lyrics.
+- Nelly's visible OpenCode session: `ses_ea2919b49ffe6gTnPUHWPTFyGS`; instructed to build the template
+  and verify an editable PDF roundtrip on a copy, stopping at tool failures. Previous validator session
+  `ses_ea35ffb58ffeW3tnC2Nm3bziln` told to stop Nelly writes.
+- Image-to-animation audit: existing `asset.build_cutout_rig` calls `guided_cutout_rig_builder.py`.
+  Current handler ignores params, writes outside song, runs rendering before returning. The script's
+  joint discovery is silhouette/proportion heuristic; pose library is fixed biped data. No new cuts run
+  on Nelly. User questioned previous defects; do not treat automated cuts as reviewed artwork.
+  Existing rig-to-spec converter is in the 2d-asset-to-animation skill's scripts (not yet integrated).
+- OpenMontage has `bg_remove` (rembg), SVG rig/pose/timeline/render/review tools, and the
+  `skills/creative/animated-drawing.md` route (Meta AnimatedDrawings, skeleton + mesh warp).
+  Only skill found for AnimatedDrawings, executable/service installation not established.
+  HyperFrames `remove-background --info` found cached u2net_human_seg, CPU only; this is background
+  removal, not semantic part separation. Three.js SkinnedMesh supplies deformation/playback, not image segmentation.

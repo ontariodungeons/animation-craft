@@ -207,3 +207,14 @@ canvas points, `duration` (0.1–600s), and `start_size`/`end_size` (1–1000%).
 using existing position/scale keys and retains other source motion. `motion.undo_path` takes the
 returned `undo` token and restores the exact source text if no newer edit would be overwritten.
 Grid and path guides are editor-only. The Pen toolbar and Path & depth sliders expose these commands.
+
+Import externally authored word timings with their existing subtitle boundaries (no lyric rewriting):
+
+```sh
+animationcraft-cli --bridge 19897 exec workshop.import_transcript path=/song/lyrics.words.json captions=/song/subtitles.srt
+animationcraft-cli --bridge 19897 exec workshop.build_storyboard
+```
+
+`path` accepts the existing `{words, paragraphs}` document or a word array when `captions` supplies
+its authored SRT paragraphs. Invalid cue times are rejected. The selected video target receives
+`transcript.srt`, which the storyboard template uses for scene timing.

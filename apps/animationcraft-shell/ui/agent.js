@@ -299,6 +299,8 @@ function pointStart() {
 function agentToggle(open = !agent.open) {
   if (!state.project) return toast("Open a project first");
   agent.open = open;
+  document.body.classList.toggle("agent-docked",open);
+  invoke("agent_dock",{width:open?$("agent").getBoundingClientRect().width:0}).catch(e=>status(String(e)));
   $("agent").classList.toggle("open", open);
   $("agent").setAttribute("aria-hidden", String(!open));
   $("agent-toggle").classList.toggle("on", open);
@@ -363,3 +365,5 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
   if (e.key === "Escape" && agent.open && !$("point-overlay").classList.contains("on")) agentToggle(false);
 });
+
+window.addEventListener("resize",()=>{ if(agent.open) invoke("agent_dock",{width:$("agent").getBoundingClientRect().width}).catch(()=>{}); });

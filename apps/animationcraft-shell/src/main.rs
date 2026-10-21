@@ -267,7 +267,28 @@ async fn snapshot(app: tauri::AppHandle, project: String, rect: [f64; 4]) -> Res
 
 /// WebKit's picture of the project view, cropped to `rect` (CSS px; None = all of it), as PNG.
 pub fn snapshot_to(app: &tauri::AppHandle, rect: Option<[f64; 4]>, out: &std::path::Path) -> Result<(), String> {
-    let view = app.get_webview("project").ok_or("no project view")?;
+    capture_view(app, "project", None, out)?;
+    let studio_visible = app.state::<View>().0.lock().map(|v|v.0=="studio" || v.0=="split").unwrap_or(false);
+    #[cfg(target_os="linux")]
+    if studio_visible && app.get_webview("studio").is_some() {
+        let studio_path=out.with_extension("studio.png");
+        capture_view(app,"studio",None,&studio_path)?;
+        let scale=app.get_window("main").and_then(|w|w.scale_factor().ok()).unwrap_or(1.0);
+        let mut base_file=std::fs::File::open(out).map_err(|e|e.to_string())?;
+        let base=cairo::ImageSurface::create_from_png(&mut base_file).map_err(|e|e.to_string())?;
+        let mut studio_file=std::fs::File::open(&studio_path).map_err(|e|e.to_string())?;
+        let studio=cairo::ImageSurface::create_from_png(&mut studio_file).map_err(|e|e.to_string())?;
+        let cr=cairo::Context::new(&base).map_err(|e|e.to_string())?;
+        cr.set_source_surface(&studio,0.0,BAR*scale).map_err(|e|e.to_string())?;
+        cr.paint().map_err(|e|e.to_string())?;
+        let crop=rect.unwrap_or([0.0,0.0,base.width() as f64/scale,base.height() as f64/scale]);
+        crop_png(&base,crop,scale,out)?;
+    } else if let Some(rect)=rect { capture_view(app,"project",Some(rect),out)?; }
+    Ok(())
+}
+
+fn capture_view(app: &tauri::AppHandle, label: &str, rect: Option<[f64;4]>, out: &std::path::Path) -> Result<(),String> {
+    let view = app.get_webview(label).ok_or("no requested view")?;
     let scale = app.get_window("main").and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
     let out = out.to_path_buf();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -361,47 +382,58 @@ impl Default for View {
     }
 }
 
-/// Gives a webview an exact height (logical px; None = any). On Linux a window's webviews stack
-/// top to bottom in one GTK box and positions are ignored; GTK also hands a webview its large
-/// natural height, so each gets an explicit height and together they fill the window exactly.
-fn pack(view: &tauri::Webview, height: Option<f64>) {
+/// Native webviews share one allocation. Studio occupies the content rectangle;
+/// the shell remains full-height so its docked agent can sit beside Studio.
+fn place_webview(view: &tauri::Webview, top: i32, right: i32, is_studio: bool) {
     #[cfg(target_os = "linux")]
     let _ = view.with_webview(move |platform| {
         use gtk::prelude::*;
         let widget: gtk::Widget = platform.inner().upcast();
-        widget.set_size_request(-1, height.map_or(-1, |h| h.round() as i32));
         if let Some(parent) = widget.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) {
-            parent.set_child_packing(&widget, height.is_none(), true, 0, gtk::PackType::Start);
+            let overlay = parent.children().into_iter().find_map(|c|c.downcast::<gtk::Overlay>().ok()).unwrap_or_else(|| {
+                let overlay=gtk::Overlay::new();
+                parent.pack_start(&overlay,true,true,0);
+                overlay.show();
+                overlay
+            });
+            parent.remove(&widget);
+            if is_studio { overlay.add_overlay(&widget); } else { overlay.add(&widget); }
         }
+        widget.set_size_request(0,0);
+        widget.set_hexpand(true); widget.set_vexpand(true);
+        widget.set_halign(gtk::Align::Fill); widget.set_valign(gtk::Align::Fill);
+        widget.set_margin_top(top); widget.set_margin_end(right);
     });
     #[cfg(not(target_os = "linux"))]
-    let _ = (view, height);
+    let _ = (view, top, right, is_studio);
 }
 
-/// Lays the webviews out for the current view: the project view alone; split, the project view
-/// above the studio at the dragged ratio; or the studio filling the window under the top bar.
+#[derive(Default)]
+struct AgentDock(std::sync::Mutex<f64>);
+
+#[tauri::command]
+fn agent_dock(app: tauri::AppHandle, width: f64) -> Result<(), String> {
+    *app.state::<AgentDock>().0.lock().map_err(|e|e.to_string())?=width.clamp(0.0,600.0);
+    layout(&app);
+    Ok(())
+}
+
 fn layout(app: &tauri::AppHandle) {
     let (Some(window), Some(project)) = (app.get_window("main"), app.get_webview("project")) else { return };
     let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
-    let height = physical.to_logical::<f64>(scale).height;
-    let (view, ratio) = app.state::<View>().0.lock().map(|v| v.clone()).unwrap_or(("project".into(), 0.5));
-    let top = match view.as_str() {
-        "split" => (height * ratio).clamp(BAR + 80.0, height - 80.0),
-        "studio" => BAR,
-        _ => height,
-    };
-    match app.get_webview("studio") {
-        Some(studio) if view != "project" => {
-            pack(&project, Some(top));
-            pack(&studio, Some(height - top));
-            let _ = studio.show();
-        }
-        studio => {
-            if let Some(studio) = studio {
-                let _ = studio.hide();
-            }
-            pack(&project, None);
-        }
+    let size = physical.to_logical::<f64>(scale);
+    let (view, _) = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or(("project".into(),0.5));
+    let dock = app.state::<AgentDock>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.width-240.0).max(0.0));
+    place_webview(&project,0,0,false);
+    #[cfg(not(target_os="linux"))]
+    { let _=project.set_position(LogicalPosition::new(0.0,0.0)); let _=project.set_size(size); }
+    if let Some(studio)=app.get_webview("studio") {
+        if view=="studio" || view=="split" {
+            place_webview(&studio,BAR as i32,dock.round() as i32,true);
+            #[cfg(not(target_os="linux"))]
+            { let _=studio.set_position(LogicalPosition::new(0.0,BAR)); let _=studio.set_size(LogicalSize::new(size.width-dock,size.height-BAR)); }
+            let _=studio.show();
+        } else { let _=studio.hide(); }
     }
 }
 
@@ -459,9 +491,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(View::default())
+        .manage(AgentDock::default())
         .manage(Engine::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("AnimationCraft").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
