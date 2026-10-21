@@ -362,7 +362,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("workshop.files", "Workshop Files", "{\"filter\": \"optional substring\", \"group\": \"optional audio|liner_notes|transcript|storyboard|assets|other\"}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
         query!("project.search", "Search Project, Files, Storyboard & Commands", "{\"query\": \"search text\"}", cmd_project_search),
-        query!("assets.assess", "Assess Asset (clean or recreate?)", "{\"path\": \"layer.png\"}", cmd_assets_assess),
+        query!("assets.assess", "Assess Asset (clean or recreate?)", "{\"path\": \"layer.png\", \"part\": false}", cmd_assets_assess),
         query!("assets.fixlist", "Asset Fix List", "{}", cmd_assets_fixlist),
         cmd!("assets.fixlist_add", "Add to Asset Fix List", ["Workshop"], None,
             "{\"asset\": \"id\", \"path\": \"png\", \"decision\": \"clean|recreate\", \"problem\": \"what is wrong\", \"tool\": \"exact command (clean)\", \"reference\": \"optional\", \"status\": \"open|done\"}", always, cmd_assets_fixlist_add),

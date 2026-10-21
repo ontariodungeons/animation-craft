@@ -1158,7 +1158,21 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     lum.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = lum.get(lum.len() / 2).copied().unwrap_or(0.0);
     let (smear, smear_aspect) = smear_band(&img, median);
+    let (measured_cuts, full_bleed) = straight_cuts(&img);
+    // A joint part (an arm, a wing) is meant to end flat where it joins; only a whole
+    // character or object cut in a straight line is missing artwork.
+    let part = params.get("part").and_then(Value::as_bool).unwrap_or(false);
+    let cuts = if part { [0; 4] } else { measured_cuts };
     let mut reasons = Vec::new();
+    for (side, run) in ["left", "right", "top", "bottom"].iter().zip(cuts) {
+        if run > 0 {
+            reasons.push(format!(
+                "artwork cut off in a straight line along the {side} edge ({run} px): it was cropped through, not drawn to end there"
+            ));
+        }
+    }
+    // A full-bleed layer (a page, a background) fills its frame on purpose.
+    let touching = if full_bleed { 0.0 } else { touching };
     if touching > 0.15 {
         reasons.push(format!(
             "{:.0}% of the outline runs into the box edge (clipped)",
@@ -1177,7 +1191,8 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     if opaque == 0.0 {
         reasons.push("no opaque pixels".into());
     }
-    let suggestion = if opaque == 0.0 || touching > 0.35 {
+    // Missing artwork cannot be cleaned back: a cut means a new, complete drawing.
+    let suggestion = if opaque == 0.0 || touching > 0.35 || cuts.iter().any(|&run| run > 0) {
         "recreate"
     } else if reasons.is_empty() {
         "ok"
@@ -1186,13 +1201,99 @@ pub fn cmd_assets_assess(s: &mut Session, params: &Value) -> Result<Value> {
     };
     Ok(
         json!({"ok": true, "path": path, "size": [w, h], "suggestion": suggestion, "reasons": reasons,
-        "measures": {"clipped_border": touching, "raggedness": raggedness, "smear_band": smear, "smear_aspect": smear_aspect, "soft_edge_pixels": partial / opaque.max(1.0)},
+        "measures": {"clipped_border": touching, "full_bleed": full_bleed, "straight_cut_px": {"left": measured_cuts[0], "right": measured_cuts[1], "top": measured_cuts[2], "bottom": measured_cuts[3]}, "raggedness": raggedness, "smear_band": smear, "smear_aspect": smear_aspect, "soft_edge_pixels": partial / opaque.max(1.0)},
         "next": [match suggestion {
             "recreate" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=recreate problem=<what is wrong>".to_string(),
             "clean" => "Record it: assets.fixlist_add asset=<id> path=<png> decision=clean problem=<what> tool=<exact command that fixes it>".to_string(),
             _ => "Looks fine by measure; still check it at full size before using it.".to_string(),
         }]}),
     )
+}
+
+/// Straight cuts along each side of the artwork (left, right, top, bottom), in px; 0 = none.
+///
+/// Artwork cropped through ends in a straight run of solid pixels with nothing solid beyond
+/// them, and the outline pulls away from that line past both ends of the run. A complete
+/// drawing can also have a long, nearly straight edge (a wing, a chin, a hull), but its outline
+/// keeps running along the line, so a run counts as a cut only when, within 7 px past its ends,
+/// the outline recedes at least 3 px at one end and 2 px at the other (measured on cropped
+/// cast layers and complete parts). Runs are looked for on the four lines just inside the bounds,
+/// because a soft fringe can sit beyond a cut. A run over 90% of a side is the edge of a
+/// full-bleed layer (a page, a background), not a cut; such a layer also continues past the
+/// frame on its other sides that touch the canvas, so those are not cuts either.
+fn straight_cuts(img: &image::RgbaImage) -> ([u32; 4], bool) {
+    let (w, h) = (i64::from(img.width()), i64::from(img.height()));
+    let solid = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < h && img.get_pixel(x as u32, y as u32)[3] > 128;
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, -1, -1);
+    for (x, y, p) in img.enumerate_pixels() {
+        if p[3] > 128 {
+            let (x, y) = (i64::from(x), i64::from(y));
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+    }
+    if x1 < 0 {
+        return ([0; 4], false);
+    }
+    // Each side as (lines inward from the bounds, outward step, span along the side, is the
+    // side vertical). Points are (across, along) and map back to (x, y) through `at`.
+    let sides = [
+        ((x0..=(x0 + 3).min(x1)).collect::<Vec<_>>(), -1, (y0, y1), true),
+        (((x1 - 3).max(x0)..=x1).rev().collect(), 1, (y0, y1), true),
+        ((y0..=(y0 + 3).min(y1)).collect(), -1, (x0, x1), false),
+        (((y1 - 3).max(y0)..=y1).rev().collect(), 1, (x0, x1), false),
+    ];
+    let at = |vertical: bool, across: i64, along: i64| if vertical { (across, along) } else { (along, across) };
+    let mut runs = [0u32; 4];
+    let mut bleed = [false; 4];
+    for (i, (lines, out, (a0, a1), vertical)) in sides.iter().enumerate() {
+        let length = (a1 - a0 + 1) as f64;
+        // How far the outline sits inward of `line` at position `along` (None: nothing there).
+        let recede = |line: i64, along: i64| {
+            (0..=12).find(|d| {
+                let (x, y) = at(*vertical, line - out * d, along);
+                solid(x, y)
+            })
+        };
+        for &line in lines {
+            let mut start = None;
+            for along in *a0..=a1 + 1 {
+                let (x, y) = at(*vertical, line, along);
+                let (ox, oy) = at(*vertical, line + out, along);
+                let edge = along <= *a1 && solid(x, y) && !solid(ox, oy);
+                match (edge, start) {
+                    (true, None) => start = Some(along),
+                    (false, Some(s)) => {
+                        let run = (along - s) as u32;
+                        if f64::from(run) >= length * 0.9 {
+                            bleed[i] = true;
+                        } else {
+                            // Furthest the outline pulls away within 7 px past an end (None: gone).
+                            let away = |end: i64, step: i64| {
+                                (1..=7).map(|k| recede(line, end + step * k).unwrap_or(13)).max().unwrap_or(0)
+                            };
+                            let (before, after) = (away(s, -1), away(along - 1, 1));
+                            let pulls_away = (before >= 3 && after >= 2) || (before >= 2 && after >= 3);
+                            if run > 16 && f64::from(run) > length * 0.02 && pulls_away {
+                                runs[i] = runs[i].max(run);
+                            }
+                        }
+                        start = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let on_canvas_edge = [x0 == 0, x1 == w - 1, y0 == 0, y1 == h - 1];
+    let full_bleed = bleed.iter().any(|&b| b);
+    if full_bleed {
+        for i in 0..4 {
+            if bleed[i] || on_canvas_edge[i] {
+                runs[i] = 0;
+            }
+        }
+    }
+    (runs, full_bleed)
 }
 
 /// Largest flat dark band: (share of visible pixels, long/short side of its box).
@@ -1632,6 +1733,58 @@ mod tests {
             let grain = if smeared && dark { 0 } else { ((x * 7 + y * 13) % 5) as u8 * 6 };
             image::Rgba([base + grain, base + grain, base, 255])
         })
+    }
+
+    /// A disc of radius 100 in a 220px canvas, optionally sliced flat at x = `cut` with a
+    /// soft fringe `fringe` px wide beyond the slice.
+    fn disc(cut: Option<u32>, fringe: u32) -> image::RgbaImage {
+        image::RgbaImage::from_fn(220, 220, |x, y| {
+            let (dx, dy) = (x as f64 - 110.0, y as f64 - 110.0);
+            let inside = dx * dx + dy * dy <= 100.0 * 100.0;
+            let a = match cut {
+                Some(c) if x > c + fringe => 0,
+                Some(c) if x > c => 60,
+                _ => 255,
+            };
+            image::Rgba([180, 160, 200, if inside { a } else { 0 }])
+        })
+    }
+
+    #[test]
+    fn a_whole_drawing_has_no_straight_cut() {
+        assert_eq!(super::straight_cuts(&disc(None, 0)).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn artwork_cropped_through_is_a_straight_cut() {
+        let cuts = super::straight_cuts(&disc(Some(170), 0)).0;
+        assert!(cuts[1] > 100, "right cut {cuts:?}");
+        assert_eq!([cuts[0], cuts[2], cuts[3]], [0, 0, 0]);
+    }
+
+    #[test]
+    fn the_flat_stretch_of_a_long_curve_is_not_a_cut() {
+        // A long, shallow ellipse (a wing): its top and bottom are nearly straight for a while.
+        let wing = image::RgbaImage::from_fn(300, 120, |x, y| {
+            let (dx, dy) = ((x as f64 - 150.0) / 140.0, (y as f64 - 60.0) / 40.0);
+            image::Rgba([220, 200, 170, if dx * dx + dy * dy <= 1.0 { 255 } else { 0 }])
+        });
+        assert_eq!(super::straight_cuts(&wing).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_full_bleed_layer_is_not_cut() {
+        // A ground band: full width along the bottom of the canvas, rolling hills on top.
+        let band = image::RgbaImage::from_fn(400, 200, |x, y| {
+            let top = 80.0 + 20.0 * (x as f64 / 40.0).sin();
+            image::Rgba([90, 160, 80, if y as f64 >= top { 255 } else { 0 }])
+        });
+        assert_eq!(super::straight_cuts(&band), ([0, 0, 0, 0], true));
+    }
+
+    #[test]
+    fn a_cut_behind_a_soft_fringe_is_still_found() {
+        assert!(super::straight_cuts(&disc(Some(170), 3)).0[1] > 100);
     }
 
     #[test]
