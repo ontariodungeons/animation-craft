@@ -173,6 +173,7 @@ a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
 
 **Animation view**
 - ✅ `964aba3` Stage with rest pose; zoom (fit, 100%, ±), center (fit centers the artwork)
+- ✅ `8dbf449` Pen path, show/hide guide, grid, duration/start/end scale sliders, path undo; refined section colors/icons
 - ◻ Actions (idle, walk, run, jump, wave, talk, track), jump height, run lock, WASD roam
 - ◻ Pose controls: head turn and tilt, eye blink and gaze, mouth opening and smile, arm spread, elbow and knee
   bend, ear tilt and spread, reset
@@ -213,7 +214,8 @@ does must be visible to the user.
 ## Current next slice
 
 Animation layout approved. Shell has the bee stage, engine track playback/scrub and layer visibility.
-Pen path + grid + start/end scale and colored sliders are now live; commit/evidence accompanies the
-next checkpoint. Remaining controls are not implied complete by section headings. Keep the user's
+Pen path + grid + start/end scale and colored sliders are live in `8dbf449`.
+Inner validator checked endpoints, scale/exporter parity and byte-exact undo on a copy.
+Visual evidence: Bumble Bee `.agent/looks/look-1792566893867.png`. Reference app 19898 closed after comparison. Remaining controls are not implied complete by section headings. Keep the user's
 drawn path, slider values and composer draft across any restart. User now prioritizes 2D; defer 3D
 techniques. The in-app agent validates operations and CLI configuration; coordinator owns UI changes.
