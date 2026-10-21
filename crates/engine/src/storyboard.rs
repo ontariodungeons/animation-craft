@@ -357,8 +357,8 @@ pub(crate) fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
     Ok(list)
 }
 
-/// Images on the overview pages ("Cast & sets"), eight per page.
-const PER_ASSET_PAGE: usize = 8;
+/// Images on the overview pages ("Cast & sets"): a 3 x 3 grid per page.
+const PER_ASSET_PAGE: usize = 9;
 
 /// The project's backgrounds, characters and props for the overview: the workshop's asset
 /// files plus connected project images.
@@ -506,7 +506,8 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
     let pages = 1 + asset_pages + scene_list.len() + 1;
     let mut layout: Vec<Value> = Vec::new();
 
-    let (pw, ph, m) = (842.0_f64, 595.0_f64, 36.0_f64);
+    // Portrait A4, to fill the tall storyboard pane.
+    let (pw, ph, m) = (595.0_f64, 842.0_f64, 36.0_f64);
     let mut steps = vec![
         json!({"tool": "doc_create", "args": {"from": "blank", "pages": pages, "width": pw, "height": ph, "name": title}}),
         json!({"tool": "doc_background", "args": {"doc": 1, "color": "#0a0a0c"}}),
@@ -555,7 +556,6 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
         format!("EDIT IN     {} ({})", s.video_target, target_project_path(s, &dir, &s.video_target).map(|p| p.display().to_string()).unwrap_or_else(|| "ready".into())),
         format!("STATUS      {}", if s.draft_approved { "APPROVED" } else { "DRAFT — NEEDS REVIEW" }),
     ];
-    steps.push(block(1, [m, 100.0, pw - m - 270.0, 172.0], facts.join("\n"), 8.5, "courier", CREAM));
     let grid_sheet = [
         dir.join("assets/references/storyboard-grid-v1.png"),
         dir.join("storyboard/storyboard-grid.png"),
@@ -588,6 +588,9 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
             steps.push(text(1, [box_r[0], 170.0], box_r[2], "TEACHING CUES 3x2".into(), 7.5, "courier", AMBER, true));
         }
     }
+    // The song facts use the full width unless reference sheets sit at the right.
+    let facts_right = if grid_sheet.is_some() || teach_sheet.is_some() { pw - m - 270.0 } else { pw - m };
+    steps.push(block(1, [m, 100.0, facts_right, 172.0], facts.join("\n"), 8.5, "courier", CREAM));
     steps.push(text(1, [m, 184.0], pw - m, "SCENES · CLICK A SCENE ROW TO JUMP TO ITS PACKET".into(), 9.0, "courier", AMBER, true));
     let row_step = ((ph - 206.0) / scene_list.len().max(1) as f64).min(44.0);
     let card_h = (row_step - 5.0).max(26.0);
@@ -627,7 +630,7 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
         let lines = scene["lines"].as_array().cloned().unwrap_or_default();
         if let Some(reference) = scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file()) {
             let teach_ref = scene["teaching_reference"].as_str().map(PathBuf::from).filter(|p| p.is_file());
-            let right_card_left = if let Some(ref teach) = teach_ref {
+            let images_bottom = if let Some(ref teach) = teach_ref {
                 let story_box = [m, 74.0, m + 216.0, 74.0 + 212.0];
                 let r1 = fit(&reference, [story_box[0] + 6.0, story_box[1] + 6.0, story_box[2] - 6.0, story_box[3] - 18.0])?;
                 steps.push(image(page, &reference, r1));
@@ -638,14 +641,14 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
                 steps.push(image(page, teach, r2));
                 layout.push(json!({"page": page, "path": teach, "rect": r2}));
                 steps.push(text(page, [teach_box[0] + 6.0, teach_box[3] - 14.0], teach_box[2], "TEACHING CUE".into(), 7.5, "courier", AMBER, true));
-                teach_box[2] + 10.0
+                teach_box[3]
             } else {
                 let frame = [m, 74.0, m + 360.0, 74.0 + 230.0];
                 let window = [frame[0] + 18.0, frame[1] + 22.0, frame[2] - 18.0, frame[3] - 22.0];
                 let r = fit(&reference, window)?;
                 steps.push(image(page, &reference, r));
                 layout.push(json!({"page": page, "path": reference, "rect": r}));
-                frame[2] + 12.0
+                frame[3]
             };
             let lyric_text = if lines.is_empty() {
                 "Instrumental — no sung words.".to_string()
@@ -662,9 +665,11 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
                     .collect::<Vec<_>>()
                     .join("\n")
             };
-            let card_bottom = if teach_ref.is_some() { 74.0 + 212.0 } else { 74.0 + 230.0 };
-            steps.push(image(page, &card_cream, [right_card_left, 74.0, pw - m, card_bottom]));
-            steps.push(block(page, [right_card_left + 16.0, 82.0, pw - m - 10.0, card_bottom - 6.0], lyric_text, 8.5, "courier", INK));
+            // The lyric card sits under the images, full width.
+            let card_top = images_bottom + 10.0;
+            let card_bottom = card_top + 24.0 + 14.0 * lyric_text.lines().count() as f64;
+            steps.push(image(page, &card_cream, [m, card_top, pw - m, card_bottom]));
+            steps.push(block(page, [m + 16.0, card_top + 8.0, pw - m - 10.0, card_bottom - 6.0], lyric_text, 8.5, "courier", INK));
             let sections = scene["sections"].as_object().cloned().unwrap_or_default();
             let short = |t: &str| {
                 let flat = t.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -736,7 +741,7 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, _: &Value) -> Result<Value
         if chunk.is_empty() {
             steps.push(text(page, [m, 90.0], pw - m, "Nothing yet. Add backgrounds and characters in AnimationCraft; they appear here.".into(), 10.0, "courier", MUTE, false));
         }
-        let (cols, cell_w, cell_h) = (4usize, (pw - 2.0 * m) / 4.0, 236.0);
+        let (cols, cell_w, cell_h) = (3usize, (pw - 2.0 * m) / 3.0, 236.0);
         for (n, img) in chunk.iter().enumerate() {
             let (cx, cy) = (m + (n % cols) as f64 * cell_w, 84.0 + (n / cols) as f64 * cell_h);
             let side = (cell_w - 16.0).min(cell_h - 40.0);
