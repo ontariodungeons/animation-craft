@@ -984,8 +984,10 @@ fn storyboard_pane(app: &mut AnimationCraftApp, ui: &mut Ui) {
     let page = app.ui_state.storyboard_page.min(pages - 1);
     ui.horizontal_wrapped(|ui| {
         let titles = info["scene_titles"].as_array().cloned().unwrap_or_default();
-        let mut nav = vec![("Overview".to_string(), 0usize)];
-        nav.extend(titles.iter().enumerate().filter_map(|(i, t)| Some((t.as_str()?.split(" · ").take(2).collect::<Vec<_>>().join(" · "), i + 1))));
+        // Page 1 is the lyrics index, then the "Cast & sets" overview, then one page per scene.
+        let first_scene = info["first_scene_page"].as_u64().unwrap_or(2) as usize - 1;
+        let mut nav = vec![("Lyrics".to_string(), 0usize), ("Cast & sets".to_string(), 1)];
+        nav.extend(titles.iter().enumerate().filter_map(|(i, t)| Some((t.as_str()?.split(" · ").take(2).collect::<Vec<_>>().join(" · "), first_scene + i))));
         nav.push(("Agent brief".into(), pages - 1));
         for (label, target) in nav {
             let r = ui.selectable_label(page == target, RichText::new(label).size(11.5));

@@ -222,7 +222,7 @@ pub(crate) fn video_project_path(dir: &Path) -> Option<PathBuf> {
 }
 
 /// Static and cutout image assets in the song project folder.
-fn workshop_asset_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn workshop_asset_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut push_unique = |paths: Vec<PathBuf>| {
         for p in paths {
