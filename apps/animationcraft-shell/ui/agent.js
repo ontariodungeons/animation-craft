@@ -1,106 +1,103 @@
-// The agent drawer: chat with the project's opencode session (or an agent in Herdr), answer its
-// permission requests and questions, and point at anything in the app to attach a picture of it.
-// Same session and payloads as the native app's agent pane (<project>/.agent/opencode-session).
-const SESSION = "session";
-const agent = { open: false, session: null, target: SESSION, models: [], herdr: [], messages: [], permissions: [], forms: [],
-  attachments: [], polling: false, timer: null, loaded: false, sending: false };
+// The agent drawer: the app's own agent.
+//
+// Its settings are stored by the app (`agent_config`), its conversation lives in the project
+// (`.agent/agent-log.json`) and every turn runs the configured command as a child process of this
+// window, in the project folder, with the app's instructions appended to its system prompt.
+// Nothing here needs a service, session or tool started somewhere else.
+const agent = {
+  open: false, turns: [], config: null, sending: false, attachments: [], loaded: false,
+  newChat: false, timer: null, floating: false,
+};
 
-const oc = (args, data) => invoke("opencode", { project: state.project, args, data: data ?? null });
 const status = (text) => { $("agent-status").textContent = text; $("agent-status").title = text; };
+
+// ---- Settings ------------------------------------------------------------------------------
+
+function renderConfig() {
+  const c = agent.config;
+  const runtime = $("agent-runtime");
+  const chosen = c?.agent || "";
+  const isDefault = c?.default && c.default === chosen;
+  runtime.textContent = c
+    ? `${chosen || "no agent"}${isDefault ? " · system default" : ""}${c.model ? ` · ${c.model}` : ""}`
+    : "agent not configured";
+  runtime.title = c
+    ? `Installed agents: ${(c.agents || []).filter((a) => a.installed).map((a) => a.name).join(", ")}\n` +
+      `System default: ${c.default || "none"}\nInstructions: ${c.instructions}\nExtra arguments: ${(c.extra_args || []).join(" ") || "none"}`
+    : "Open settings to choose an installed agent.";
+  // The list comes from the system: every installed agent, with the Omarchy default marked.
+  const select = $("agent-command");
+  const installed = (c?.agents || []).filter((a) => a.installed);
+  const options = installed.map((a) =>
+    el("option", { value: a.name }, `${a.name}${a.default ? " (system default)" : ""}${a.headless ? "" : " · no headless mode"}`));
+  const signature = options.map((o) => o.value).join(",");
+  if (select.dataset.signature !== signature) {
+    select.replaceChildren(...options);
+    select.dataset.signature = signature;
+  }
+  select.value = chosen;
+  $("agent-command").title = installed.filter((a) => !a.headless).length
+    ? "Agents without a headless mode cannot answer from this window yet"
+    : "The system agent this app runs";
+  $("agent-model").value = c?.model || "";
+  $("agent-thinking").value = c?.thinking || "";
+  $("agent-extra").value = (c?.extra_args || []).join(" ");
+}
+
+async function configSave() {
+  const patch = {
+    agent: $("agent-command").value,
+    model: $("agent-model").value.trim(),
+    thinking: $("agent-thinking").value,
+    extra_args: $("agent-extra").value.trim().split(/\s+/).filter(Boolean),
+  };
+  try {
+    agent.config = await invoke("agent_config_save", { patch });
+    renderConfig();
+    $("agent-config").hidden = true;
+    status("Settings saved.");
+  } catch (error) { status(String(error)); }
+}
+
+// ---- Conversation --------------------------------------------------------------------------
 
 async function agentLoad() {
   agent.loaded = true;
-  agent.session = await invoke("agent_session", { project: state.project, set: null }).catch(() => null);
-  const [models, herdr] = await Promise.allSettled([oc(["model.list"]), invoke("herdr", { args: ["agent", "list"] })]);
-  agent.models = models.value?.data || [];
-  agent.herdr = (herdr.value?.result?.agents || []).map((a) => ({
-    id: a.name || a.pane_id,
-    label: a.name ? `${a.name} (${a.agent || "agent"}, Herdr)` : `${a.agent || "agent"} in ${a.pane_id} (Herdr)`,
-  }));
-  const target = $("agent-target");
-  target.replaceChildren(el("option", { value: SESSION }, "opencode session (this project)"),
-    ...agent.herdr.map((h) => el("option", { value: h.id }, h.label)));
-  target.value = agent.target;
-  renderModels();
-  renderWatch();
+  const [config, turns] = await Promise.allSettled([
+    invoke("agent_config"),
+    state.project ? motionCommand("agent.log") : Promise.resolve([]),
+  ]);
+  if (config.status === "fulfilled") agent.config = config.value;
+  else status(String(config.reason));
+  agent.turns = turns.status === "fulfilled" && Array.isArray(turns.value) ? turns.value : [];
+  renderConfig();
+  renderLog();
 }
 
-function currentModel() {
-  for (let i = agent.messages.length - 1; i >= 0; i--) {
-    const m = agent.messages[i].model;
-    if (m?.providerID && m?.id) return m;
-  }
-  return null;
-}
-
-function renderModels() {
-  const select = $("agent-model");
-  select.hidden = agent.target !== SESSION;
-  const cur = currentModel();
-  const key = (p, id) => `${p}/${id}`;
-  const wanted = agent.models.map((m) => ({ value: key(m.providerID, m.id), label: `${m.name || m.id}  ·  ${m.providerID}` }));
-  if (!cur) wanted.unshift({ value: "", label: "default model" });
-  // Rebuild the options only when the list really changed: replacing them every poll closed an
-  // open menu and churned the DOM every two seconds.
-  const have = [...select.options].map((o) => o.value);
-  if (have.length !== wanted.length || have.some((v, i) => v !== wanted[i].value)) {
-    select.replaceChildren(...wanted.map((o) => el("option", { value: o.value }, o.label)));
-  }
-  const value = cur ? key(cur.providerID, cur.id) : "";
-  if (select.value !== value && document.activeElement !== select) select.value = value;
-}
-
-function renderWatch() {
-  const w = $("agent-watch");
-  w.textContent = agent.session ? `watch: opencode --session ${agent.session}` : "";
-  w.hidden = !agent.session;
-}
-
-async function agentPoll() {
-  if (!agent.open || !agent.session || agent.polling || agent.target !== SESSION) return;
-  agent.polling = true;
-  const sid = `sessionID=${agent.session}`;
+async function agentReloadLog() {
+  if (!state.project) return;
   try {
-    const [messages, permissions, forms] = await Promise.allSettled([
-      oc(["session.message.list", "--param", sid, "--param", "order=desc", "--param", "limit=40"]),
-      oc(["session.permission.list", "--param", sid]),
-      oc(["session.form.list", "--param", sid]),
-    ]);
-    if (sid !== `sessionID=${agent.session}`) return;
-    if (messages.status === "fulfilled") agent.messages = (messages.value?.data || []).slice().reverse();
-    else status(String(messages.reason));
-    agent.permissions = permissions.value?.data || [];
-    agent.forms = forms.value?.data || [];
-    renderLog();
-  } finally { agent.polling = false; }
+    const turns = await motionCommand("agent.log");
+    if (Array.isArray(turns)) agent.turns = turns;
+  } catch { /* the next send reports the real error */ }
+  renderLog();
 }
 
-// The log is polled every two seconds. It is described here as keyed items, not DOM, so the
-// render below can keep the nodes it already has: rebuilding the log replayed the entry
-// animation on the whole conversation, dropped the reader's scroll and selection, and threw away
-// an answer being typed into a permission or question card.
-function logItems() {
+function turnItems() {
   const items = [];
-  if (agent.target !== SESSION) {
-    items.push({ key: "notice:herdr", cls: "msg done", text: "Messages go to that agent's pane in Herdr; watch the reply there." });
-  } else if (!agent.messages.length) {
-    items.push({ key: "notice:empty", cls: "msg done", text: "Ask the agent anything about this project. Point at something to show it what you mean." });
+  if (!agent.turns.length) {
+    items.push({ key: "notice:empty", cls: "msg done",
+      text: "Ask the agent anything about this project. Point at something to show it what you mean." });
   }
-  if (agent.target === SESSION) {
-    for (const m of agent.messages) {
-      const id = m.id ?? m.role;
-      if (m.type === "user") items.push({ key: `u:${id}`, cls: "msg user", text: m.text || "" });
-      else if (m.type === "idle") items.push({ key: `i:${id}`, cls: "msg done", text: "— done" });
-      else if (m.type === "assistant") {
-        (m.content || []).forEach((part, i) => {
-          if (part.type === "text" && part.text) items.push({ key: `a:${id}:${i}`, cls: "msg assistant", text: part.text });
-          else if (part.type?.includes("tool")) items.push({ key: `t:${id}:${i}`, cls: "msg tool", text: `· ${part.name || part.tool || part.type}` });
-        });
-      }
+  agent.turns.forEach((turn, i) => {
+    const key = `t:${i}:${turn.at || 0}`;
+    if (turn.role === "user") items.push({ key, cls: "msg user", text: turn.text || "" });
+    else if (turn.role === "assistant") items.push({ key, cls: "msg assistant", text: turn.text || "" });
+    else if (turn.role === "error") items.push({ key, cls: "msg tool", text: `· ${turn.text || "failed"}` });
+    if (turn.role === "assistant" && turn.tools?.length) {
+      items.push({ key: `${key}:tools`, cls: "msg tool", text: `· ${turn.tools.join(", ")}` });
     }
-    for (const p of agent.permissions) items.push({ key: `p:${p.sessionID}:${p.id}`, build: () => permissionCard(p) });
-    for (const f of agent.forms) for (const field of f.fields || []) items.push({ key: `q:${f.sessionID}:${f.id}:${field.key}`, build: () => questionCard(f, field) });
-  }
+  });
   return items;
 }
 
@@ -112,16 +109,15 @@ function renderLog() {
   const existing = new Map();
   for (const child of log.children) if (child.dataset?.k) existing.set(child.dataset.k, child);
 
-  const next = logItems().map((item) => {
+  const next = turnItems().map((item) => {
     const node = existing.get(item.key);
     if (!node) {
-      const made = item.build ? item.build() : el("div", { class: item.cls }, item.text);
+      const made = el("div", { class: item.cls }, item.text);
       made.dataset.k = item.key;
       return made;
     }
     existing.delete(item.key);
-    // Same message, more text: update it in place, so the node keeps its place in the log.
-    if (item.text !== undefined && node.textContent !== item.text) node.textContent = item.text;
+    if (node.textContent !== item.text) node.textContent = item.text;
     return node;
   });
 
@@ -129,7 +125,6 @@ function renderLog() {
   for (let i = 0; i < next.length; i++) {
     const node = next[i];
     if (node.parentNode === log) continue;
-    // Only new nodes are inserted: moving a node that is already there restarts its animation.
     let anchor = null;
     for (let j = i + 1; j < next.length; j++) if (next[j].parentNode === log) { anchor = next[j]; break; }
     log.insertBefore(node, anchor);
@@ -137,45 +132,6 @@ function renderLog() {
 
   if (atBottom) log.scrollTop = log.scrollHeight;
   else log.scrollTop = top;
-  renderModels();
-}
-
-function permissionCard(p) {
-  const what = `${p.action || ""} ${(p.resources || []).join(", ")}`.trim();
-  const reply = (decision) => async () => {
-    try {
-      await oc(["session.permission.reply", "--param", `sessionID=${p.sessionID}`, "--param", `requestID=${p.id}`], { decision });
-      status(`Permission: ${decision}.`);
-    } catch (e) { status(String(e)); }
-    agentPoll();
-  };
-  return el("div", { class: "card" }, el("div", { class: "q" }, "Permission"), el("div", {}, what),
-    el("div", { class: "opts" },
-      el("button", { class: "opt", onclick: reply("once") }, "Allow once"),
-      el("button", { class: "opt", onclick: reply("always") }, "Always"),
-      el("button", { class: "opt", onclick: reply("reject") }, "Reject")));
-}
-
-function questionCard(form, field) {
-  const answer = async (value) => {
-    if (!value) return;
-    try {
-      await oc(["session.form.reply", "--param", `sessionID=${form.sessionID}`, "--param", `formID=${form.id}`], { answer: { [field.key]: value } });
-      status("Answered.");
-    } catch (e) { status(String(e)); }
-    agentPoll();
-  };
-  const card = el("div", { class: "card" }, el("div", { class: "q" }, field.title || "Question"));
-  if (field.description) card.append(el("div", {}, field.description));
-  const opts = (field.options || []).map((o) =>
-    el("button", { class: "opt", title: o.description || "", onclick: () => answer(o.value) }, o.label || o.value || ""));
-  if (opts.length) card.append(el("div", { class: "opts" }, opts));
-  if (field.custom !== false) {
-    const input = el("input", { placeholder: "Your own answer · Enter" });
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") answer(input.value.trim()); });
-    card.append(input);
-  }
-  return card;
 }
 
 function renderAttachments() {
@@ -185,8 +141,8 @@ function renderAttachments() {
       el("button", { "aria-label": "Remove", title: "Remove", onclick: () => { agent.attachments.splice(i, 1); renderAttachments(); } }, "×"))));
 }
 
-// The draft and its pictures are handed over only once the message is delivered: a failed send
-// keeps them, and anything typed or attached while it was in flight stays in the composer.
+// The draft and its pictures are handed over only once the turn is delivered: a failed send keeps
+// them, and anything typed or attached while it ran stays in the composer.
 function clearSent(input, raw, attachments) {
   if (input.value === raw) input.value = "";
   const sent = new Set(attachments);
@@ -196,18 +152,19 @@ function clearSent(input, raw, attachments) {
   }
 }
 
-async function agentNewChat(){
- if(agent.sending)throw new Error("Wait for the current message to finish sending");
- const button=$("agent-new");button.disabled=true;
- try{
-  const result=await motionCommand("agent.new_chat",{model:currentModel()});
-  agent.session=result.session;agent.target=SESSION;agent.messages=[];agent.permissions=[];agent.forms=[];
-  $("agent-target").value=SESSION;renderLog();renderWatch();renderModels();
-  status("New chat · previous conversation saved");$("agent-input").focus();
-  return result;
- }finally{button.disabled=false;}
+async function agentNewChat() {
+  if (agent.sending) throw new Error("Wait for the current message to finish");
+  const button = $("agent-new");
+  button.disabled = true;
+  try {
+    agent.turns = await motionCommand("agent.new_chat");
+    agent.newChat = true;
+    renderLog();
+    status("New chat · previous conversation saved");
+    $("agent-input").focus();
+  } finally { button.disabled = false; }
 }
-$("agent-new").addEventListener("click",()=>agentNewChat().catch(e=>status(String(e))));
+$("agent-new").addEventListener("click", () => agentNewChat().catch((e) => status(String(e))));
 
 async function agentSend() {
   const input = $("agent-input");
@@ -218,27 +175,26 @@ async function agentSend() {
   const attachments = agent.attachments.slice();
   agent.sending = true;
   $("agent-send").disabled = true;
+  status("Sending…");
   try {
-    if (agent.target !== SESSION) {
-      const body = [text, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft — picture: ${a.path}]`)].join("\n");
-      status(`Sending to ${agent.target} in Herdr…`);
-      await invoke("herdr", { args: ["agent", "prompt", agent.target, body] });
-      status(`Sent to ${agent.target} in Herdr.`);
-    } else {
-      status("Sending…");
-      if (!agent.session) { const made=await motionCommand("agent.new_chat",{});agent.session=made.session;renderWatch(); }
-      const files = attachments.map((a) => ({ uri: `file://${a.path}`, name: a.path.split("/").pop(), description: a.what }));
-      const board=state.data?.storyboard;
-      const scene=state.view==='project' && board?.first_scene_page && state.page+1>=board.first_scene_page ? state.page+2-board.first_scene_page : null;
-      const context={project:state.project,view:state.view,scene,storyboard_page:state.page+1,deck:board?.deck,placements:state.data?.design?.placements||[],animation:{asset:motion.character,track:motion.track,time:motion.time}};
-      const full = [text, `[Shared AnimationCraft context at send time: ${JSON.stringify(context)}]`, ...attachments.map((a) => `[Pointed at ${a.what} in AnimationCraft; picture attached]`)].join("\n");
-      await oc(["session.prompt", "--param", `sessionID=${agent.session}`], { text: full, files });
-      status("Sent. The agent is working…");
-    }
+    const context = {
+      project: state.project, view: state.view, storyboard_page: state.page + 1,
+      deck: state.data?.storyboard?.deck,
+      animation: { asset: motion.character, track: motion.track, time: motion.time },
+    };
+    const message = `${text}\n\n[AnimationCraft context at send time: ${JSON.stringify(context)}]`;
+    const reply = await motionCommand("agent.send", {
+      message,
+      new_chat: agent.newChat,
+      attachments: attachments.map((a) => a.path),
+    });
+    agent.newChat = false;
+    if (Array.isArray(reply.turns)) agent.turns = reply.turns;
+    renderLog();
     clearSent(input, raw, attachments);
-    agentPoll();
-  } catch (e) {
-    status(String(e));
+    status(reply.ok ? `Answered${reply.model ? ` by ${reply.model}` : ""}.` : String(reply.error || "The agent failed."));
+  } catch (error) {
+    status(String(error));
     input.focus();
   } finally {
     agent.sending = false;
@@ -309,16 +265,73 @@ function pointStart() {
 function agentToggle(open = !agent.open) {
   if (!state.project) return toast("Open a project first");
   agent.open = open;
-  document.body.classList.toggle("agent-docked",open);
-  invoke("agent_dock",{width:open?$("agent").getBoundingClientRect().width:0}).catch(e=>status(String(e)));
+  if (open && !agent.floating) {
+    document.body.classList.add("agent-docked");
+    invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch((e) => status(String(e)));
+  } else if (!open) {
+    document.body.classList.remove("agent-docked");
+    invoke("agent_dock", { width: 0 }).catch((e) => status(String(e)));
+  }
   $("agent").classList.toggle("open", open);
   $("agent").setAttribute("aria-hidden", String(!open));
   $("agent-toggle").classList.toggle("on", open);
   clearInterval(agent.timer);
   if (!open) return;
-  (agent.loaded ? Promise.resolve() : agentLoad()).then(agentPoll);
-  agent.timer = setInterval(agentPoll, 2000);
+  if (agent.loaded) agentReloadLog();
+  else agentLoad();
   $("agent-input").focus();
+}
+
+function toggleAgentFloat() {
+  agent.floating = !agent.floating;
+  if (agent.floating) {
+    document.body.classList.remove("agent-docked");
+    invoke("agent_dock", { width: 0 }).catch((e) => status(String(e)));
+    $("agent").classList.add("agent-floating");
+    setupAgentDrag();
+  } else {
+    document.body.classList.add("agent-docked");
+    invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch((e) => status(String(e)));
+    $("agent").classList.remove("agent-floating");
+    teardownAgentDrag();
+  }
+  $("agent-float").setAttribute("aria-pressed", String(agent.floating));
+}
+
+let agentDrag = null;
+function setupAgentDrag() {
+  const head = $("agent").querySelector(".agent-head");
+  head.style.cursor = "move";
+  head.addEventListener("pointerdown", onAgentDragStart);
+}
+function teardownAgentDrag() {
+  const head = $("agent").querySelector(".agent-head");
+  head.style.cursor = "";
+  head.removeEventListener("pointerdown", onAgentDragStart);
+  if (agentDrag) { window.removeEventListener("pointermove", agentDrag.move); window.removeEventListener("pointerup", agentDrag.up); agentDrag = null; }
+}
+function onAgentDragStart(e) {
+  if (e.button !== 0) return;
+  const agentEl = $("agent");
+  const r = agentEl.getBoundingClientRect();
+  agentDrag = {
+    move: (ev) => {
+      agentEl.style.position = "fixed";
+      agentEl.style.transform = "none";
+      agentEl.style.top = `${Math.max(48, ev.clientY - r.height / 2)}px`;
+      agentEl.style.left = `${Math.max(0, ev.clientX - r.width / 2)}px`;
+      agentEl.style.bottom = "auto";
+      agentEl.style.right = "auto";
+      agentEl.style.width = `${r.width}px`;
+    },
+    up: () => {
+      teardownAgentDrag();
+      setupAgentDrag();
+    },
+  };
+  window.addEventListener("pointermove", agentDrag.move);
+  window.addEventListener("pointerup", agentDrag.up, { once: true });
+  agentDrag.move(e);
 }
 
 // Pictures pasted (Ctrl+V) or dropped onto the drawer attach like pointed ones.
@@ -348,9 +361,12 @@ $("agent").addEventListener("drop", (e) => {
   attachFiles([...(e.dataTransfer?.files || [])]);
 });
 $("agent-toggle").addEventListener("click", () => agentToggle());
+$("agent-float").addEventListener("click", toggleAgentFloat);
 $("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
 $("agent-point").addEventListener("click", pointStart);
+$("agent-config-toggle").addEventListener("click", () => { $("agent-config").hidden = !$("agent-config").hidden; });
+$("agent-config-save").addEventListener("click", configSave);
 $("agent-input").addEventListener("keydown", (e) => {
   // An IME candidate is not a send: Enter only picks the candidate.
   if (e.isComposing || e.key === "Process") return;
@@ -359,21 +375,9 @@ $("agent-input").addEventListener("keydown", (e) => {
   e.preventDefault();
   agentSend();
 });
-$("agent-target").addEventListener("change", (e) => { agent.target = e.target.value; renderLog(); agentPoll(); });
-$("agent-model").addEventListener("change", async (e) => {
-  const [providerID, ...rest] = e.target.value.split("/");
-  if (!providerID || !agent.session) return;
-  try {
-    await oc(["session.switchModel", "--param", `sessionID=${agent.session}`], { model: { id: rest.join("/"), providerID } });
-    status("Model switched.");
-  } catch (err) { status(String(err)); }
-});
-$("agent-watch").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(`opencode --session ${agent.session}`); toast("Copied"); } catch { toast("Copy failed"); }
-});
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
   if (e.key === "Escape" && agent.open && !$("point-overlay").classList.contains("on")) agentToggle(false);
 });
 
-window.addEventListener("resize",()=>{ if(agent.open) invoke("agent_dock",{width:$("agent").getBoundingClientRect().width}).catch(()=>{}); });
+window.addEventListener("resize", () => { if (agent.open) invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch(() => {}); });

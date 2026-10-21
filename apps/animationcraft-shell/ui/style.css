@@ -161,6 +161,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .agent.open { transform: none; }
 body.agent-docked .agent { transform: none; z-index: 10; }
 body.agent-docked main { margin-right: min(400px, 92vw); }
+.agent.agent-floating { transform: none !important; position: fixed !important; z-index: 25 !important; box-shadow: -24px 0 60px #0008; }
 .agent-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); flex: none; background: color-mix(in srgb, var(--surface) 90%, black); }
 .agent-head-actions { display: flex; gap: 6px; }
 .agent-title { font-weight: 600; font-size: 13px; }
@@ -336,8 +337,6 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
 .sb-empty strong { font-size: 18px; }
 .sb-empty p { color: var(--muted); margin: 8px 0 20px; }
 .sb-page-wrap img[hidden] { display: none; }
-
-body.agent-docked main { margin-right: min(400px, 92vw); }
 
 .sb-page-wrap.document-pages { display:block; padding:20px; }
 .sb-sheet { position:relative; width:100%; margin:0 auto 24px; max-width:1600px; }
