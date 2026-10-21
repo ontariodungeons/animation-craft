@@ -9,6 +9,10 @@
   --faint: #5d6575;
   --accent: #64d7c2;
   --accent-ink: #0c2a25;
+  --motion-blue: #70c4ff;
+  --pose-purple: #c3a4ff;
+  --depth-gold: #f0be70;
+  --check-green: #80da9a;
   --amber: #f0a83c;
   --rust: #d0644a;
   --radius: 10px;
@@ -273,3 +277,51 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
 .motion-empty { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:32px; text-align:center; }
 .motion-empty p { max-width:360px; }
 @media(max-width:1000px){.motion-inspector{width:230px;padding:8px}.motion-stagebar{gap:4px;padding:8px}.motion-tools{gap:0}}
+
+.motion-tools .icon[aria-pressed=true] { color:var(--accent); background:var(--surface-2); }
+
+.motion-path-actions{display:flex;align-items:center;gap:4px}.motion-path-actions .start{margin:0 0 0 auto;padding:7px 10px}
+#motion-canvas.drawing{cursor:crosshair;touch-action:none}button:disabled{opacity:.4;cursor:default}
+
+/* Large teal slider handles work with mouse, keyboard and touch. */
+.motion-range input[type=range] { appearance:none; -webkit-appearance:none; height:28px; background:transparent; cursor:pointer; }
+.motion-range input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:99px; background:linear-gradient(to right,var(--accent) var(--range-fill),var(--line) var(--range-fill)); }
+.motion-range input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; margin-top:-6px; border-radius:50%; background:var(--accent); border:2px solid var(--surface); box-shadow:0 0 0 1px var(--accent); }
+.motion-range input[type=range]::-moz-range-track { height:6px; border-radius:99px; background:var(--line); }
+.motion-range input[type=range]::-moz-range-progress { height:6px; border-radius:99px; background:var(--accent); }
+.motion-range input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:var(--accent); border:2px solid var(--surface); }
+.motion-range input[type=range]:focus-visible { outline:1px solid var(--accent); outline-offset:3px; border-radius:6px; }
+
+/* Section accents identify the kind of work; status still has its own dot and label. */
+.motion-section { --control-accent:var(--muted); border-color:var(--line); }
+.motion-section[data-tone=motion] { --control-accent:var(--motion-blue); }
+.motion-section[data-tone=depth] { --control-accent:var(--depth-gold); }
+.motion-section[data-tone=pose] { --control-accent:var(--pose-purple); }
+.motion-section[data-tone=check] { --control-accent:var(--check-green); }
+.motion-section[data-tone=export] { --control-accent:var(--accent); }
+.motion-section[open] { border-color:color-mix(in srgb,var(--control-accent) 22%,var(--line)); }
+.motion-section summary { display:flex; align-items:center; gap:8px; list-style:none; padding:12px; font-size:12px; letter-spacing:.01em; }
+.motion-section summary::-webkit-details-marker { display:none; }
+.motion-section summary>span:nth-child(2) { flex:1; }
+.motion-section-icon { display:grid;place-items:center;color:var(--control-accent); }
+.motion-section-icon svg { width:15px;height:15px;stroke-width:1.6; }
+.motion-section-chevron { display:grid;place-items:center;color:var(--faint);transition:transform var(--fast) var(--ease); }
+.motion-section-chevron svg { width:13px;height:13px; }
+.motion-section[open] .motion-section-chevron { transform:rotate(90deg); }
+.motion-section[open] summary>span:nth-child(2) { color:var(--control-accent); }
+.motion-section-body { gap:14px; padding:2px 14px 14px; }
+.motion-help { font-size:11px;line-height:1.5;color:var(--muted); }
+.motion-range { gap:3px; }
+.motion-range output { color:var(--control-accent); background:color-mix(in srgb,var(--control-accent) 8%,var(--surface));padding:2px 6px;border-radius:5px;min-width:42px;text-align:right; }
+.motion-range>span { align-items:center; }
+.motion-range input[type=range]::-webkit-slider-runnable-track { height:5px;background:linear-gradient(to right,color-mix(in srgb,var(--control-accent) 70%,var(--surface)) var(--range-fill),var(--line) var(--range-fill)); }
+.motion-range input[type=range]::-webkit-slider-thumb { width:16px;height:16px;margin-top:-5.5px;background:var(--surface-2);border:2px solid var(--control-accent);box-shadow:none;transition:background var(--fast) var(--ease); }
+.motion-range input[type=range]:hover::-webkit-slider-thumb { background:var(--control-accent); }
+.motion-range input[type=range]::-moz-range-progress { background:var(--control-accent); }
+.motion-range input[type=range]::-moz-range-thumb { background:var(--surface-2);border-color:var(--control-accent); }
+.motion-range input[type=range]:focus-visible { outline-color:var(--control-accent); }
+.motion-inspector select { appearance:none;-webkit-appearance:none; background:var(--surface-2);padding:9px 28px 9px 10px; }
+.motion-object-head { position:relative; }
+.motion-object-head::after { content:'';position:absolute;right:12px;top:15px;width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg);pointer-events:none; }
+#motion-track { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e97a8' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-position:right 10px center;background-repeat:no-repeat; }
+@media(pointer:coarse){.motion-range input[type=range]{height:40px}.motion-range input[type=range]::-webkit-slider-thumb{width:22px;height:22px;margin-top:-8.5px}}

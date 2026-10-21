@@ -172,7 +172,7 @@ a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
 - ◻ Turnaround views (front/right/back/left), optimize accuracy
 
 **Animation view**
-- ◻ Stage with rest pose; zoom (fit, 100%, ±), center
+- ✅ `964aba3` Stage with rest pose; zoom (fit, 100%, ±), center (fit centers the artwork)
 - ◻ Actions (idle, walk, run, jump, wave, talk, track), jump height, run lock, WASD roam
 - ◻ Pose controls: head turn and tilt, eye blink and gaze, mouth opening and smile, arm spread, elbow and knee
   bend, ear tilt and spread, reset
@@ -209,3 +209,11 @@ does must be visible to the user.
   (6) markdown in replies is rendered with a vendored library.
 - **Verify with a real task:** ask the inner agent to do something (e.g. hide the bee's blink lids) and watch it
   through `ui.look`.
+
+## Current next slice
+
+Animation layout approved. Shell has the bee stage, engine track playback/scrub and layer visibility.
+Pen path + grid + start/end scale and colored sliders are now live; commit/evidence accompanies the
+next checkpoint. Remaining controls are not implied complete by section headings. Keep the user's
+drawn path, slider values and composer draft across any restart. User now prioritizes 2D; defer 3D
+techniques. The in-app agent validates operations and CLI configuration; coordinator owns UI changes.

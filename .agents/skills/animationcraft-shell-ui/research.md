@@ -517,3 +517,21 @@ No Animation screen implementation is authorized by this document alone.
   design skill was found in installed crates or official Tauri/tauri-docs trees and organization
   repository inventory; community packages were not mislabeled or installed as official ones.
 
+
+## Approved refinement: section color and slider taste
+
+The user prefers this shell overall, and requested only the useful section coding and icons from the
+reference inspector, not its density. Reviewed actual Rust constants and slider styling and current
+[Rive inspector](https://rive.app/docs/editor/interface-overview/inspector) plus
+[Adobe Spectrum slider anatomy](https://spectrum.adobe.com/fragments/components/slider/anatomy) and
+[usage guidance](https://spectrum.adobe.com/fragments/components/slider/usage-guidelines). Adopt labeled
+controls with units, quiet values, small handles, section icons and contextual grouping. Use the
+reference blue/purple/gold/green hues as restrained category accents. Teal remains the primary action.
+This explicitly supersedes ledger #70's single-heading-color requirement: named categories can have
+colors, while state remains a dot plus a label. The older Spectrum /page/slider URL was unavailable;
+the current fragment pages above were read instead.
+
+Pen path uses existing engine keys, not a second evaluator. Start/end scale is local scale; source
+wing/antenna motion and root rotation remain, so matrix diagonal entries are not scale measurements.
+A grid and the path are editor overlays and never enter exports. User intent for the bee is recorded
+in the song's intent.md: slow classic layered 2D, continuous frame, gentle scale/parallax for depth.

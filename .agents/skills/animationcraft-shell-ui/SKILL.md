@@ -1,6 +1,6 @@
 ---
 name: animationcraft-shell-ui
-description: Use before building or changing any screen of the AnimationCraft Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, one teal accent, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
+description: Use before building or changing any screen of the AnimationCraft Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
 ---
 
 # AnimationCraft shell UI
@@ -165,3 +165,15 @@ For agent features, also ask the inner agent to perform a real task, observe it 
 and verify state and undo. Check stale-context behavior, failed sends, typing during polling, and
 in-progress question answers. Do not claim the six-step agent contract is implemented merely because
 MCP connects. With an open project, `ui.look` defaults to `<project>/.agent/looks/`; open the actual PNG.
+
+## Approved visual refinement (2026-10-21)
+
+The user likes the shell overall and explicitly asks to retain the useful colored-slider/section
+separation concept. Keep layout and density; refine rather than redesign. Teal remains the primary
+action accent. Inspector categories may use motion blue `--motion-blue` (#70c4ff), pose purple
+`--pose-purple` (#c3a4ff), path/depth gold `--depth-gold` (#f0be70), check green `--check-green`
+(#80da9a), and neutral layers. Pair color with names and SVG icons; it never substitutes for status.
+Use a faint border tint, a colored small icon/title, a quiet value badge with units and an outlined
+slider handle. Avoid large colored panels. Sliders replace spinners and keep keyboard/touch control.
+This user-approved category coding supersedes the earlier restriction to one heading color.
+Craft processing runs headlessly by default; show previews/results inside this app.

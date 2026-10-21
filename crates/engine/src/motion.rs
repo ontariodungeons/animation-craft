@@ -495,7 +495,7 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         );
     };
     validate(rig)?;
-    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false)})).collect();
+    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false),"path":t["path"]})).collect();
     let layers: Vec<_> = rig.parts.iter().map(|p| json!({"id":p.id,"label":p.label,"file":p.cropped_path,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,
         "state":asset.parts.iter().find(|x| x.name == p.id)})).collect();
     Ok(
@@ -631,4 +631,154 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(
         json!({"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
     )
+}
+
+/// Author a drawn route using the existing position/scale key vocabulary. No new evaluator.
+pub fn cmd_motion_path(s: &mut Session, params: &Value) -> Result<Value> {
+    let id = load_character(s, params)?;
+    let rig = s
+        .assets
+        .get(&id)
+        .and_then(|a| a.cutout_rig.clone())
+        .ok_or_else(|| invalid("Load a layered rig first"))?;
+    validate(&rig)?;
+    let points: Vec<[f64; 2]> = serde_json::from_value(params["points"].clone())
+        .map_err(|_| invalid("Path points must be [x,y] pairs"))?;
+    if !(2..=512).contains(&points.len()) || points.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(invalid("Draw 2–512 finite path points"));
+    }
+    let duration = params["duration"].as_f64().unwrap_or(3.0);
+    let start_size = params["start_size"].as_f64().unwrap_or(100.0);
+    let end_size = params["end_size"].as_f64().unwrap_or(100.0);
+    if !(0.1..=600.0).contains(&duration)
+        || !(1.0..=1000.0).contains(&start_size)
+        || !(1.0..=1000.0).contains(&end_size)
+    {
+        return Err(invalid("Duration must be 0.1–600s; sizes 1–1000%"));
+    }
+    let roots: Vec<_> = rig.parts.iter().filter(|p| p.parent.is_none()).collect();
+    let part = if let Some(layer) = params["layer"].as_str() {
+        roots.iter().copied().find(|p| p.id == layer)
+    } else if roots.len() == 1 {
+        roots.first().copied()
+    } else {
+        None
+    }
+    .ok_or_else(|| invalid("Choose one root layer for the path"))?;
+    let before_text = std::fs::read_to_string(&rig.plan_path)?;
+    let before: Value = serde_json::from_str(&before_text)
+        .map_err(|e| invalid(e.to_string()))?;
+    // A file changed outside the engine must be reloaded before editing it.
+    if before != rig.effectcraft {
+        return Err(invalid(
+            "Motion changed on disk; reload the object before drawing a path",
+        ));
+    }
+    let base_id = params["track"].as_str();
+    let mut track = before["tracks"]
+        .as_array()
+        .and_then(|ts| {
+            base_id
+                .and_then(|id| ts.iter().find(|t| t["id"].as_str() == Some(id)))
+                .or_else(|| ts.first())
+        })
+        .cloned()
+        .ok_or_else(|| invalid("Choose a source motion track"))?;
+    let mut lengths = vec![0.0];
+    for pair in points.windows(2) {
+        let d = (pair[1][0] - pair[0][0]).hypot(pair[1][1] - pair[0][1]);
+        lengths.push(lengths.last().copied().unwrap_or(0.0) + d);
+    }
+    let total = lengths.last().copied().unwrap_or(0.0);
+    if total < 0.01 {
+        return Err(invalid("Path needs two different points"));
+    }
+    let keys: Vec<_> = points
+        .iter()
+        .zip(&lengths)
+        .map(|(p, d)| {
+            json!([
+                duration * d / total,
+                [p[0] - part.pivot[0] as f64, p[1] - part.pivot[1] as f64]
+            ])
+        })
+        .collect();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| invalid(e.to_string()))?
+        .as_millis();
+    let track_id = format!("drawn-path-{stamp}");
+    track["id"] = json!(track_id);
+    track["duration"] = json!(duration);
+    track["loop"] = json!(false);
+    if !track["motion"].is_object() {
+        track["motion"] = json!({});
+    }
+    if !track["motion"][&part.id].is_object() {
+        track["motion"][&part.id] = json!({});
+    }
+    track["motion"][&part.id]["position"] = json!([{"kind":"keys","ease":"linear","keys":keys}]);
+    track["motion"][&part.id]["scale"] = json!([{"kind":"keys","ease":"smooth","keys":[[0,[start_size-100.0,start_size-100.0]],[duration,[end_size-100.0,end_size-100.0]]]}]);
+    track["path"] =
+        json!({"points":points,"layer":part.id,"start_size":start_size,"end_size":end_size});
+    let mut after = before.clone();
+    after["tracks"]
+        .as_array_mut()
+        .ok_or_else(|| invalid("No track list"))?
+        .push(track);
+    let history_dir = rig
+        .plan_path
+        .parent()
+        .ok_or_else(|| invalid("No rig folder"))?
+        .join(".motion-history");
+    std::fs::create_dir_all(&history_dir)?;
+    let undo = history_dir.join(format!("path-{stamp}.json"));
+    std::fs::write(
+        &undo,
+        serde_json::to_vec_pretty(&json!({"spec":rig.plan_path,"before":before,"before_text":before_text,"after":after}))
+            .map_err(|e| invalid(e.to_string()))?,
+    )?;
+    std::fs::write(
+        &rig.plan_path,
+        serde_json::to_vec_pretty(&after).map_err(|e| invalid(e.to_string()))?,
+    )?;
+    crate::project::cmd_project_load_asset(s, &json!({"id":id,"reload":true}))?;
+    Ok(json!({"ok":true,"character":id,"track":track_id,"undo":undo}))
+}
+
+pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
+    let id = load_character(s, params)?;
+    let spec = s
+        .assets
+        .get(&id)
+        .and_then(|a| a.cutout_rig.as_ref())
+        .map(|r| r.plan_path.clone())
+        .ok_or_else(|| invalid("No rig"))?;
+    let path = std::path::PathBuf::from(
+        params["undo"]
+            .as_str()
+            .ok_or_else(|| invalid("Missing undo token"))?,
+    );
+    let history = spec
+        .parent()
+        .ok_or_else(|| invalid("No rig folder"))?
+        .join(".motion-history");
+    if path.parent() != Some(history.as_path()) {
+        return Err(invalid("Undo belongs to another object"));
+    }
+    let record: Value = serde_json::from_str(&std::fs::read_to_string(path)?)
+        .map_err(|e| invalid(e.to_string()))?;
+    let current: Value = serde_json::from_str(&std::fs::read_to_string(&spec)?)
+        .map_err(|e| invalid(e.to_string()))?;
+    if current != record["after"] || record["spec"] != json!(spec) {
+        return Err(invalid(
+            "Motion has changed since this path; undo would overwrite newer edits",
+        ));
+    }
+    std::fs::write(
+        &spec,
+        record["before_text"].as_str().ok_or_else(|| invalid("Undo record has no original source text"))?,
+    )?;
+    crate::project::cmd_project_load_asset(s, &json!({"id":id,"reload":true}))?;
+    Ok(json!({"ok":true,"character":id}))
 }

@@ -201,3 +201,9 @@ The stage draws engine samples; motion is evaluated by Rust and checked against 
 
 The first frame includes rest/play/scrub, fit/100%/zoom and layer visibility. Pose editing, song
 placement and export controls remain in progress; visible section headings are not completion claims.
+
+Pen path: `motion.path` accepts `character`, optional root `layer`, source `track`, 2–512 `[x,y]`
+canvas points, `duration` (0.1–600s), and `start_size`/`end_size` (1–1000%). It creates a new track
+using existing position/scale keys and retains other source motion. `motion.undo_path` takes the
+returned `undo` token and restores the exact source text if no newer edit would be overwritten.
+Grid and path guides are editor-only. The Pen toolbar and Path & depth sliders expose these commands.

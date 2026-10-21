@@ -30,7 +30,7 @@ not as a substitute for missing product commands. Avoid global mouse/focus autom
 
 ## Design contract
 
-- Reuse `ui/style.css` tokens and existing components. Calm surfaces, one teal accent, system sans.
+- Reuse `ui/style.css` tokens and existing components. Calm surfaces, teal primary actions, restrained functional section accents, system sans.
 - Secondary actions are SVG icons with matching tooltips and accessible names. One primary action
   per place. Preserve readable names, numeric values, field labels and timecodes.
 - The user requires animation controls on the left and a useful main stage after import. Timing
