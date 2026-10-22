@@ -525,7 +525,7 @@ fn action_lines(c: &Center, action: &Value, compact: bool) -> Vec<Line<'static>>
     let first = action["first_sequence"].as_u64(); let last = action["last_sequence"].as_u64();
     let sequence = match (first,last) { (Some(a),Some(b)) if a != b => format!("#{a}–{b}"), (Some(a),_) => format!("#{a}"), _ => "#?".into() };
     let (engine, color) = engine_badge(action);
-    let mut heading = styled(format!("{sequence}  {}  ·  {} UTC", target(start), stamp(start)), if color == RED { RED } else { BLUE });
+    let mut heading = styled(format!("{}{}  ·  {} UTC",if c.details_open{format!("{sequence}  ")}else{String::new()},target(start),stamp(start)), if color == RED { RED } else { BLUE });
     if c.flash_started.is_some_and(|at| at.elapsed() < Duration::from_millis(800)) && last.is_some_and(|seq| seq > c.flash_after) {
         heading = heading.style(Style::default().fg(if color == RED { RED } else { BLUE }).bg(DESK_SELECTED));
     }
@@ -596,7 +596,7 @@ fn render_actions(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, compac
         if i > 0 && !compact { lines.push(Line::raw("")); }
         lines.extend(action_lines(c, action, compact));
     }
-    let block = round_panel("LAST 3 ROOT ACTIONS · newest first · Pg scroll", MUTED, false);
+    let block = round_panel("Last actions · newest first · Pg scroll", MUTED, false);
     let inner = block.inner(area);
     let max_scroll = wrapped_rows(&lines, inner.width).saturating_sub(inner.height);
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((c.scroll.min(max_scroll), 0)).block(block), area);
@@ -657,7 +657,7 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
- if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=t["text"].as_str().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");lines.push(styled(format!("{}: {text}",t["role"].as_str().unwrap_or("message")),DESK_FG));}}
+ if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=t["text"].as_str().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");if lines.len()>1{lines.push(Line::raw(""));}lines.push(styled(format!("{}: {text}",if t["role"]=="user"{"You"}else{"Agent"}),DESK_FG));}}
  let block=round_panel("PROJECT AGENT · same session as Studio",MUTED,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);
  if inner.height<5{let reply=c.state["chat_turns"].as_array().into_iter().flatten().rev().find(|t|t["role"]=="assistant").and_then(|t|t["text"].as_str()).unwrap_or("No reply received");f.render_widget(Paragraph::new(vec![styled(reply,DESK_FG),styled(if c.chat_editing{format!("> {}_",c.chat_draft)}else{"F9 compose".into()},MUTED)]).wrap(Wrap{trim:false}),inner);return;}
  let parts=Layout::vertical([Constraint::Min(1),Constraint::Length(2)]).split(inner);
@@ -681,7 +681,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[1]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
- else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,false)).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);render_conversation(f,c,right[1]);}
+ else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
  }
  let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"[ / ] stage · F9 chat · D details · C copy · ↑↓ commands · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
@@ -840,6 +840,10 @@ mod feedback_tests {
         let c=fixture();assert!(stage_evidence(&c,0).is_none());assert_eq!(state_badge(Some("missing")).1,BLUE);assert_eq!(state_badge(Some("ready")).0,"[OK]");assert_eq!(state_badge(Some("working")).1,GREEN);assert_eq!(state_badge(Some("blocked")).1,RED);
     }
     #[test]
+    fn last_actions_label_keeps_three_root_actions_without_exposing_sequence_by_default(){
+        let mut c=fixture();let a=c.state["activity"]["actions"][0].clone();c.state["activity"]["actions"]=json!([a.clone(),a.clone(),a.clone(),a]);assert_eq!(root_actions(&c).len(),3);let lines=action_lines(&c,root_actions(&c)[0],true);assert!(!lines[0].to_string().contains("#40"));c.details_open=true;assert!(action_lines(&c,root_actions(&c)[0],true)[0].to_string().contains("#40"));
+    }
+    #[test]
     fn accepted_but_pending_agent_reply_still_counts_as_activity(){
       let mut c=fixture();c.state["activity"]["actions"][0]["events"][0]["command"]=json!("agent.send");c.state["activity"]["actions"][0]["events"][1]=json!({"stage":"engine_success","request_id":"save","command":"agent.send","status":"running"});
       assert!(activity_wave(&c).contains("[>] agent.send"));assert!(!activity_wave(&c).contains("idle"));c.state["activity"]["actions"][0]["events"][1]["status"]=json!("replied");assert!(activity_wave(&c).contains("idle"));
@@ -859,7 +863,7 @@ mod feedback_tests {
     fn approved_booth_uses_shared_stage_evidence_and_replied_state_at_both_sizes(){
         let mut c=fixture();c.message="Chat running · old request".into();c.state["chat"]=json!({"session":"sessionA","selection":{"provider":"opencode","model":"free"},"request":{"status":"replied","request_id":"replyA"}});c.state["chat_turns"]=json!([{"role":"assistant","text":"ACTUAL_REPLY"}]);
         assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"transcript cannot establish official artist lyrics");
-        for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Official lyrics","Liner notes","Animation","ACTUAL_REPLY","LAST 3 ROOT ACTIONS","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
+        for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Official lyrics","Liner notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
     }
 
 }
