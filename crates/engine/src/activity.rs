@@ -253,7 +253,7 @@ pub fn command(
 pub fn result(project:Option<&std::path::Path>,id:&str,value:&Value,elapsed_ms:u128){
  let context=CONTEXT.with(|v|v.borrow().clone());
  let mut outputs=json!({});
- for key in ["ok","project","path","deck","pdf","output","files","intake_ready","video_ready","captions","observation","prerequisites","metrics","status","request_id","session","native_message_id"] {
+ for key in ["ok","project","path","deck","pdf","output","files","intake_ready","video_ready","captions","observation","prerequisites","metrics","status","tasks","assessed","unassessed","scope_assessed","scope_unassessed","healthy","storyboard","storyboard_revision","assessed_at_unix_ms","diagnostic_only","request_id","session","native_message_id"] {
   if let Some(v)=value.get(key){let bytes=v.to_string();outputs[key]=if bytes.len()<=16000{v.clone()}else{json!({"summary":"output exceeds receipt bound; inspect command result","bytes":bytes.len()})};}
  }
  append(json!({"project":project,"project_id":project,"command":id,"command_id":context["_request_id"],"request_id":context["_request_id"],"stage":"command_result","elapsed_ms":elapsed_ms,"outputs":outputs,"ui_ack":"not implied by engine completion"}));

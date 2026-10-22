@@ -88,6 +88,8 @@ SUBCOMMANDS
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
+  storyboard --doctor                read-only section-boundary task list for the selected Studio project
+                                      exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
@@ -701,6 +703,12 @@ fn main() {
             }
         }
         "storyboard" => {
+            if std::env::args().any(|v|v=="--doctor"){
+                if a.pos(1).is_some_and(|v|!v.contains('=')){usage("storyboard --doctor (select the project with --bridge <port>)");}
+                let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.doctor",a.params_from(1).map(|mut p|{p["_origin"]=json!("CLI");p}).unwrap_or_else(|e|usage(e))).unwrap_or_else(|e|fail(e));
+                outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
+                std::process::exit(if result["healthy"]==true{0}else if result["healthy"]==false{1}else{2});
+            }
             let params=storyboard_edit_params(&std::env::args().skip(1).collect::<Vec<_>>()).unwrap_or_else(|e|usage(e));
             let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.edit",params).unwrap_or_else(|e|fail(e));
             if is_payload_error(&result){fail(format!("storyboard.edit: {result}"));}

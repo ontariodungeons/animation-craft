@@ -291,6 +291,9 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         item("deckcraft","Editable storyboard PDF",deck_ready,board["pdf"].is_string()||deck.is_some(),"Saved PDF fields inspected through PDFCraft; source timing/creative approval remain separate"),
     ];
     native["id"]=json!("hyperframes");native["label"]=json!("HyperFrames audio + captions");prerequisites.push(native);
+    let activity=crate::activity::events(s,&json!({"limit":192}))?;
+    let mut doctor=dir.and_then(|p|fs::read(p.join(".agent/storyboard-doctor.json")).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+    if doctor.is_object(){doctor["stale"]=json!(dir.and_then(crate::storyboard::doctor_revision).is_none_or(|r|doctor["storyboard_revision"].as_str()!=Some(&r)));}
     let metrics=json!({"timed_words":count,"lyric_groups":lines,"recording_duration_sec":duration,"last_word_end_sec":last_word,"registered_assets":s.project_assets.len(),"available_assets":assets,"animatable_assets":animated,"native_deck":deck,"design_dirty":design["dirty"],"server":workshop["video_server"]});
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_micros()).unwrap_or(0);
     let observation=json!({"id":format!("{}-{now}",std::process::id()),"project_id":s.project_path,"command":"center.status","observed_unix_micros":now,"elapsed_ms":started.elapsed().as_millis(),"source":"shared engine inspection; not inferred from process exit or UI revision"});
@@ -307,7 +310,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         crate::activity::command(s.project_path.as_deref(),"center.status",p,"engine_success",None);
     }
     Ok(
-        json!({"ok":true,"observation":observation,"prerequisites":prerequisites,"metrics":metrics,"next_commands":next_commands,"studio_acknowledgement":"unobserved; query ui.feedback separately","warnings":saved["warnings"],"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":crate::activity::events(s,&json!({"limit":192}))?,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
+        json!({"ok":true,"observation":observation,"prerequisites":prerequisites,"metrics":metrics,"next_commands":next_commands,"studio_acknowledgement":"unobserved; query ui.feedback separately","warnings":saved["warnings"],"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":activity,"storyboard_doctor":doctor,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
     )
 }
 

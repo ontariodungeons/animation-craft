@@ -574,6 +574,7 @@ fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
 pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<Value> {
     if params["template"]=="backlot" {
         let dir=project_dir(s)?;
+        let active_board=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file()).or_else(||transcript_files(&dir).into_iter().next()).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
         let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
@@ -590,11 +591,12 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let provenance=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let recording_duration=song_seconds(&dir);
         let timing_extent=recording_duration.or_else(||provenance["duration_sec"].as_f64()).or_else(||scenes.last().and_then(|v|v["end"].as_f64()));
-        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){None}else{caption_file(&dir)},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){Value::Null}else if active_board["source_transcript"]==json!(transcript){active_board["source_captions"].clone()}else{json!(caption_file(&dir))},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
         let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
         if params["allow_timing_overrun"]==true{if params["draft"]!=true{return Err(EngineError::InvalidParams("Timing-overrun source may only produce an explicitly warned draft".into()));}args.push("--allow-timing-overrun".into());}
         if let Some(source)=params["source"].as_str(){args.extend(["--source".into(),resolve_workspace_path(s,source).to_string_lossy().into_owned()]);}
+        if let Some(panels)=params["panels"].as_str(){args.extend(["--panels".into(),panels.into()]);}
         let output=run_tool_in(&dir,"python3",&args)?;
         let mut result:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
         result["project"]=json!(s.project_path);result["manifest"]=json!(out.join("manifest.json"));
@@ -971,6 +973,38 @@ pub fn cmd_storyboard_toc(s: &mut Session, _: &Value) -> Result<Value> {
         "overview_page": 2, "brief_page": pages}))
 }
 
+/// Saved input fingerprint only; polling this never runs a diagnosis.
+pub(crate) fn doctor_revision(dir:&Path)->Option<String>{
+    use sha2::{Digest,Sha256};
+    let bytes=std::fs::read(dir.join("storyboard/movie-board.json")).ok()?;
+    let board:Value=serde_json::from_slice(&bytes).ok()?;let mut hash=Sha256::new();hash.update(&bytes);
+    let mut paths=vec![dir.join("artifacts/scene_plan.json"),dir.join("artifacts/script.json")];
+    if let Some(path)=board["source_transcript"].as_str(){paths.push(path.into());}
+    for path in paths{hash.update(path.to_string_lossy().as_bytes());if let Ok(bytes)=std::fs::read(&path){hash.update(bytes);}else{hash.update(b"missing");}}
+    Some(format!("{:x}",hash.finalize()))
+}
+
+/// Explicit read-only diagnosis of the loaded project's single storyboard.
+pub fn cmd_storyboard_doctor(s:&mut Session,p:&Value)->Result<Value>{
+    let dir=project_dir(s)?;let manifest=dir.join("storyboard/movie-board.json");
+    if !manifest.is_file(){return Err(EngineError::InvalidParams("No saved storyboard for this project".into()));}
+    crate::activity::command(s.project_path.as_deref(),"storyboard.doctor",p,"dispatch_running",None);
+    let start=std::time::Instant::now();
+    let result=(|| -> Result<Value>{
+        let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
+        let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--doctor".into(),manifest.to_string_lossy().into_owned(),"--source".into(),dir.to_string_lossy().into_owned()])?;
+        let mut value:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+        value["project"]=json!(s.project_path);value["storyboard_revision"]=json!(doctor_revision(&dir));
+        value["assessed_at_unix_ms"]=json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_millis()).unwrap_or(0));
+        let report=dir.join(".agent/storyboard-doctor.json");std::fs::create_dir_all(report.parent().ok_or_else(||EngineError::InvalidParams("Missing report folder".into()))?)?;
+        value["output"]=json!(report);std::fs::write(&report,serde_json::to_vec_pretty(&value).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        Ok(value)
+    })();
+    if let Ok(value)=&result{crate::activity::result(s.project_path.as_deref(),"storyboard.doctor",value,start.elapsed().as_millis());}
+    crate::activity::command(s.project_path.as_deref(),"storyboard.doctor",p,if result.is_err(){"engine_error"}else{"engine_success"},result.as_ref().err().map(|e|e.to_string()).as_deref());
+    result
+}
+
 pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let list = storyboard_scenes(&dir)?;
@@ -995,6 +1029,11 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
     if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
         if let Ok(board)=serde_json::from_str::<Value>(&text) {
             let page=board["first_scene_page"].as_u64().unwrap_or(1)+n as u64-1;
+            if let Some(group)=board["page_plan"].as_array().and_then(|pages|pages.iter().filter_map(|p|p.get("group")).find(|g|g["id"]==format!("scene-{n}"))) {
+                result["start"]=group["span_start"].clone();result["end"]=group["span_end"].clone();result["kind"]=group["kind"].clone();
+                result["panels"]=group["panels"].clone();result["section_label"]=group["section_label"].clone();
+                if let Some(label)=group["section_label"].as_str(){result["title"]=json!(format!("{label} / Scene {n:02}"));}
+            }
             result["page"]=json!(page); result["deck"]=board["deck"].clone();
             result["preview"]=board["previews"][page as usize-1].clone();result["page_size"]=board["page_size"].clone();
             result["saved_placements"]=json!(board["design"]["placements"].as_array().map(|xs|xs.iter().filter(|p|p["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());

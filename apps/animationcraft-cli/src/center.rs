@@ -44,13 +44,15 @@ struct Center {
     chat_editing:bool,
     chat_sent:String,
     chat_sent_request:Option<String>,
+    doctor_receiver:Option<std::sync::mpsc::Receiver<Result<Value,String>>>,
+    doctor_error:Option<String>,
     chat_receiver:Option<std::sync::mpsc::Receiver<Result<Value,String>>>,
 }
 impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,state:json!({}),message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
@@ -107,6 +109,24 @@ impl Center {
             let mut command=std::process::Command::new(exe);command.args(["--bridge",&endpoint,"exec","agent.send"]);
             if let Some(fields)=params.as_object(){for(k,v)in fields{command.arg(format!("{k}={v}"));}}
             let result=command.output().map_err(|e|e.to_string()).and_then(|o|{if !o.status.success(){return Err(String::from_utf8_lossy(&o.stderr).into_owned());}serde_json::from_slice::<Value>(&o.stdout).map_err(|e|e.to_string()).and_then(|r|if r["ok"]==false{Err(r.to_string())}else{Ok(r)})});let _=tx.send(result);
+        });
+    }
+    fn poll_doctor(&mut self){
+        if let Some(result)=self.doctor_receiver.as_ref().and_then(|r|r.try_recv().ok()){
+            self.doctor_receiver=None;
+            match result{Ok(value)=>{self.state["storyboard_doctor"]=value;self.doctor_error=None;},Err(e)=>{self.doctor_error=Some(e.clone());self.message=format!("Doctor check failed: {e}");}}
+            self.refresh();
+        }
+    }
+    fn check_storyboard(&mut self){
+        if self.doctor_receiver.is_some(){return;}
+        self.stage_selected=5;self.details_open=true;self.doctor_error=None;
+        let (Some(endpoint),Some(project),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.state["project"].as_str(),self.pinned_instance.as_deref())else{self.doctor_error=Some("No matched Studio project; F8 reattach before checking".into());return;};
+        if self.state["ui"]["active_project"].as_str()!=Some(project){self.doctor_error=Some("Studio project differs; no check launched".into());return;}
+        let Ok(exe)=std::env::current_exe()else{self.doctor_error=Some("Current CLI executable unavailable".into());return;};
+        let endpoint=endpoint.to_owned();let project=project.to_owned();let instance=instance.to_owned();let(tx,rx)=std::sync::mpsc::channel();self.doctor_receiver=Some(rx);
+        std::thread::spawn(move||{
+            let result=std::process::Command::new(exe).args(["--bridge",&endpoint,"storyboard","--doctor",&format!("_expected_project={project}"),&format!("_expected_instance={instance}")]).output().map_err(|e|e.to_string()).and_then(|o|serde_json::from_slice::<Value>(&o.stdout).map_err(|_|String::from_utf8_lossy(&o.stderr).into_owned()));let _=tx.send(result);
         });
     }
     fn execute(&mut self, id: &str, mut p: Value) {
@@ -647,13 +667,34 @@ fn stage_lines(c:&Center,stacked:bool)->Vec<Line<'static>>{
  if stacked&&i%2==1{let mut previous=lines.pop().unwrap_or_default();previous.spans.push(Span::raw("   "));previous.spans.extend(line.spans);lines.push(previous);}else{lines.push(line);}}
  lines
 }
+fn doctor_badge(c:&Center)->(&'static str,Color){
+ let d=&c.state["storyboard_doctor"];
+ if c.doctor_receiver.is_some(){("● Checking",GREEN)}else if c.doctor_error.is_some(){("● Check failed",RED)}else if d.is_null(){("● Not checked",BLUE)}else if d["stale"]==true{("● Needs review · stale",AMBER)}else if d["healthy"]==true{("✓ Checked · section boundary only",DESK_FG)}else{("● Needs review",AMBER)}
+}
 fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines=if area.height<4{vec![styled(activity_wave(c),MUTED)]}else{vec![styled(selected_reason(c),DESK_FG),styled(activity_wave(c),MUTED)]};
+ if c.stage_selected==5{
+    let(mark,color)=doctor_badge(c);lines.insert(0,styled(format!("F10 🩺 [+] Storyboard Doctor · {mark}"),color));
+    let d=&c.state["storyboard_doctor"];
+    if let Some(error)=&c.doctor_error{lines.push(styled(error,RED));}
+    if !d.is_null(){
+        let time=d["assessed_at_unix_ms"].as_u64().unwrap_or(0)/1000;let rev=d["storyboard_revision"].as_str().unwrap_or("unknown");
+        lines.push(styled(format!("Checked {:02}:{:02}:{:02} UTC · input {}",time/3600%24,time/60%60,time%60,rev.get(..rev.len().min(8)).unwrap_or(rev)),MUTED));
+        if d["tasks"].as_array().is_some_and(|v|v.is_empty()){lines.push(styled("No supported spillover found. Other quality checks unassessed.",MUTED));}
+        for task in d["tasks"].as_array().into_iter().flatten(){
+            lines.push(styled(format!("{} / page {}: {}",task["scene_id"].as_str().unwrap_or("?"),task["page_id"],task["suspected_flaw"].as_str().unwrap_or("Review")),AMBER));
+            lines.push(styled(format!("Words {} · {}",task["source_word_ids"],task["affected_lyrics"].as_str().unwrap_or("")),DESK_FG));
+            lines.push(styled(task["confidence"].as_str().unwrap_or("Evidence unknown"),MUTED));
+            lines.push(styled(task["proposed_fix"].as_str().unwrap_or("Inspect source"),DESK_FG));
+        }
+        for item in d["unassessed"].as_array().into_iter().flatten().take(1){lines.push(styled(format!("Unassessed: {}",item["reason"].as_str().unwrap_or("source evidence unavailable")),AMBER));}
+    }
+ }
  let m=&c.state["metrics"];let observed=|key:&str|m[key].as_u64().map(|v|v.to_string()).unwrap_or_else(||"?".into());
  lines.push(styled(format!("{} words · {} groups · {}s audio · {}/{} assets",observed("timed_words"),observed("lyric_groups"),m["recording_duration_sec"].as_f64().map(|v|format!("{v:.2}")).unwrap_or_else(||"?".into()),observed("available_assets"),observed("registered_assets")),MUTED));
  if let Some(r)=c.state["chat"]["request"].as_object().filter(|r|r.get("status").is_some_and(|v|v=="running")){let elapsed=r.get("sent_at").and_then(Value::as_u64).map(|ms|std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_secs().saturating_sub(ms/1000)).unwrap_or(0));lines.push(styled(format!("● agent.send working · {} · {}s elapsed",c.state["chat"]["selection"]["model"].as_str().unwrap_or("model unknown"),elapsed.map(|v|v.to_string()).unwrap_or_else(||"?".into())),GREEN));}
  if c.details_open{lines.push(styled(format!("Project: {}",c.state["project"].as_str().unwrap_or("unknown")),MUTED));lines.push(styled(format!("Session: {} · request {} · engine/ack {}/{} · DOM {}ms",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["request"]["request_id"].as_str().unwrap_or("none"),revision(&c.state["ui"]["engine_revision"]),revision(&c.state["ui"]["ack_engine_revision"]),c.state["ui"]["frontend_report_age_ms"]),MUTED));}
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",PROJECT_STAGES[c.stage_selected].0,if c.details_open{" / DETAILS"}else{""}),MUTED,false)),area);
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==5{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),MUTED,false)),area);
 }
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
@@ -684,7 +725,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
  }
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"[ / ] stage · F9 chat · D details · C copy · ↑↓ commands · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
+ let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"F10 🩺 Doctor · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
 
 fn render(f: &mut Frame,c: &Center) {
@@ -717,7 +758,7 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     let result = (|| -> io::Result<()> {
         let mut refreshed=std::time::Instant::now();
         loop {
-            c.poll_chat();
+            c.poll_chat();c.poll_doctor();
             if refreshed.elapsed()>Duration::from_secs(1){c.refresh();refreshed=std::time::Instant::now();}
             terminal.draw(|f| render(f, &c))?;
             if !event::poll(Duration::from_millis(120))? {
@@ -736,6 +777,7 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
             if c.chat_editing {match key.code{KeyCode::Esc=>c.chat_editing=false,KeyCode::Enter=>c.send_chat(),KeyCode::Backspace=>{c.chat_draft.pop();},KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL)=>c.chat_draft.push(ch),_=>{}}continue;}
             if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;continue;}
             if key.code==KeyCode::F(2) && !c.show_form{c.control_view=false;continue;}
+            if key.code==KeyCode::F(10){c.check_storyboard();continue;}
             if key.code==KeyCode::F(4){c.show_form=!c.show_form;continue;}
             if !c.show_form {
                 match key.code{
@@ -802,6 +844,15 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
 mod feedback_tests {
     use super::*;
     #[test]
+    fn doctor_badges_distinguish_scope_staleness_and_failures(){
+        let mut c=Center::new(&json!({})).unwrap();assert_eq!(doctor_badge(&c).0,"● Not checked");
+        c.state["storyboard_doctor"]=json!({"healthy":true,"stale":false});assert!(doctor_badge(&c).0.starts_with("✓ Checked"));
+        c.state["storyboard_doctor"]["stale"]=json!(true);assert!(doctor_badge(&c).0.contains("stale"));
+        c.doctor_error=Some("failure".into());assert_eq!(doctor_badge(&c).0,"● Check failed");
+        let(_tx,rx)=std::sync::mpsc::channel();c.doctor_receiver=Some(rx);assert_eq!(doctor_badge(&c).0,"● Checking");
+    }
+
+    #[test]
     fn navigation_is_not_engine_work_and_requires_its_own_receipt() {
         let mut a=json!({"root_request_id":"nav-1","events":[{"stage":"ui_click","request_id":"nav-1","interaction":"navigation","control":"sb-next"}]});
         assert_eq!(engine_badge(&a).0,"— UI NAVIGATION");assert!(!action_ack(&a));
@@ -822,7 +873,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){

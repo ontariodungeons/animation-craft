@@ -16,6 +16,7 @@ def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def clock(t):
     n=round(float(t)*1000);return f'{n//60000:02}:{n//1000%60:02}.{n%1000:03}'
 def norm(t):return re.sub(r'[^\w]+','',t.lower())
+def panel_region(index):return [60+(index%2)*496,220+(index//2)*200,464,160]
 def fit_rect(width,height,region):
     if not all(math.isfinite(v) and v>0 for v in [width,height,region[2],region[3]]):raise ValueError('Picture and region dimensions must be positive')
     x,y,w,h=region;scale=min(w/width,h/height);fw,fh=width*scale,height*scale
@@ -75,7 +76,7 @@ def read_inputs(config,grouping=None):
     groups=json.loads(Path(grouping).read_text())['groups'] if grouping else propose_groups(words,duration)
     lookup={w['id']:w for w in words}
     for g in groups:
-        g['text']=' '.join(lookup[i]['text'] for i in g['word_ids'])
+        g['text']='\n'.join(l['text'] for l in g['lyric_lines']) if g.get('lyric_lines') else ' '.join(lookup[i]['text'] for i in g['word_ids'])
         if g['word_ids']:g['lyric_start']=lookup[g['word_ids'][0]]['start'];g['lyric_end']=lookup[g['word_ids'][-1]]['end']
     validate_groups(groups,words,duration)
     image_map=c.get('scene_images',{})
@@ -191,7 +192,7 @@ def build_plan(c,cues,groups,representative=False):
     pages=[dict(kind='overview',key='overview',title='Song story & backgrounds')]
     pages += sheet_pages('assets',c.get('assets',[]),'Characters & props')
     pages += sheet_pages('locations',c.get('locations',[]),'Backgrounds & locations')
-    pages += [dict(kind='scene',key='scene:'+x['id'],title=f'Scene {i+1:02}',group=x) for i,x in enumerate(groups)]
+    pages += [dict(kind='scene',key='scene:'+x['id'],title=(x.get('section_label')+' / ' if x.get('section_label') else '')+f'Scene {i+1:02}',group=x) for i,x in enumerate(groups)]
     count=math.ceil(len(pages)/TOC_PAGE_SIZE)
     contents=[dict(kind='toc',key=f'toc:{i+1}',title='Contents' if count==1 else f'Contents {i+1}/{count}') for i in range(count)]
     return pages[:1]+contents+pages[1:]
@@ -208,14 +209,14 @@ def fill_text(d,slide,role,value,size=None,fit=False):
                 if role=='user.scene.continuity':height=min(height,1130-(y+56)-12)
                 d.q('edit.select',ids=[sh['id']]);d.q('format.autofit',mode='shrink')
                 d.q('shape.setBounds',ids=[sh['id']],x=x+18,y=y+56,w=w-36,h=height)
-def place_scene_picture(d,slide,record,group_id):
+def place_scene_picture(d,slide,record,group_id,region=None):
     path=Path(record['file']).resolve()
     if not path.is_file():raise ValueError('Configured scene reference does not exist: '+str(path))
     d.flush()
     # Native insertion without a rect supplies the decoded image's natural aspect.
     picture=d.cmd('insert.picture',path=str(path),name=record.get('name','Reference only'))
     pid=picture['id'];native=d.cmd('shape.inspect',id=pid)['box']
-    fitted=fit_rect(native['w'],native['h'],SCENE_ART_REGION)
+    fitted=fit_rect(native['w'],native['h'],region or SCENE_ART_REGION)
     d.cmd('shape.sizePosition',ids=[pid],x=fitted[0],y=fitted[1],w=fitted[2],h=fitted[3],lockAspect=False)
     d.cmd('shape.sizePosition',ids=[pid],lockAspect=True)
     d.cmd('edit.select',ids=[pid]);d.cmd('shape.altText',text='user.picture.scene.'+group_id)
@@ -228,6 +229,14 @@ def place_scene_picture(d,slide,record,group_id):
     return dict(file=str(path),status='reference only / needs review',region=SCENE_ART_REGION,picture_id=pid,rect=fitted)
 def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative):
     kind=page['kind'];fill=lambda r,t,sz=None:fill_text(d,slide,r,t,sz)
+    compact=140 if kind=='scene' and page['group'].get('panels') else 0
+    if compact:
+        for shape in slide['shapes']:
+            x,y,w,h=shape['box']
+            if y>=790:d.q('shape.setBounds',ids=[shape['id']],x=x,y=y-compact,w=w,h=h)
+            if shape.get('altText')=='layout.scene.picturewell':d.q('shape.setBounds',ids=[shape['id']],x=x,y=y,w=w,h=400)
+        d.flush();slide=d.cmd('slide.inspect',index=slide['index'])
+
     duration_label='Measured recording' if c.get('recording_duration_verified',False) else 'Supplied timing extent; recording duration unknown'
     fill('auto.title',c['title']+' / '+page['title'],36)
     fill('auto.subtitle',f'{clock(duration)} / '+page['title'],18)
@@ -254,7 +263,9 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
         g=page['group'];ids=g['word_ids'];raw=g['text'] or ''
         fill('auto.scene.lyrics',raw,27)
         lyric_shape=next(x for x in slide['shapes'] if x.get('altText')=='auto.scene.lyrics')
-        d.q('edit.select',ids=[lyric_shape['id']]);d.q('format.autofit',mode='shrink');d.q('shape.setBounds',ids=[lyric_shape['id']],x=80,y=838,w=920,h=90)
+        d.q('edit.select',ids=[lyric_shape['id']]);d.q('format.autofit',mode='shrink');d.q('shape.setBounds',ids=[lyric_shape['id']],x=160 if g.get('lyric_lines') else 80,y=838-compact,w=840 if g.get('lyric_lines') else 920,h=90)
+        for i,line in enumerate(g.get('lyric_lines',[])):
+            d.text(line['id'],[80,838-compact+i*32.4,76,24],13,TEAL,False,'auto.scene.lyric_id.'+line['id'])
         existing=c.get('scene_content',{}).get(g['id'],{})
         sections=existing.get('sections') or {}
         for source_role,target_role in [('reference_prompt','user.scene.image_prompt'),('animation_prompt','user.scene.animation_prompt'),('layer_stack','user.scene.continuity'),('action','user.scene.action'),('animated_text','user.scene.animated_text'),('drawing_cues','user.scene.drawing')]:
@@ -281,7 +292,21 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
                 d.cmd('shape.sizePosition',ids=[picture['id']],x=rect[0],y=rect[1],w=rect[2],h=rect[3],lockAspect=False)
                 d.cmd('edit.select',ids=[picture['id']]);d.cmd('shape.altText',text='user.picture.'+record['id']);d.cmd('insert.hyperlink',url=path.as_uri(),tooltip='Existing asset; original pixels and alpha unchanged')
     reference=None
-    if kind=='scene' and page['group']['id'] in c.get('scene_images',{}):reference=place_scene_picture(d,slide,c['scene_images'][page['group']['id']],page['group']['id'])
+    if kind=='scene' and page['group']['id'] in c.get('scene_images',{}):
+        record=c['scene_images'][page['group']['id']]
+        if page['group'].get('panels'):
+            panels=[]
+            background=next((r for r in c.get('locations',[]) if 'backdrop' in r['id'].lower()),None)
+            if not background:raise ValueError('Four chorus panels need an existing registered backdrop; no background is generated')
+            for i,line in enumerate(page['group']['panels']):
+                image=record if i in [0,3] else background
+                placed=place_scene_picture(d,slide,image,page['group']['id']+f'.panel.{i+1}',panel_region(i))
+                rect=panel_region(i);label=('START' if i==0 else 'END' if i==3 else str(i+1))
+                d.text(f'{label}  {line.get("line_id") or ""}  {clock(line["start"])}–{clock(line["end"])}  '+line['text'],[rect[0],rect[1]+160,464,40],14,INK,False,'user.scene.panel.'+str(i+1))
+                panels.append(dict(line,reference=placed,staging='Original cast reference' if i in [0,3] else 'Existing background; animated subjects pending'))
+            reference=dict(panels=panels,original=record['file'])
+            fill('state.scene.reference','')
+        else:reference=place_scene_picture(d,slide,record,page['group']['id'])
     meta=dict(sb_generator=VERSION,page_key=page['key'],kind=kind,status='needs review',group=page.get('group'),source_transcript=c['transcript'],source_captions=c.get('captions'),sheet=page.get('sheet'))
     if kind=='scene':meta['source_packet']=c.get('scene_content',{}).get(page['group']['id'],{});meta['asset_links']=c.get('asset_links',[]);meta['official_lyrics_source']=c.get('official_lyrics_source')
     if reference:meta['reference_image']=reference
@@ -336,7 +361,7 @@ def pdf_fields(slides,pages):
             if role=='user.scene.reference' and not sh['text']:continue
             field=role.removeprefix('user.scene.').removeprefix('user.') if role!='auto.scene.lyrics' else 'lyrics'
             x,y,w,h=sh['box'];name=f'page_{i+1}_'+re.sub(r'[^a-zA-Z0-9_]', '_',role)
-            fields.append(dict(name=name,id=sh['id'],page=i+1,scene=scene if page['kind']=='scene' else None,field=field,role=role,rect=[x,y,w,h],value=sh['text'],font_size=18 if role.startswith('user.sheet.') else 12 if len(sh['text'])>100 else 27 if field=='lyrics' else 21,fill='#F3ECD7' if field=='lyrics' else '#08090C' if role=='user.scene.reference' else '#1B1D22',text_color='#211E18' if field=='lyrics' else MUTED))
+            fields.append(dict(name=name,id=sh['id'],page=i+1,scene=scene if page['kind']=='scene' else None,field=field,role=role,rect=[x,y,w,h],value=sh['text'],font_size=27 if field=='lyrics' else 14 if role.startswith('user.scene.panel.') else 18 if role.startswith('user.sheet.') else 12 if len(sh['text'])>100 else 21,fill='#F3ECD7' if field=='lyrics' else '#08090C' if role=='user.scene.reference' else '#1B1D22',text_color='#211E18' if field=='lyrics' else MUTED))
     return fields
 
 def make_pdf_editable(pdf,fields):
