@@ -906,7 +906,12 @@ pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         (Some(b), Some(changed)) => changed > b,
         (Some(_), None) => false,
     };
-    Ok(json!({"ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
+    let native_scenes=if scene_doc_path(&dir,1).is_file(){
+        let count=storyboard_scenes(&dir)?.len();
+        (1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?
+    }else{Vec::new()};
+    let native_section_schema:Vec<Value>=SCENE_SECTIONS.iter().map(|(field,label)|json!({"field":field,"label":label})).collect();
+    Ok(json!({"native_scenes":native_scenes,"native_section_schema":native_section_schema,"native_editor":"scene packets; DeckCraft editing is separate","ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
         "scene_titles": layout.get("scene_titles").cloned().unwrap_or_else(|| json!([])),
         "first_scene_page": layout.get("first_scene_page").cloned().unwrap_or_else(|| json!(2)), "layout": layout, "stale": stale}))
 }
@@ -939,7 +944,7 @@ pub fn cmd_storyboard_toc(s: &mut Session, _: &Value) -> Result<Value> {
         .enumerate()
         .map(|(i, sc)| {
             let lines = sc["lines"].as_array().map_or(0, Vec::len);
-            json!({"scene": i + 1, "title": scene_label(i, sc), "page": first_scene_page + i, "status": sc["status"], "lines": lines,
+            json!({"target":format!("scene-{}",i+1),"scene": i + 1, "title": scene_label(i, sc), "page": first_scene_page + i, "status": sc["status"], "lines": lines,
                 "panels": lines.min(panels), "notes": sc["notes"].as_array().map_or(0, Vec::len), "source": scene_doc_path(&dir, i + 1)})
         })
         .collect();
@@ -966,7 +971,7 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
                 "cue": l.get("cue"), "panel": panel, "prompt": panel.and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())})
         })
         .collect();
-    let mut result=json!({"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
+    let mut result=json!({"target":format!("scene-{n}"),"ok": true, "scene": n, "title": scene_label(n - 1, scene), "kind": scene["kind"], "start": scene["start"], "end": scene["end"],
         "status": scene["status"], "notes": scene["notes"], "reference": scene["reference"], "teaching_reference": scene["teaching_reference"],
         "sections": scene["sections"], "lines": lines, "source": scene_doc_path(&dir, n), "page": first_scene_page(&dir) + n - 1});
     if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {

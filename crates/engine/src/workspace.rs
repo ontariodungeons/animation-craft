@@ -11,14 +11,15 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result};
 
-/// Return the workspace root directory containing `studio_pipeline_cli.py`.
+/// Return the canonical current Tauri/engine workspace, independent of the caller working directory.
 pub fn workspace_root(s: &crate::Session) -> PathBuf {
-    if s.cwd.join("studio_pipeline_cli.py").is_file() {
+    let current_root = |root:&Path| root.join("Cargo.toml").is_file() && root.join("apps/animationcraft-shell/Cargo.toml").is_file();
+    if current_root(&s.cwd) {
         return s.cwd.clone();
     }
     let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     if let Ok(canon) = manifest_root.canonicalize()
-        && canon.join("studio_pipeline_cli.py").is_file()
+        && current_root(&canon)
     {
         return canon;
     }
@@ -212,6 +213,14 @@ pub fn asset_id_for_import(typed_name: Option<&str>, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caller_directory_does_not_hide_the_current_pipeline() {
+        let s=crate::Session{cwd:std::env::temp_dir(),..crate::Session::default()};
+        let root=workspace_root(&s);
+        assert!(root.join("apps/animationcraft-shell/Cargo.toml").is_file());
+        assert!(root.join("pipeline/storyboard_skeleton.py").is_file());
+    }
 
     #[test]
     fn sanitize_asset_id_lowercases_and_collapses_separators() {

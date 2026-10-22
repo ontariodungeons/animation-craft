@@ -29,6 +29,7 @@ fn startup() -> Value {
 
 mod bridge;
 mod feedback;
+mod project_cli;
 
 /// The engine session of the open project: one for the window, shared by the page's commands and
 /// the `--control` bridge (the CLI and MCP), like the session of the older UI.
@@ -142,28 +143,22 @@ fn projects_root() -> Option<String> {
         .and_then(|p| {let parent=p.parent()?;let root=if parent.file_name().is_some_and(|v|v=="project"){parent.parent()?.parent()?}else{parent.parent()?};Some(root.to_string_lossy().into_owned())})
 }
 
-/// Opens a project with the engine's `project.open` (so a bad file is refused here), records it in
-/// Recent and returns its state.
+/// Run the adjacent animationcraft-cli against this Studio's private bridge. The engine stays in
+/// this window; the initiating frontend applies the returned state and acknowledges its revision.
 #[tauri::command]
-fn project_open(app:tauri::AppHandle, engine: tauri::State<Engine>, path: String, request: Option<String>, control:Option<String>) -> Result<Value, String> {
+async fn project_open(app:tauri::AppHandle, path: String, request: Option<String>, control:Option<String>) -> Result<Value, String> {
     let request=request.unwrap_or_else(feedback::new_request);
     if let Some(result)=feedback::reuse_open(&app,&json!({"path":path,"_request_id":request,"_origin":"UI control"}))?{return Ok(result);}
     feedback::guard(&app,"project.open",true)?;
-    let mut state = engine.with(None, |s| {
-        s.execute("project.open", json!({"path": path,"claim_owner":true,"_origin":"UI control","_client":"Studio user (unverified label)","_request_id":request,"_control":control})).map_err(|e| e.to_string())?;
-        state_of(s)
-    })?;
-    state["project"]=json!(engine.with(None,|s|Ok(s.project_path.clone()))?);
-    state["_ui_engine_revision"]=json!(feedback::command_finished(&app,"project.open",&state,Some(&request)));
-    Ok(state)
+    tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.open",json!({"path":path,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
 }
 
-/// UI intake uses the same project.intake command and root/layout contract as terminal/MCP.
+/// New song uses the actual CLI project.intake command and preserves its complete receipt.
 #[tauri::command]
-fn project_create(app:tauri::AppHandle,engine:tauri::State<Engine>,name:String,audio:String,root:String,request:Option<String>,control:Option<String>)->Result<String,String>{
+async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:String,request:Option<String>,control:Option<String>)->Result<Value,String>{
  feedback::guard(&app,"project.intake",true)?;
- let result=engine.with(None,|s|s.execute("project.intake",json!({"root":root,"name":name,"audio":audio,"_origin":"UI click","_client":"Studio user (unverified label)","_request_id":request,"_control":control})).map_err(|e|e.to_string()))?;
- let path=result["project"].as_str().ok_or("Intake did not return a project path")?.to_string();Ok(path)
+ let request=request.unwrap_or_else(feedback::new_request);
+ tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
 }
 
 /// Starts (`on`) or stops the project's studio server with the engine's own commands
@@ -552,6 +547,7 @@ fn main() {
         .manage(View::default())
         .manage(AgentDock::default())
         .manage(Engine::default())
+        .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
         .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])

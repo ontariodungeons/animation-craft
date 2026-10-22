@@ -245,6 +245,9 @@ pub fn reuse_open(app: &tauri::AppHandle, params: &Value) -> Result<Option<Value
         ));
     }
     if let Some(live) = animationcraft_engine::studio_sessions::for_project(&target)? {
+        // This engine has opened the file but its frontend has not applied it yet. Returning
+        // "focused existing session" here used to skip the actual document/name render.
+        if live["identity"]["pid"].as_u64()==Some(std::process::id() as u64){return Ok(None);}
         #[cfg(unix)]
         {
             let endpoint = live["endpoint"]

@@ -71,6 +71,7 @@ fn output(app: &AppHandle, params: &Value, name: &str) -> Result<std::path::Path
 
 pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
     let none = Value::Null;
+    let ui_project_request = crate::project_cli::is_ui_request(app,id,params);
     if let Some(expected)=params["_expected_project"].as_str(){
         let expected=animationcraft_engine::studio_sessions::canonical(std::path::Path::new(expected))?;
         let actual=app.state::<Engine>().with(None,|s|Ok(s.project_path.clone()))?;
@@ -119,18 +120,23 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
             Ok(json!({"ok":true,"status":"close_requested","exited":false,"verification":"Check endpoint/process exit after this response; no force kill or silent discard."}))
         }
         _ => {
-            crate::feedback::guard(app,id,false)?;
+            crate::feedback::guard(app,id,ui_project_request)?;
             let mut supplied=params.clone();
             if supplied.is_object(){if supplied.get("_origin").is_none(){supplied["_origin"]=json!("CLI/MCP bridge");}}
             if supplied["_request_id"].is_null(){supplied["_request_id"]=json!(crate::feedback::new_request());}
             if id=="project.open"{supplied["claim_owner"]=json!(true);}
             let request_id=supplied["_request_id"].as_str().map(str::to_owned);
-            let result = app.state::<Engine>().with(None, |s| s.execute(id, supplied).map_err(|e| e.to_string()))?;
+            supplied.as_object_mut().map(|p|p.remove("_ui_dispatch_token"));
+            let mut result = app.state::<Engine>().with(None, |s| s.execute(id, supplied).map_err(|e| e.to_string()))?;
             if animationcraft_engine::find_command(id).is_some_and(|c|!c.journal){return Ok(result);}
             let revision=crate::feedback::command_finished(app,id,&result,request_id.as_deref());
+            if result.is_object(){result["_ui_engine_revision"]=json!(revision);}
+            // This command came from the UI's CLI subprocess. Its awaiting handler renders once;
+            // refreshing here would call Open while that same transition is still in flight.
+            if ui_project_request {return Ok(result);}
             // The page shows the change (and follows a project opened or created from outside).
             let project = app.state::<Engine>().with(None, |s| Ok(s.project_path.clone()))?;
-            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision)])?;
+            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision), &result])?;
             Ok(result)
         }
     }

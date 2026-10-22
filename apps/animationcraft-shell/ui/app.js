@@ -111,6 +111,14 @@ function renderBlocks() {
   const box = $("blocks");
   box.replaceChildren();
   if (!s) return;
+  const receipt=state.projectReceipt;
+  if(receipt?.project===state.project && (receipt.problems?.length || receipt.warnings?.length)){
+    box.append(el('div',{class:'why',id:'project-intake-problems',role:'status'},
+      el('strong',{},receipt.intake_ready===false?'Intake needs attention':'Project notices'),
+      el('p',{},receipt.project),
+      ...(receipt.problems||[]).map(problem=>el('p',{},String(problem))),
+      ...(receipt.warnings||[]).map(warning=>el('p',{},warning.error||warning.effect||warning.code||String(warning)))));
+  }
   // Collapse/expand toggle for the blocks rail
   box.append(el("button", {
     class: `icon rail-toggle${state.blocksCollapsed ? "" : " open"}`,
@@ -176,6 +184,15 @@ function renderStoryboard() {
   const cards = $("sb-cards");
   cards.replaceChildren();
   $("sb-empty")?.remove();
+  cards.classList.remove('native-document');
+  if (sb?.native_scenes?.length && typeof renderNativeStoryboard === 'function') {
+    chips.replaceChildren();
+    for (const id of ['sb-prev','sb-next','sb-pdf','sb-save-version']) $(id).disabled = true;
+    $('sb-page').textContent = `${sb.native_scenes.length} editable draft scenes`;
+    renderNativeStoryboard(sb, cards);
+    return;
+  }
+
   for (const id of ["sb-prev", "sb-next", "sb-pdf", "sb-save-version"]) $(id).disabled = !pages.length;
   if (!pages.length) {
     $("sb-page").textContent = "no storyboard yet";
@@ -322,8 +339,17 @@ async function load() {
 
 // Opens a project (engine `project.open`, recorded in Recent) and shows the Project view.
 async function openProject(path, start = {}) {
-  try { const opened=await invoke("project_open", { path }); if(opened.reused_session){toast("Focused the existing project session");return;}path=opened.project||path;state.data=opened; }
+  try { return await applyOpenedProject(await invoke("project_open", { path }), start); }
   catch (e) { toast(String(e)); throw e; }
+}
+
+// Apply an already executed CLI/bridge transition; never dispatch Open while refreshing it.
+async function applyOpenedProject(opened, start = {}) {
+  if(opened.reused_session){toast("Focused the existing project session");return;}
+  const path=opened.project;
+  if(!path)throw new Error('Project command did not return its canonical location');
+  state.data=opened;
+  state.projectReceipt=opened;
   if (state.project !== path) animationReset();
   state.project = path;
   state.page = 0;

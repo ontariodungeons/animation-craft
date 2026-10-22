@@ -987,7 +987,15 @@ fn import_transcript_inner(s: &mut Session, params: &Value) -> Result<Value> {
         std::fs::copy(&fcproj, &to)?;
         copied.push(to);
     }
-    let provenance=json!({"mode":"reused existing transcript; no ASR or transcoding","source":params["original_source"],"captions_source":params["original_captions"],"duration_sec":duration,"duration_source":if probed_duration.is_some(){"authoritative recording probe"}else{"unverified supplied audiomap or unknown"},"duration_warning":duration_warning, "recording_duration_sec":probed_duration,"audiomap_duration_sec":mapped_duration,"provider":"unknown; not recorded by source","model":"unknown; not recorded by source","manual":"~/.agents/skills/media-use/audio/references/transcribe.md","executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"tool":"workshop.import_transcript (native Rust; ASR not called)","grouping":grouping});
+    let mut provenance=json!({"mode":"reused existing transcript; no ASR or transcoding","source":params["original_source"],"captions_source":params["original_captions"],"duration_sec":duration,"duration_source":if probed_duration.is_some(){"authoritative recording probe"}else{"unverified supplied audiomap or unknown"},"duration_warning":duration_warning, "recording_duration_sec":probed_duration,"audiomap_duration_sec":mapped_duration,"provider":"unknown; not recorded by source","model":"unknown; not recorded by source","manual":"~/.agents/skills/media-use/audio/references/transcribe.md","executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"tool":"workshop.import_transcript (native Rust; ASR not called)","grouping":grouping});
+    {
+        use sha2::Digest;
+        let raw_hash=std::fs::read(&source).ok().map(|bytes|format!("{:x}",sha2::Sha256::digest(bytes)));
+        let prior=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok());
+        if let Some(prior)=prior.filter(|v|raw_hash.is_some()&&v["producer"]["transcript_sha256"]==json!(raw_hash)) {
+            provenance["producer"]=prior["producer"].clone();
+        }
+    }
     std::fs::write(dir.join("transcript-provenance.json"),serde_json::to_vec_pretty(&provenance).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
     let _ = ensure_video_target_project(s, &dir, &s.video_target);
     let mut status = workshop_status(s)?;
@@ -1554,41 +1562,25 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
         })?;
     let arg = |p: &Path| p.to_string_lossy().into_owned();
     let mut ran = Vec::new();
-    if overwrite || !bgm.is_file() {
-        super::workspace::run_tool_in(&hf, "ffmpeg", &["-v", "error", "-y", "-i", &arg(&audio),
-            "-codec:a", "libmp3lame", "-q:a", "2", &arg(&bgm)].map(String::from))?;
-        ran.push("ffmpeg → assets/bgm.mp3");
-    }
-    if overwrite || !transcript.is_file() {
-        super::workspace::run_tool_in(&hf, "npx", &["hyperframes", "transcribe", &arg(&bgm), "-d", &arg(&hf), "--json"]
-            .map(String::from))?;
-        ran.push("hyperframes transcribe → transcript.json");
-    }
+    let mut trace=crate::audio_trace::AudioTrace::new(&project_dir(s)?,&audio,params)?;
+    if trace.run("audio_conversion",overwrite||!bgm.is_file(),&hf,"ffmpeg",&["-v", "error", "-y", "-i", &arg(&audio),
+            "-codec:a", "libmp3lame", "-q:a", "2", &arg(&bgm)].map(String::from),&[bgm.clone()])?.is_some(){ran.push("ffmpeg → assets/bgm.mp3");}
+    if trace.run("transcription",overwrite||!transcript.is_file(),&hf,"npx",&["--no-install", "hyperframes", "transcribe", &arg(&bgm), "-d", &arg(&hf), "--json", "--no-runtime-install"]
+            .map(String::from),&[transcript.clone()])?.is_some(){ran.push("hyperframes transcribe → transcript.json");}
     let srt = hf.join("transcript.srt");
-    if overwrite || !srt.is_file() {
-        // Exported from transcript.json: the tool's caption lines, no second transcription.
-        super::workspace::run_tool_in(&hf, "npx", &["hyperframes", "transcribe", &arg(&transcript), "--to", "srt",
-            "-o", &arg(&srt)].map(String::from))?;
-        ran.push("hyperframes transcribe --to srt → transcript.srt");
-    }
-    if overwrite || !audiomap.is_file() {
-        super::workspace::run_tool_in(&hf, "python3", &[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)])?;
-        ran.push("analyze-beatgrid.py → audiomap.json");
-    }
+    // Existing JSON -> SRT conversion never runs ASR.
+    if trace.run("caption_export",overwrite||!srt.is_file(),&hf,"npx",&["--no-install", "hyperframes", "transcribe", &arg(&transcript), "--to", "srt",
+            "-o", &arg(&srt)].map(String::from),&[srt.clone()])?.is_some(){ran.push("hyperframes transcribe --to srt → transcript.srt");}
+    if trace.run("beatgrid",overwrite||!audiomap.is_file(),&hf,"python3",&[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)],&[audiomap.clone()])?.is_some(){ran.push("analyze-beatgrid.py → audiomap.json");}
     let storyboard = hf.join("STORYBOARD.md");
-    if overwrite || !storyboard.is_file() {
-        let script = super::workspace::workspace_root(s).join("pipeline/storyboard_skeleton.py");
-        super::workspace::run_tool_in(&hf, "python3", &[arg(&script), "--srt".into(), arg(&srt),
-            "--audiomap".into(), arg(&audiomap), "--out".into(), arg(&storyboard)])?;
-        ran.push("storyboard_skeleton.py → STORYBOARD.md");
-    }
-    let map: Value = serde_json::from_str(&std::fs::read_to_string(&audiomap)?)
-        .map_err(|e| EngineError::InvalidParams(format!("unreadable audiomap.json: {e}")))?;
-    let words: Value = serde_json::from_str(&std::fs::read_to_string(&transcript)?)
-        .map_err(|e| EngineError::InvalidParams(format!("unreadable transcript.json: {e}")))?;
+    let script = super::workspace::workspace_root(s).join("pipeline/storyboard_skeleton.py");
+    if trace.run("storyboard_skeleton",overwrite||!storyboard.is_file(),&hf,"python3",&[arg(&script), "--srt".into(), arg(&srt),
+            "--audiomap".into(), arg(&audiomap), "--out".into(), arg(&storyboard)],&[storyboard.clone()])?.is_some(){ran.push("storyboard_skeleton.py → STORYBOARD.md");}
+    let map=trace.read_json("read_audiomap",&audiomap)?;
+    let words=trace.read_json("read_transcript",&transcript)?;
     let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
-    cmd_workshop_import_transcript(s,&json!({"path":transcript,"captions":srt,"audiomap":audiomap,"replace":overwrite}))?;
-    Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,
+    trace.import(s,json!({"path":transcript,"captions":srt,"audiomap":audiomap,"replace":overwrite}))?;
+    Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,"analysis_attempt":trace.data,"provenance_receipt":project_dir(s)?.join("transcript-provenance.json"),
         "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap, "storyboard": storyboard},
         "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
         "silences": map["silences"], "phrases": map["phrases"], "words": words.len(),

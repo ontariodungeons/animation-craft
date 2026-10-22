@@ -19,6 +19,7 @@
 )]
 
 pub mod agent;
+pub(crate) mod audio_trace;
 pub mod activity;
 pub mod commands;
 pub mod command_center;

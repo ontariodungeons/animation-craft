@@ -57,13 +57,9 @@ async function openDialog() {
 
 // ---- New song sheet -------------------------------------------------------------------------
 
-function slug(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
 function renderWhere() {
   const name = $("new-name").value.trim(), root = $("new-root").value.trim();
-  $("new-where").textContent = name && root ? `Creates ${root}/${slug(name)}/project/${name}.acproj` : "";
+  $("new-where").textContent = name && root ? `Project root: ${root}. The project location is returned after creation.` : "";
 }
 
 async function newSheet(open = true) {
@@ -97,11 +93,11 @@ $("new-form").addEventListener("submit", async (e) => {
   $("new-create").disabled = true;
   try {
     const action=acFeedback.actions.get(e.submitter);
-    const path = await invoke("project_create", {request:action?.request_id,control:action?.control, name: $("new-name").value, audio: $("new-audio").value, root: $("new-root").value });
+    const opened = await invoke("project_create", {request:action?.request_id,control:action?.control, name: $("new-name").value, audio: $("new-audio").value, root: $("new-root").value });
     newSheet(false);
     $("new-form").reset();
-    await openProject(path);
-    toast("Project created");
+    await applyOpenedProject(opened);
+    toast(opened.problems?.length ? `Project created · ${opened.problems.join('; ')}` : "Project created");
   } catch (err) { toast(String(err)); }
   $("new-create").disabled = false;
 });

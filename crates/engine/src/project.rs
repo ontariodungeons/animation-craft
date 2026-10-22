@@ -83,6 +83,15 @@ pub fn cmd_project_list_assets(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"assets": s.project_assets, "active_asset": s.active_asset, "project": s.project_path}))
 }
 
+// Navigation history is optional global state; a valid project remains created/open if it is unavailable.
+fn recent_warning(s:&Session,path:&Path,requested:bool)->Vec<Value>{
+    if !s.record_user_state||!requested{return Vec::new();}
+    match crate::project_catalog::record(&path.to_string_lossy()){
+        Ok(())=>Vec::new(),
+        Err(error)=>vec![json!({"code":"recent_history_unavailable","stage":"update_recent_projects","path":crate::project_catalog::file(),"error":error,"project":path,"effect":"Project is available; Home recent history was not updated","next_action":"Continue using the returned project path; repair only the named navigation-history location if needed"})],
+    }
+}
+
 /// Create a new `.acproj` session.
 pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
     let path = project_file_path(s, params)?;
@@ -107,8 +116,8 @@ pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
     s.project_owner=Some(owner);
     s.song_audio = audio;
     write_project_file(s)?;
-    if s.record_user_state{crate::project_catalog::record(&path.to_string_lossy()).map_err(EngineError::InvalidParams)?;}
-    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "workshop": super::workshop::workshop_status(s)?}))
+    let warnings=recent_warning(s,&path,true);
+    Ok(json!({"ok": true, "project": path, "warnings":warnings,"assets": s.project_assets, "workshop": super::workshop::workshop_status(s)?}))
 }
 
 /// Open an existing `.acproj` session.
@@ -141,8 +150,8 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
         s.video_target = target.into();
     }
-    if s.record_user_state&&params["record_recent"]!=false{crate::project_catalog::record(&path.to_string_lossy()).map_err(EngineError::InvalidParams)?;}
-    Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing, "workshop": super::workshop::workshop_status(s)?}))
+    let warnings=recent_warning(s,&path,params["record_recent"]!=false);
+    Ok(json!({"ok": true, "project": path,"warnings":warnings,"assets": s.project_assets, "missing": missing, "workshop": super::workshop::workshop_status(s)?}))
 }
 
 /// Save the open project (or save-as when `path` is given).

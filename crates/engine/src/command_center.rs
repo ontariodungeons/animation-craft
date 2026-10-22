@@ -88,7 +88,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
             path.display()
         )));
     }
-    s.execute(
+    let lifecycle=s.execute(
         if exists {
             "project.open"
         } else {
@@ -100,6 +100,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = path
         .parent()
         .ok_or_else(|| EngineError::InvalidParams("project needs a parent folder".into()))?;
+    let warnings=lifecycle["warnings"].as_array().cloned().unwrap_or_default();
     let mut problems = Vec::<String>::new();
     let mut steps =
         vec![json!({"command":if exists{"project.open"}else{"project.new"},"status":"complete"})];
@@ -151,7 +152,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     if !valid && problems.is_empty() {
         problems.push("No valid transcript yet. Import existing HyperFrames words (JSON) with optional original SRT; audio processing is never automatic.".into());
     }
-    let result = json!({"ok":true,"intake_ready":problems.is_empty()&&valid,"storyboard_ready":false,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !problems.iter().any(|v|v.contains("transcript")||v.contains("JSON")),"manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs","next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    let result = json!({"ok":true,"warnings":warnings,"intake_ready":problems.is_empty()&&valid,"storyboard_ready":false,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !problems.iter().any(|v|v.contains("transcript")||v.contains("JSON")),"manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs","next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
@@ -198,7 +199,7 @@ pub fn status(s: &mut Session, _: &Value) -> Result<Value> {
  {"label":"Read storyboard contents","command":"storyboard.toc","enabled":valid},
  {"label":"Save project","command":"project.save","enabled":s.project_path.is_some()}]);
     Ok(
-        json!({"ok":true,"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":crate::activity::events(s,&json!({"limit":12}))?,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
+        json!({"ok":true,"warnings":saved["warnings"],"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":crate::activity::events(s,&json!({"limit":12}))?,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
     )
 }
 

@@ -86,13 +86,13 @@ window.acBridge = {
     return [x, y, Math.min(innerWidth, r.right + pad) - x, Math.min(innerHeight, r.bottom + pad) - y];
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
-  async refresh(id, project, revision) {
+  async refresh(id, project, revision, result = {}) {
     if (id.startsWith("motion.")) return { refreshed: id };
     if (id === "agent.new_chat") {
       agent.session=await invoke("agent_session",{project:state.project,set:null});agent.messages=[];agent.permissions=[];agent.forms=[];
       renderLog();renderWatch();renderModels();return {refreshed:id,session:agent.session};
     }
-    if (project && project !== state.project) {await openProject(project);await acFeedback.acknowledge(revision,project);return {refreshed:id,project,ack_engine_revision:revision};}
+    if (project && project !== state.project) {const data=await invoke('project_state',{path:project});await applyOpenedProject({...result,...data,project,_ui_engine_revision:revision});return {refreshed:id,project,ack_engine_revision:revision};}
     if (!project) {await showHome();await acFeedback.acknowledge(revision,null);return {refreshed:id,ack_engine_revision:revision};}
     state.data = await invoke("project_state", { path: state.project });
     renderTarget();
