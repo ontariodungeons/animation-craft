@@ -171,7 +171,7 @@ function renderBlocks() {
     : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
        el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
   box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
-  if (typeof imagePromptBlock === 'function') box.append(imagePromptBlock());
+  if (typeof imagePromptBlock === 'function') $('agent-image-tools')?.replaceChildren(imagePromptBlock());
 
 }
 

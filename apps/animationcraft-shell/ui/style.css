@@ -195,8 +195,11 @@ body.agent-docked main { margin-right: min(400px, 92vw); }
 .att img { width: 40px; height: 28px; object-fit: cover; border-radius: 4px; }
 .att button { color: var(--faint); }
 .agent-compose { flex: none; padding: 10px 12px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 95%, black); }
-.agent textarea { resize: none; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: inherit;
+.agent textarea { width: 100%; box-sizing: border-box; resize: none; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font: inherit;
   transition: border-color var(--fast) var(--ease); }
+.agent-image-tools { flex: none; max-height: 38vh; overflow-y: auto; padding: 8px 12px; border-top: 1px solid var(--line); }
+.agent-image-tools .block { margin: 0; }
+.agent-image-tools textarea, .agent-image-tools input { width: 100%; box-sizing: border-box; }
 .agent textarea:focus { outline: none; border-color: var(--accent); }
 .agent-actions { display: flex; align-items: center; gap: 8px; }
 .agent-actions .start { margin: 0 0 0 auto; padding: 6px 14px; }

@@ -86,3 +86,13 @@ assert.equal(vm.runInContext("agent.turns.length",context),0);
 assert.equal(vm.runInContext("agent.newChat",context),false);
 assert.ok(calls.some(c=>c.id==="render_revision"&&c.revision===12));
 console.log("PASS: bridged New Chat reloads shared drawer state and acknowledges its revision");
+
+// The shared drawer must remain available when Project is hidden for Animation/Studio.
+const shell = readFileSync(new URL("../ui/index.html", import.meta.url), "utf8");
+const projectStart = shell.indexOf('id="view-project"');
+const animationStart = shell.indexOf('id="view-animation"');
+const projectEnd = shell.lastIndexOf('</section>', animationStart);
+const drawer = shell.indexOf('id="agent"');
+assert.ok(drawer > projectEnd && drawer > projectStart, "shared drawer cannot be nested in Project");
+assert.ok(shell.indexOf('</main>') < drawer, "drawer is independent of tab-specific view visibility");
+console.log("PASS: shared Sproket drawer is outside tab-specific containers");

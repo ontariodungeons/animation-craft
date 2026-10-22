@@ -1294,6 +1294,7 @@ pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<V
     let (subject, background) =
         (out_dir.join(format!("{stem}_subject.png")), out_dir.join(format!("{stem}_background.png")));
     let bin = super::workspace::resolve_craft_cli("photocraft-cli");
+    let tool_version = super::workspace::run_tool_in(&root, &bin, &["--version".into()])?;
     let run = |steps: &[(&str, String)], out: &Path| -> Result<String> {
         let mut args = vec!["run".to_string(), source.to_string_lossy().into_owned()];
         for (cmd, p) in steps {
@@ -1330,6 +1331,8 @@ pub fn cmd_asset_extract_background(s: &mut Session, params: &Value) -> Result<V
         .find(|v| v["command"] == json!("edit.contentAwareFill"))
         .map(|v| v["result"]["filled"].clone());
     Ok(json!({"ok": true, "asset": id, "source": source, "subject": subject, "background": background,
+        "tool": {"executable": bin, "version": tool_version},
+        "operations": [select_cmd, "select.inverse", "edit.clear", "select.modify.expand", "edit.contentAwareFill"],
         "selection": {"command": select_cmd, "params": select, "result": selection}, "filled_pixels": filled,
         "next": [
             "Look at the subject on a solid colour and the background at full size before using them.",

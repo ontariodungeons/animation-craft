@@ -41,17 +41,16 @@ pub fn resolve_workspace_path(s: &crate::Session, raw: &str) -> PathBuf {
 
 /// Resolve an installed Craft CLI binary (`photocraft-cli`, `effectcraft-cli`, `filmcraft-cli`).
 pub fn resolve_craft_cli(name: &str) -> String {
-    if let Ok(dir) = std::env::var("CRAFT_CLI_DIR") {
-        let candidate = Path::new(&dir).join(name);
-        if candidate.is_file() {
-            return candidate.to_string_lossy().into_owned();
-        }
-    }
-    let squashfs = format!("/tmp/{name}-inspect/squashfs-root/usr/bin/{name}");
-    if Path::new(&squashfs).is_file() {
-        return squashfs;
-    }
-    name.to_string()
+    craft_cli_override(name, std::env::var(name.to_uppercase().replace('-', "_")).ok(),
+                       std::env::var("CRAFT_CLI_DIR").ok()).unwrap_or_else(|| name.to_string())
+}
+
+// Match pipeline/craft_cli.py: explicit tool path, suite directory, then PATH.
+// Keep an invalid explicit override so execution fails rather than silently using another version.
+fn craft_cli_override(name: &str, explicit: Option<String>, directory: Option<String>) -> Option<String> {
+    if let Some(path) = explicit.filter(|p| !p.is_empty()) { return Some(path); }
+    directory.map(|dir| Path::new(&dir).join(name)).filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Build the exact CLI argument vector for `photocraft-cli run <input> --cmd <id> [--params <json>] --out <output>`.
@@ -213,6 +212,17 @@ pub fn asset_id_for_import(typed_name: Option<&str>, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn craft_cli_explicit_version_wins_and_never_silently_falls_back() {
+        assert_eq!(craft_cli_override("photocraft-cli",Some("/configured/new-cli".into()),Some("/other".into())),Some("/configured/new-cli".into()));
+        assert_eq!(craft_cli_override("photocraft-cli",Some("/missing/explicit-cli".into()),None),Some("/missing/explicit-cli".into()));
+        assert_eq!(craft_cli_override("photocraft-cli",None,None),None);
+        let dir=std::env::temp_dir().join(format!("ac_craft_resolver_{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
+        let file=dir.join("photocraft-cli");std::fs::write(&file,b"fixture").unwrap();
+        assert_eq!(craft_cli_override("photocraft-cli",None,Some(dir.to_string_lossy().into_owned())),Some(file.to_string_lossy().into_owned()));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn caller_directory_does_not_hide_the_current_pipeline() {

@@ -87,10 +87,23 @@
         </section>
       </div>
 
+
+    </section>
+
+    <section class="view" id="view-animation" aria-label="Animation workspace"></section>
+    <section class="view" id="view-studio">
+      <div class="studio-slot" id="studio-slot"></div>
+      <div class="studio-empty" id="studio-empty">
+        <p>The studio is off.</p>
+        <p class="muted">It only runs when you need it.</p>
+        <button class="start" id="studio-start">Start the studio</button>
+      </div>
+    </section>
+  </main>
       <!-- Right rail: Agent docked panel -->
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
         <div class="agent-head">
-          <span class="agent-title">Agent</span>
+          <span class="agent-title">Sproket</span>
           <div class="agent-head-actions">
             <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
             <button class="ghost" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
@@ -125,19 +138,8 @@
             <button class="start" id="agent-send">Send</button>
           </div>
         </div>
+        <div id="agent-image-tools" class="agent-image-tools" aria-label="Image generation"></div>
       </aside>
-    </section>
-
-    <section class="view" id="view-animation" aria-label="Animation workspace"></section>
-    <section class="view" id="view-studio">
-      <div class="studio-slot" id="studio-slot"></div>
-      <div class="studio-empty" id="studio-empty">
-        <p>The studio is off.</p>
-        <p class="muted">It only runs when you need it.</p>
-        <button class="start" id="studio-start">Start the studio</button>
-      </div>
-    </section>
-  </main>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="feedback.js"></script>
