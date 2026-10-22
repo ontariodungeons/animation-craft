@@ -34,6 +34,7 @@ pub mod project;
 pub mod rig;
 pub mod sequence;
 pub mod sheets;
+pub mod image_generation;
 pub mod session;
 pub mod storyboard;
 pub mod storyboard_design;

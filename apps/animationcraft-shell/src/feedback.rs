@@ -132,6 +132,20 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     v["connection"] = json!("connected");
     v["identity"] = json!({"application":"AnimationCraft Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("ANIMATIONCRAFT_BUILD_ID")});
     v["active_project"] = json!(project);
+    v["project_id"] = json!(project);
+    v["project_identity_kind"] = json!("canonical project path");
+    v["observed_unix_ms"] = json!(now());
+    v["frontend_report_age_ms"] = v["updated_unix_ms"].as_u64().map(|updated|json!(now().saturating_sub(updated as u128))).unwrap_or(Value::Null);
+    v["chat_selection"] = match animationcraft_engine::agent::settings(){
+        Ok(selected)=>json!({"agent":selected["agent"],"provider":selected["provider"],"model":selected["model"],"source":"saved app selection","runtime_model_verified":false}),
+        Err(error)=>json!({"status":"unknown","error":error.to_string(),"runtime_model_verified":false}),
+    };
+    let mut reasons=Vec::new();
+    if dirty==Some(true){reasons.push(json!("engine state differs from saved project"));}
+    if dirty.is_none(){reasons.push(json!("engine state unavailable; busy or unreadable saved project"));}
+    for field in v["draft_fields"].as_array().into_iter().flatten(){reasons.push(json!({"draft_field":field}));}
+    if v["pending_invokes"].as_u64().unwrap_or(0)>0 {reasons.push(json!({"pending_invokes":v["pending_invokes"]}));}
+    v["dirty_reasons"]=json!(reasons);
     v["engine_unsaved"] = json!(dirty);
     v["unsaved_state"] = json!(if dirty == Some(true)
         || v["draft_fields"].as_array().is_some_and(|a| !a.is_empty())

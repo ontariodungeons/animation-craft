@@ -36,6 +36,12 @@ Recent activity stores three root action groups per project. Engine results and 
 
 This first slice does not wire the Tauri New form to `project.intake`, build/register the separate DeckCraft template, or infer creative fields. Current shell source exposes guarded dirty-state and UI-feedback queries; a running older shell must be rebuilt and safely restarted before those updated contracts apply. Its UI mapping panel labels remaining gaps. Audio-tool provider/model provenance is reported unknown when the received source did not record it.
 
+## Generate an image
+
+`animationcraft-cli exec image.generate project=/absolute/project.acproj prompt='Describe the artwork' model=gpt-6-luna quality=auto` uses a fresh Codex session and the native image tool with the current login. The same `image.generate` command is exposed to MCP and the separate Project image-prompt block; it does not change chat settings. `animationcraft-cli commands image.generate` describes the contract. The executable remains `animationcraft-cli`; no separate `ac-cli` implementation is installed.
+
+Generated PNGs and request receipts live in the selected project's `assets/generated-images/<request>/`. The one-shot subprocess stops after its first successful native image receipt; the adapter copies the receipt-correlated staged bytes rather than trusting an agent-authored file or save claim. A successful native tool receipt and full PNG decode are required before `project.add_asset` attaches it. Failures retain received files and logs without approval claims. The selected Codex model is distinct from the underlying image model; only `quality=auto` is verified, exact resolution is tool-controlled and actual dimensions are returned. Generation serializes engine mutations; the shell remains responsive but other engine requests wait. This block needs a rebuilt shell; terminal success alone does not verify UI rendering.
+
 ## Existing material intake
 
 Discover contracts from `animationcraft-cli commands workshop` and `commands project`. `workshop.set_audio` references original audio. `workshop.import_transcript` accepts JSON with optional original SRT via `captions`; preserve every word/timestamp and distinguish raw transcription from corrections. Audio analysis/transcription is an explicit operation, never a prerequisite for reusing valid existing timing. Existing imported or generated files are not proof of approval.

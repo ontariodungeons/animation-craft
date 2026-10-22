@@ -310,7 +310,8 @@ impl Center{
    ("Inspect selected project's Studio connection; never opens or switches",format!("{exe} exec ui.feedback {}",if project.is_empty(){String::new()}else{shell_quote(&format!("project={project}"))})),
    ("Read this project's next persisted action stages",format!("{exe} exec center.events after={cursor} limit=192 {}",if project.is_empty(){String::new()}else{shell_quote(&format!("project={project}"))})),
    ("Inspect project state; closed projects use read-only disk metadata",inspection),
-   ("Read the actual transcript import contract; no processing",format!("{exe} commands workshop.import_transcript"))];
+   ("Read the actual transcript import contract; no processing",format!("{exe} commands workshop.import_transcript")),
+   ("Read saved app chat selection; no inference or settings change",format!("{exe} exec agent.config"))];
   commands
  }
  fn copy_command(&mut self){
@@ -544,7 +545,7 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
 fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let area = f.area(); let narrow = area.width < 110;
     f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
-    let chunks = Layout::vertical([Constraint::Length(if narrow { 6 } else { 5 }),Constraint::Min(1),Constraint::Length(if area.height >= 28 { 2 } else { 1 })]).split(area);
+    let chunks = Layout::vertical([Constraint::Length(if narrow { 8 } else { 7 }),Constraint::Min(1),Constraint::Length(if area.height >= 28 { 2 } else { 1 })]).split(area);
     let project = c.state["project"].as_str();
     let name = project.and_then(|p|std::path::Path::new(p).file_stem()).and_then(|n|n.to_str()).unwrap_or("No project");
     let ui = &c.state["ui"];
@@ -567,6 +568,12 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     else { header.push(Line::from(vec![Span::styled(fit_text(&status,area.width.saturating_sub(42) as usize),Style::default().fg(if matched && ui["ui_ready"] == true { GREEN } else { AMBER })),Span::styled(format!("  {}",activity_wave(c)),Style::default().fg(TEAL))])); }
     if narrow { header.push(styled(activity_wave(c),TEAL)); }
     let block = Block::default().borders(Borders::ALL).border_type(ratatui::widgets::BorderType::Rounded).border_style(Style::default().fg(DESK_LINE)).title(Line::from(tabs));
+    let selected=&ui["chat_selection"];
+    header.push(styled(fit_text(&format!(" VIEW: {} · CHAT: {} / {} / {} · runtime model unverified",ui["view"].as_str().unwrap_or("unobserved"),selected["agent"].as_str().filter(|s|!s.is_empty()).unwrap_or("unknown"),selected["provider"].as_str().filter(|s|!s.is_empty()).unwrap_or("default/unknown"),selected["model"].as_str().filter(|s|!s.is_empty()).unwrap_or("default/unknown")),area.width.saturating_sub(4) as usize),BLUE));
+    let report_age=ui["frontend_report_age_ms"].as_u64().map(|ms|format!("{}s",ms/1000)).unwrap_or_else(||"unknown".into());
+    let reasons=ui["dirty_reasons"].as_array().map(|a|a.iter().map(|v|v.as_str().map(str::to_owned).unwrap_or_else(||v.to_string())).collect::<Vec<_>>().join("; ")).unwrap_or_default();
+    let errors=ui["errors"].as_array().map(|a|a.iter().filter_map(|v|v["message"].as_str()).collect::<Vec<_>>().join("; ")).unwrap_or_default();
+    header.push(styled(fit_text(&format!(" DOM report age: {report_age} · {}{}",if reasons.is_empty(){"no reported dirty reason"}else{&reasons},if errors.is_empty(){String::new()}else{format!(" · ERROR: {errors}")}),area.width.saturating_sub(4) as usize),if !errors.is_empty()||!reasons.is_empty(){AMBER}else{MUTED}));
     f.render_widget(Paragraph::new(header).block(block),chunks[0]);
     if control {
         let parts = Layout::vertical([Constraint::Min(5),Constraint::Length(if area.height >= 35 { 11 } else { 8 })]).split(chunks[1]);

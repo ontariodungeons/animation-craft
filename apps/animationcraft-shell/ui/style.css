@@ -431,3 +431,18 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 .project-summary{min-width:0;flex:1;}.project-main{display:flex;flex-direction:column;gap:5px;max-width:100%;text-align:left;}
 .project-main .folder{font-size:11px;overflow-wrap:anywhere;color:var(--muted);}.project-state{font-size:12px;}.project-state.is-open{color:var(--accent);}.project-state.needs-check{color:var(--amber);}
 .project-quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}.project-quick button{font-size:11px;padding:5px;}.project-quick button:disabled{opacity:.45;cursor:not-allowed;}
+
+/* Separate image composer: existing workflow block and theme, independent of chat. */
+.image-prompt-block textarea,.image-prompt-block input { width:100%; min-width:0; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; font:inherit; }
+.image-prompt-block textarea { resize:vertical; min-height:88px; }
+.image-prompt-block textarea:focus,.image-prompt-block input:focus { outline:1px solid var(--accent); }
+.image-prompt-block code { display:block; user-select:text; overflow-wrap:anywhere; margin:8px 0; font-size:11px; }
+.image-prompt-block .image-result { width:100%; max-height:240px; object-fit:contain; border-radius:var(--radius); }
+.image-prompt-block .image-error { color:var(--rust); overflow-wrap:anywhere; }
+
+/* Keep native image assets readable inside the existing workflow rail. */
+.objects { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr)); gap:8px; min-width:0; }
+.objects .object { display:flex; flex-direction:column; gap:6px; width:100%; min-width:0; text-align:left; }
+.objects .stack { display:grid; place-items:center; width:100%; height:140px; overflow:hidden; border-radius:8px; background:var(--bg); }
+.objects .stack img { display:block; width:100%; height:140px; min-height:0; max-height:140px; object-fit:contain; }
+.objects .object .label { overflow-wrap:anywhere; }

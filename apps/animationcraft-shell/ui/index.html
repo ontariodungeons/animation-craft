@@ -93,7 +93,7 @@
           <span class="agent-title">Agent</span>
           <div class="agent-head-actions">
             <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
-            <button class="icon" id="agent-new" aria-label="New chat" title="New chat · keep previous conversation"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+            <button class="ghost" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
             <button class="icon" id="agent-close" aria-label="Close the agent panel" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           </div>
         </div>
@@ -103,7 +103,11 @@
         </div>
         <div class="agent-config" id="agent-config" hidden>
           <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
-          <label>Model<input id="agent-model" placeholder="default" title="Model passed to the command" /></label>
+          <label>Provider<input id="agent-provider" list="agent-providers" placeholder="CLI default" title="Exact provider ID; choose from the installed catalog" /><datalist id="agent-providers"></datalist></label>
+          <label>Model<input id="agent-model" list="agent-models" placeholder="CLI default" title="Exact model ID; saved for both app and CLI" /><datalist id="agent-models"></datalist></label>
+          <button class="ghost" id="agent-catalog-refresh" title="Read the installed model catalog without inference">Refresh models</button>
+          <small id="agent-catalog-status" role="status"></small>
+          <small>Messages start fresh. Chat settings are separate from image generation.</small>
           <label>Thinking<select id="agent-thinking" title="Reasoning effort">
             <option value="">default</option><option value="off">off</option><option value="low">low</option>
             <option value="medium">medium</option><option value="high">high</option></select></label>
@@ -138,6 +142,7 @@
   <div class="toast" id="toast" role="status"></div>
   <script src="feedback.js"></script>
   <script src="app.js"></script>
+  <script src="image-prompt.js"></script>
   <script src="animation.js"></script>
   <script src="sequence.js"></script>
   <script src="agent.js"></script>

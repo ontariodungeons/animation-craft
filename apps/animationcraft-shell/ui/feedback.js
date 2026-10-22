@@ -4,7 +4,8 @@ function feedbackSnapshot(){
  const changed=[...document.querySelectorAll('input:not([type=password]),textarea,[contenteditable=true]')].filter(n=>n.getBoundingClientRect().width&&n.getBoundingClientRect().height&&!n.closest('#agent-log')).filter(n=>n.isContentEditable?!!n.textContent.trim():n.value!==n.defaultValue).map(n=>n.id||n.tagName.toLowerCase());
  const pane=typeof state==='undefined'?null:document.querySelector(state.project?'#view-'+state.view:'#view-home');
  const rendered=!!pane&&pane.getBoundingClientRect().width>0&&pane.getBoundingClientRect().height>0&&getComputedStyle(pane).display!=='none'&&pane.textContent.trim().length>0;
- return {rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
+ const chat=typeof agent!=="undefined"&&agent.loaded?{agent:document.getElementById('agent-command')?.value||null,provider:document.getElementById('agent-provider')?.value||null,model:document.getElementById('agent-model')?.value||null,source:'rendered selector; may include unsaved edits'}:null;
+ return {chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
 }
 acFeedback.report=async function(phase,ack,event){
  if(phase)acFeedback.phase=phase;if(ack)acFeedback.ack=Math.max(acFeedback.ack,ack);

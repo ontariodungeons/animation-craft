@@ -96,7 +96,7 @@ SUBCOMMANDS
   --version                           print the version
 
   agent say \"<text>\" [wait=300] [project=<dir>]
-                                      talk to the project's in-app opencode agent (prints its reply);
+                                      talk to the app-selected chat agent (fresh by default; prints its reply);
                                       also: agent read [last=10], agent session (not an MCP tool)
 
 LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec ui.state`)
@@ -207,7 +207,10 @@ fn command_input_schema(id: &str) -> Value {
     let unit = json!({ "type": "number", "minimum": 0, "maximum": 1 });
     let point = json!({ "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 });
     match id {
-        "agent.new_chat" => json!({"type":"object","properties":{"model":{"type":"object","properties":{"id":{"type":"string"},"providerID":{"type":"string"}},"required":["id","providerID"]}},"additionalProperties":false}),
+        "agent.config" | "agent.session" => json!({"type":"object","properties":{},"additionalProperties":false}),
+        "agent.models" => json!({"type":"object","properties":{"agent":{"type":"string","enum":["opencode","codex","omp","claude"]}},"additionalProperties":false}),
+        "agent.new_chat" => json!({"type":"object","properties":{"free_only":{"type":"boolean"}},"additionalProperties":false}),
+        "agent.send" => json!({"type":"object","properties":{"message":{"type":"string"},"attachments":{"type":"array","items":{"type":"string"}},"new_chat":{"type":"boolean","default":true},"wait":{"type":"integer","minimum":0,"maximum":300},"free_only":{"type":"boolean"}},"required":["message"],"additionalProperties":false}),
         "workshop.build_storyboard" => json!({"type":"object","properties":{"template":{"type":"string","enum":["pdf","backlot"]},"source":{"type":"string","description":"Optional OpenMontage project folder containing scene plan, script and reference artwork"}},"additionalProperties":false}),
         "image.break_apart" => json!({
             "type": "object",
@@ -493,127 +496,36 @@ fn mcp_tools() -> Vec<Value> {
     tools
 }
 
-/// `opencode api <args…> [-d data]` against the user's opencode background service.
-fn opencode_api(cwd: &std::path::Path, args: &[&str], data: Option<&Value>) -> Result<Value, String> {
-    let mut cmd = std::process::Command::new("opencode");
-    cmd.current_dir(cwd).arg("api").args(args);
-    if let Some(d) = data {
-        cmd.arg("-d").arg(d.to_string());
-    }
-    // opencode can exit before a pipe is drained (large replies get cut at a 64 KiB boundary),
-    // so its reply is written to a file and read back whole.
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let reply = std::env::temp_dir().join(format!(
-        "animationcraft-opencode-{}-{}.json",
-        std::process::id(),
-        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    let file = std::fs::File::create(&reply).map_err(|e| format!("opencode reply file: {e}"))?;
-    let out = cmd.stdout(file).output().map_err(|e| format!("opencode: {e}"))?;
-    let stdout = std::fs::read(&reply).unwrap_or_default();
-    let _ = std::fs::remove_file(&reply);
-    if !out.status.success() {
-        return Err(format!("opencode {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    let text = String::from_utf8_lossy(&stdout);
-    if text.trim().is_empty() {
-        return Ok(Value::Null);
-    }
-    serde_json::from_str(&text).map_err(|e| format!("opencode reply: {e}"))
-}
-
 /// `agent say|read|session`: talk to the project's in-app opencode agent from outside the app.
 /// Deliberately not an engine command, so it is not an MCP tool the agent itself could call.
 fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<String>) -> Result<(), String> {
-    let dir = match params.get("project").and_then(Value::as_str) {
-        Some(p) if p.ends_with(".acproj") => std::path::Path::new(p).parent().map(std::path::Path::to_path_buf).ok_or("bad project path")?,
-        Some(p) => std::path::PathBuf::from(p),
-        None => match &bridge {
-            Some(addr) => bridge_call(addr, "project.list_assets", json!({}))?["project"]
-                .as_str()
-                .and_then(|p| std::path::Path::new(p).parent().map(std::path::Path::to_path_buf))
-                .ok_or("the live app has no project open; pass project=<folder>")?,
-            None => std::env::current_dir().map_err(|e| e.to_string())?,
-        },
+    let command = match verb { "say" => "agent.send", "read" => "agent.log", "session" => "agent.session", _ => return Err("usage: agent say \"<text>\" [project=<existing project>] | agent read | agent session".into()) };
+    let mut request = params.clone();
+    if verb == "say" { request["message"] = json!(text.ok_or("agent say needs message text")?); }
+    let result = if let Some(addr) = bridge {
+        if params.get("project").is_some() { return Err("Use an explicitly pinned Studio bridge or a headless project path; no automatic project switch".into()); }
+        bridge_call(&addr, command, request)?
+    } else {
+        let mut session = Session::user_session();
+        let target = params["project"].as_str().map(std::path::PathBuf::from)
+            .unwrap_or(std::env::current_dir().map_err(|e|e.to_string())?);
+        let project = if target.extension().is_some_and(|e|e=="acproj") { target } else {
+            let files: Vec<_> = std::fs::read_dir(&target).map_err(|_|"Project directory unavailable; pass project=<existing .acproj>")?
+                .filter_map(Result::ok).map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="acproj")).collect();
+            if files.len()!=1 { return Err("Pass project=<existing .acproj>; no unique project found and no bootstrap project was created".into()); }
+            files[0].clone()
+        };
+        session.execute("project.attach", json!({"path":project})).map_err(|e|e.to_string())?;
+        request["_origin"]=json!("CLI agent");
+        dispatch(&mut session,command,request)?
     };
-    let file = dir.join(".agent").join("opencode-session");
-    let session = std::fs::read_to_string(&file).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let print = |messages: &[Value]| {
-        for m in messages {
-            match m["type"].as_str() {
-                Some("user") => outln!("\n> {}", m["text"].as_str().unwrap_or("")),
-                Some("assistant") => {
-                    for part in m["content"].as_array().into_iter().flatten() {
-                        match part["type"].as_str() {
-                            Some("text") => outln!("{}", part["text"].as_str().unwrap_or("")),
-                            Some(k) if k.contains("tool") => outln!("  · {}", part["name"].as_str().unwrap_or(k)),
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    };
-    let list = |sid: &str, limit: u64| -> Result<Vec<Value>, String> {
-        let v = opencode_api(&dir, &["session.message.list", "--param", &format!("sessionID={sid}"), "--param", "order=desc", "--param", &format!("limit={limit}")], None)?;
-        Ok(v["data"].as_array().cloned().unwrap_or_default().into_iter().rev().collect())
-    };
-    match verb {
-        "session" => {
-            outln!("{}", session.ok_or_else(|| format!("no agent session yet for {}", dir.display()))?);
-            Ok(())
-        }
-        "read" => {
-            let sid = session.ok_or_else(|| format!("no agent session yet for {}", dir.display()))?;
-            print(&list(&sid, params.get("last").and_then(Value::as_u64).unwrap_or(10))?);
-            Ok(())
-        }
-        "say" => {
-            let text = text.ok_or("agent say needs the message text")?;
-            let sid = match session {
-                Some(s) => s,
-                None => {
-                    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project");
-                    let v = opencode_api(&dir, &["session.create"], Some(&json!({"title": format!("AnimationCraft · {name}")})))?;
-                    let id = v["data"]["id"].as_str().ok_or("opencode did not return a session id")?.to_string();
-                    std::fs::create_dir_all(dir.join(".agent")).map_err(|e| e.to_string())?;
-                    std::fs::write(&file, &id).map_err(|e| e.to_string())?;
-                    id
-                }
-            };
-            let sent = opencode_api(&dir, &["session.prompt", "--param", &format!("sessionID={sid}")], Some(&json!({"text": text})))?;
-            let since = sent["data"]["time"]["created"].as_u64().unwrap_or(0);
-            let wait = params.get("wait").and_then(Value::as_u64).unwrap_or(300);
-            if wait == 0 {
-                outln!("sent to {sid}");
-                return Ok(());
-            }
-            let start = std::time::Instant::now();
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                let new: Vec<Value> = list(&sid, 30)?.into_iter().filter(|m| m["time"]["created"].as_u64().unwrap_or(0) >= since).collect();
-                let forms = opencode_api(&dir, &["session.form.list", "--param", &format!("sessionID={sid}")], None)?;
-                let asked = forms["data"].as_array().is_some_and(|f| !f.is_empty());
-                if asked || new.iter().any(|m| m["type"] == json!("idle")) {
-                    print(&new);
-                    for f in forms["data"].as_array().into_iter().flatten() {
-                        for field in f["fields"].as_array().into_iter().flatten() {
-                            outln!("\n? {} — {}", field["title"].as_str().unwrap_or(""), field["description"].as_str().unwrap_or(""));
-                            for o in field["options"].as_array().into_iter().flatten() {
-                                outln!("  - {}", o["label"].as_str().unwrap_or(""));
-                            }
-                        }
-                    }
-                    return Ok(());
-                }
-                if start.elapsed().as_secs() > wait {
-                    return Err(format!("no reply within {wait} s; see `agent read` (session {sid})"));
-                }
-            }
-        }
-        _ => Err("usage: agent say \"<text>\" [wait=300] [project=<dir>] | agent read [last=10] | agent session".into()),
+    if verb=="say" {
+        if let Some(text)=result["text"].as_str(){outln!("{}",text);}else{outln!("{}",result);}
     }
+    else if verb=="session" { outln!("{}",result["session"].as_str().ok_or("No recorded provider session; inspect agent.config and start a fresh chat")?); }
+    else { outln!("{}",result); }
+    if result["ok"]==false { return Err(format!("Agent needs attention in session {}; inspect agent read project=<same .acproj> before retrying",result["session"])); }
+    Ok(())
 }
 
 /// `ui_look` as an MCP result: the picture as an image block, the state as text.
@@ -648,6 +560,14 @@ fn base64(bytes: &[u8]) -> String {
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
 pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Value,String>{
+ if id=="image.generate" && params["project"].is_string(){
+  let target=params["project"].as_str().ok_or("Missing image project")?;
+  let identity=session.execute("project.identity",json!({"path":target})).map_err(|e|e.to_string())?;
+  let project=identity["project"].as_str().ok_or("No canonical image project")?;
+  if session.project_path.as_deref().is_some_and(|p|p!=std::path::Path::new(project)){return Err("Image target differs from this session's project; attach it explicitly in a separate session".into());}
+  if session.project_path.is_none(){session.execute("project.attach",json!({"path":project})).map_err(|e|e.to_string())?;}
+ }
+
  let requested=if id=="project.open" || (id=="project.intake" && params["path"].as_str().is_some_and(|p|std::path::Path::new(p).is_file())){Some(session.execute("project.identity",params.clone()).map_err(|e|e.to_string())?["project"].as_str().ok_or("No canonical project")?.to_string())}else if id=="project.intake"{None}else{session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned())};
  if let Some(project)=requested{
   if let Some(live)=animationcraft_engine::studio_sessions::for_project(std::path::Path::new(&project))?{

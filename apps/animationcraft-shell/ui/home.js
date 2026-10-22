@@ -108,7 +108,7 @@ $("new-form").addEventListener("submit", async (e) => {
 
 $("home-new").addEventListener("click", () => newSheet(true));
 $("home-open").addEventListener("click", openDialog);
-$("brand").addEventListener("click", showHome);
+$("brand").addEventListener("click", () => showHome().catch(error => toast(String(error))));
 $("brand").addEventListener("keydown", (e) => { if (e.key === "Enter") showHome(); });
 document.addEventListener("keydown", (e) => {
   if (!(e.ctrlKey || e.metaKey) || e.target.closest("input, textarea")) {

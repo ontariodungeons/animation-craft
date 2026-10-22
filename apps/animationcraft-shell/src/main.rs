@@ -66,7 +66,9 @@ fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, St
 /// Execute the shared engine registry without blocking the UI thread.
 async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
     let long = animationcraft_engine::find_command(&id).is_some_and(|c| c.long_running);
-    if !long {
+    // Image generation attaches an asset and saves the project. Keep that mutation serialized;
+    // merging an old background snapshot could overwrite concurrent asset edits.
+    if !long || id == "image.generate" {
         return tauri::async_runtime::spawn_blocking(move || {
             app.state::<Engine>().with(None, |s| s.execute(&id, params).map_err(|e| e.to_string()))
         })
@@ -202,6 +204,7 @@ fn agent_defaults() -> Value {
     json!({
         "agent": "omp",
         "model": "",
+        "provider": "",
         "thinking": "",
         "extra_args": [],
         "instructions": crate_dir.join("agent.md").to_string_lossy(),
@@ -252,7 +255,7 @@ fn agent_catalog() -> Value {
             json!({
                 "name": name,
                 "installed": which(name).is_some(),
-                "headless": matches!(*name, "omp" | "claude" | "codex"),
+                "headless": matches!(*name, "opencode" | "omp" | "claude" | "codex"),
                 "default": default.as_deref() == Some(*name),
             })
         })
@@ -263,7 +266,8 @@ fn agent_catalog() -> Value {
 /// The settings the agent pane shows and edits, plus the installed agents to choose from.
 #[tauri::command]
 fn agent_config() -> Result<Value, String> {
-    let mut settings = agent_settings()?;
+    let mut settings = animationcraft_engine::agent::settings().map_err(|e| e.to_string())?;
+    settings["instructions"] = agent_defaults()["instructions"].clone();
     if let (Some(base), Value::Object(catalog)) = (settings.as_object_mut(), agent_catalog()) {
         for (key, value) in catalog {
             base.insert(key, value);
@@ -275,6 +279,18 @@ fn agent_config() -> Result<Value, String> {
 /// Merge `patch` into the agent settings; returns the settings actually stored.
 #[tauri::command]
 fn agent_config_save(patch: Value) -> Result<Value, String> {
+    let fields = patch.as_object().ok_or("Chat settings must be an object")?;
+    if fields.get("agent").is_some_and(|v|!v.is_string()) { return Err("Chat agent must be a string".into()); }
+    if fields.get("extra_args").is_some_and(|v|!v.is_array()) { return Err("Extra arguments must be an array".into()); }
+    if fields.keys().any(|k| !matches!(k.as_str(), "agent" | "provider" | "model" | "thinking" | "extra_args")) {
+        return Err("Only chat selection fields can be changed here; credentials and image settings are separate".into());
+    }
+    for key in ["provider", "model", "thinking"] {
+        if let Some(value) = fields.get(key) {
+            let value = value.as_str().ok_or("Chat selection fields must be strings")?;
+            if value.len() > 256 || value.chars().any(char::is_control) { return Err("Invalid chat selection".into()); }
+        }
+    }
     if let Some(agent) = patch.get("agent").and_then(Value::as_str) {
         if !AGENT_NAMES.contains(&agent) {
             return Err(format!("unknown agent `{agent}`"));
@@ -293,7 +309,7 @@ fn agent_config_save(patch: Value) -> Result<Value, String> {
     std::fs::create_dir_all(agent_home()).map_err(|e| e.to_string())?;
     std::fs::write(&file, serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    agent_settings()
+    agent_config()
 }
 
 /// Point: WebKit's snapshot of the project view cropped to `rect` (CSS px, x y w h), saved to

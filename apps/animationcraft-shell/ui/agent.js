@@ -3,10 +3,10 @@
 // Its settings are stored by the app (`agent_config`), its conversation lives in the project
 // (`.agent/agent-log.json`) and every turn runs the configured command as a child process of this
 // window, in the project folder, with the app's instructions appended to its system prompt.
-// Nothing here needs a service, session or tool started somewhere else.
+// OpenCode uses its existing installed API/session route; no image settings are changed here.
 const agent = {
   open: false, turns: [], config: null, sending: false, attachments: [], loaded: false,
-  newChat: false, timer: null, floating: false,
+  newChat: true, models: [], timer: null, floating: false,
 };
 
 const status = (text) => { $("agent-status").textContent = text; $("agent-status").title = text; };
@@ -19,7 +19,7 @@ function renderConfig() {
   const chosen = c?.agent || "";
   const isDefault = c?.default && c.default === chosen;
   runtime.textContent = c
-    ? `${chosen || "no agent"}${isDefault ? " · system default" : ""}${c.model ? ` · ${c.model}` : ""}`
+    ? `${chosen || "no agent"}${isDefault ? " · system default" : ""}${c.provider ? ` · ${c.provider}` : ""}${c.model ? ` · ${c.model}` : " · CLI default (unverified)"}`
     : "agent not configured";
   runtime.title = c
     ? `Installed agents: ${(c.agents || []).filter((a) => a.installed).map((a) => a.name).join(", ")}\n` +
@@ -39,14 +39,18 @@ function renderConfig() {
   $("agent-command").title = installed.filter((a) => !a.headless).length
     ? "Agents without a headless mode cannot answer from this window yet"
     : "The system agent this app runs";
+  $("agent-provider").value = c?.provider || "";
   $("agent-model").value = c?.model || "";
   $("agent-thinking").value = c?.thinking || "";
   $("agent-extra").value = (c?.extra_args || []).join(" ");
+  // These values came from saved settings, not a user draft. Later edits still differ from this baseline.
+  for (const id of ["agent-provider", "agent-model", "agent-extra"]) $(id).defaultValue = $(id).value;
 }
 
 async function configSave() {
   const patch = {
     agent: $("agent-command").value,
+    provider: $("agent-provider").value.trim(),
     model: $("agent-model").value.trim(),
     thinking: $("agent-thinking").value,
     extra_args: $("agent-extra").value.trim().split(/\s+/).filter(Boolean),
@@ -55,8 +59,34 @@ async function configSave() {
     agent.config = await invoke("agent_config_save", { patch });
     renderConfig();
     $("agent-config").hidden = true;
-    status("Settings saved.");
+    agent.newChat = true;
+    status("Chat selection saved · next message starts fresh");
+    await refreshModels();
   } catch (error) { status(String(error)); }
+}
+
+// Catalog values come from the installed OpenCode API, never a hard-coded model list.
+async function refreshModels() {
+  try {
+    const reply = await motionCommand("agent.models", { agent: $("agent-command").value });
+    agent.models = Array.isArray(reply.models) ? reply.models : [];
+    const providers = [...new Set(agent.models.filter((m) => m.enabled).map((m) => m.providerID))];
+    $("agent-providers").replaceChildren(...providers.map((p) => el("option", { value: p })));
+    renderModelOptions();
+    $("agent-catalog-status").textContent = reply.available
+      ? `${agent.models.filter((m) => m.enabled).length} available models · selection is checked before sending`
+      : (reply.reason || "Catalog unavailable; no model substituted");
+  } catch (error) {
+    agent.models = [];
+    $("agent-providers").replaceChildren();
+    $("agent-models").replaceChildren();
+    $("agent-catalog-status").textContent = String(error);
+  }
+}
+function renderModelOptions() {
+  const provider = $("agent-provider").value.trim();
+  $("agent-models").replaceChildren(...agent.models.filter((m) => m.enabled && m.providerID === provider)
+    .map((m) => el("option", { value: m.id }, m.name || m.id)));
 }
 
 // ---- Conversation --------------------------------------------------------------------------
@@ -157,10 +187,11 @@ async function agentNewChat() {
   const button = $("agent-new");
   button.disabled = true;
   try {
-    agent.turns = await motionCommand("agent.new_chat");
-    agent.newChat = true;
+    const reply = await motionCommand("agent.new_chat");
+    agent.turns = Array.isArray(reply.turns) ? reply.turns : [];
+    agent.newChat = !reply.session;
     renderLog();
-    status("New chat · previous conversation saved");
+    status(`New chat ready${reply.session ? ` · ${reply.session}` : ""} · previous conversation saved`);
     $("agent-input").focus();
   } finally { button.disabled = false; }
 }
@@ -188,11 +219,11 @@ async function agentSend() {
       new_chat: agent.newChat,
       attachments: attachments.map((a) => a.path),
     });
-    agent.newChat = false;
+    agent.newChat = true;
     if (Array.isArray(reply.turns)) agent.turns = reply.turns;
     renderLog();
     clearSent(input, raw, attachments);
-    status(reply.ok ? `Answered${reply.model ? ` by ${reply.model}` : ""}.` : String(reply.error || "The agent failed."));
+    status(reply.ok ? `Answered${reply.provider ? ` · ${reply.provider}` : ""}${reply.model ? ` / ${reply.model}` : " · CLI default unverified"} · ${reply.session || "fresh process"}` : String(reply.error || "Agent needs attention in its existing session; do not resend blindly."));
   } catch (error) {
     status(String(error));
     input.focus();
@@ -365,7 +396,10 @@ $("agent-float").addEventListener("click", toggleAgentFloat);
 $("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
 $("agent-point").addEventListener("click", pointStart);
-$("agent-config-toggle").addEventListener("click", () => { $("agent-config").hidden = !$("agent-config").hidden; });
+$("agent-config-toggle").addEventListener("click", () => { $("agent-config").hidden = !$("agent-config").hidden; if (!$("agent-config").hidden) refreshModels(); });
+$("agent-catalog-refresh").addEventListener("click", refreshModels);
+$("agent-command").addEventListener("change", refreshModels);
+$("agent-provider").addEventListener("input", renderModelOptions);
 $("agent-config-save").addEventListener("click", configSave);
 $("agent-input").addEventListener("keydown", (e) => {
   // An IME candidate is not a send: Enter only picks the candidate.

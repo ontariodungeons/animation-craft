@@ -47,7 +47,7 @@ use crate::project::{
 use crate::rig::cmd_mesh_build_4dir;
 use crate::sequence::cmd_sequence_render;
 use crate::sheets::cmd_assets_agent_sheets;
-use crate::agent::{cmd_agent_log, cmd_agent_new_chat, cmd_agent_send};
+use crate::agent::{cmd_agent_config, cmd_agent_models, cmd_agent_session, cmd_agent_log, cmd_agent_new_chat, cmd_agent_send};
 use crate::turnaround::{cmd_anim_preview_2d, cmd_turnaround_optimize_accuracy};
 use crate::exports::{
     cmd_effectcraft_run_script, cmd_export_blender,
@@ -112,6 +112,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"workshop.build_storyboard"
             | b"workshop.split_panels"
             | b"video.place_references"
+            | b"image.generate"
     )
 }
 
@@ -197,6 +198,9 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional .acproj\",\"root\":\"selected song root\",\"name\":\"song name\",\"audio\":\"optional existing audio\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false}", always, crate::command_center::intake),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
+        query!("agent.session", "Current Chat Session", "{}", cmd_agent_session),
+        query!("agent.config", "Current App Chat Selection", "{}", cmd_agent_config),
+        query!("agent.models", "Available Chat Models", "{\"agent\":\"optional catalog adapter: opencode\"}", cmd_agent_models),
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{}", always, cmd_agent_new_chat),
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
@@ -389,7 +393,10 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("assets.request_sheet", "Request Asset Sheet (one pass)", ["Workshop"], None, "{}", always, cmd_assets_request_sheet),
         cmd!("image.image_size", "Image Size (normalise a sheet)", ["Edit"], None, "{\"source\":\"path.png\",\"out\":\"path.png\",\"width\":2048,\"height\":2048,\"anchor\":\"center\",\"extensionColor\":\"#ffffff\"}", always, cmd_image_image_size),
         query!("agent.log", "Agent Transcript", "{}", cmd_agent_log),
-        cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":false,\"agent\":\"codex|omp|claude\"}", always, cmd_agent_send),
+        cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":true,\"wait\":300,\"free_only\":false}", always, cmd_agent_send),
+        cmd!("image.generate", "Generate Image (Codex)", ["Project Assets"], None,
+            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .acproj for CLI targeting\"}",
+            always, crate::image_generation::generate),
         cmd!("assets.agent_sheets", "Draw Asset Sheets (agent)", ["Rig & Matting"], None, "{\"character\":\"optional id\",\"kinds\":[\"turnaround\",\"skeleton\",\"poses\"],\"agent\":\"codex|omp|claude\",\"run\":true,\"check\":false,\"timeout_s\":1800,\"note\":\"optional\"}", always, cmd_assets_agent_sheets),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
         query!("storyboard.design", "Inspect storyboard placements", "{}", crate::storyboard_design::inspect),
