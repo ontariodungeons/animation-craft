@@ -61,3 +61,13 @@ esac"#);
  assert_eq!(std::fs::read(&audio).unwrap(),b"synthetic audio fixture");assert_eq!(std::fs::read_to_string(transcript).unwrap(),words.to_string());
  std::fs::remove_dir_all(dir).unwrap();
 }
+#[test]
+#[cfg(unix)]
+fn requested_music_assembly_requires_the_documented_machine_plan() {
+ let dir=std::env::temp_dir().join(format!("ac-video-plan-{}",std::process::id()));std::fs::create_dir_all(dir.join("hyperframes")).unwrap();
+ let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.acproj")})).unwrap();
+ std::fs::write(dir.join("hyperframes/hyperframes.json"),"{}").unwrap();std::fs::write(dir.join("hyperframes/index.html"),"existing").unwrap();let cli=runtime(&dir,"exit 0");
+ let result=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli,"assemble":true}));
+ assert!(result.is_err(),"An assembly request without the owning workflow plan must not silently succeed");assert_eq!(std::fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(),"existing");
+ std::fs::remove_dir_all(dir).unwrap();
+}

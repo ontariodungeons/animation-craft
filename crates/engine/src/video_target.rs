@@ -325,7 +325,31 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
             "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
         )));
     }
+    let mut assembly=Value::Null;
+    if params["assemble"]==true {
+        if target!="hyperframes" {return Err(EngineError::InvalidParams("Music-to-video assembly requires target=hyperframes".into()));}
+        let hf=dir.join("hyperframes");let plan=hf.join("STORYBOARD.md");
+        if !plan.is_file(){return Err(EngineError::InvalidParams("Music-to-video assembly requires derived STORYBOARD.md and completed frame files from the native storyboard; no replacement plan was invented".into()));}
+        let map=params["audiomap"].as_str().map(|p|resolve_workspace_path(s,p)).unwrap_or_else(||hf.join("audiomap.json"));
+        let data:Value=serde_json::from_slice(&std::fs::read(&map)?).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+        let audio=data["audio"]["path"].as_str().map(PathBuf::from).filter(|p|p.is_file()).ok_or_else(||EngineError::InvalidParams("Existing audiomap audio.path must identify the already processed BGM; no new analysis/transcode was attempted".into()))?;
+        for (source,dest) in [(audio,hf.join("assets/bgm.mp3")),(map.clone(),hf.join("audiomap.json"))] {
+            if dest.is_file()&&std::fs::read(&source)?!=std::fs::read(&dest)?{return Err(EngineError::InvalidParams(format!("Existing {} differs; no overwrite performed",dest.display())));}
+            if !dest.exists(){std::fs::create_dir_all(dest.parent().ok_or_else(||EngineError::InvalidParams("Input destination has no parent".into()))?)?;std::fs::copy(source,dest)?;}
+        }
+        let skill=std::env::var_os("HOME").map(PathBuf::from).ok_or_else(||EngineError::InvalidParams("HOME unavailable for installed music-to-video skill".into()))?.join(".agents/skills/music-to-video");
+        let arg=|p:&Path|p.to_string_lossy().into_owned();
+        let validate=skill.join("scripts/validate-plan.mjs");let assemble=skill.join("scripts/assemble-index.mjs");
+        let validation=run_tool_in(&hf,"node",&[arg(&validate),"--storyboard".into(),arg(&plan),"--audiomap".into(),arg(&hf.join("audiomap.json")),"--templates".into(),arg(&skill.join("references/templates"))])?;
+        // Preserve the previous composition before the owning workflow's deterministic assembler writes it.
+        let backup=hf.join(".animationcraft-history/assembled-before.html");
+        if hf.join("index.html").is_file()&&!backup.exists(){std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Assembly backup has no parent".into()))?)?;std::fs::copy(hf.join("index.html"),&backup)?;}
+        let result=run_tool_in(&hf,"node",&[arg(&assemble),"--storyboard".into(),arg(&plan),"--hyperframes".into(),arg(&hf),"--audiomap".into(),arg(&hf.join("audiomap.json"))])?;
+        if result.contains("anomalies") {return Err(EngineError::InvalidParams(format!("Music-to-video assembler reported incomplete inputs: {result}")));}
+        assembly=json!({"workflow":"music-to-video","validation_script":validate,"assembly_script":assemble,"validation":validation,"result":result,"storyboard":plan,"audiomap":hf.join("audiomap.json"),"bgm":hf.join("assets/bgm.mp3")});
+    }
     let mut status = workshop_status(s)?;
+    status["music_assembly"]=assembly;
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
     status["video_complete"]=json!(false);
