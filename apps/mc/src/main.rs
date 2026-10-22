@@ -1,6 +1,6 @@
-//! AnimationCraft headless CLI: every engine command is one shell call away, for scripts and AI agents.
+//! Magic Studio CLI: every engine command is one shell call away, for scripts and AI agents.
 //!
-//! Run `animationcraft-cli help` for the full reference.
+//! Run `mc help` for the full reference.
 
 #![cfg_attr(
     not(test),
@@ -36,7 +36,7 @@ fn stdout_failed(e: std::io::Error) {
         return;
     }
     diag(format_args!(
-        "animationcraft-cli: can't write to stdout: {e}"
+        "mc: can't write to stdout: {e}"
     ));
     STDOUT_ERROR.store(true, Ordering::Relaxed);
 }
@@ -57,21 +57,21 @@ fn diag(msg: std::fmt::Arguments) {
 
 fn usage(msg: impl std::fmt::Display) -> ! {
     diag(format_args!(
-        "animationcraft-cli: {msg}\nRun `animationcraft-cli help` for usage."
+        "mc: {msg}\nRun `mc help` for usage."
     ));
     std::process::exit(2)
 }
 
 fn fail(msg: impl std::fmt::Display) -> ! {
-    diag(format_args!("animationcraft-cli: {msg}"));
+    diag(format_args!("mc: {msg}"));
     std::process::exit(1)
 }
 
 const HELP: &str = "\
-animationcraft-cli: drive AnimationCraft from the shell (headless engine or live GUI bridge)
+mc: drive Magic Studio from the shell (headless engine or live GUI bridge)
 
 USAGE
-  animationcraft-cli [--bridge <port|host:port>] <SUBCOMMAND> [ARGS]
+  mc [--bridge <port|host:port>] <SUBCOMMAND> [ARGS]
 
 OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
@@ -95,7 +95,7 @@ SUBCOMMANDS
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
   mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
-                                      register it with your agent as: command `animationcraft-cli`, args [\"mcp\"]
+                                      register it with your agent as: command `mc`, args [\"mcp\"]
   help                                this text
   --version                           print the version
 
@@ -345,15 +345,15 @@ fn schema_from_description(id: &str) -> Value {
 }
 
 /// Sent with `initialize` so a client knows where to start without reading the code.
-const MCP_INSTRUCTIONS: &str = "AnimationCraft turns still character artwork into animated characters and plans \
+const MCP_INSTRUCTIONS: &str = "Magic Studio turns still character artwork into animated characters and plans \
 song videos (storyboard, transcript, video target). Every tool is an engine command (command_list shows ids and \
 params; tool names are the dotted ids with underscores). Start with project_open or project_new, then \
 workshop_status (song, transcript, storyboard, assets) or project_list_assets. Assets need a destination: \
 project_add_asset {path, character: <name>} copies an outside image to assets/characters/<name>/parts/, \
 {background: <name>} to assets/backgrounds/<name>/; a rig spec connects with kind: cutout_rig. Without --bridge \
 these tools run a headless engine; to drive the user's open window start the server as \
-`animationcraft-cli --bridge <port> mcp` (the app runs with `animationcraft-shell --control <port>`). Full guide: the \
-animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `animationcraft-cli help`.";
+`mc --bridge <port> mcp` (the app runs with `animationcraft-shell --control <port>`). Full guide: the \
+animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `mc help`.";
 
 fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
@@ -381,7 +381,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     "protocolVersion": "2024-11-05",
                     "capabilities": { "tools": {} },
                     "serverInfo": {
-                        "name": "animationcraft-mcp",
+                        "name": "mc",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "instructions": MCP_INSTRUCTIONS
@@ -612,7 +612,7 @@ fn main() {
         return;
     }
     if a.version {
-        outln!("animationcraft-cli {}", env!("CARGO_PKG_VERSION"));
+        outln!("mc {}", env!("CARGO_PKG_VERSION"));
         return;
     }
     let Some(cmd) = a.pos(0) else {
@@ -620,7 +620,7 @@ fn main() {
     };
     match cmd {
         "help" | "-h" => outln!("{HELP}"),
-        "version" => outln!("animationcraft-cli {}", env!("CARGO_PKG_VERSION")),
+        "version" => outln!("mc {}", env!("CARGO_PKG_VERSION")),
         "login" => {
             use std::io::IsTerminal;
             if a.bridge_addr().is_some() || a.pos(2).is_some() {

@@ -69,27 +69,27 @@ Write the sheet to <project>/assets/sheets/<character>-<sheet>.png and this exac
 <project>/assets/sheets/<character>-<sheet>.prompt.md.
 ```
 
-## Normalise, matte and connect — through `animationcraft-cli` only
+## Normalise, matte and connect — through `mc` only
 
 ```bash
 # 1. fixed contract size, whatever the image tool returned
-animationcraft-cli exec image.image_size source=assets/sheets/<character>-<sheet>.png \
+mc exec image.image_size source=assets/sheets/<character>-<sheet>.png \
   out=assets/sheets/<character>-<sheet>-2048.png width=2048 height=2048
 
 # 2. cut the sheet into frames/parts and remove the background (PhotoCraft under the hood)
-animationcraft-cli exec asset.cut_sheet asset=<character>
+mc exec asset.cut_sheet asset=<character>
 
 # 3. connect the prepared artwork to the animated subject
-animationcraft-cli exec project.add_asset path=assets/sheets/<character>-turnaround-2048.png \
+mc exec project.add_asset path=assets/sheets/<character>-turnaround-2048.png \
   kind=image character=<character> load=true
 
 # 4. judge it, then rig
-animationcraft-cli exec assets.assess path=assets/sheets/<character>-turnaround-2048.png
-animationcraft-cli exec asset.build_cutout_rig
+mc exec assets.assess path=assets/sheets/<character>-turnaround-2048.png
+mc exec asset.build_cutout_rig
 ```
 
 Do not write a bespoke script for any of these steps. If a step is missing from
-`animationcraft-cli commands`, the command is what gets added — not a script.
+`mc commands`, the command is what gets added — not a script.
 
 ## Naming and prompts
 
@@ -103,10 +103,10 @@ Do not write a bespoke script for any of these steps. If a step is missing from
 ## After the sheets exist — the agent runs this chain, in order
 
 ```bash
-animationcraft-cli exec intake.validate image=<sheet.png> slot=turnaround_sheet attach_to_active=true
-animationcraft-cli exec asset.cut_sheet asset=<id>          # PhotoCraft cuts frames/parts
-animationcraft-cli exec assets.assess path=<sheet.png>      # clean or recreate, with reasons
-animationcraft-cli exec asset.build_cutout_rig              # parts + pivots from the cut sheet
+mc exec intake.validate image=<sheet.png> slot=turnaround_sheet attach_to_active=true
+mc exec asset.cut_sheet asset=<id>          # PhotoCraft cuts frames/parts
+mc exec assets.assess path=<sheet.png>      # clean or recreate, with reasons
+mc exec asset.build_cutout_rig              # parts + pivots from the cut sheet
 ```
 
 ## Reject and redraw when
@@ -117,6 +117,6 @@ animationcraft-cli exec asset.build_cutout_rig              # parts + pivots fro
 - cells overlap, text appears, or the background is not flat;
 - limbs are drawn detached on the turnaround or poses sheets (only the skeleton sheet separates them).
 
-Use `animationcraft-cli` for all of it: it is the harness wrapping the *craft CLIs (see
+Use `mc` for all of it: it is the harness wrapping the *craft CLIs (see
 `~/.agents/skills/cli-anything/SKILL.md`). Never call `photocraft-cli` directly for these steps, and
 read each command's JSON before running the next. Do not report success from a file existing alone.

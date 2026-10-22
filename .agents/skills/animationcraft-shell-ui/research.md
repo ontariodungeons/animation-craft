@@ -333,7 +333,7 @@ Sources: [Cua repository/demo](https://github.com/trycua/cua#cua-driver),
 [cursor](https://cua.ai/docs/cua-driver/reference/mcp-tools/pointer-cursor-and-browser),
 [platform limits](https://cua.ai/docs/cua-driver/concepts/platform-support).
 
-1. **Persistent live MCP.** Global command: `animationcraft-cli --bridge 19897 mcp`, with no project
+1. **Persistent live MCP.** Global command: `mc --bridge 19897 mcp`, with no project
    path. Initially proposed as a user configuration change; the user then explicitly authorized
    moving MCP to the shell. The global `animationcraft` command was updated with a backup and
    OpenCode configuration reloaded. An inner-agent read-only task confirmed Bumble Bee in the

@@ -10,8 +10,8 @@
 //!   not the size it is asked for, so a sheet asked for as "2048x2048" comes back at another
 //!   size. The agent has to draw the artwork and report the size; this command normalises it
 //!   to the contract's canvas with `image.image_size`.
-//! * **The session.** `animationcraft-cli exec` runs one command in a throwaway session, so the
-//!   project's own commands have to run through one `animationcraft-cli run` script, not one
+//! * **The session.** `mc exec` runs one command in a throwaway session, so the
+//!   project's own commands have to run through one `mc run` script, not one
 //!   `exec` call per step.
 //!
 //! After the agent runs, every sheet is checked against the contract, and the command either
@@ -355,9 +355,9 @@ fn chain_instructions(project_path: &Path, sheet_dir: &Path, character: &str) ->
     let sheet = sheet_dir.join(sheet_file(character, "turnaround"));
     format!(
         "## Then prepare the layers with AnimationCraft's CLI\n\n\
-`animationcraft-cli exec` runs **one command in a throwaway session**: the next call starts \
+`mc exec` runs **one command in a throwaway session**: the next call starts \
 with no project open, so `intake.validate`, `asset.cut_sheet` and `asset.build_cutout_rig` \
-all fail with \"no project\". Run the whole chain in **one** `animationcraft-cli run` script, \
+all fail with \"no project\". Run the whole chain in **one** `mc run` script, \
 which keeps one session for every line:\n\n\
 ```bash\n\
 cat > /tmp/asset-sheets-chain.jsonl <<'JSON'\n\
@@ -369,11 +369,11 @@ cat > /tmp/asset-sheets-chain.jsonl <<'JSON'\n\
 {{\"id\":\"asset.cut_sheet\",\"params\":{{\"asset\":\"{character}\"}}}}\n\
 {{\"id\":\"asset.build_cutout_rig\",\"params\":{{}}}}\n\
 JSON\n\
-animationcraft-cli run /tmp/asset-sheets-chain.jsonl\n\
+mc run /tmp/asset-sheets-chain.jsonl\n\
 ```\n\n\
 Read every line of the reply. `assets.assess` decides clean-or-recreate: if it reports \
 `recreate`, record the finding with `assets.fixlist_add` instead of forcing the cut. Do not \
-call the *craft CLIs directly; `animationcraft-cli` is the harness that wraps them (see \
+call the *craft CLIs directly; `mc` is the harness that wraps them (see \
 `~/.agents/skills/cli-anything/SKILL.md`).\n\n\
 Two things this chain can hit, so you do not have to rediscover them:\n\n\
 - `asset.build_cutout_rig` writes to the repo's own `exports/pose_and_parts/<character>` \
@@ -388,7 +388,7 @@ it and stop; the sheets themselves are fine.\n\
     )
 }
 
-/// The chain the caller can run itself, as `animationcraft-cli run` lines.
+/// The chain the caller can run itself, as `mc run` lines.
 fn chain_script(project_path: &Path, sheet_dir: &Path, character: &str) -> Vec<Value> {
     let sheet = sheet_dir.join(sheet_file(character, "turnaround"));
     let normal = sheet_dir.join(format!("{}-turnaround-2048.png", character));
@@ -407,12 +407,12 @@ fn chain_script(project_path: &Path, sheet_dir: &Path, character: &str) -> Vec<V
 /// sheets it wrote against the contract. `run=false` only writes the brief; `check=true`
 /// checks the sheets already on disk without running the agent.
 pub fn cmd_assets_agent_sheets(s: &mut Session, params: &Value) -> Result<Value> {
-    // `animationcraft-cli exec` runs one command in a throwaway session, so this command is
+    // `mc exec` runs one command in a throwaway session, so this command is
     // usually reached with no project open. Say exactly how to reach it with one.
     let dir = crate::workshop::project_dir(s).map_err(|_| {
         EngineError::InvalidParams(
             "no project is open, so there is nowhere to write the sheets. Run it in one session: \
-             `animationcraft-cli run` with a script of two lines — \
+             `mc run` with a script of two lines — \
              {\"id\":\"project.open\",\"params\":{\"path\":\"<project>.acproj\"}} then \
              {\"id\":\"assets.agent_sheets\",\"params\":{\"character\":\"<id>\"}} — or open the \
              project in the app first."
@@ -636,7 +636,7 @@ pub fn cmd_assets_agent_sheets(s: &mut Session, params: &Value) -> Result<Value>
         }
     } else {
         next.push(
-            "Write `chain` to a .jsonl file and run `animationcraft-cli run <file>`: `exec` starts \
+            "Write `chain` to a .jsonl file and run `mc run <file>`: `exec` starts \
              a throwaway session, so the project's own commands need one session to share."
                 .to_string(),
         );

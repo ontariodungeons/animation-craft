@@ -4,9 +4,9 @@
 
 **Goal:** Produce the 4:50, 15-chapter all-desktop comedy film from Sol's script as a reusable FilmCraft project whose every credited technique has a native source document and a final timecode, and which visibly beats the HyperFrames champion (299 s, 15 tracks, 25 credited skills).
 
-**Architecture:** One production spec (`production.json`: chapters → shots → dialogue lines → technique IDs) drives everything. Generic pipeline modules in `omhas-animation/pipeline/production/` turn that spec into Voicebox dialogue, an animatic, and the final FilmCraft timeline, and they check the evidence ledger. Each is exposed as an `animationcraft-cli` command. Creative work happens in the native apps (one Blender soundstage `.blend` holds all of the 3D, plus a native document per craft app), and their renders land in `renders/<chapter>/`. Structure comes before polish: the animatic is cut first, and shots replace their animatic placeholders one at a time.
+**Architecture:** One production spec (`production.json`: chapters → shots → dialogue lines → technique IDs) drives everything. Generic pipeline modules in `omhas-animation/pipeline/production/` turn that spec into Voicebox dialogue, an animatic, and the final FilmCraft timeline, and they check the evidence ledger. Each is exposed as an `mc` command. Creative work happens in the native apps (one Blender soundstage `.blend` holds all of the 3D, plus a native document per craft app), and their renders land in `renders/<chapter>/`. Structure comes before polish: the animatic is cut first, and shots replace their animatic placeholders one at a time.
 
-**Tech Stack:** Python 3.12 + pytest (pipeline), Blender 5.3 headless (`blender -b --python`), Voicebox HTTP `127.0.0.1:17600`, filmcraft-cli, effectcraft-cli, photocraft-cli, vectorcraft-cli, soundcraft-cli, lightcraft-cli, cadcraft-cli, designcraft-cli, pdfcraft-cli, gridcraft-cli, deckcraft-cli, wordcraft-cli, figcraft (MCP), animationcraft-cli, HyperFrames CLI (opponent shots only), ffmpeg/ffprobe.
+**Tech Stack:** Python 3.12 + pytest (pipeline), Blender 5.3 headless (`blender -b --python`), Voicebox HTTP `127.0.0.1:17600`, filmcraft-cli, effectcraft-cli, photocraft-cli, vectorcraft-cli, soundcraft-cli, lightcraft-cli, cadcraft-cli, designcraft-cli, pdfcraft-cli, gridcraft-cli, deckcraft-cli, wordcraft-cli, figcraft (MCP), mc, HyperFrames CLI (opponent shots only), ffmpeg/ffprobe.
 
 **Spec:** `PROJECT/SCRIPT.md` (Sol's script, copied from `/tmp/claude-1000/.../scratchpad/sol-script-the-hard-way.md`) and `PROJECT/LEDGER_TARGET.md` (copied from `/tmp/codex-roast-review/competition-count.md`).
 
@@ -152,9 +152,9 @@
 
 **Interfaces:**
 - Consumes: Sol's manifest (turnarounds, transparency flags).
-- Produces: AnimationCraft cutout rigs exported with `animationcraft-cli exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
+- Produces: AnimationCraft cutout rigs exported with `mc exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
 
-- [ ] **Step 1:** Import each character with `animationcraft-cli` (`asset.cut_sheet` → `asset.build_cutout_rig`) and validate it with `assets.assess`. Likeness must match the turnarounds (check with `intake.compare_reference`).
+- [ ] **Step 1:** Import each character with `mc` (`asset.cut_sheet` → `asset.build_cutout_rig`) and validate it with `assets.assess`. Likeness must match the turnarounds (check with `intake.compare_reference`).
 - [ ] **Step 2:** Pose library per character (pose-library-design): neutral, smug, recoil, drenched, conduct, point. Check silhouettes for readability at 25% scale.
 - [ ] **Step 3:** HYPE's drenched contact performance (chapter 3), where the weight shift reads. **Ledger 9.**
 - [ ] **Step 4:** REMY's body (chapter 5) — skills character-artist, rigging:
@@ -238,13 +238,13 @@ Each insert keeps its native document in `PROJECT/apps/<app>/` and its render in
 
 **Files:** `PROJECT/ledger.csv`, `PROJECT/review.html`, the commands `production.voice`, `production.timeline` and `production.ledger` in `crates/engine/src/` (wired like `export.layered_motion` in `commands.rs:327`), and AnimationCraft `README.md` lines
 
-- [ ] **Step 1:** Fill `ledger.csv` from the actual edit (FilmCraft `sequence.inspect` gives the shot timecodes). Run `animationcraft-cli exec production.ledger spec=PROJECT/production.json ledger=PROJECT/ledger.csv` and fix or remove every failure. The closing card text comes from `LedgerReport` (the achieved counts), and the card is rendered in EffectCraft and placed at the end.
+- [ ] **Step 1:** Fill `ledger.csv` from the actual edit (FilmCraft `sequence.inspect` gives the shot timecodes). Run `mc exec production.ledger spec=PROJECT/production.json ledger=PROJECT/ledger.csv` and fix or remove every failure. The closing card text comes from `LedgerReport` (the achieved counts), and the card is rendered in EffectCraft and placed at the end.
 - [ ] **Step 2:** `review.html`:
   - chapter buttons with the editing lesson per chapter
   - side-by-side champion vs desktop clips
   - the ledger table with source links
   - served the way Gemini's was, on a local port
-- [ ] **Step 3:** Rust command wrappers, each returning JSON with `next` steps. Add one README example line per command, then run `cargo build --bin animationcraft-cli`. Smoke test: `animationcraft-cli exec production.ledger ...` gives the same counts as Step 1.
+- [ ] **Step 3:** Rust command wrappers, each returning JSON with `next` steps. Add one README example line per command, then run `cargo build --bin mc`. Smoke test: `mc exec production.ledger ...` gives the same counts as Step 1.
 - [ ] **Step 4:** Final QA:
   - Watch the full film at 1×.
   - Use the qa-review skill.

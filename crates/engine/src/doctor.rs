@@ -1,4 +1,4 @@
-//! `doctor` subcommand (`animationcraft-cli doctor [--clean]` and `app.doctor` command):
+//! `doctor` subcommand (`mc doctor [--clean]` and `app.doctor` command):
 //! checks for lingering AnimationCraft/Craft processes, stale bridge/dev-server ports,
 //! external tool availability, and source code smells worth running `/ponytail-review` on.
 
@@ -19,6 +19,9 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_u64)
         .map(|p| p as u16);
     let my_pid = std::process::id();
+    let mc_program = std::env::current_exe().ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("mc")))
+        .and_then(|exe| std::fs::canonicalize(exe).ok());
 
     let mut processes = Vec::new();
     let mut cleaned_pids = Vec::new();
@@ -50,10 +53,15 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(exe);
+            // A short executable name can belong to an unrelated program. Match the actual
+            // kernel executable against this installation before listing or stopping mc.
+            if exe_name == "mc" && !matching_mc_process(&entry.path().join("exe"), mc_program.as_deref()) {
+                continue;
+            }
             let is_ac = matches!(
                 exe_name,
                 "animationcraft"
-                    | "animationcraft-cli"
+                    | "mc"
                     | "photocraft-cli"
                     | "effectcraft-cli"
                     | "filmcraft-cli"
@@ -78,7 +86,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             let should_clean = clean
                 && ((exe_name == "animationcraft"
                     && keep_port.is_none_or(|kp| control_port != Some(kp)))
-                    || (exe_name.ends_with("-cli") && !is_mcp));
+                    || ((exe_name == "mc" || exe_name.ends_with("-cli")) && !is_mcp));
             let mut action = "running";
             if should_clean {
                 action = if stop_process(pid, control_port) {
@@ -154,13 +162,13 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     let mut recommendations = Vec::new();
     if lingering_gui_count > 1 {
         recommendations.push(format!(
-            "{lingering_gui_count} AnimationCraft GUI instances are running concurrently; run `animationcraft-cli doctor --clean` to close lingering instances."
+            "{lingering_gui_count} AnimationCraft GUI instances are running concurrently; run `mc doctor --clean` to close lingering instances."
         ));
     } else if lingering_gui_count == 1 && !clean {
         if let Some(p) = processes.iter().find(|p| p["kind"] == "gui") {
             let port_hint = p["control_port"]
                 .as_u64()
-                .map(|port| format!(" (`animationcraft-cli --bridge {port} app.quit`)"))
+                .map(|port| format!(" (`mc --bridge {port} app.quit`)"))
                 .unwrap_or_default();
             recommendations.push(format!(
                 "1 AnimationCraft GUI instance is running (pid {}){port_hint}. Pass `--clean` to close it.",
@@ -170,7 +178,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     }
     if video_server_state.get("stale") == Some(&json!(true)) {
         recommendations.push(
-            "Stale `.video-server.json` found for a stopped dev server; run `animationcraft-cli doctor --clean`."
+            "Stale `.video-server.json` found for a stopped dev server; run `mc doctor --clean`."
                 .into(),
         );
     }
@@ -195,6 +203,39 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
         "ponytail_candidates": ponytail_suggestions,
         "recommendations": recommendations,
     }))
+}
+
+fn matching_mc_process(executable_link: &Path, expected: Option<&Path>) -> bool {
+    expected.is_some_and(|expected| {
+        std::fs::canonicalize(executable_link).ok().as_deref() == Some(expected)
+    })
+}
+
+#[cfg(test)]
+mod mc_process_tests {
+    use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn unrelated_mc_and_unavailable_executables_are_not_owned() {
+        let root = std::env::temp_dir().join(format!("mc-doctor-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("ours")).unwrap();
+        std::fs::create_dir_all(root.join("other")).unwrap();
+        let ours = root.join("ours/mc");
+        let other = root.join("other/mc");
+        std::fs::write(&ours, b"own executable fixture").unwrap();
+        std::fs::write(&other, b"unrelated executable fixture").unwrap();
+        let link = root.join("exe");
+        std::os::unix::fs::symlink(&other, &link).unwrap();
+        let expected = ours.canonicalize().unwrap();
+        assert!(!matching_mc_process(&link, Some(&expected)));
+        assert!(!matching_mc_process(&link, None));
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&ours, &link).unwrap();
+        assert!(matching_mc_process(&link, Some(&expected)));
+        std::fs::remove_file(&ours).unwrap();
+        assert!(!matching_mc_process(&link, Some(&expected)));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn port_open(port: u16) -> bool {
@@ -242,7 +283,7 @@ fn which_in_path(bin: &str) -> bool {
 
 fn scan_ponytail_candidates(root: &Path) -> Vec<Value> {
     let mut files: Vec<(PathBuf, usize, Vec<&'static str>)> = Vec::new();
-    for rel_dir in ["crates/engine/src", "crates/ui-egui/src", "apps/animationcraft-cli/src"] {
+    for rel_dir in ["crates/engine/src", "crates/ui-egui/src", "apps/mc/src"] {
         collect_rs_files(&root.join(rel_dir), &mut files);
     }
     files.sort_by(|a, b| b.2.len().cmp(&a.2.len()).then_with(|| b.1.cmp(&a.1)));

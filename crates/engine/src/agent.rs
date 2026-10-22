@@ -202,9 +202,9 @@ fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
 // Native per-session policy for one bounded image task; no global config or auth changes.
 fn image_task_cli() -> Result<std::path::PathBuf> {
     let exe=std::env::current_exe()?;
-    let folder=exe.parent().ok_or_else(||invalid("Cannot locate the installed AC CLI"))?;
-    let candidate=folder.join("animationcraft-cli");
-    let candidate=if candidate.is_file(){candidate}else{folder.parent().unwrap_or(folder).join("animationcraft-cli")};
+    let folder=exe.parent().ok_or_else(||invalid("Cannot locate the installed mc CLI"))?;
+    let candidate=folder.join("mc");
+    let candidate=if candidate.is_file(){candidate}else{folder.parent().unwrap_or(folder).join("mc")};
     fs::canonicalize(&candidate).map_err(|_|invalid(format!("Image task needs the matching installed CLI at {}; no alternative installed",candidate.display())))
 }
 fn image_task_permissions() -> Result<Value> {
@@ -273,7 +273,7 @@ pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
     let fresh=params["new_chat"].as_bool().unwrap_or(true);
     if fresh && params["session"].is_string(){return Err(invalid("An expected session requires new_chat=false; no chat created or message sent"));}
     let task=if params["image_task"]==true {format!("You are Sproket. This is one bounded image repair task. Native permissions allow reading images, skills and ONLY these shell commands: `{0} commands image.generate` and `{0} exec image.generate ...`. Use this exact installed CLI, not a relative executable. Do not call yourself, chat, OpenCode, subagents, scripts, or another harness. Inspect original references with native read; use existing image.generate with references and transparent_background=true, default model gpt-6-luna. After one job, inspect the returned draft image with native read, report observed defects, and STOP for review. Do not replace the original or regenerate a background.\n",image_task_cli()?.display())}else{String::new()};
-    let prompt=format!("{task}Freshness: discover current animationcraft-cli help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
+    let prompt=format!("{task}Freshness: discover current mc help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
     if agent=="opencode" {
         if !selection["thinking"].as_str().unwrap_or_default().is_empty(){return Err(invalid("OpenCode reasoning variants are not wired to this setting; clear Thinking rather than silently ignoring it"));}
         let prior=request_read(s);if matches!(prior["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("A project chat request is still pending; read agent.log refresh=true before sending another message"));}

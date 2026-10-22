@@ -21,7 +21,7 @@ impl AudioTrace {
         let mut trace=Self{path:project.join("transcript-provenance.json"),data:json!({
             "status":"running","operation":"audio.analyze","audio_source":audio,
             "request_id":p["_request_id"],"client_label":p["_client"],
-            "manual":"animationcraft-cli commands audio.analyze; animationcraft-cli commands workshop.import_transcript",
+            "manual":"mc commands audio.analyze; mc commands workshop.import_transcript",
             "steps":[],"producer_status":"unknown until an actual transcription result is recorded"})};
         trace.data["transcript_path"]=json!(project.join("hyperframes/transcript.json"));trace.persist()?;Ok(trace)
     }
@@ -71,7 +71,7 @@ impl AudioTrace {
         match crate::workspace::run_tool_in(cwd,tool,args){
             Ok(output)=>{self.data["steps"][index]["status"]=json!("success");self.data["steps"][index]["result"]=summary(&output);self.persist()?;Ok(Some(output))},
             Err(error)=>{self.data["steps"][index]["status"]=json!("error");self.data["steps"][index]["error"]=json!(error.to_string());self.data["failed_stage"]=json!(stage);self.data["status"]=json!("failed");self.persist()?;
-                Err(EngineError::InvalidParams(format!("audio.analyze stage={stage}; executable={tool}; cwd={}; {error}; receipt={}. Inspect this receipt and `animationcraft-cli commands audio.analyze` before retrying; no alternate provider or automatic retry was used.",cwd.display(),self.path.display())))},
+                Err(EngineError::InvalidParams(format!("audio.analyze stage={stage}; executable={tool}; cwd={}; {error}; receipt={}. Inspect this receipt and `mc commands audio.analyze` before retrying; no alternate provider or automatic retry was used.",cwd.display(),self.path.display())))},
         }
     }
     pub fn read_json(&mut self,stage:&str,path:&Path)->Result<Value>{
@@ -87,7 +87,7 @@ impl AudioTrace {
         self.data["status"]=json!(if result.is_ok(){"complete"}else{"failed"});
         if let Err(e)=&result{self.data["steps"][index]["error"]=json!(e.to_string());self.data["failed_stage"]=json!("import");}
         self.persist()?;
-        result.map_err(|e|EngineError::InvalidParams(format!("audio.analyze stage=import; {e}; receipt={}. Read `animationcraft-cli commands workshop.import_transcript`; received files remain preserved and no ASR retry was attempted.",self.path.display())))
+        result.map_err(|e|EngineError::InvalidParams(format!("audio.analyze stage=import; {e}; receipt={}. Read `mc commands workshop.import_transcript`; received files remain preserved and no ASR retry was attempted.",self.path.display())))
     }
 }
 

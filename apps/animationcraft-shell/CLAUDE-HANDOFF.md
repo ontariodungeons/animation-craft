@@ -97,15 +97,15 @@ some captions in snapshot; fix compositing order. No final full-video render mad
 
 Commands (live or headless after project.open):
 ```
-animationcraft-cli --bridge 19897 exec storyboard.read scene=14
-animationcraft-cli --bridge 19897 exec storyboard.design
-animationcraft-cli --bridge 19897 exec storyboard.place_asset asset=mouse scene=14 x=160 y=105 width=96
+mc --bridge 19897 exec storyboard.read scene=14
+mc --bridge 19897 exec storyboard.design
+mc --bridge 19897 exec storyboard.place_asset asset=mouse scene=14 x=160 y=105 width=96
 # existing placement id updates instead of adding
-animationcraft-cli --bridge 19897 exec storyboard.place_asset asset=mouse scene=14 placement=<id> x=160 y=105 width=96
-animationcraft-cli --bridge 19897 exec storyboard.remove_placement placement=<id>
-animationcraft-cli --bridge 19897 exec storyboard.save_version
-animationcraft-cli --bridge 19897 exec motion.export_track character=mouse track=@jump amount=35 duration=2.58
-animationcraft-cli --bridge 19897 exec video.place_track id=<stable-id> path=<webm> scene=14 start=26.8 duration=2.58 rect='[x,y,w,h]'
+mc --bridge 19897 exec storyboard.place_asset asset=mouse scene=14 placement=<id> x=160 y=105 width=96
+mc --bridge 19897 exec storyboard.remove_placement placement=<id>
+mc --bridge 19897 exec storyboard.save_version
+mc --bridge 19897 exec motion.export_track character=mouse track=@jump amount=35 duration=2.58
+mc --bridge 19897 exec video.place_track id=<stable-id> path=<webm> scene=14 start=26.8 duration=2.58 rect='[x,y,w,h]'
 ```
 MCP names replace dots with underscores. `video.place_track` rect is VIDEO pixels; deck placement is
 SLIDE points. The caller currently maps them using template art rectangle [32,102,620,349] and export

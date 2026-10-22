@@ -145,20 +145,20 @@ pub(crate) fn brief_header(dir: &Path) -> String {
         ),
     };
     format!(
-        "{intent}Project folder: {project}\nWorkshop state: animationcraft-cli exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
+        "{intent}Project folder: {project}\nWorkshop state: mc exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
     )
 }
 
 pub(crate) fn stage_body(s: &Session, dir: &Path, stage: &str) -> String {
     let target = s.video_target.as_str();
     match stage {
-        "song" => "Stage 1 — Song. Point the project at the song (never copy audio) and add the artist's liner notes.\n  animationcraft-cli exec workshop.set_audio path=<song>\n  animationcraft-cli exec workshop.add kind=liner_notes paths='[\"<file>\"]'".to_string(),
+        "song" => "Stage 1 — Song. Point the project at the song (never copy audio) and add the artist's liner notes.\n  mc exec workshop.set_audio path=<song>\n  mc exec workshop.add kind=liner_notes paths='[\"<file>\"]'".to_string(),
         "transcript" => format!(
-            "Stage 2 — Transcription & transcoding. FilmCraft speech-to-text, headless; it also writes <song>.fcproj with the song on a sequence.\n  animationcraft-cli exec audio.transcribe\nAlready have a transcript? animationcraft-cli exec workshop.import_transcript path=<file> (it is checked first).\nVideo target: {target}.{}",
+            "Stage 2 — Transcription & transcoding. FilmCraft speech-to-text, headless; it also writes <song>.fcproj with the song on a sequence.\n  mc exec audio.transcribe\nAlready have a transcript? mc exec workshop.import_transcript path=<file> (it is checked first).\nVideo target: {target}.{}",
             skill_hints(s, dir, &[match target { "hyperframes" => "hyperframes-cli", "filmcraft" => "filmcraft", _ => "remotion-best-practices" }])
         ),
         "reference" => format!(
-            "Stage 3 — Reference art. Template: {STORYBOARD_DIR}/panel-NN.png (+ panel-NN.prompt.md with the exact prompt), {STORYBOARD_DIR}/{STORYBOARD_PDF}, {ASSETS_DIR}/<name>.png (static, transparent).\nPanel N illustrates line N of each verse. Follow the studio intent above for style and image rules.\n  animationcraft-cli exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>\n  animationcraft-cli exec workshop.build_storyboard\nCut-outs with PhotoCraft only: animationcraft-cli exec intake.validate image=<panel> asset=<name>{}",
+            "Stage 3 — Reference art. Template: {STORYBOARD_DIR}/panel-NN.png (+ panel-NN.prompt.md with the exact prompt), {STORYBOARD_DIR}/{STORYBOARD_PDF}, {ASSETS_DIR}/<name>.png (static, transparent).\nPanel N illustrates line N of each verse. Follow the studio intent above for style and image rules.\n  mc exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>\n  mc exec workshop.build_storyboard\nCut-outs with PhotoCraft only: mc exec intake.validate image=<panel> asset=<name>{}",
             skill_hints(s, dir, &["backlot"])
         ),
         _ => format!(
@@ -888,7 +888,7 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params:&Value)->Result<Va
  }
  let result=import_transcript_inner(s,&adjusted);
  let errors=match &result{Ok(_)=>vec![],Err(e)=>vec![e.to_string()]};
- crate::command_center::write_state(&dir,&json!({"received":received,"problems":errors,"valid":result.is_ok(),"command":"workshop.import_transcript","manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs"}))?;
+ crate::command_center::write_state(&dir,&json!({"received":received,"problems":errors,"valid":result.is_ok(),"command":"workshop.import_transcript","manual":"mc commands workshop.import_transcript; crates/engine/src/workshop.rs"}))?;
  result
 }
 
@@ -1519,7 +1519,7 @@ pub fn cmd_assets_request_sheet(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(
         json!({"ok": true, "brief": path, "items": items.len(), "next": [
         format!("Send the image agent: follow {} exactly", path.display()),
-        "When the sheet exists: cut each asset out (PhotoCraft via animationcraft-cli), check at full size, assets.fixlist_add asset=<id> status=done".to_string()]}),
+        "When the sheet exists: cut each asset out (PhotoCraft via mc), check at full size, assets.fixlist_add asset=<id> status=done".to_string()]}),
     )
 }
 

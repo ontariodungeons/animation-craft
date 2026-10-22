@@ -211,7 +211,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if !video_ready {next_commands.push(json!({"command":"video.init","params":{"target":"hyperframes","hyperframes_cli":p["hyperframes_cli"]},"reason":"Correct the reported native video/caption handoff failure; existing timing and deck are preserved"}));}
     }
-    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready&&video_ready,"video_ready":video_ready,"video":video,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"animationcraft-cli commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready&&video_ready,"video_ready":video_ready,"video":video,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"mc commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
@@ -314,12 +314,12 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-pub fn requires_ui(_: &mut Session,_:&Value)->Result<Value>{Err(EngineError::InvalidParams("Use the canonical Studio connection: animationcraft-cli exec ui.feedback; no UI exists in a headless engine session".into()))}
+pub fn requires_ui(_: &mut Session,_:&Value)->Result<Value>{Err(EngineError::InvalidParams("Use the canonical Studio connection: mc exec ui.feedback; no UI exists in a headless engine session".into()))}
 
 pub(crate) fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
 
 pub(crate) fn cli_program()->String{
  std::env::current_exe().ok().and_then(|p|{
-  if p.file_name().is_some_and(|v|v.to_string_lossy().starts_with("animationcraft-cli")){Some(p)}else{p.parent().map(|p|p.join("animationcraft-cli")).filter(|p|p.is_file())}
- }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"animationcraft-cli".into())
+  if p.file_name().is_some_and(|v|v == "mc"){Some(p)}else{p.parent().map(|p|p.join("mc")).filter(|p|p.is_file())}
+ }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"mc".into())
 }
