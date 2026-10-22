@@ -19,9 +19,10 @@ const context = vm.createContext({
   el: (tag, attrs, text) => ({ tag, ...attrs, text }),
   document: { addEventListener() {} }, window: { addEventListener() {} },
   state: { project: "/synthetic/Test.acproj", view: "project", page: 0 }, motion: {},
-  invoke: async (id, { patch }) => { calls.push({ id, patch }); return { ...config, ...patch }; },
+  invoke: async (id, { patch } = {}) => { if (id === "agent_session") throw Error("Obsolete agent_session command is not registered"); calls.push({ id, patch }); return { ...config, ...patch }; },
   motionCommand: async (id, params) => {
     calls.push({ id, params });
+    if (id === "agent.log") return [];
     if (id === "agent.models") return { available: true, models: [{ providerID: "opencode", id: "synthetic-free", enabled: true }] };
     if (id === "agent.new_chat") return { ok: true, session: "ses_fresh", turns: [] };
     if (id === "agent.send") {
@@ -77,3 +78,11 @@ vm.runInContext("agent.open=false; agent.renderedReply=null",context);
 await vm.runInContext("acknowledgeAgentReply(11)",context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,1,"closed drawer cannot acknowledge");
 console.log("PASS: reply receipts require actual visible text, project match, open drawer and correlated request; repeated polling is idempotent");
+
+// CLI New Chat refresh uses the same drawer loader, not removed Tauri chat commands.
+vm.runInContext(readFileSync(new URL("../ui/bridge.js", import.meta.url), "utf8"), context);
+await vm.runInContext(`agent.turns=[{role:"assistant",text:"Previous conversation"}]; window.acBridge.refresh("agent.new_chat",state.project,12,{session:"ses_fresh",turns:[]})`,context);
+assert.equal(vm.runInContext("agent.turns.length",context),0);
+assert.equal(vm.runInContext("agent.newChat",context),false);
+assert.ok(calls.some(c=>c.id==="render_revision"&&c.revision===12));
+console.log("PASS: bridged New Chat reloads shared drawer state and acknowledges its revision");
