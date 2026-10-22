@@ -456,4 +456,4 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
  resize:none; background:transparent; color:transparent; font-family:"DejaVu Sans",sans-serif;
  line-height:1.2; box-shadow:none; outline:none; }
 .sb-text:hover { outline:1px dashed #D7B46A; }
-.sb-text:focus { outline:1px solid #D7B46A; background:#1B1D22; color:#B7B4AB; }
+.sb-text:focus { outline:1px solid #D7B46A; background:var(--field-fill,#1B1D22); color:var(--field-ink,#B7B4AB); }

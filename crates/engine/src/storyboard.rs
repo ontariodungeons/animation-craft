@@ -574,10 +574,14 @@ fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
 pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<Value> {
     if params["template"]=="backlot" {
         let dir=project_dir(s)?;
-        let transcript=transcript_files(&dir).into_iter().next().ok_or_else(||EngineError::InvalidParams("Import the approved transcript first".into()))?;
+        let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file()).or_else(||transcript_files(&dir).into_iter().next()).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
         let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
-        let out=dir.join("storyboard").join(format!("movie-board-{stamp}"));
+        let out=if let Some(resume)=params["resume"].as_str(){
+            let manifest=resolve_workspace_path(s,resume).canonicalize()?;
+            if !manifest.starts_with(dir.join("storyboard").canonicalize()?) || manifest.file_name().and_then(|n|n.to_str())!=Some("manifest.json"){return Err(EngineError::InvalidParams("Resume must be this project's storyboard draft manifest".into()));}
+            manifest.parent().ok_or_else(||EngineError::InvalidParams("Draft has no folder".into()))?.to_path_buf()
+        }else{dir.join("storyboard").join(format!("movie-board-{stamp}"))};
         let title=title.to_owned();
         let count=storyboard_scenes(&dir)?.len();
         let scenes=(1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?;
@@ -586,13 +590,22 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let provenance=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let recording_duration=song_seconds(&dir);
         let timing_extent=recording_duration.or_else(||provenance["duration_sec"].as_f64()).or_else(||scenes.last().and_then(|v|v["end"].as_f64()));
-        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":caption_file(&dir).ok_or_else(||EngineError::InvalidParams("DeckCraft template needs existing timed captions; import the original SRT with workshop.import_transcript".into()))?,"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){None}else{caption_file(&dir)},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
         let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
+        if params["allow_timing_overrun"]==true{if params["draft"]!=true{return Err(EngineError::InvalidParams("Timing-overrun source may only produce an explicitly warned draft".into()));}args.push("--allow-timing-overrun".into());}
         if let Some(source)=params["source"].as_str(){args.extend(["--source".into(),resolve_workspace_path(s,source).to_string_lossy().into_owned()]);}
         let output=run_tool_in(&dir,"python3",&args)?;
-        let result:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
-        std::fs::write(dir.join("storyboard/movie-board.json"),result.to_string())?;
+        let mut result:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+        result["project"]=json!(s.project_path);result["manifest"]=json!(out.join("manifest.json"));
+        result["draft"]=json!(params["draft"]==true || result["mapping"]["needs_correction"]==true);
+        result["status"]=json!(if result["ok"]==false{"draft generation failed; active storyboard unchanged"}else if result["timing_valid"]==false{"editable draft with raw timing warning; not validated"}else if result["mapping"]["needs_correction"]==true{"draft needs source mapping correction"}else if result["draft"]==true{"draft ready for review; active storyboard unchanged"}else{"saved"});
+        let executable=crate::command_center::cli_program();
+        result["next_commands"]=json!([format!("{} --bridge auto exec storyboard.read scene=1 project={}",crate::command_center::shell_quote(&executable),crate::command_center::shell_quote(&s.project_path.as_ref().map(|p|p.to_string_lossy().into_owned()).unwrap_or_default()))]);
+        result["resume_command"]=json!(format!("{} --bridge auto exec workshop.build_storyboard template=backlot draft=true resume={} source={} project={}",crate::command_center::shell_quote(&executable),crate::command_center::shell_quote(&out.join("manifest.json").to_string_lossy()),crate::command_center::shell_quote(params["source"].as_str().unwrap_or(&dir.to_string_lossy())),crate::command_center::shell_quote(&s.project_path.as_ref().map(|p|p.to_string_lossy().into_owned()).unwrap_or_default())));
+        if let Some(transcript)=params["transcript"].as_str(){let command=format!("{} transcript={} allow_timing_overrun={}",result["resume_command"].as_str().unwrap_or_default(),crate::command_center::shell_quote(transcript),params["allow_timing_overrun"]==true);result["resume_command"]=json!(command);}
+        std::fs::write(out.join("manifest.json"),result.to_string())?;
+        if result["ok"]==true && result["draft"]!=true{std::fs::write(dir.join("storyboard/movie-board.json"),result.to_string())?;}
         return Ok(result);
     }
     let dir = project_dir(s)?;
@@ -1112,36 +1125,7 @@ pub fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
 pub fn cmd_storyboard_import_openmontage(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let src = params.get("path").and_then(Value::as_str).map(|p| resolve_workspace_path(s, p)).ok_or_else(|| EngineError::InvalidParams("missing 'path' (the existing project folder)".into()))?;
-    if params["preserve_document"] == true {
-        // Attach an existing document and its previews only. Never enter scene import/build.
-        let source=src.join(STORYBOARD_DIR);
-        let pdf=source.join(STORYBOARD_PDF);
-        let previews=files_in(&source.join(".preview"),Some(&["png"]));
-        let layout=source.join(".preview/layout.json");
-        if !pdf.is_file() || previews.is_empty() || !layout.is_file() {
-            return Err(EngineError::InvalidParams("Preserved import requires the existing storyboard.pdf, .preview PNGs and layout.json; no regeneration performed".into()));
-        }
-        let mut copies=vec![(pdf,dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF)),(layout,dir.join("storyboard/.preview/layout.json"))];
-        for preview in previews {
-            let name=preview.file_name().ok_or_else(||EngineError::InvalidParams("Invalid preview filename".into()))?;
-            copies.push((preview.clone(),dir.join("storyboard/.preview").join(name)));
-        }
-        // Check every collision before any copy, and never overwrite different authored bytes.
-        for (from,to) in &copies {
-            if to.exists() && std::fs::read(from)?!=std::fs::read(to)? {
-                return Err(EngineError::InvalidParams(format!("Existing storyboard differs at {}; preserved without importing",to.display())));
-            }
-        }
-        for (from,to) in &copies {
-            if !to.exists(){if let Some(parent)=to.parent(){std::fs::create_dir_all(parent)?;}std::fs::copy(from,to)?;}
-        }
-        let mut result=cmd_workshop_storyboard(s,&json!({}))?;
-        result["preserved_existing_document"]=json!(true);
-        result["source_document"]=json!(source.join(STORYBOARD_PDF));
-        result["imported"]=json!(copies.iter().map(|(_,to)|to).collect::<Vec<_>>());
-        result["editable_slide_integration"]=json!("Existing PDF and page previews preserved; no native deck or editable text fields are claimed");
-        return Ok(result);
-    }
+    if params["preserve_document"]==true{return Err(EngineError::InvalidParams("Static document copying was removed. Import scene content normally, then use workshop.build_storyboard template=backlot draft=true to populate the editable PDF template.".into()));}
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let read = |rel: &str| -> Option<Value> { serde_json::from_str(&std::fs::read_to_string(src.join(rel)).ok()?).ok() };
     let plan = read("artifacts/scene_plan.json").ok_or_else(|| EngineError::InvalidParams(format!("no artifacts/scene_plan.json in {}", src.display())))?;
@@ -1213,9 +1197,8 @@ pub fn cmd_storyboard_import_openmontage(s: &mut Session, params: &Value) -> Res
     let mut toc = cmd_storyboard_toc(s, &json!({}))?;
     toc["imported"] = json!(written);
     toc["next"] = json!([
-        "workshop.build_storyboard to rebuild the PDF from the imported scenes",
-        "storyboard.read scene=N for each scene: check lyrics against the official lyrics and fill gaps with storyboard.edit",
-        "the user approves each scene with storyboard.approve"]);
+        "workshop.build_storyboard template=backlot draft=true to populate the editable PDF from native transcript words and imported creative fields",
+        "Review the rendered draft and mapping report, then storyboard.save_version draft=<returned manifest>"]);
     Ok(toc)
 }
 

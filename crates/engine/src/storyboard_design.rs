@@ -21,8 +21,47 @@ pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
  Ok(doc)
 }
 
+fn pdf_run(s:&Session,steps:Value)->Result<Value>{
+ let dir=crate::workshop::project_dir(s)?;let folder=dir.join("storyboard/.pdfcraft");std::fs::create_dir_all(&folder)?;
+ let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+ let script=folder.join(format!("{stamp}.json"));write(&script,&steps)?;
+ let output=crate::workspace::run_tool_in(&dir,"pdfcraft-cli",&["run".into(),"--script".into(),script.to_string_lossy().into_owned(),"--report".into()])?;
+ let report:Value=serde_json::from_str(&output).map_err(|e|invalid(&format!("Invalid PDFCraft report: {e}")))?;
+ if report["ok"]!=true{return Err(invalid(&format!("PDFCraft failed: {report}")));}
+ Ok(report)
+}
+fn pdf_previews(s:&Session,pdf:&Path,folder:&Path,count:usize)->Result<Vec<std::path::PathBuf>>{
+ std::fs::create_dir_all(folder)?;let mut paths=Vec::new();
+ for page in 1..=count{let path=folder.join(format!("slide-{page:03}.png"));crate::workspace::run_tool_in(&crate::workshop::project_dir(s)?,"pdfcraft-cli",&["render".into(),pdf.to_string_lossy().into_owned(),"--page".into(),page.to_string(),"--dpi".into(),"72".into(),"--out".into(),path.to_string_lossy().into_owned()])?;paths.push(path);}
+ Ok(paths)
+}
+fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
+ let dir=crate::workshop::project_dir(s)?;let mut baseline=base(&board);let original=baseline["pdf"].as_str().ok_or_else(||invalid("Storyboard PDF is missing"))?;
+ let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
+ let pdf=out.join("movie-board.pdf");let text_base=out.join("text-base.pdf");
+ let mut values=serde_json::Map::new();for edit in design["text_edits"].as_array().into_iter().flatten(){values.insert(edit["name"].as_str().ok_or_else(||invalid("Missing PDF field name"))?.into(),edit["value"].clone());}
+ let mut steps=vec![json!({"tool":"doc_open","args":{"path":original}})];
+ if !values.is_empty(){steps.push(json!({"tool":"form_fill","args":{"doc":1,"values":values}}));}
+ steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":text_base}}));
+ for item in design["placements"].as_array().into_iter().flatten(){let r=&item["rect"];let x=r[0].as_f64().unwrap_or(0.0);let y=r[1].as_f64().unwrap_or(0.0);let w=r[2].as_f64().unwrap_or(0.0);let h=r[3].as_f64().unwrap_or(0.0);steps.push(json!({"tool":"page_add_image","args":{"doc":1,"page":item["page"],"path":item["path"],"rect":[x,y,x+w,y+h]}}));}
+ steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":pdf}}));pdf_run(s,json!(steps))?;
+ let count=board["previews"].as_array().map_or(0,Vec::len);let previews=pdf_previews(s,&pdf,&out.join("pages"),count)?;
+ baseline["previews"]=json!(pdf_previews(s,&text_base,&out.join("text-pages"),count)?);
+ board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
+ write(&out.join("manifest.json"),&board)?;write(&dir.join("storyboard/movie-board.json"),&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
+ Ok(json!({"ok":true,"pdf":pdf,"dirty":false,"placements":design["placements"],"editable_pdf":true}))
+}
+
 /// Inspect the existing native document; role names and boxes come from its objects.
 pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
+ if let Some(fields)=board["pdf_fields"].as_array(){
+  let pdf=board["pdf"].as_str().ok_or_else(||invalid("Editable PDF is missing"))?;
+  let report=pdf_run(s,json!([{"tool":"doc_open","args":{"path":pdf}},{"tool":"form_fields","args":{"doc":1}}]))?;
+  let actual=report["steps"][1]["result"][0]["fields"].as_array().ok_or_else(||invalid("PDFCraft returned no form fields"))?;
+  let mut result=Vec::new();for metadata in fields{let field=actual.iter().find(|f|f["name"]==metadata["name"]).ok_or_else(||invalid("Saved PDF field missing; refusing stale metadata"))?;let mut item=metadata.clone();item["value"]=field["value"].clone();result.push(item);}
+  return Ok(json!(result));
+ }
+
  let Some(deck)=board["deck"].as_str().filter(|p|Path::new(p).is_file()) else{return Ok(json!([]));};
  let dir=crate::workshop::project_dir(s)?;
  let count=board["previews"].as_array().map_or(0,Vec::len);
@@ -97,9 +136,22 @@ pub fn place(s:&mut Session,p:&Value)->Result<Value>{
  write(&history.join(format!("{stamp}.json")),&inspect(s,&json!({}))?)?;
  doc["dirty"]=json!(true);write(&draft(s)?,&doc)?;Ok(json!({"ok":true,"placement":item,"draft":draft(s)?}))
 }
-pub fn save(s:&mut Session,_:&Value)->Result<Value>{
+pub fn save(s:&mut Session,p:&Value)->Result<Value>{
+ if let Some(path)=p["draft"].as_str(){
+  let dir=crate::workshop::project_dir(s)?;let path=crate::workspace::resolve_workspace_path(s,path).canonicalize()?;
+  if !path.starts_with(dir.join("storyboard").canonicalize()?) || path.file_name().and_then(|n|n.to_str())!=Some("manifest.json"){return Err(invalid("Draft must be this project's generated storyboard manifest"));}
+  let mut board=read(&path)?;
+  if board["project"]!=json!(s.project_path) || board["draft"]!=true{return Err(invalid("Not a draft for this open project"));}
+  if board["mapping"]["needs_correction"]==true{return Err(invalid(&format!("Draft mapping needs correction; expected template and unmapped source: {}. Resume: {}",board["mapping"],board["resume_command"])));}
+  if !board["deck"].as_str().is_some_and(|p|Path::new(p).is_file()) || board["previews"].as_array().is_none_or(|xs|xs.is_empty()||xs.iter().any(|p|!p.as_str().is_some_and(|v|Path::new(v).is_file()))){return Err(invalid("Draft native deck or rendered previews are missing"));}
+  if inspect(s,&json!({}))?["dirty"]==true{return Err(invalid("Save pending design edits before adopting a generated draft"));}
+  board["draft"]=json!(false);board["status"]=json!("saved after draft review");
+  write(&dir.join("storyboard/movie-board.json"),&board)?;
+  return Ok(json!({"ok":true,"deck":board["deck"],"pdf":board["pdf"],"dirty":false,"saved_draft":path}));
+ }
  let dir=crate::workshop::project_dir(s)?;let active=dir.join("storyboard/movie-board.json");let mut board=read(&active)?;
- let design=inspect(s,&json!({}))?;let entries=design["placements"].as_array().ok_or_else(||invalid("Invalid placements"))?;
+ let design=inspect(s,&json!({}))?;if board["pdf_fields"].is_array(){return save_pdf(s,board,&design);}
+ let entries=design["placements"].as_array().ok_or_else(||invalid("Invalid placements"))?;
  let mut baseline=base(&board);
  let original=baseline["deck"].as_str().ok_or_else(||invalid("storyboard has no editable deck"))?.to_owned();
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();

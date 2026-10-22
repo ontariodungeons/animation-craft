@@ -3,7 +3,7 @@ use crate::workspace::{resolve_workspace_path, sanitize_asset_id};
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{fs, path::{Path,PathBuf}};
 
 pub(crate) fn receive(dir: &Path, source: &Path) -> Result<Value> {
     let bytes = fs::read(source)?;
@@ -223,23 +223,21 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let project_path=s.project_path.clone();
     let dir = project_path.as_deref().and_then(Path::parent);
     let saved = dir.map(read_state).unwrap_or(json!({}));
-    let transcript = dir.and_then(|d| crate::workshop::transcript_files(d).into_iter().next());
-    let parsed = transcript
-        .as_ref()
-        .and_then(|f| fs::read(f).ok())
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    let board=dir.and_then(|d|fs::read(d.join("storyboard/movie-board.json")).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+    let transcript = board["source_transcript"].as_str().map(PathBuf::from).filter(|p|p.is_file()).or_else(||dir.and_then(|d| crate::workshop::transcript_files(d).into_iter().next()));
+    let parsed = transcript.as_ref().and_then(|f|fs::read(f).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).map(|v|if v.is_array(){json!({"words":v,"paragraphs":v,"recording_duration_sec":board["validation"]["duration"]})}else{v});
     let valid = parsed
         .as_ref()
         .is_some_and(|v| crate::workshop::transcript_problems(v).is_empty())
         && saved["transcript_valid"] != false
-        && saved["valid"] != false;
+        && saved["valid"] != false && board["timing_valid"]!=false;
     let mut problems = saved["problems"].as_array().cloned().unwrap_or_default();
     if !valid {
         problems.push(json!("Storyboard requires valid timed words/captions; received inputs remain available for repair."));
     }
     let commands:Vec<Value>=crate::command_specs().iter().map(|c|{
   let registry_reason=(c.enabled)(s).err();
-  let dependency=if c.id.starts_with("storyboard.")||c.id=="workshop.build_storyboard" {(!valid).then(||"Requires a valid transcript; import or repair received input".to_string())}else if c.id.starts_with("workshop.")||c.id=="project.save" {s.project_path.is_none().then(||"Open or create a project first".to_string())}else{None};
+  let dependency=if c.id=="storyboard.init"||c.id=="workshop.build_storyboard" {(!valid).then(||"Requires a valid transcript; import or repair received input".to_string())}else if c.id.starts_with("workshop.")||c.id=="project.save" {s.project_path.is_none().then(||"Open or create a project first".to_string())}else{None};
   let reason=registry_reason.or(dependency);
   json!({"id":c.id,"label":c.label,"params":c.params,"menu":c.menu,"enabled":reason.is_none(),"block_reason":reason,"long_running":c.long_running})
  }).collect();
@@ -270,7 +268,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let assets=s.project_assets.iter().filter(|a|a.path.as_ref().is_some_and(|p|p.is_file())).count();
     let animated=workshop["stages"].as_array().into_iter().flatten().find(|v|v["id"]=="animate").and_then(|v|v["assets"].as_array()).map(|v|v.iter().filter(|a|a["animatable"]==true).count()).unwrap_or(0);
     let deck=design["deck"].as_str();
-    let deck_ready=deck.is_some_and(|f|Path::new(f).is_file());
+    let deck_ready=if board["pdf_fields"].is_array(){board["pdf"].as_str().is_some_and(|f|Path::new(f).is_file()) && design["text_fields"].as_array().is_some_and(|v|!v.is_empty())}else{deck.is_some_and(|f|Path::new(f).is_file())};
     let mut native=json!({"state":"missing","reason":"Native HyperFrames audio/caption project not observed"});
     if let Some(dir)=dir {
         let hf=dir.join("hyperframes");
@@ -283,13 +281,14 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         native=json!({"state":if valid&&audio_ready&&matched&&bound{"ready"}else if host.is_some(){"blocked"}else{"missing"},"reason":if valid&&audio_ready&&matched&&bound{"Audio and native caption source linked; timing fingerprint matches. Creative/listening approval separate."}else{"Missing or mismatched audio, native caption source, timing fingerprint or host track"},"path":hf,"caption_source":hf.join("compositions/captions.html")});
     }
     let item=|id:&str,label:&str,ready:bool,present:bool,reason:&str|json!({"id":id,"label":label,"state":if ready{"ready"}else if present{"blocked"}else{"missing"},"reason":reason});
+    let transcript_detail=if let Some(source)=board["source_transcript"].as_str(){format!("Loaded storyboard consumes {source} directly ({count} raw words); no ASR run. Archive label: {} (producer executable/version not recorded in native array). {}",Path::new(source).parent().and_then(|p|p.file_name()).and_then(|n|n.to_str()).unwrap_or("unknown"),board["timing_warning"].as_str().unwrap_or(""))}else{parsed.as_ref().and_then(|v|v["source"].as_str().map(|tool|format!("Native output reused; recorded tool {tool}; model {}. Timing/word data consumed directly; not retranscribed.",v["model"].as_str().unwrap_or("unknown")))).unwrap_or_else(||"Native timing schema validated; producer unknown when not recorded".to_string())};
     let mut prerequisites=vec![
         item("song","Song",audio_ready,s.song_audio.is_some(),"Linked audio file exists; source is not copied or transcribed by this observation"),
         item("lyrics","Lyrics & notes",valid&&(lines>0||count>0),transcript.is_some(),"Timed lyric data available; optional notes and recognition accuracy are separate"),
-        item("transcript","Transcription",valid,transcript.is_some(),"Native timing schema validated; file presence alone is insufficient"),
+        item("transcript","Transcription",valid,transcript.is_some(),&transcript_detail),
         item("animate","Animate",animated>0,!s.project_assets.is_empty(),"Registered assets with usable rig parts; optional for static scenes"),
         item("assets","Assets",assets>0,!s.project_assets.is_empty(),"Registered source asset files exist; artistic approval separate"),
-        item("deckcraft","DeckCraft",deck_ready,deck.is_some(),"Active native DeckCraft file exists; not a PDF readiness check"),
+        item("deckcraft","Editable storyboard PDF",deck_ready,board["pdf"].is_string()||deck.is_some(),"Saved PDF fields inspected through PDFCraft; source timing/creative approval remain separate"),
     ];
     native["id"]=json!("hyperframes");native["label"]=json!("HyperFrames audio + captions");prerequisites.push(native);
     let metrics=json!({"timed_words":count,"lyric_groups":lines,"recording_duration_sec":duration,"last_word_end_sec":last_word,"registered_assets":s.project_assets.len(),"available_assets":assets,"animatable_assets":animated,"native_deck":deck,"design_dirty":design["dirty"],"server":workshop["video_server"]});
@@ -314,9 +313,9 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn requires_ui(_: &mut Session,_:&Value)->Result<Value>{Err(EngineError::InvalidParams("Use the canonical Studio connection: animationcraft-cli exec ui.feedback; no UI exists in a headless engine session".into()))}
 
-fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
+pub(crate) fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
 
-fn cli_program()->String{
+pub(crate) fn cli_program()->String{
  std::env::current_exe().ok().and_then(|p|{
   if p.file_name().is_some_and(|v|v.to_string_lossy().starts_with("animationcraft-cli")){Some(p)}else{p.parent().map(|p|p.join("animationcraft-cli")).filter(|p|p.is_file())}
  }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"animationcraft-cli".into())

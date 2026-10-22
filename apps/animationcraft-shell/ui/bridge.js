@@ -96,6 +96,10 @@ window.acBridge = {
     if (project && project !== state.project) {const data=await invoke('project_state',{path:project});await applyOpenedProject({...result,...data,project,_ui_engine_revision:revision});return {refreshed:id,project,ack_engine_revision:revision};}
     if (!project) {await showHome();await acFeedback.acknowledge(revision,null);return {refreshed:id,ack_engine_revision:revision};}
     state.data = await invoke("project_state", { path: state.project });
+    if(id==='workshop.build_storyboard'&&result.draft&&result.ok){
+      state.data.storyboard=result;state.data.design={placements:[],text_fields:[]};
+      toast(result.status||'Draft ready · review before Save');
+    }
     renderTarget();
     renderBlocks();
     renderStoryboard();

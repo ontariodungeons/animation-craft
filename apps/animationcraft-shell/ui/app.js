@@ -146,7 +146,7 @@ function renderBlocks() {
 
   const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
   const transcriptState = observed("transcript")?.state || "unknown";
-  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, ready("transcript"), outputs.map(fileButton), transcriptState));
+  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, ready("transcript"), [el('div',{class:'why'},transcript.why||''),...outputs.map(fileButton)], transcriptState));
 
   const assets=state.data?.assets?.assets||[];
   const cards=assets.map(a=>{
@@ -187,8 +187,8 @@ function renderStoryboard() {
   cards.replaceChildren();
   $("sb-empty")?.remove();
   if(sb?.deck){
-    cards.append(el('div',{class:'why'},el('strong',{},'Editable DeckCraft deck'),
-      el('p',{},sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Text fields can be edited on the page and save when you finish typing. Pictures keep the existing Save new version action.'),
+    cards.append(el('div',{class:'why'},el('strong',{},sb.pdf_fields?'Editable PDF':'Existing storyboard document'),
+      el('p',{},sb.pdf_fields?sb.pdf:sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Text fields can be edited on the page and save when you finish typing. Pictures keep the existing Save new version action.'),
       ...(sb.next_commands||[]).map(command=>el('pre',{},command))));
   }
 
@@ -426,7 +426,7 @@ function renderStoryboardText(){
    title:`Edit ${field.field.replaceAll('_',' ')} · saved when you finish typing`,
    'aria-label':`Scene ${field.scene||'page '+field.page} ${field.field.replaceAll('_',' ')}`,
    'data-commands':'storyboard.edit',spellcheck:'true',
-   style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${w/size[0]*100}%;height:${Math.max(h,50)/size[1]*100}%;font-size:${(field.field==='lyrics'?27:21)/size[0]*100}cqw`});
+   style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${w/size[0]*100}%;height:${(field.name?h:Math.max(h,50))/size[1]*100}%;font-size:${(field.name?(field.font_size||12):(field.field==='lyrics'?27:21))/size[0]*100}cqw;${field.name?`font-family:Helvetica,Arial,sans-serif;padding:${2/size[0]*100}cqw;box-sizing:border-box;--field-fill:${field.fill};--field-ink:${field.text_color}`:''}`});
   node.value=node.defaultValue=field.value;
   node.addEventListener('change',async()=>{
    if(node.value===node.defaultValue)return;
@@ -453,7 +453,7 @@ let selectedPlacement=null;
 function renderDesignPlacements(){
  const entries=state.data?.design?.placements||[];const size=state.data?.storyboard?.page_size||[960,540];
  document.querySelectorAll('.design-placement,.design-remove').forEach(n=>n.remove());
- $('sb-save-version').hidden=!state.data?.storyboard?.deck;
+ $('sb-save-version').hidden=!(state.data?.storyboard?.pdf_fields||state.data?.storyboard?.deck);
  if(!entries.some(p=>p.id===selectedPlacement))selectedPlacement=entries.at(-1)?.id||null;
 
  for(const item of entries){
@@ -484,4 +484,4 @@ function renderDesignPlacements(){
   });page.append(node,el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',style:`left:${100*(x+w)/size[0]}%;top:${100*y/size[1]}%`,onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×'));
  }
 }
-$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.setAttribute('aria-busy','true');try{await designCommand('storyboard.save_version');toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.removeAttribute('aria-busy');}});
+$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.setAttribute('aria-busy','true');try{await designCommand('storyboard.save_version',state.data?.storyboard?.draft?{draft:state.data.storyboard.manifest}:{});toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.removeAttribute('aria-busy');}});

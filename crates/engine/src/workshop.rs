@@ -358,10 +358,16 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         })
         .collect();
     let server = video_server_info(&dir, target);
-    let transcript_why = if transcripts.is_empty() {
-        "Transcribe the song to timestamp lyrics and initialize the video project."
+    let supplied_transcript=transcripts.first().and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+    let loaded_board=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+    let transcript_why = if let Some(source)=loaded_board["source_transcript"].as_str(){
+        format!("Storyboard uses native output {source} directly ({} words); no transcription rerun. Archive label: {} (producer executable/version not recorded). {}",loaded_board["source_words"],Path::new(source).parent().and_then(|p|p.file_name()).and_then(|n|n.to_str()).unwrap_or("unknown"),loaded_board["timing_warning"].as_str().unwrap_or(""))
+    } else if transcripts.is_empty() {
+        "Transcribe the song to timestamp lyrics and initialize the video project.".to_string()
+    } else if let Some(tool)=supplied_transcript["source"].as_str() {
+        format!("Reused native transcript; recorded tool: {tool}; recorded model: {}. No transcription run in this import.",supplied_transcript["model"].as_str().unwrap_or("unknown"))
     } else {
-        "Transcript ready; timestamps line up the video project and storyboard scenes."
+        "Transcript ready; producer unknown because the supplied file did not record it.".to_string()
     };
     let reference_why = match (panels.is_empty(), pdf.is_file(), approved) {
         (true, _, _) => "Add storyboard panels (split a storyboard grid or add panel images).",
@@ -415,7 +421,7 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).chain(liner.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
             "outputs": vec![target_chip],
             "brief": stage_brief(s, &dir, "song")}),
-        json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty(), "why": transcript_why,
+        json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty() && loaded_board["timing_valid"]!=false, "why": transcript_why,
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
             "outputs": transcript_outputs,
             "document": transcripts.first().and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()),
