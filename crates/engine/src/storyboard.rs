@@ -1112,6 +1112,36 @@ pub fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
 pub fn cmd_storyboard_import_openmontage(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let src = params.get("path").and_then(Value::as_str).map(|p| resolve_workspace_path(s, p)).ok_or_else(|| EngineError::InvalidParams("missing 'path' (the existing project folder)".into()))?;
+    if params["preserve_document"] == true {
+        // Attach an existing document and its previews only. Never enter scene import/build.
+        let source=src.join(STORYBOARD_DIR);
+        let pdf=source.join(STORYBOARD_PDF);
+        let previews=files_in(&source.join(".preview"),Some(&["png"]));
+        let layout=source.join(".preview/layout.json");
+        if !pdf.is_file() || previews.is_empty() || !layout.is_file() {
+            return Err(EngineError::InvalidParams("Preserved import requires the existing storyboard.pdf, .preview PNGs and layout.json; no regeneration performed".into()));
+        }
+        let mut copies=vec![(pdf,dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF)),(layout,dir.join("storyboard/.preview/layout.json"))];
+        for preview in previews {
+            let name=preview.file_name().ok_or_else(||EngineError::InvalidParams("Invalid preview filename".into()))?;
+            copies.push((preview.clone(),dir.join("storyboard/.preview").join(name)));
+        }
+        // Check every collision before any copy, and never overwrite different authored bytes.
+        for (from,to) in &copies {
+            if to.exists() && std::fs::read(from)?!=std::fs::read(to)? {
+                return Err(EngineError::InvalidParams(format!("Existing storyboard differs at {}; preserved without importing",to.display())));
+            }
+        }
+        for (from,to) in &copies {
+            if !to.exists(){if let Some(parent)=to.parent(){std::fs::create_dir_all(parent)?;}std::fs::copy(from,to)?;}
+        }
+        let mut result=cmd_workshop_storyboard(s,&json!({}))?;
+        result["preserved_existing_document"]=json!(true);
+        result["source_document"]=json!(source.join(STORYBOARD_PDF));
+        result["imported"]=json!(copies.iter().map(|(_,to)|to).collect::<Vec<_>>());
+        result["editable_slide_integration"]=json!("Existing PDF and page previews preserved; no native deck or editable text fields are claimed");
+        return Ok(result);
+    }
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let read = |rel: &str| -> Option<Value> { serde_json::from_str(&std::fs::read_to_string(src.join(rel)).ok()?).ok() };
     let plan = read("artifacts/scene_plan.json").ok_or_else(|| EngineError::InvalidParams(format!("no artifacts/scene_plan.json in {}", src.display())))?;

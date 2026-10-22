@@ -412,7 +412,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("storyboard.edit", "Edit Scene", ["Storyboard"], None,
             "{\"scene\": 1, \"field\": \"native: action|continuity|image_prompt|animation_prompt|animated_text|drawing|lyrics (see storyboard.read text_fields); legacy: lyric|prompt|panel|note|status|time|reference|skills|reference_prompt|layer_stack|build_steps|acceptance_checks|plan_vs_actual\", \"line\": 1, \"value\": \"text, image path, start-end or status\"}", always, cmd_storyboard_edit),
         cmd!("storyboard.import_openmontage", "Import Scenes from an OpenMontage Project", ["Storyboard"], None,
-            "{\"path\": \"existing project folder\", \"overwrite\": false}", always, cmd_storyboard_import_openmontage),
+            "{\"path\": \"existing project folder\", \"overwrite\": false, \"preserve_document\": false}", always, cmd_storyboard_import_openmontage),
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
