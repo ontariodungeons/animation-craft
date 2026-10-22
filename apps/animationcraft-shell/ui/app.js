@@ -276,10 +276,11 @@ async function showStudio() {
   $("studio-empty").classList.toggle("show", !url);
   if (!url) return;
   try { await invoke("studio_show", { url, mode: state.view }); }
-  catch (e) { toast(String(e)); }
+  catch (e) { toast(String(e)); throw e; }
 }
 
-async function setView(view) {
+async function setView(view, action) {
+  const errors = acFeedback.errors.length;
   if (view === "split") view = "studio";
   if (typeof animationPause === "function") animationPause();
   state.view = view;
@@ -291,14 +292,17 @@ async function setView(view) {
   const page = view === "studio" ? "project" : view;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${page}`));
   placeInk();
-  if (view === "animation") { await invoke("studio_hide"); await animationOpen(); return; }
-  if (view !== "project" && serverUrl()) requestAnimationFrame(showStudio);
+  if (view === "animation") { await invoke("studio_hide"); await animationOpen(); }
+  else if (view !== "project" && serverUrl()) { await new Promise(requestAnimationFrame); await showStudio(); }
   else {
     await invoke("studio_hide");
     if (view !== "project") {
       document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-studio"));
       $("studio-empty").classList.add("show");
     }
+  }
+  if (action && feedbackSnapshot().rendered && acFeedback.errors.length === errors) {
+    await acFeedback.report(null, null, {stage:"ui_navigation_applied",...action,view:state.view});
   }
 }
 
@@ -368,7 +372,7 @@ async function applyOpenedProject(opened, start = {}) {
   await acFeedback.acknowledge(state.data?._ui_engine_revision, path);
 }
 
-document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view, acFeedback.actions.get(t))));
 
 // The frame between the project view and the studio: drag to move, double-click for half,
 // buttons collapse either side (studio only / project only).

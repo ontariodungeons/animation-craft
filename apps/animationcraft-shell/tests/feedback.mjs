@@ -18,7 +18,7 @@ assert.equal(intervals[0]?.ms,1000,'Frontend must refresh its own observation, i
 context.acFeedback.ack=1;
 const before=reports.length;await intervals[0].fn();
 assert.equal(reports.length,before+1);assert.equal(reports.at(-1).report.event,undefined,'Heartbeat must not invent activity');assert.equal(context.acFeedback.ack,1,'Heartbeat must not acknowledge unseen engine work');
-function click(navigation=false){const node={id:navigation?'sb-next':'sb-save-version',dataset:{},getAttribute:()=>null,matches:()=>navigation,textContent:''};const event={target:{closest:()=>node}};listeners.click(event);return event;}
+function click(navigation=false){const node={id:navigation==='tab'?'Studio':navigation?'sb-next':'sb-save-version',dataset:navigation==='tab'?{view:'studio'}:{},getAttribute:()=>null,matches:selector=>navigation==='tab'?selector.includes('.tab[data-view]'):selector.includes('#sb-next')&&!!navigation,textContent:''};const event={target:{closest:()=>node}};listeners.click(event);return event;}
 const save=click();
 assert.equal(context.acFeedback.action?.request_id,save.acAction.request_id,'Static handlers must receive the captured click request');
 await vm.runInContext("invoke('engine_command',{id:'storyboard.save_version',params:{}})",context);
@@ -32,3 +32,27 @@ const count=reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').l
 click(true);context.acFeedback.errors.push({message:'Handler failed'});frames.shift()();await Promise.resolve();
 assert.equal(reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').length,count,'Failed navigation must not report completion');
 console.log('PASS: real heartbeat without activity/ack fabrication, static click request propagation, correlated navigation after render and no false completion on error');
+
+context.acFeedback.errors=[];
+const tab=click('tab');
+assert.equal(reports.at(-1).report.event.interaction,'navigation','Existing third tab must be classified as navigation, not unknown control');
+
+context.document.querySelector=selector=>selector==='#view-studio'?null:pane;
+context.placeInk=()=>{};context.serverUrl=()=>'http://localhost:3058/#project/hyperframes';
+context.$=()=>({classList:{toggle:()=>{},add:()=>{}}});
+let completeNative;
+context.nativeInvoke=async command=>command==='studio_show'?new Promise(resolve=>{completeNative=resolve;}):{};
+vm.runInContext(app.slice(app.indexOf('async function showStudio()'),app.indexOf('// ---- Studio server')),context);
+context.tabAction=tab.acAction;
+const beforeTab=reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').length;
+const showing=vm.runInContext("setView('studio',tabAction)",context);
+assert.equal(frames.length,1,'View tabs must use their asynchronous handler, not the generic first-frame completion');
+frames.shift()();await new Promise(setImmediate);
+assert.equal(reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').length,beforeTab,'Do not acknowledge before the existing embedded-view operation finishes');
+completeNative({});await showing;
+const completed=reports.at(-1).report.event;
+assert.equal(completed.stage,'ui_navigation_applied');assert.equal(completed.request_id,tab.acAction.request_id);assert.equal(completed.view,'studio');assert.equal(context.acFeedback.ack,1);
+context.nativeInvoke=async()=>{throw new Error('Native view failed');};context.toast=()=>{};
+const failed=vm.runInContext("setView('studio',tabAction)",context);frames.shift()();await assert.rejects(failed,/Native view failed/);
+assert.equal(reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').length,beforeTab+1,'A failed native view must not create navigation completion');
+console.log('PASS: Studio tab emits one correlated navigation receipt after native view completion; failure and engine revisions remain truthful');
