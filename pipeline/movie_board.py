@@ -36,7 +36,7 @@ def build(transcript, source, out, title, scene_map):
         selected=[w for w in words if packet['start_seconds']-0.001<=w['start']<packet['end_seconds']-0.001]
         group=dict(id=packet['id'],word_ids=[w['id'] for w in selected],span_start=packet['start_seconds'],span_end=packet['end_seconds'],kind=packet.get('kind','provisional scene'),status=packet.get('status','needs review'),reason='Canonical CLI scene span; review grouping without forced verse taxonomy.')
         groups.append(group)
-    config=dict(title=title,transcript=str(transcript),captions=metadata['captions'],duration_sec=metadata['duration_sec'],audio=metadata.get('audio'),project=metadata.get('project'),scene_content={p['id']:dict(sections=p.get('sections',{}),notes=p.get('notes',[]),source=p.get('source'),lines=p.get('lines',[])) for p in packets})
+    config=dict(title=title,transcript=str(transcript),captions=metadata['captions'],duration_sec=metadata['duration_sec'],recording_duration_verified=metadata.get('recording_duration_verified',False),audio=metadata.get('audio'),project=metadata.get('project'),scene_content={p['id']:dict(sections=p.get('sections',{}),notes=p.get('notes',[]),source=p.get('source'),lines=p.get('lines',[])) for p in packets})
     config_path=out/'template-inputs.json';config_path.write_text(json.dumps(config,indent=2))
     grouping=out/'scene-map-input.json';grouping.write_text(json.dumps(dict(groups=groups),indent=2))
     template=Path(__file__).parent/'templates/studio-template.deckcraft'

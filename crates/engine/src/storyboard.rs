@@ -583,7 +583,10 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let scenes=(1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?;
         std::fs::create_dir_all(&out)?;
         let scene_map=out.join("scene-map.json");
-        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":caption_file(&dir).ok_or_else(||EngineError::InvalidParams("DeckCraft template needs existing timed captions; import the original SRT with workshop.import_transcript".into()))?,"duration_sec":song_seconds(&dir),"audio":s.song_audio,"project":s.project_path})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        let provenance=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
+        let recording_duration=song_seconds(&dir);
+        let timing_extent=recording_duration.or_else(||provenance["duration_sec"].as_f64()).or_else(||scenes.last().and_then(|v|v["end"].as_f64()));
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":caption_file(&dir).ok_or_else(||EngineError::InvalidParams("DeckCraft template needs existing timed captions; import the original SRT with workshop.import_transcript".into()))?,"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
         let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
         if let Some(source)=params["source"].as_str(){args.extend(["--source".into(),resolve_workspace_path(s,source).to_string_lossy().into_owned()]);}
@@ -920,20 +923,20 @@ pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
 
 pub fn cmd_storyboard_init(s: &mut Session, _: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
-    for folder in [STORYBOARD_DIR, ASSETS_DIR, "liner-notes"] {
-        std::fs::create_dir_all(dir.join(folder))?;
-    }
-    let list = storyboard_scenes(&dir)?;
-    let mut created = Vec::new();
-    for (i, scene) in list.iter().enumerate() {
-        if !scene_doc_path(&dir, i + 1).is_file() {
-            write_scene_doc(&dir, i + 1, &scene_label(i, scene), &read_scene_doc(&dir, i + 1))?;
-            created.push(scene_doc_path(&dir, i + 1));
+    // The editable DeckCraft document is authoritative once created. Reopening never regenerates it.
+    let active=dir.join("storyboard/movie-board.json");
+    if let Ok(bytes)=std::fs::read(&active) {
+        if let Ok(board)=serde_json::from_slice::<Value>(&bytes) {
+            if board["deck"].as_str().is_some_and(|p|Path::new(p).is_file()) {
+                let mut result=cmd_workshop_storyboard(s,&json!({}))?;
+                result["reused_existing_document"]=json!(true);return Ok(result);
+            }
         }
     }
-    let mut toc = cmd_storyboard_toc(s, &json!({}))?;
-    toc["created"] = json!(created);
-    Ok(toc)
+    for folder in [STORYBOARD_DIR, ASSETS_DIR, "liner-notes"] {std::fs::create_dir_all(dir.join(folder))?;}
+    // Canonical scene spans are parsed data, not another editable Markdown storyboard.
+    let mut result=cmd_workshop_build_storyboard(s,&json!({"template":"backlot"}))?;
+    result["reused_existing_document"]=json!(false);Ok(result)
 }
 
 pub fn cmd_storyboard_toc(s: &mut Session, _: &Value) -> Result<Value> {

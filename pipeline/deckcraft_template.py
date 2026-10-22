@@ -165,6 +165,7 @@ def place_scene_picture(d,slide,record,group_id):
     return dict(file=str(path),status='reference only / needs review',region=SCENE_ART_REGION,picture_id=pid,rect=fitted)
 def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative):
     kind=page['kind'];fill=lambda r,t,sz=None:fill_text(d,slide,r,t,sz)
+    duration_label='Measured recording' if c.get('recording_duration_verified',False) else 'Supplied timing extent; recording duration unknown'
     fill('auto.title',c['title']+' / '+page['title'],36)
     fill('auto.subtitle',f'{c.get("artist","Artist unassigned")} / {clock(duration)} / NEEDS REVIEW / '+page['key'],20)
     nav=next(x for x in slide['shapes'] if x.get('altText')=='nav.contents');d.q('shape.action',ids=[nav['id']],action='none' if representative else 'slide',**({} if representative else {'slide':0}))
@@ -180,7 +181,7 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
             sh=next(x for x in slide['shapes'] if x.get('altText')=='auto.toc.label.'+str(slot))
             d.q('shape.action',ids=[sh['id']],action='slide' if target else 'none',**({'slide':index} if target else {}))
     if kind=='overview':
-        fill('user.source',f'{c.get("album","Album unassigned")} / track {c.get("track","?")}\nMeasured duration: {clock(duration)}\n{len(words)} words / {len(cues)} original cues\n{len(groups)} proposed scene spans\nTranscript: ASR, not verified by listening.',21)
+        fill('user.source',f'{c.get("album","Album unassigned")} / track {c.get("track","?")}\n{duration_label}: {clock(duration)}\n{len(words)} words / {len(cues)} original cues\n{len(groups)} proposed scene spans\nTranscript: ASR, not verified by listening.',21)
         links=[('Audio',c.get('audio')),('Words',c['transcript']),('Cues',c['captions']),('Project',c.get('project'))]
         for i,(label,path) in enumerate(links):
             if path and Path(path).exists():d.text(label+' ↗',[930+i*110,413,108,26],16,TEAL,True,'source.'+str(i));d.q('insert.hyperlink',url=Path(path).resolve().as_uri(),tooltip=label)
@@ -209,7 +210,7 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
         for label,targetkey,x in [('Asset pages','asset:',1078),('Clean plates','location:',1220)]:
             target=next((i for i,p in enumerate(all_pages) if p['key'].startswith(targetkey)),None)
             if target is not None:d.text(label,[x,616,140,24],16,TEAL,True,'nav.'+targetkey);d.q('shape.action',action='slide',slide=target,tooltip=label)
-    if kind=='qc':fill('user.qc.settings',f'Measured recording: {clock(duration)}\nCanvas / fps / codec: NOT SET\nExport destination: NOT SET\nEnter proposed settings, then record approval.',22)
+    if kind=='qc':fill('user.qc.settings',f'{duration_label}: {clock(duration)}\nCanvas / fps / codec: NOT SET\nExport destination: NOT SET\nEnter proposed settings, then record approval.',22)
     # Configured pictures become real independently replaceable DeckCraft picture objects.
     record=page.get('asset') or page.get('location') or {}
     if record.get('file'):
