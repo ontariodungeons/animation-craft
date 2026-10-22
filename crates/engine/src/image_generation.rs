@@ -131,6 +131,8 @@ pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     for reference in &references {
         args.extend(["--image".into(), reference["path"].as_str().ok_or_else(|| invalid("Invalid resolved reference path"))?.into()]);
     }
+    // --image accepts multiple values; terminate options before the positional prompt.
+    args.push("--".into());
     args.push(format!("{instruction}\nAttached references (in order): {}. Inspect these images before the single image edit. {}",
         serde_json::to_string(&references).map_err(|e| invalid(&e.to_string()))?,
         if p["transparent_background"] == true { "Request transparent_background=true from the native image tool; retain subject texture, silhouette and attachment point." } else { "Preserve reference transparency unless the description explicitly requests a change." }));
