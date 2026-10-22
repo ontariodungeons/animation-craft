@@ -395,7 +395,7 @@ fn root_finish(action: &Value) -> Option<&Value> {
 }
 fn engine_badge(action: &Value) -> (&'static str, Color) {
     match root_finish(action).and_then(|e| e["stage"].as_str()) {
-        Some("engine_success") => ("✓ ENGINE OK", GREEN),
+        Some("engine_success") => ("✓ SUCCEEDED", GREEN),
         Some("engine_error" | "handler_error") => ("✗ FAILED", RED),
         Some("engine_needs_work") => ("! NEEDS WORK", AMBER),
         _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("◌ RUNNING", BLUE),
@@ -454,13 +454,15 @@ fn action_lines(c: &Center, action: &Value, compact: bool) -> Vec<Line<'static>>
         heading = heading.style(Style::default().fg(if color == RED { RED } else { BLUE }).bg(DESK_SELECTED));
     }
     let ack = action_ack(action);
+    let navigation=root_start(action).is_some_and(|e| e["interaction"]=="navigation");
+    let ui_result=if ack {if navigation {"NAVIGATION APPLIED"}else{"RESULT RENDERED"}}else if navigation {"navigation receipt pending"}else if engine_badge(action).0=="◌ RUNNING" {"waiting for result/render"}else {"no correlated Studio receipt"};
     let mut lines = vec![heading];
     if compact {
         lines.push(Line::from(vec![Span::styled(format!("  {engine}  "), Style::default().fg(color)),
-            Span::styled(if ack { "▣ UI APPLIED" } else { "— NO UI RECEIPT" }, Style::default().fg(if ack { GREEN } else { MUTED }))]));
+            Span::styled(format!("{} {ui_result}",if ack {"▣"}else{"—"}), Style::default().fg(if ack { GREEN } else { MUTED }))]));
     } else {
         lines.push(styled(format!(" ├─ ENGINE: {engine}"), color));
-        lines.push(styled(if ack { " ├─ STUDIO: ▣ DOM APPLIED · visual review separate" } else { " ├─ STUDIO: — no correlated UI receipt; valid for headless work" }, if ack { GREEN } else { MUTED }));
+        lines.push(styled(format!(" ├─ STUDIO: {} {ui_result}{}",if ack {"▣"}else{"—"},if ack && !navigation {" · visual review separate"}else{""}), if ack { GREEN } else { MUTED }));
         lines.push(styled(format!(" └─ AGENT: {} · {}", start["origin"].as_str().unwrap_or("unknown"), start["client_label"].as_str().unwrap_or("unverified")), MUTED));
     }
     if let Some(error) = root_finish(action).and_then(|e| e["error"].as_str()).filter(|_| !compact) { lines.push(styled(format!("    {}", error.strip_prefix("invalid parameters: ").unwrap_or(error)), RED)); }
