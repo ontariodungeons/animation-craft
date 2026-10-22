@@ -449,3 +449,11 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 
 /* Restore the existing continuous DeckCraft placement surface. */
 .sb-title-cards.document-pages { max-width:1200px; width:100%; }
+
+/* Native storyboard text boxes: unchanged preview until the existing field receives focus. */
+.sb-sheet { container-type:inline-size; }
+.sb-text { position:absolute; z-index:2; margin:0; padding:0; border:0; border-radius:0;
+ resize:none; background:transparent; color:transparent; font-family:"DejaVu Sans",sans-serif;
+ line-height:1.2; box-shadow:none; outline:none; }
+.sb-text:hover { outline:1px dashed #D7B46A; }
+.sb-text:focus { outline:1px solid #D7B46A; background:#1B1D22; color:#B7B4AB; }

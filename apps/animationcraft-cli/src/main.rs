@@ -88,6 +88,7 @@ SUBCOMMANDS
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
+  storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
@@ -591,6 +592,17 @@ fn call_app_quit(bridge: Option<&str>, mut args: Value) -> Result<Value, String>
     bridge_call(bridge.unwrap_or("auto"), "app.quit", args)
 }
 
+/// A short spelling of the existing storyboard.edit operation; dash-only text is literal.
+fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
+ let mut args=Vec::new();let mut i=0;
+ while i<raw.len(){if raw[i]=="--bridge"{i+=2;continue;}args.push(raw[i].as_str());i+=1;}
+ if args.len()<5 || args[..3]!=["storyboard","edit","scene"] {return Err("storyboard edit scene <N> <text> [field=action]".into());}
+ let scene=args[3].parse::<u64>().ok().filter(|n|*n>0).ok_or("scene must be a positive number")?;
+ let field=match args.get(5){None=>"action",Some(value)=>value.strip_prefix("field=").filter(|s|!s.is_empty()).ok_or("expected field=<native field from storyboard.read>")?};
+ if args.len()>6{return Err("unexpected arguments after field".into());}
+ Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
+}
+
 fn main() {
     let a = args::Args::parse(std::env::args().skip(1));
     if a.help {
@@ -687,6 +699,12 @@ fn main() {
                 }
                 Err(e) => fail(format!("vision: {e}")),
             }
+        }
+        "storyboard" => {
+            let params=storyboard_edit_params(&std::env::args().skip(1).collect::<Vec<_>>()).unwrap_or_else(|e|usage(e));
+            let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.edit",params).unwrap_or_else(|e|fail(e));
+            if is_payload_error(&result){fail(format!("storyboard.edit: {result}"));}
+            outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
         }
         "exec" => {
             let id = a
@@ -886,4 +904,22 @@ mod tests {
         assert!(!is_payload_error(&json!({ "ok": true })));
         assert!(!is_payload_error(&json!({ "viewport_tab": "2d" })));
     }
+}
+
+#[cfg(test)]
+mod storyboard_text_tests {
+ use super::*;
+ #[test]
+ fn shortcut_keeps_dash_text_and_uses_explicit_field(){
+  let raw=["--bridge","19897","storyboard","edit","scene","14","----","field=drawing"].map(str::to_owned);
+  let value=storyboard_edit_params(&raw).unwrap();
+  assert_eq!(value["scene"],14);assert_eq!(value["value"],"----");assert_eq!(value["field"],"drawing");
+ }
+ #[test]
+ fn shortcut_defaults_to_named_action_field_and_rejects_ambiguous_extra_args(){
+  let raw=["storyboard","edit","scene","4","Saved action"].map(str::to_owned);
+  assert_eq!(storyboard_edit_params(&raw).unwrap()["field"],"action");
+  let bad=["storyboard","edit","scene","4","Saved action","other"].map(str::to_owned);
+  assert!(storyboard_edit_params(&bad).is_err());
+ }
 }

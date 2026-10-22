@@ -188,7 +188,7 @@ function renderStoryboard() {
   $("sb-empty")?.remove();
   if(sb?.deck){
     cards.append(el('div',{class:'why'},el('strong',{},'Editable DeckCraft deck'),
-      el('p',{},sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Placements are saved as native DeckCraft picture objects; other slide text/object edits use DeckCraft commands.'),
+      el('p',{},sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Text fields can be edited on the page and save when you finish typing. Pictures keep the existing Save new version action.'),
       ...(sb.next_commands||[]).map(command=>el('pre',{},command))));
   }
 
@@ -254,6 +254,7 @@ function renderStoryboard() {
     wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
   }
 
+  renderStoryboardText();
   renderDesignPlacements();
   $(`sb-sheet-${state.page}`)?.scrollIntoView({block:"start",behavior:"instant"});
 }
@@ -414,6 +415,28 @@ placeInk();
 load().catch(e=>{toast(String(e));acFeedback.errors.push({message:String(e).slice(0,300)});acFeedback.report('error');});
 
 $("project-details").addEventListener("click",()=>{document.body.classList.toggle("project-details-open");$("project-details").setAttribute("aria-pressed",String(document.body.classList.contains("project-details-open")));});
+
+function renderStoryboardText(){
+ document.querySelectorAll('.sb-text').forEach(node=>node.remove());
+ const size=state.data?.storyboard?.page_size||[960,540];
+ for(const field of state.data?.design?.text_fields||[]){
+  const page=$(`sb-sheet-${field.page-1}`);if(!page)continue;
+  const [x,y,w,h]=field.rect;
+  const node=el('textarea',{id:`sb-text-${field.page}-${field.id}`,class:'sb-text',
+   title:`Edit ${field.field.replaceAll('_',' ')} · saved when you finish typing`,
+   'aria-label':`Scene ${field.scene||'page '+field.page} ${field.field.replaceAll('_',' ')}`,
+   'data-commands':'storyboard.edit',spellcheck:'true',
+   style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${w/size[0]*100}%;height:${Math.max(h,50)/size[1]*100}%;font-size:${(field.field==='lyrics'?27:21)/size[0]*100}cqw`});
+  node.value=node.defaultValue=field.value;
+  node.addEventListener('change',async()=>{
+   if(node.value===node.defaultValue)return;
+   node.disabled=true;
+   try{await designCommand('storyboard.edit',{page:field.page,field:field.field,value:node.value});toast('Storyboard text saved');}
+   catch(error){node.disabled=false;toast(String(error));}
+  });
+  page.append(node);
+ }
+}
 
 async function designCommand(id,params={}){
  const result=await motionCommand(id,params);

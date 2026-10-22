@@ -17,8 +17,55 @@ pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
  if file.exists(){let mut pending=read(&file)?;if pending["dirty"]==true || pending["placements"].as_array().is_some_and(|v|!v.is_empty()){pending["dirty"]=json!(true);doc=pending;}}
  doc["dirty"]=json!(doc["dirty"]==true);
  doc["deck"]=board["deck"].clone();doc["pdf"]=board["pdf"].clone();
+ doc["text_fields"]=native_fields(s,&board)?;
  Ok(doc)
 }
+
+/// Inspect the existing native document; role names and boxes come from its objects.
+pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
+ let Some(deck)=board["deck"].as_str().filter(|p|Path::new(p).is_file()) else{return Ok(json!([]));};
+ let dir=crate::workshop::project_dir(s)?;
+ let count=board["previews"].as_array().map_or(0,Vec::len);
+ let mut args=vec!["run".into(),"--in".into(),deck.into()];
+ for i in 0..count{args.extend(["--cmd".into(),format!("slide.inspect={}",json!({"index":i}))]);}
+ args.push("--print".into());
+ let output=crate::workspace::run_tool_in(&dir,"deckcraft-cli",&args)?;
+ let mut fields=Vec::new();
+ for line in output.lines(){
+  let Some(raw)=line.strip_prefix("slide.inspect → ") else{continue;};
+  let slide:Value=serde_json::from_str(raw).map_err(|e|invalid(&format!("Invalid native slide inspection: {e}")))?;
+  let page=slide["index"].as_u64().ok_or_else(||invalid("Native slide has no index"))?+1;
+  for shape in slide["shapes"].as_array().into_iter().flatten(){
+   let role=shape["altText"].as_str().unwrap_or_default();
+   let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user.")).or_else(||(role=="auto.scene.lyrics").then_some("lyrics"));
+   if let Some(field)=field{
+    let scene=page.checked_sub(board["first_scene_page"].as_u64().unwrap_or(u64::MAX)).map(|n|n+1);
+    fields.push(json!({"page":page,"scene":scene,"field":field,"role":role,"id":shape["id"],"rect":shape["box"],"value":shape["text"].as_str().unwrap_or_default()}));
+   }
+  }
+ }
+ if count>0 && fields.is_empty(){return Err(invalid("Native storyboard has no recognized editable text fields"));}
+ Ok(json!(fields))
+}
+
+/// Stage a native text replacement in the existing design draft, then use its Save path.
+pub(crate) fn edit_text(s:&mut Session,p:&Value)->Result<Value>{
+ let dir=crate::workshop::project_dir(s)?;let board=read(&dir.join("storyboard/movie-board.json"))?;
+ let page=p["page"].as_u64().or_else(||p["scene"].as_u64().and_then(|n|n.checked_sub(1)).map(|n|n+board["first_scene_page"].as_u64().unwrap_or(1))).ok_or_else(||invalid("scene or page is required"))?;
+ let field=p["field"].as_str().unwrap_or("action");
+ let value=p["value"].as_str().ok_or_else(||invalid("value must be text"))?;
+ let fields=native_fields(s,&board)?;
+ let target=fields.as_array().into_iter().flatten().find(|f|f["page"]==page && f["field"]==field).ok_or_else(||invalid("No such native text field on this page; inspect storyboard.read text_fields"))?;
+ let mut doc=inspect(s,&json!({}))?;
+ if !doc["text_edits"].is_array(){doc["text_edits"]=json!([]);}
+ let edits=doc["text_edits"].as_array_mut().ok_or_else(||invalid("Invalid text draft"))?;
+ let mut edit=target.clone();edit["value"]=json!(value);
+ if let Some(old)=edits.iter_mut().find(|e|e["page"]==page && e["id"]==target["id"]){*old=edit;}else{edits.push(edit);}
+ doc["dirty"]=json!(true);write(&draft(s)?,&doc)?;
+ let result=save(s,&json!({}))?;
+ Ok(json!({"ok":true,"page":page,"field":field,"value":value,"saved":true,"deck":result["deck"],"pdf":result["pdf"],"dirty":false}))
+}
+
 pub(crate) fn base(board:&Value)->Value{
  if board["design_base"].is_object(){return board["design_base"].clone();}
  if let Some(parent)=board["parent_deck"].as_str(){
@@ -53,12 +100,28 @@ pub fn place(s:&mut Session,p:&Value)->Result<Value>{
 pub fn save(s:&mut Session,_:&Value)->Result<Value>{
  let dir=crate::workshop::project_dir(s)?;let active=dir.join("storyboard/movie-board.json");let mut board=read(&active)?;
  let design=inspect(s,&json!({}))?;let entries=design["placements"].as_array().ok_or_else(||invalid("Invalid placements"))?;
- let baseline=base(&board);
+ let mut baseline=base(&board);
  let original=baseline["deck"].as_str().ok_or_else(||invalid("storyboard has no editable deck"))?.to_owned();
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
  let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
  let deck=out.join("movie-board.deckcraft");let pdf=out.join("movie-board.pdf");
+ let edits=design["text_edits"].as_array().cloned().unwrap_or_default();
  let mut args=vec!["run".into(),"--in".into(),original.clone()];
+ for edit in &edits{
+  args.extend(["--cmd".into(),format!("slide.go={}",json!({"index":edit["page"].as_u64().unwrap_or(1)-1})),"--cmd".into(),format!("text.set={}",json!({"id":edit["id"],"text":edit["value"]}))]);
+ }
+ if !edits.is_empty(){
+  // Render the same document with text edits, before draft picture overlays are inserted.
+  // This keeps existing image drag/drop behaviour and avoids duplicating saved pictures.
+  let text_base=out.join("text-base.deckcraft");
+  args.extend(["--save".into(),text_base.to_string_lossy().into_owned()]);
+  crate::workspace::run_tool_in(&dir,"deckcraft-cli",&args)?;
+  let pages=out.join("text-pages");
+  crate::workspace::run_tool_in(&dir,"deckcraft-cli",&["render".into(),text_base.to_string_lossy().into_owned(),"--all".into(),"--scale".into(),"1.5".into(),pages.to_string_lossy().into_owned()])?;
+  let mut previews=std::fs::read_dir(&pages)?.filter_map(|e|e.ok().map(|e|e.path())).filter(|p|p.extension().is_some_and(|e|e=="png")).collect::<Vec<_>>();previews.sort();
+  baseline["previews"]=json!(previews);
+  args=vec!["run".into(),"--in".into(),text_base.to_string_lossy().into_owned()];
+ }
  for item in entries {
   args.extend(["--cmd".into(),format!("slide.go={}",json!({"index":item["page"].as_u64().unwrap_or(1)-1})),"--cmd".into(),format!("insert.picture={}",json!({"path":item["path"],"rect":item["rect"],"name":format!("Design · {}",item["asset"])}))]);
  }
@@ -66,7 +129,7 @@ pub fn save(s:&mut Session,_:&Value)->Result<Value>{
  crate::workspace::run_tool_in(&dir,"deckcraft-cli",&args)?;
  let pages=out.join("pages");crate::workspace::run_tool_in(&dir,"deckcraft-cli",&["render".into(),deck.to_string_lossy().into_owned(),"--all".into(),"--scale".into(),"1.5".into(),pages.to_string_lossy().into_owned()])?;
  let mut previews=std::fs::read_dir(&pages)?.filter_map(|e|e.ok().map(|e|e.path())).filter(|p|p.extension().is_some_and(|e|e=="png")).collect::<Vec<_>>();previews.sort();
- board["parent_deck"]=board["deck"].clone();board["deck"]=json!(deck);board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=json!({"placements":entries,"dirty":false});
+ board["parent_deck"]=board["deck"].clone();board["deck"]=json!(deck);board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=json!({"placements":entries,"text_edits":edits,"dirty":false});
  write(&out.join("manifest.json"),&board)?;write(&active,&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
  Ok(json!({"ok":true,"deck":deck,"pdf":pdf,"previous_deck":board["parent_deck"],"dirty":false,"placements":entries}))
 }

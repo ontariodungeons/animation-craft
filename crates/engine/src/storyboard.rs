@@ -986,6 +986,7 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
             result["preview"]=board["previews"][page as usize-1].clone();result["page_size"]=board["page_size"].clone();
             result["saved_placements"]=json!(board["design"]["placements"].as_array().map(|xs|xs.iter().filter(|p|p["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());
             let design=crate::storyboard_design::inspect(s,&json!({}))?;
+            result["text_fields"]=json!(design["text_fields"].as_array().map(|xs|xs.iter().filter(|f|f["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());
             result["draft_placements"]=json!(design["placements"].as_array().map(|xs|xs.iter().filter(|p|p["page"].as_u64()==Some(page)).cloned().collect::<Vec<_>>()).unwrap_or_default());
         }
     }
@@ -1021,6 +1022,12 @@ pub fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {
 
 /// Changes one scene's source: a lyric correction, a line's panel prompt or image, a note, or the status.
 pub fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    if let Ok(bytes)=std::fs::read(dir.join("storyboard/movie-board.json")) {
+        if serde_json::from_slice::<Value>(&bytes).ok().and_then(|b|b["deck"].as_str().map(str::to_owned)).is_some() {
+            return crate::storyboard_design::edit_text(s,params);
+        }
+    }
     let dir = project_dir(s)?;
     let list = storyboard_scenes(&dir)?;
     let n = scene_number(params, list.len())?;
