@@ -27,3 +27,16 @@ vm.runInContext(source.slice(source.indexOf("async function designCommand("),sou
 await vm.runInContext("designCommand('storyboard.save_version')",designContext);
 assert.deepEqual(rendered,["blocks","storyboard","ack"],"Save must acknowledge its engine revision after rendering the returned state");
 console.log("PASS: native Save acknowledges the rendered project revision");
+
+// Rendering after Save must retain the actual selected page, not just its toolbar number.
+const scrolled=[],nodes=new Map();
+function dom(id){return {id,children:[],dataset:{},classList:{toggle(){},add(){}},replaceChildren(){this.children=[];},append(...n){this.children.push(...n);},querySelector(){return null;},addEventListener(){},remove(){},scrollIntoView(){scrolled.push(this.id);}};}
+const get=id=>{if(!nodes.has(id))nodes.set(id,dom(id));return nodes.get(id);};
+const renderContext=vm.createContext({state:{project:'/fixture/test.acproj',page:1,data:{storyboard:{template:'backlot',previews:['one','two','three'],scene_titles:['scene-1','scene-2'],first_scene_page:2}}},
+ $:get,document:{body:{classList:{toggle(){}}}},el:(tag,attrs={})=>dom(attrs.id),convertFileSrc:p=>p,renderDesignPlacements(){}});
+vm.runInContext(source.slice(source.indexOf('function renderStoryboard() {'),source.indexOf('function showPage(')),renderContext);
+vm.runInContext('renderStoryboard()',renderContext);
+assert.equal(scrolled.at(-1),'sb-sheet-1','Refresh must show the selected slide after rebuilding its page container');
+renderContext.state.page=2;vm.runInContext('renderStoryboard()',renderContext);
+assert.equal(scrolled.at(-1),'sb-sheet-2');
+console.log('PASS: storyboard refresh retains the visibly selected page');

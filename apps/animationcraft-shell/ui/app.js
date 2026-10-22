@@ -253,13 +253,13 @@ function renderStoryboard() {
   }
 
   renderDesignPlacements();
+  $(`sb-sheet-${state.page}`)?.scrollIntoView({block:"start",behavior:"instant"});
 }
 
 function showPage(n) {
   const total = state.data?.storyboard?.previews?.length || 0;
   state.page = Math.max(0, Math.min(total - 1, n));
   renderStoryboard();
-  $(`sb-sheet-${state.page}`)?.scrollIntoView({block:"start",behavior:"instant"});
 }
 
 // ---- Tabs and the studio webview ----------------------------------------------------------
