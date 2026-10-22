@@ -138,7 +138,7 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
             "running": true,
             "target": target,
             "port": port,
-            "url": format!("http://localhost:{port}"),
+            "url": if target=="hyperframes"{format!("http://localhost:{port}/#project/hyperframes")}else{format!("http://localhost:{port}")},
             "pid": saved.get("pid"),
             "managed": true,
         });
@@ -356,8 +356,9 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
             // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
             // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
             std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str())?)
-                .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", "."])
+                .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", &work_dir.to_string_lossy()])
                 .current_dir(&work_dir)
+                .env("PWD", &work_dir)
                 .process_group(0)
                 .stdout(log_file)
                 .stderr(err_file)
@@ -375,7 +376,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
         "target": target,
         "port": port,
         "pid": pid,
-        "url": format!("http://localhost:{port}"),
+        "url": if target=="hyperframes"{format!("http://localhost:{port}/#project/hyperframes")}else{format!("http://localhost:{port}")},
     });
     std::fs::write(
         dir.join(".video-server.json"),
