@@ -60,3 +60,11 @@ console.log('PASS: Studio tab emits one correlated navigation receipt after nati
 const field=(id,value,defaultValue)=>({id,value,defaultValue,tagName:'INPUT',getBoundingClientRect:()=>({width:90,height:20}),closest:()=>null});
 context.document.querySelectorAll=()=>[field('motion-scrub','2.236','0'),field('agent-input','unsent draft','')];
 assert.deepEqual(Array.from(vm.runInContext('feedbackSnapshot().draft_fields',context)),['agent-input'],'playhead navigation is not an unsaved document edit; text drafts remain protected');
+
+context.document.querySelectorAll=()=>[];context.state.project='/fixture/test.acproj';context.acFeedback.errors=[];
+let timeoutFrame;context.setTimeout=fn=>{timeoutFrame=fn;return 1;};
+const priorAck=context.acFeedback.ack;const deferred=context.acFeedback.acknowledge(99,context.state.project);timeoutFrame();await deferred;
+assert.equal(context.acFeedback.ack,priorAck,'background frame timeout cannot acknowledge an unseen revision');
+assert.equal(context.acFeedback.phase,'ready','handler readiness must not hang indefinitely on an inactive workspace');
+assert.equal(reports.at(-1).report.event.stage,'render_deferred');
+console.log('PASS: deferred background frame preserves unknown render receipt without blocking handler readiness');

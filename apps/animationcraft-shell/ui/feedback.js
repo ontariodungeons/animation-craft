@@ -36,9 +36,16 @@ document.addEventListener('click',e=>{
 },true);
 
 acFeedback.acknowledge=async function(revision,project){
- await new Promise(requestAnimationFrame);
+ const frameObserved=await Promise.race([
+  new Promise(resolve=>requestAnimationFrame(()=>resolve(true))),
+  new Promise(resolve=>setTimeout(()=>resolve(false),800)),
+ ]);
  if(state.project!==project)throw new Error('Render project mismatch; acknowledgement withheld');
  const current=feedbackSnapshot();
  if(!current.rendered||current.errors.length)throw new Error('Frontend render incomplete; acknowledgement withheld');
+ if(!frameObserved){
+  await acFeedback.report('ready',null,{stage:'render_deferred',project,reason:'No animation frame observed; engine revision acknowledgement withheld'});
+  return;
+ }
  await acFeedback.report('ready',revision);
 };
