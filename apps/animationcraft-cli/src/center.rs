@@ -418,7 +418,7 @@ fn round_panel(title: impl Into<String>, accent: Color, active: bool) -> Block<'
         .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(if active{accent}else{MUTED})))
 }
 fn root_actions(c: &Center) -> Vec<&Value> {
-    c.state["activity"]["actions"].as_array().into_iter().flatten().rev().take(3).collect()
+    c.state["activity"]["actions"].as_array().into_iter().flatten().rev().filter(|a|stages(a).iter().any(|e|matches!(e["stage"].as_str(),Some("dispatch_running"|"ui_click")))).take(3).collect()
 }
 fn stages(action: &Value) -> Vec<&Value> {
     action["events"].as_array().into_iter().flatten().collect()
@@ -651,12 +651,12 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
  let (saved,_)=saved_observation(ui);let status=if !matched{"? Studio unobserved"}else if ui["ui_ready"]==true{"[OK] Studio rendered"}else{"? Studio receipt pending"};
- let session=c.state["chat"]["session"].as_str().unwrap_or("none");let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {}",chat_outcome(&c.state)),MUTED)];
+ let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED)];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"F1 CONTROL | F2 BOOTH | F4 INTAKE"}else{"F1 CONTROL | F2 BOOTH | F4 INTAKE · D details"},MUTED,false)),chunks[0]);
  if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[1]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
  let bottom_height=if narrow{13}else{9};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else{6}),Constraint::Min(5)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
- else{let p=Layout::horizontal([Constraint::Length(26),Constraint::Min(30)]).spacing(1).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,false)).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);render_conversation(f,c,right[1]);}
+ else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,false)).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);render_conversation(f,c,right[1]);}
  if narrow{let p=Layout::vertical([Constraint::Length(8),Constraint::Min(4)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
  }
  let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"[ / ] stage · F9 chat · D details · C copy · ↑↓ commands · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
