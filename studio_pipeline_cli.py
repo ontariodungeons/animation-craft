@@ -11,7 +11,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pipeline.intake_router import run_three_question_intake
 from pipeline.blender53_bridge import execute_archetype_in_blender53
 from pipeline.filmcraft_bridge import load_animation_into_filmcraft
-from pipeline.browser_cdp_bridge import open_studio_browser
 
 WORKDIR = "/home/jesse/Work/omhas-animation"
 EXPORTS_DIR = os.path.join(WORKDIR, "exports")
@@ -73,14 +72,6 @@ def cmd_intake(args):
     res = run_three_question_intake(image_hint, overrides)
     print(json.dumps(res, indent=2))
 
-
-def cmd_open_browser(args):
-    res = open_studio_browser(
-        headless=args.headless,
-        port=args.cdp_port,
-        screenshot_out=getattr(args, "screenshot", None),
-    )
-    print(json.dumps(res, indent=2))
 
 
 def cmd_blender_check(args):
@@ -145,25 +136,6 @@ def cmd_run_e2e(args):
     raw_stem = getattr(args, "name", None) or os.path.splitext(os.path.basename(image_hint))[0]
     base_stem = raw_stem.replace(" ", "_")
 
-    browser_res = None
-    screenshot_path = getattr(args, "browser_screenshot", None)
-    if getattr(args, "open_browser", False) or screenshot_path:
-        browser_res = open_studio_browser(
-            headless=not getattr(args, "open_browser", False),
-            screenshot_out=screenshot_path,
-            char_key=base_stem.lower(),
-            angle_deg=0,
-        )
-        if screenshot_path:
-            side_shot = os.path.splitext(screenshot_path)[0] + "_side45.png"
-            open_studio_browser(
-                headless=True,
-                screenshot_out=side_shot,
-                char_key=base_stem.lower(),
-                angle_deg=45,
-            )
-            browser_res["side45Screenshot"] = side_shot
-
     out_mp4 = os.path.join(out_dir, f"{base_stem}_{arch}_{verb}_blender53.mp4")
     out_png = os.path.join(out_dir, f"{base_stem}_{arch}_{verb}_blender53.png")
     fcproj_out = os.path.join(out_dir, f"{base_stem}_{arch}_{verb}.fcproj")
@@ -183,7 +155,6 @@ def cmd_run_e2e(args):
 
     summary = {
         "step1_intake": intake,
-        "browser": browser_res,
         "step2_blender53": blender_res,
         "step3_filmcraft": fc_res,
     }
@@ -276,12 +247,6 @@ def main():
     p_in.add_argument("--json", action="store_true")
     p_in.set_defaults(func=cmd_intake)
 
-    p_open = sub.add_parser("open-browser", help="Launch the Web Studio visibly on desktop or headless")
-    p_open.add_argument("--headless", action="store_true")
-    p_open.add_argument("--cdp-port", type=int, default=9225)
-    p_open.add_argument("--screenshot", default=None)
-    p_open.set_defaults(func=cmd_open_browser)
-
     p_bl = sub.add_parser("blender-check", help="Build/rig archetype in live Blender 5.3 and render MP4 + preview PNG")
     p_bl.add_argument("--archetype", required=True, choices=["humanoid_biped", "axial_creature", "radial_prop", "vehicle_hull"])
     p_bl.add_argument("--verb", default="move_traverse", choices=["move_traverse", "jump_rise_fall", "turn_bank", "express_talk"])
@@ -303,8 +268,6 @@ def main():
         p_e2e = sub.add_parser(cmd_name, help="Run full Track B: 3-Question Intake -> Blender 5.3 Render -> FilmCraft Load")
         add_shared_intake_flags(p_e2e)
         p_e2e.add_argument("--frames", type=int, default=24)
-        p_e2e.add_argument("--open-browser", action="store_true")
-        p_e2e.add_argument("--browser-screenshot", default=None)
         p_e2e.add_argument("--out-dir", default=None)
         p_e2e.set_defaults(func=cmd_run_e2e)
 

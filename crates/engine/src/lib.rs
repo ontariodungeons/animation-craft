@@ -3,7 +3,7 @@
 //! Every user-visible action is a command with a stable id
 //! (`sheet.slice`, `turnaround.register`, `mesh.build4dir`, `export.blender`…)
 //! and JSON parameters, dispatched through [`Session::execute`].
-//! The egui UI, the CLI, and any future control channel / MCP server all use
+//! The Tauri UI, CLI, and MCP server all use
 //! this one entry point; that is what makes the UI swappable and agent-drivable.
 
 #![cfg_attr(

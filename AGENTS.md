@@ -3,24 +3,15 @@
 Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
 UI, engine, pipeline, and test work from overwriting one another.
 
-## The app is the Tauri shell — not the egui window
+## Canonical application
 
-| Surface | What it is | Launch |
-|---|---|---|
-| **`apps/animationcraft-shell` (the app)** | product UI: Home, Project, Animation, Studio; `ui/*` embedded | `cargo build -p animationcraft-shell && ./target/debug/animationcraft-shell` |
-| `apps/animationcraft` + `crates/ui-egui` | egui engine inspector for agents/debugging; never present it as the product | `cargo build --bin animationcraft && ./target/debug/animationcraft --control <port>` |
-| `public/index.html` + `src/` + `server.ts` | legacy web studio; not current | `bun server.ts` |
-
-Rebuild the shell after any `ui/` edit (`ui/` is embedded). The desktop entry
-`ai.storyteller.animationcraft.desktop` starts the shell. If a user says "the app",
-they mean the shell; ask which surface only when they name the egui window or the
-web page.
+The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell`; desktop menu **AnimationCraft Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `animationcraft-cli` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
 
 ## Drive the app: CLI, MCP and skill
 
 - Skill: `~/.agents/skills/animationcraft/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
 - CLI: `animationcraft-cli help`; `animationcraft-cli exec <command> key=value`, or add
-  `--bridge <port>` to drive an open `animationcraft --control <port>` window.
+  `--bridge <port>` to drive an open `animationcraft-shell --control <port>` window.
 - MCP: register command `animationcraft-cli`, args `["mcp"]` (headless engine) or
   `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
 

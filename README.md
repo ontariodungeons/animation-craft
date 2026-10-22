@@ -1,255 +1,48 @@
-# AnimationCraft
+# AnimationCraft Studio
 
-**The AnimationCraft application is the Tauri shell** in
-`apps/animationcraft-shell` (HTML/JS in `apps/animationcraft-shell/ui`, embedded at
-build time). It picks a project, plans the song, animates and assembles, imports
-artwork and reference sheets, and delegates image/media operations to installed
-Craft CLIs through the Rust engine and Python pipeline. Inputs may be any
-supported image: no face, body type, number of limbs, pose count, or sheet layout
-can be assumed.
+The application is the Tauri shell in `apps/animationcraft-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
 
-## Which app is which — read this before launching anything
-
-| Surface | What it is | Launch |
-|---|---|---|
-| **AnimationCraft shell — the app** | Tauri desktop app, `apps/animationcraft-shell/ui` | `cargo build -p animationcraft-shell` then `./target/debug/animationcraft-shell` |
-| egui engine inspector | eframe window over the same engine (`crates/ui-egui`); a debugging/agent surface, **not** the product UI | `cargo build --bin animationcraft` then `./target/debug/animationcraft --control <port>` |
-| Headless CLI / MCP | engine without a window; `--bridge <port>` attaches to a live window, otherwise a separate session | `animationcraft-cli exec <command> …`, `animationcraft-cli mcp [--bridge <port>]` |
-| Legacy web studio | Bun server + `public/index.html`; not current | `bun server.ts` → http://127.0.0.1:8765/ |
-
-The desktop entry `ai.storyteller.animationcraft.desktop` launches the shell.
-Do not tell a user that the egui window is "the app", and do not rebuild the
-legacy web UI to change product behavior.
-
-## Where the code lives
-
-| Area | Entry points |
-|---|---|
-| **Shell app (the product UI)** | `apps/animationcraft-shell/ui/*` (`app.js`, `home.js`, `animation.js`, `bridge.js`, `style.css`), `src/`, `tauri.conf.json` |
-| Shell design system | skill `animationcraft-shell-ui`, `apps/animationcraft-shell/agent.md` |
-| Engines/CLI entry | `apps/animationcraft-cli/src/main.rs`, `crates/engine/src/commands.rs`, `session.rs` |
-| egui inspector | `apps/animationcraft/src/main.rs`, `crates/ui-egui/src/lib.rs`, `panels/` |
-| Pipeline | `studio_pipeline_cli.py`, `pipeline/` |
-| External CLI discovery | `pipeline/craft_cli.py`, Rust `resolve_craft_cli` |
-| Legacy web studio | `public/index.html`, `src/`, `server.ts`, `package.json` |
-
-Editing `ui/*` requires rebuilding the shell (`ui/` is embedded). Editing
-`src/animation/*.ts` or running the Bun bundle build updates the legacy web page
-only — not the shell and not the egui inspector. Reuse useful behavior from the
-older frontend deliberately; do not rebuild its asset-specific geometry as the
-default for arbitrary imports.
-
-## Build and run
-
-From the repository/worktree root. **The app** is the shell:
+## Run and discover
 
 ```bash
-cargo build -p animationcraft-shell
+cargo build -p animationcraft-shell --bin animationcraft-cli
 ./target/debug/animationcraft-shell
+animationcraft-cli --help
+animationcraft-cli commands
 ```
 
-`ui/` is embedded, so rebuild after editing anything under
-`apps/animationcraft-shell/ui/`. The engine and CLI are shared with it:
+The Omarchy menu entry is **AnimationCraft Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
+
+## CLI and MCP
+
+`animationcraft-cli exec <id> key=value` executes one command. `animationcraft-cli run <file.jsonl|->` keeps one headless session across JSONL commands with `id` and `params`. Separate `exec` calls do not share the open project.
+
+Register one AnimationCraft MCP server per client: command `animationcraft-cli`, args `["mcp"]`. It uses a headless engine session. To use an already configured live Studio bridge, explicitly select its port:
 
 ```bash
-cargo check --workspace
-cargo build --bin animationcraft-cli
+animationcraft-cli --bridge <port> exec ui.state
+animationcraft-cli --bridge <port> mcp
 ```
 
-The egui inspector is a separate window over the same engine; use it for agent
-inspection, not to show the product UI:
+A Studio window must have been started with `animationcraft-shell --control <port>` for that bridge to exist. Do not automatically launch/switch another window or restart services. `ui.state` does not report unsaved-change safety.
 
-```bash
-cargo build --bin animationcraft
-./target/debug/animationcraft --control 19897
-```
+## Existing material intake
 
-With that window open, use the **same instance's port**:
+Discover contracts from `animationcraft-cli commands workshop` and `commands project`. `workshop.set_audio` references original audio. `workshop.import_transcript` accepts JSON with optional original SRT via `captions`; preserve every word/timestamp and distinguish raw transcription from corrections. Audio analysis/transcription is an explicit operation, never a prerequisite for reusing valid existing timing. Existing imported or generated files are not proof of approval.
 
-```bash
-./target/debug/animationcraft-cli --bridge 19897 exec ui.state
-./target/debug/animationcraft-cli --bridge 19897 exec ui.screenshot output=/tmp/animationcraft-review.png
-./target/debug/animationcraft-cli --bridge 19897 mcp
-```
+Storyboards and media commands operate in the selected project. Preview-image display is not native editable slide-object support. Keep runtime/tool failures and unavailable integration visible; do not substitute custom production pipelines.
 
-Without `--bridge`, the CLI/MCP uses a separate headless engine session; it does
-not control or inherit any open window's state. A `run` script keeps one session
-across its commands. Discover current contracts instead of relying on copied
-parameter tables or hardcoded command counts:
+## Source map
 
-```bash
-./target/debug/animationcraft-cli help
-./target/debug/animationcraft-cli commands
-./target/debug/animationcraft-cli info
-python3 studio_pipeline_cli.py cut-sheet --help
-photocraft-cli commands --json
-```
-
-The working directory affects pipeline and output resolution. Launch each agent's
-app from its own worktree and use separate output directories. One app process
-per port is required for isolated UI state; several MCP clients targeting the
-same port still share one window, selection, playback state and screenshot queue.
-Do not click or restart another agent's app. Agree on port ownership in the
-handoff rather than assuming the example port is free.
-
-### Stopping the instance you started
-
-A live window stays open until it is told to close. Save the project first, then
-use the instance's own control channel; do not rely on a window-manager close
-request (Hyprland 0.56 no longer accepts `hyprctl dispatch closewindow` or
-`killactive`, and a dirty EffectCraft/PhotoCraft/VectorCraft window would cancel
-the close to show its save prompt anyway):
-
-```bash
-./target/debug/animationcraft-cli --bridge 19897 exec project.save
-./target/debug/animationcraft-cli --bridge 19897 exec app.quit
-```
-
-The MCP server exposes the same operation as the `app_quit` tool when it is
-started with `--bridge`; headless MCP has no app process to quit and says so. The
-reply is `{"closing": true}` and the control port becomes free once the process
-exits. Wait for that before relaunching on the same port.
-
-If the control channel is unreachable, terminate the exact process you started
-(`$!` from its launch, or the PID owning the port), not a pattern:
-
-```bash
-kill "$pid"          # SIGTERM: normal shutdown
-# after 5s, only if it is still running:
-kill -9 "$pid"
-```
-
-Do not use `pkill -f`: the pattern can match the shell issuing it. Do not stop
-another agent's instance or reuse its port. See
-[`.agents/skills/craft-app-lifecycle/SKILL.md`](.agents/skills/craft-app-lifecycle/SKILL.md)
-for the equivalent PhotoCraft, EffectCraft, VectorCraft and FilmCraft commands.
-
-## Song workflow commands (one line each — for you and for agents)
-
-Every command is the same in the app, `animationcraft-cli` and MCP. Open the project first, e.g.
-`animationcraft-cli run -` with one JSON per line, starting `{"id":"project.open","params":{"path":"<song>/<Song>.acproj"}}`.
-Each result includes `next` steps for an agent.
-
-| Job | One line |
+| Area | Source |
 |---|---|
-| New song project (audio referenced, not copied) | `animationcraft-cli exec project.new path=<projects>/<song>/<Song>.acproj audio=<song.wav>` |
-| Transcribe with FilmCraft (also makes `<song>.fcproj`) | `animationcraft-cli exec audio.transcribe` |
-| Use an existing transcript (checked first) | `animationcraft-cli exec workshop.import_transcript path=<song>.transcript.json` |
-| Create the storyboard template | `animationcraft-cli exec storyboard.init` |
-| Agent pane: header **Agent** opens your opencode session (`opencode api`, your models and MCP servers); **Point** attaches a picture of any element; send to the session or any Herdr agent | app header → Agent; watch with `opencode --session <id>` |
-| Let agents see and drive the app with egui's own inspection (egui_mcp: widget tree, click, type, resize, screenshot) | `EGUI_INSPECTION=1 animationcraft --control 19897`, then MCP server `egui-mcp` (`cargo install --git https://github.com/rerun-io/kittest_inspector egui_mcp`) |
-| Desktop shell (Tauri): project view, storyboard and the video studio as Project / Split / Studio views in one window; the studio server only runs when you switch it on (red/green light) | `animationcraft-shell <project.acproj> [--view split] [--open animate]` |
-| See the live app in one step (optional click, crop to a region, state + ids) | `animationcraft-cli --bridge 19897 exec ui.look region=workshop.storyboard click=workshop.storyboard.page.0` |
-| Analyze the song with the HyperFrames tools (words → `hyperframes/transcript.json`, structure → `hyperframes/audiomap.json`) | `animationcraft-cli exec audio.analyze` |
-| Import scenes from an OpenMontage project | `animationcraft-cli exec storyboard.import_openmontage path=<old project>` |
-| List chapters (scenes) | `animationcraft-cli exec storyboard.toc` |
-| Read one scene | `animationcraft-cli exec storyboard.read scene=1` |
-| Search lyrics, prompts, notes | `animationcraft-cli exec storyboard.search query=bell` |
-| Edit a scene (lyric, prompt, panel, note, time, reference, packet section) | `animationcraft-cli exec storyboard.edit scene=1 field=note value="bell too high"` |
-| Split a storyboard grid into panels (PhotoCraft) | `animationcraft-cli exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>` |
-| Rebuild the storyboard PDF | `animationcraft-cli exec workshop.build_storyboard` |
-| Approve a scene (user only) | `animationcraft-cli exec storyboard.approve scene=1` |
-| Add one image to its destination (copied to `assets/characters/<name>/parts/` or `assets/backgrounds/<name>/`, source recorded in `provenance.json`) | `animationcraft-cli --bridge 19897 exec project.add_asset path=<image.png> character=bee load=true` |
-| Make it transparent (PhotoCraft; writes `<name>_transparent.png` beside it) | `animationcraft-cli --bridge 19897 exec asset.make_transparent` |
-| Split an image into subject + filled background (PhotoCraft; writes `<name>_subject.png`, `<name>_background.png` beside it) | `animationcraft-cli --bridge 19897 exec asset.extract_background asset=<id> rect=[x,y,w,h]` |
-| Assess an asset: clean or recreate? | `animationcraft-cli exec assets.assess path=<layer.png>` |
-| Add to the asset fix list | `animationcraft-cli exec assets.fixlist_add asset=<id> path=<png> decision=recreate problem="torn edge"` |
-| Show the fix list | `animationcraft-cli exec assets.fixlist` |
-| One-pass asset sheet brief for the image agent | `animationcraft-cli exec assets.request_sheet` |
-| Place storyboard panels in FilmCraft at their lines | `animationcraft-cli exec video.place_references` |
+| Studio UI and transport | `apps/animationcraft-shell/ui/`, `apps/animationcraft-shell/src/` |
+| Terminal and MCP | `apps/animationcraft-cli/src/` |
+| Command contracts/dispatch | `crates/engine/src/commands.rs`, `lib.rs` |
+| Project persistence | `crates/engine/src/project.rs` |
+| Workshop/transcript | `crates/engine/src/workshop.rs` |
+| Storyboard | `crates/engine/src/storyboard.rs` |
+| Tool resolution | `crates/engine/src/workspace.rs`, `pipeline/craft_cli.py` |
+| Current Studio interaction contract | `apps/animationcraft-shell/agent.md` |
 
-## Current functional boundaries
-
-- Original images, pose sheets, part sheets and turnarounds are distinct inputs.
-  Missing references remain missing; never borrow another character's artwork.
-- A pose reference sheet is not a timed walk/run cycle. Actual animation requires
-  appropriate rig/sequence data and a renderer that consumes the controls.
-- A command being registered or returning success does not establish correct
-  rendering, segmentation, facial motion, topology or export quality.
-- Keep `needs_review`, absent measurements and tool failures visible. Nonempty
-  PNGs and matching frame counts are not visual acceptance criteria.
-- Use installed selection, mask and deformation tools before implementing image
-  processing algorithms. Preserve source files and review tool results; subject
-  detection and global color removal can damage light artwork.
-- PhotoCraft facial previews deform existing pixels; procedural mouth motion is
-  not audio-driven lip-sync. An input is not guaranteed to contain a detectable
-  face. Inspect the connected runtime and its output before claiming support.
-- Native mesh/export paths require their own inputs and verification. Do not
-  treat the historical linear upload-to-GLB diagram as a verified universal flow.
-
-## Validation and collaboration
-
-Rust compilation catches type/ownership errors, not whether a control changes the
-right artwork. Use meaningful, asset-independent checks for state transitions,
-error propagation, preservation and temporal behavior. Generated fixtures must
-actually exercise the behavior. Avoid named-character assumptions, exact UI-text
-assertions, conditional-assertion false passes and tautological output checks.
-
-Use live visual review for appearance and motion, reporting it separately from
-portable behavior checks. Run relevant checks and the build; document inherited
-failures honestly. Do not claim all tests pass based on this README—results depend
-on the revision and environment. Do not reformat unrelated files to hide a dirty
-baseline.
-
-Work on isolated branches. Commit before handoff; submit a PR with the commit SHA,
-owned files, command contracts, observed evidence and limitations. The coordinator
-reviews and integrates PRs; contributors do not merge their own changes unless
-explicitly directed. Current ownership lives in the active coordination messages,
-not in historical plans.
-
-## Historical design references
-
-- [Rust migration proposal](RUST_CRAFT_REFACTOR_SPEC.md)
-- [Earlier web/pipeline design](docs/superpowers/specs/2026-10-18-modular-2d-3d-blender-filmcraft-pipeline-design.md)
-- [Cutter usage](docs/pose-and-part-cutter.md)
-
-Dated plans retain useful context but are not permission to implement every listed
-feature. The user's current task and reviewed contracts define scope.
-
-## License
-
-MIT OR Apache-2.0
-
-### Shell Animation frame
-
-Click **Animation** in the shell top bar, or click a connected object in Project → Animate.
-The stage draws engine samples; motion is evaluated by Rust and checked against the exporter.
-
-- Inspect tracks/layers: `animationcraft-cli --bridge 19897 exec motion.tracks character=bee`
-- Sample a track: `animationcraft-cli --bridge 19897 exec motion.sample character=bee track=bee-beat2-barn-exit fps=30`
-- Verify exporter parity: `python3 scripts/check_motion_parity.py '<song>/<Song>.acproj' '<song>/assets/characters/<name>/<spec>.json' <name>`
-- Chat regression checks: `PLAYWRIGHT_MODULE=<path-to-playwright-index.mjs> node apps/animationcraft-shell/tests/agent-drawer.mjs`
-
-The first frame includes rest/play/scrub, fit/100%/zoom and layer visibility. Pose editing, song
-placement and export controls remain in progress; visible section headings are not completion claims.
-
-Pen path: `motion.path` accepts `character`, optional root `layer`, source `track`, 2–512 `[x,y]`
-canvas points, `duration` (0.1–600s), and `start_size`/`end_size` (1–1000%). It creates a new track
-using existing position/scale keys and retains other source motion. `motion.undo_path` takes the
-returned `undo` token and restores the exact source text if no newer edit would be overwritten.
-Grid and path guides are editor-only. The Pen toolbar and Path & depth sliders expose these commands.
-
-Import externally authored word timings with their existing subtitle boundaries (no lyric rewriting):
-
-```sh
-animationcraft-cli --bridge 19897 exec workshop.import_transcript path=/song/lyrics.words.json captions=/song/subtitles.srt
-animationcraft-cli --bridge 19897 exec workshop.build_storyboard
-```
-
-`path` accepts the existing `{words, paragraphs}` document or a word array when `captions` supplies
-its authored SRT paragraphs. Invalid cue times are rejected. The selected video target receives
-`transcript.srt`, which the storyboard template uses for scene timing.
-
-Build the visual Backlot movie board as an editable DeckCraft deck plus linked PDF and scrollable
-previews (uses the project's approved transcript; optional source supplies scene artwork and acting cues):
-
-```sh
-animationcraft-cli --bridge 19897 exec workshop.build_storyboard template=backlot source=/path/to/openmontage-project
-animationcraft-cli --bridge 19897 exec agent.new_chat
-```
-
-MCP equivalents: `workshop_build_storyboard` and `agent_new_chat`. Both are engine commands and
-also work in a headless CLI session after `project.open`. New chat preserves the previous session in
-`.agent/chat-history.jsonl`, keeps the requested model, and teaches the fresh session `agent.md`.
-Deck outputs use a new revision folder; scene prompts live in editable slide notes. The source project
-is read-only. PDF contents/return links and shell hotspots share the same page destinations.
+Read `AGENTS.md` before changes. Run `cargo check --workspace`; normal commit hooks run workspace checks/tests. Commit explicit owned paths; no generated media, credentials or local agent configuration. Source history is recovered through Git, not duplicated application trees in this checkout.

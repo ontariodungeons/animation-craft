@@ -72,7 +72,7 @@ USAGE
   animationcraft-cli [--bridge <port|host:port>] <SUBCOMMAND> [ARGS]
 
 OPTIONS
-  --bridge <port|host:port>           send commands to a running `animationcraft --control <port>` GUI window
+  --bridge <port|host:port>           send commands to a running `animationcraft-shell --control <port>` GUI window
 
 SUBCOMMANDS
   info                                print engine info and available commands
@@ -325,7 +325,7 @@ workshop_status (song, transcript, storyboard, assets) or project_list_assets. A
 project_add_asset {path, character: <name>} copies an outside image to assets/characters/<name>/parts/, \
 {background: <name>} to assets/backgrounds/<name>/; a rig spec connects with kind: cutout_rig. Without --bridge \
 these tools run a headless engine; to drive the user's open window start the server as \
-`animationcraft-cli --bridge <port> mcp` (the app runs with `animationcraft --control <port>`). Full guide: the \
+`animationcraft-cli --bridge <port> mcp` (the app runs with `animationcraft-shell --control <port>`). Full guide: the \
 animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `animationcraft-cli help`.";
 
 fn run_mcp_stdio(bridge: Option<String>) {
@@ -600,7 +600,7 @@ fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<
 fn ui_look(bridge: Option<&str>, mut args: Value) -> Value {
     let error = |e: String| json!({"content": [{"type": "text", "text": e}], "isError": true});
     let Some(addr) = bridge else {
-        return error("ui_look needs the native window: start `animationcraft --control <port>` and run this MCP server with `--bridge <port>`".into());
+        return error("ui_look needs the native window: start `animationcraft-shell --control <port>` and run this MCP server with `--bridge <port>`".into());
     };
     let out = std::env::temp_dir().join(format!("animationcraft-look-{}.png", std::process::id()));
     args["output"] = json!(out);
@@ -631,7 +631,7 @@ fn call_app_quit(bridge: Option<&str>, args: Value) -> Result<Value, String> {
     match bridge {
         Some(addr) => bridge_call(addr, "app.quit", args),
         None => Err(
-            "app_quit needs the native window: start `animationcraft --control <port>` and run this MCP server with `--bridge <port>`; a headless session has no app process to quit"
+            "app_quit needs the native window: start `animationcraft-shell --control <port>` and run this MCP server with `--bridge <port>`; a headless session has no app process to quit"
                 .into(),
         ),
     }
