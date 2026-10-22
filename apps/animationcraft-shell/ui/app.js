@@ -422,7 +422,7 @@ let selectedPlacement=null;
 function renderDesignPlacements(){
  const entries=state.data?.design?.placements||[];const size=state.data?.storyboard?.page_size||[960,540];
  document.querySelectorAll('.design-placement,.design-remove').forEach(n=>n.remove());
- $('sb-save-version').hidden=!entries.length;
+ $('sb-save-version').hidden=!state.data?.storyboard?.deck;
  if(!entries.some(p=>p.id===selectedPlacement))selectedPlacement=entries.at(-1)?.id||null;
 
  for(const item of entries){
