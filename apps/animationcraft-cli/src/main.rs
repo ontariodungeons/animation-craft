@@ -207,6 +207,7 @@ fn command_input_schema(id: &str) -> Value {
     let unit = json!({ "type": "number", "minimum": 0, "maximum": 1 });
     let point = json!({ "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 });
     match id {
+        "project.root" => json!({"type":"object","properties":{"root":{"type":"string","description":"Optional absolute production root to persist; omit to inspect. Intake root= overrides never change it."}},"additionalProperties":false}),
         "agent.config" | "agent.session" => json!({"type":"object","properties":{},"additionalProperties":false}),
         "agent.models" => json!({"type":"object","properties":{"agent":{"type":"string","enum":["opencode","codex","omp","claude"]}},"additionalProperties":false}),
         "agent.new_chat" => json!({"type":"object","properties":{"free_only":{"type":"boolean"}},"additionalProperties":false}),

@@ -57,16 +57,22 @@ async function openDialog() {
 
 // ---- New song sheet -------------------------------------------------------------------------
 
+let productionRoot = "";
 function renderWhere() {
-  const name = $("new-name").value.trim(), root = $("new-root").value.trim();
-  $("new-where").textContent = name && root ? `Project root: ${root}. The project location is returned after creation.` : "";
+  const root = $("new-root").value.trim();
+  $("new-where").textContent = root ? (root === productionRoot
+    ? `Production root: ${root}. Each song is saved in its own project/ folder.`
+    : `One-project override: ${root}. Production root stays ${productionRoot}.`) : "";
 }
 
 async function newSheet(open = true) {
   $("new-sheet").classList.toggle("open", open);
   $("new-sheet").setAttribute("aria-hidden", String(!open));
   if (!open) return;
-  if (!$("new-root").value) $("new-root").value = (await invoke("projects_root")) || "";
+  try {
+    productionRoot = await invoke("projects_root");
+    $("new-root").value = productionRoot;
+  } catch (error) { $("new-root").value = ""; toast(String(error)); }
   renderWhere();
   $("new-name").focus();
 }
@@ -81,7 +87,7 @@ $("new-audio-pick").addEventListener("click", async () => {
   renderWhere();
 });
 $("new-root-pick").addEventListener("click", async () => {
-  const dir = await dialog.open({ title: "Where the project folder goes", directory: true, defaultPath: $("new-root").value || undefined });
+  const dir = await dialog.open({ title: "Project root for this song only (production setting unchanged)", directory: true, defaultPath: $("new-root").value || undefined });
   if (dir) { $("new-root").value = dir; renderWhere(); }
 });
 $("new-name").addEventListener("input", renderWhere);

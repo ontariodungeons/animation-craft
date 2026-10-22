@@ -41,9 +41,10 @@ struct Center {
     pinned_instance:Option<String>,
 }
 impl Center {
-    fn new(p: &Value) -> Self {
+    fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
-        Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().unwrap_or("/run/media/jesse/Speedy/media").to_string(),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:"Choose inputs. Nothing runs until you select an action. F3 opens an existing project; F5 creates; F6 resumes explicitly.".into(),scroll:0}
+        let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:format!("Production root: {}. Editing New song root overrides this request only. F3 opens; F5 creates; F6 resumes explicitly.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         match crate::dispatch(&mut self.session,"center.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance})) {
@@ -597,7 +598,7 @@ fn render(f: &mut Frame,c: &Center) {
 }
 
 pub fn start(p: Value, print: bool) -> Result<(), String> {
-    let mut c = Center::new(&p);
+    let mut c = Center::new(&p)?;
     if !c.fields[0].is_empty() {
         c.session.execute("project.attach",json!({"path":c.fields[0]})).map_err(|e|e.to_string())?;
         c.refresh();

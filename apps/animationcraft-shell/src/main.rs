@@ -126,9 +126,7 @@ fn object_preview(project: String, name: String, layers: Vec<String>) -> Result<
         .ok_or_else(|| format!("{name}: its layers do not share one canvas"))
 }
 
-/// Recent projects (`$XDG_CONFIG_HOME/animationcraft/recent_projects.json`, the same list the
-/// older UI kept), newest first.
-fn recent_list()->Vec<String>{animationcraft_engine::project_catalog::list()}
+/// Recent projects are navigation only; they never select the production root.
 #[tauri::command]
 fn recent_projects(engine:tauri::State<Engine>)->Result<Value,String>{engine.with(None,|s|s.execute("project.catalog",json!({})).map(|v|v["projects"].clone()).map_err(|e|e.to_string()))}
 
@@ -136,11 +134,10 @@ fn recent_projects(engine:tauri::State<Engine>)->Result<Value,String>{engine.wit
 #[tauri::command]
 fn recent_forget(path:String)->Result<(),String>{animationcraft_engine::project_catalog::forget(&path)}
 
-/// Where a new song project goes by default: beside the most recent project that still exists.
+/// Shared production setting; navigation history never selects a new song's location.
 #[tauri::command]
-fn projects_root() -> Option<String> {
-    recent_list().iter().map(std::path::Path::new).find(|p| p.is_file())
-        .and_then(|p| {let parent=p.parent()?;let root=if parent.file_name().is_some_and(|v|v=="project"){parent.parent()?.parent()?}else{parent.parent()?};Some(root.to_string_lossy().into_owned())})
+fn projects_root() -> Result<String, String> {
+    animationcraft_engine::project_settings::root().map(|p|p.to_string_lossy().into_owned()).map_err(|e|e.to_string())
 }
 
 /// Run the adjacent animationcraft-cli against this Studio's private bridge. The engine stays in

@@ -32,6 +32,7 @@ pub mod motion;
 pub mod parts;
 pub mod photocraft;
 pub mod project;
+pub mod project_settings;
 pub mod rig;
 pub mod sequence;
 pub mod sheets;

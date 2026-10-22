@@ -43,24 +43,29 @@ pub(crate) fn write_state(dir: &Path, v: &Value) -> Result<()> {
 }
 
 pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
+    let production_root = crate::project_settings::root()?;
+    let mut location = json!({"source":"explicit path override","production_root":production_root,"setting_changed":false});
     let mut path = if let Some(v) = p["path"].as_str() {
         resolve_workspace_path(s, v)
     } else {
-        let root = p["root"]
-            .as_str()
-            .filter(|x| !x.trim().is_empty())
-            .ok_or_else(|| {
-                EngineError::InvalidParams(
-                    "Choose the project root; pass root and name, or an explicit path".into(),
-                )
-            })?;
+        let root = match p.get("root") {
+            Some(value) => resolve_workspace_path(s, value.as_str().filter(|v|!v.trim().is_empty())
+                .ok_or_else(||EngineError::InvalidParams("Explicit root must be a nonempty directory path".into()))?),
+            None => production_root.clone(),
+        };
+        let is_production = root == production_root;
+        if is_production && !root.is_dir() {
+            return Err(EngineError::InvalidParams("Production project root is unavailable; mount the configured directory or deliberately pass root= for this request".into()));
+        }
+        location["source"] = json!(if is_production {"production root"} else {"explicit root override"});
+        location["root"] = json!(root);
         let name = p["name"]
             .as_str()
             .filter(|x| !x.trim().is_empty() && !x.contains(['/', '\\']) && *x != "." && *x != "..")
             .ok_or_else(|| {
                 EngineError::InvalidParams("Choose a song name without path separators".into())
             })?;
-        resolve_workspace_path(s, root)
+        root
             .join(sanitize_asset_id(name).replace('_', "-"))
             .join("project")
             .join(format!("{name}.acproj"))
@@ -152,7 +157,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     if !valid && problems.is_empty() {
         problems.push("No valid transcript yet. Import existing HyperFrames words (JSON) with optional original SRT; audio processing is never automatic.".into());
     }
-    let result = json!({"ok":true,"warnings":warnings,"intake_ready":problems.is_empty()&&valid,"storyboard_ready":false,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !problems.iter().any(|v|v.contains("transcript")||v.contains("JSON")),"manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs","next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid,"storyboard_ready":false,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !problems.iter().any(|v|v.contains("transcript")||v.contains("JSON")),"manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs","next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
