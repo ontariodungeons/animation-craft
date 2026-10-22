@@ -622,7 +622,7 @@ pub fn build() -> Vec<CommandSpec> {
             "{\"clean\": false, \"keep_port\": 0}",
             cmd_app_doctor
         ),
-        query!("command.list", "List Commands", "{}", cmd_query_list),
+        query!("command.list", "List Commands", "{\"filter\":\"optional command ID or search text\"}", cmd_query_list),
     ]
 }
 

@@ -295,7 +295,12 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let metrics=json!({"timed_words":count,"lyric_groups":lines,"recording_duration_sec":duration,"last_word_end_sec":last_word,"registered_assets":s.project_assets.len(),"available_assets":assets,"animatable_assets":animated,"native_deck":deck,"design_dirty":design["dirty"],"server":workshop["video_server"]});
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_micros()).unwrap_or(0);
     let observation=json!({"id":format!("{}-{now}",std::process::id()),"project_id":s.project_path,"command":"center.status","observed_unix_micros":now,"elapsed_ms":started.elapsed().as_millis(),"source":"shared engine inspection; not inferred from process exit or UI revision"});
-    let next_commands=prerequisites.iter().filter(|v|v["state"]!="ready").map(|v|json!({"label":format!("Inspect {} requirements",v["label"].as_str().unwrap_or("project")),"command":match v["id"].as_str(){Some("transcript"|"lyrics")=>"workshop.import_transcript",Some("deckcraft")=>"storyboard.init",Some("hyperframes")=>"video.init",Some("song")=>"workshop.set_audio",_=>"project.add_asset"},"operation":"commands","params":{},"reason":v["reason"]})).collect::<Vec<_>>();
+    let next_commands=prerequisites.iter().filter(|v|v["state"]!="ready" && (v["id"]!="animate" || assets>0)).map(|v|{
+        let target=match v["id"].as_str(){Some("transcript"|"lyrics")=>"workshop.import_transcript",Some("deckcraft")=>"storyboard.init",Some("hyperframes")=>"video.init",Some("song")=>"workshop.set_audio",_=>"project.add_asset"};
+        let label=if v["id"]=="assets"{"See asset import arguments".into()}else{format!("See {} arguments",target)};
+        let reason=if v["id"]=="assets" && s.project_assets.is_empty(){json!("No reference art is registered; inspect the import command before choosing an asset.")}else{v["reason"].clone()};
+        json!({"label":label,"command":"command.list","params":{"filter":target},"subject_command":target,"operation":"exec","reason":reason})
+    }).collect::<Vec<_>>();
     if p["trace"]==true {
         let _context=crate::activity::enter("center.status",p);
         crate::activity::command(s.project_path.as_deref(),"center.status",p,"dispatch_running",None);

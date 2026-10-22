@@ -133,6 +133,9 @@ fn shared_observation_does_not_confuse_files_or_saved_receipts_with_readiness() 
     assert_eq!(find("transcript")["state"],"missing");
     assert_eq!(find("deckcraft")["state"],"missing");
     assert_eq!(find("hyperframes")["state"],"missing");
+    let art=observed["next_commands"].as_array().unwrap().iter().find(|v|v["params"]["filter"]=="project.add_asset").unwrap();
+    assert_eq!(art["command"],"command.list");assert_eq!(art["operation"],"exec");assert_eq!(art["label"],"See asset import arguments");assert!(art["reason"].as_str().unwrap().starts_with("No reference art is registered"));
+    assert_eq!(observed["next_commands"].as_array().unwrap().iter().filter(|v|v["params"]["filter"]=="project.add_asset").count(),1,"Do not recommend optional rig work before reference art exists");
     assert_eq!(observed["metrics"]["timed_words"],0);
     assert!(observed["observation"]["id"].is_string());
     assert_eq!(observed["studio_acknowledgement"],"unobserved; query ui.feedback separately");

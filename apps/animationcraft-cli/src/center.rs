@@ -346,8 +346,8 @@ const MUTED: Color=Color::Rgb(181,197,219);
 fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
 fn styled(value:impl Into<String>,color:Color)->Line<'static>{Line::styled(value.into(),Style::default().fg(color))}
 impl Center{
- fn copy_commands(&self)->Vec<(&'static str,String)>{
-  let exe=shell_quote(&std::env::args().next().unwrap_or_else(||"animationcraft-cli".into()));
+ fn copy_commands(&self)->Vec<(&str,String)>{
+  let exe=shell_quote(&std::env::current_exe().map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(|_|"animationcraft-cli".into()));
   let project=self.state["project"].as_str().unwrap_or("");
   let cursor=self.state["activity"]["next_cursor"].as_u64().unwrap_or(0);
   let inspection=if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
@@ -372,7 +372,19 @@ impl Center{
   }
   if let Some(next)=self.state["next_commands"].as_array().filter(|v|!v.is_empty()){
    let mut commands=Vec::new();let mut seen=std::collections::HashSet::new();
-   for item in next {if let Some(id)=item["command"].as_str(){if seen.insert(id){commands.push(("Inspect shared prerequisite requirements",format!("{exe} commands {}",shell_quote(id))));}}}
+   for item in next {
+    if let (Some(id),Some(endpoint),Some(instance))=(item["command"].as_str(),self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
+     // Older shared observations used the CLI help verb; normalize to the existing registry query.
+     let (command,params)=if item["operation"]=="commands"{("command.list",json!({"filter":id}))}else{(id,item["params"].clone())};
+     let key=format!("{command}:{params}");if !seen.insert(key){continue;}
+     let mut literal=format!("{exe} --bridge {} exec {}",shell_quote(endpoint),shell_quote(command));
+     for(k,v)in params.as_object().into_iter().flatten(){literal.push(' ');literal.push_str(&shell_quote(&format!("{k}={}",v.as_str().map(str::to_owned).unwrap_or_else(||v.to_string()))));}
+     // The private endpoint already pins the instance; local_ui validates the project and adds its nonce guard.
+     let _=instance;
+     literal.push_str(&format!(" {}",shell_quote(&format!("_expected_project={project}"))));
+     commands.push((item["label"].as_str().unwrap_or("See command arguments"),literal));
+    }
+   }
    if !commands.is_empty(){return commands;}
   }
   if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
@@ -645,16 +657,18 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
- if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev(){let text=t["text"].as_str().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");lines.push(styled(format!("{}: {text}",t["role"].as_str().unwrap_or("message")),DESK_FG));}}
- let block=round_panel("PROJECT AGENT · same session as Studio",MUTED,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);let parts=Layout::vertical([Constraint::Min(1),Constraint::Length(2)]).split(inner);
+ if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=t["text"].as_str().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");lines.push(styled(format!("{}: {text}",t["role"].as_str().unwrap_or("message")),DESK_FG));}}
+ let block=round_panel("PROJECT AGENT · same session as Studio",MUTED,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);
+ if inner.height<5{let reply=c.state["chat_turns"].as_array().into_iter().flatten().rev().find(|t|t["role"]=="assistant").and_then(|t|t["text"].as_str()).unwrap_or("No reply received");f.render_widget(Paragraph::new(vec![styled(reply,DESK_FG),styled(if c.chat_editing{format!("> {}_",c.chat_draft)}else{"F9 compose".into()},MUTED)]).wrap(Wrap{trim:false}),inner);return;}
+ let parts=Layout::vertical([Constraint::Min(1),Constraint::Length(2)]).split(inner);
  let skip=wrapped_rows(&lines,parts[0].width).saturating_sub(parts[0].height);f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((skip,0)),parts[0]);
  f.render_widget(Paragraph::new(vec![styled(if c.chat_editing{"F9/Esc leave draft · Enter send"}else{"F9 compose · Enter sends only while composing"},MUTED),styled(format!("> {}{}",c.chat_draft,if c.chat_editing{"_"}else{""}),DESK_FG)]).wrap(Wrap{trim:false}),parts[1]);
 }
 fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let commands=c.copy_commands();let Some((effect,literal))=commands.get(c.command_selected%commands.len().max(1))else{return;};
- let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["command"].as_str().is_some_and(|id|literal.contains(id))).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
- let lines=vec![styled(format!("> {reason}"),DESK_FG),styled(command_preview(literal),BLUE)];
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll.min(4),0)).block(round_panel("NEXT STEP · C copies full literal command · arrows choose",MUTED,true)),area);
+ let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["label"].as_str()==Some(*effect)).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
+ let lines=vec![styled(format!("> {effect}"),DESK_FG),styled(reason,MUTED),styled(literal.clone(),BLUE)];
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel("NEXT STEP · C copies literal · Pg scroll",MUTED,true)),area);
 }
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
@@ -665,10 +679,10 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED)];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"F1 CONTROL | F2 BOOTH | F4 INTAKE"}else{"F1 CONTROL | F2 BOOTH | F4 INTAKE · D details"},MUTED,false)),chunks[0]);
  if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[1]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
- let bottom_height=if narrow{13}else{9};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
- if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else{6}),Constraint::Min(5)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
+ let bottom_height=if narrow{18}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
+ if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else{4}),Constraint::Min(5)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,false)).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);render_conversation(f,c,right[1]);}
- if narrow{let p=Layout::vertical([Constraint::Length(8),Constraint::Min(4)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
+ if narrow{let p=Layout::vertical([Constraint::Length(8),Constraint::Min(8)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
  }
  let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"[ / ] stage · F9 chat · D details · C copy · ↑↓ commands · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
@@ -824,6 +838,11 @@ mod feedback_tests {
     #[test]
     fn readiness_lights_do_not_infer_evidence_from_matched_revisions(){
         let c=fixture();assert!(stage_evidence(&c,0).is_none());assert_eq!(state_badge(Some("missing")).1,BLUE);assert_eq!(state_badge(Some("ready")).0,"[OK]");assert_eq!(state_badge(Some("working")).1,GREEN);assert_eq!(state_badge(Some("blocked")).1,RED);
+    }
+    #[test]
+    fn next_command_is_literal_pinned_and_comes_from_shared_recommendation(){
+      let mut c=fixture();c.pinned_instance=Some("studioA.sock".into());c.state["ui"]["endpoint"]=json!("unix:/tmp/studioA.sock");c.state["next_commands"]=json!([{"label":"See asset import arguments","command":"command.list","operation":"exec","params":{"filter":"project.add_asset"},"reason":"No reference art is registered; inspect the import command before choosing an asset."}]);
+      let commands=c.copy_commands();assert_eq!(commands[0].0,"See asset import arguments");assert!(commands[0].1.contains("--bridge 'unix:/tmp/studioA.sock' exec 'command.list' 'filter=project.add_asset'"));assert!(commands[0].1.contains("_expected_project=/fixture.acproj"));assert!(commands[0].1.contains("unix:/tmp/studioA.sock"));assert!(!commands[0].1.contains("<ac-cli>"));
     }
     #[test]
     fn matching_shared_chat_receipt_clears_only_the_submitted_draft(){
