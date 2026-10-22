@@ -6,7 +6,7 @@ const nodes = new Map(), calls = [];
 const node = (id) => {
   if (!nodes.has(id)) nodes.set(id, {
     value: "", hidden: true, disabled: false, textContent: "", title: "", dataset: {}, children: [],
-    addEventListener() {}, focus() {}, replaceChildren(...children) { this.children = children; },
+    querySelectorAll() { return []; }, addEventListener() {}, focus() {}, replaceChildren(...children) { this.children = children; },
   });
   return nodes.get(id);
 };
@@ -14,6 +14,8 @@ let rejectSend = false;
 const config = { agent: "opencode", provider: "opencode", model: "synthetic-free", agents: [{ name: "opencode", installed: true, headless: true }] };
 const context = vm.createContext({
   console, JSON, Promise, Set, $: node,
+  requestAnimationFrame: (callback) => callback(),
+  acFeedback: { acknowledge: async (revision, project) => calls.push({id:"render_revision",revision,project}), report: async (phase, ack, event) => calls.push({id:"render_receipt",event}) },
   el: (tag, attrs, text) => ({ tag, ...attrs, text }),
   document: { addEventListener() {} }, window: { addEventListener() {} },
   state: { project: "/synthetic/Test.acproj", view: "project", page: 0 }, motion: {},
@@ -59,3 +61,19 @@ await vm.runInContext("agentSend()", context);
 assert.equal(node("agent-input").value, "Keep failed draft");
 assert.ok(node("agent-status").textContent.includes("authentication rejected"));
 console.log("PASS: actual drawer catalog, saved selection, New Chat, fresh send, model reporting and failed-draft handlers");
+
+// A reply acknowledgement requires the matching project and an actually displayed assistant node.
+node("agent-log").querySelectorAll = () => [{textContent:"Visible reply",getBoundingClientRect:()=>({width:300,height:20})}];
+await vm.runInContext(`agent.open=true; agent.turns=[{role:"assistant",text:"Visible reply",project:"/other.acproj",request_id:"other",session:"B"}]; acknowledgeAgentReply(10)`,context);
+assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"other project cannot acknowledge");
+await vm.runInContext(`agent.turns=[{role:"assistant",text:"Not rendered",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
+assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"unrendered text cannot acknowledge");
+await vm.runInContext(`agent.turns=[{role:"assistant",text:"Visible reply",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
+assert.equal(calls.filter(c=>c.id==="render_revision").length,1);
+assert.equal(calls.find(c=>c.id==="render_receipt").event.request_id,"r1");
+await vm.runInContext("acknowledgeAgentReply()",context);
+assert.equal(calls.filter(c=>c.id==="render_receipt").length,1,"polling must not duplicate receipt");
+vm.runInContext("agent.open=false; agent.renderedReply=null",context);
+await vm.runInContext("acknowledgeAgentReply(11)",context);
+assert.equal(calls.filter(c=>c.id==="render_receipt").length,1,"closed drawer cannot acknowledge");
+console.log("PASS: reply receipts require actual visible text, project match, open drawer and correlated request; repeated polling is idempotent");

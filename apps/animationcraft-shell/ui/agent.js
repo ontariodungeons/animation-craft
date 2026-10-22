@@ -6,7 +6,7 @@
 // OpenCode uses its existing installed API/session route; no image settings are changed here.
 const agent = {
   open: false, turns: [], config: null, sending: false, attachments: [], loaded: false,
-  newChat: true, models: [], timer: null, floating: false,
+  newChat: true, models: [], timer: null, floating: false, renderedReply: null,
 };
 
 const status = (text) => { $("agent-status").textContent = text; $("agent-status").title = text; };
@@ -111,6 +111,23 @@ async function agentReloadLog() {
     if (Array.isArray(turns)) agent.turns = turns;
   } catch { /* the next send reports the real error */ }
   renderLog();
+  await acknowledgeAgentReply();
+}
+
+// A reply receipt is emitted only after this project's actual assistant node is displayed.
+async function acknowledgeAgentReply(revision) {
+  const project = state.project;
+  const turn = [...agent.turns].reverse().find((t) => t.role === "assistant" && t.request_id && t.project === project);
+  if (!agent.open || !turn) return;
+  await new Promise(requestAnimationFrame);
+  if (!agent.open || state.project !== project) return;
+  const visible = [...$("agent-log").querySelectorAll(".msg.assistant")].some((n) => n.textContent === turn.text && n.getBoundingClientRect().width > 0 && n.getBoundingClientRect().height > 0);
+  if (!visible) return;
+  if (revision) await acFeedback.acknowledge(revision, project);
+  const key = `${project}:${turn.request_id}:${turn.session}`;
+  if (agent.renderedReply === key) return;
+  await acFeedback.report(null, null, {stage:"frontend_ack",command:"agent.send",request_id:turn.request_id,session:turn.session,reply_rendered:true,ui_ack:"assistant reply displayed; visual review separate"});
+  agent.renderedReply = key;
 }
 
 function turnItems() {
@@ -222,6 +239,7 @@ async function agentSend() {
     agent.newChat = true;
     if (Array.isArray(reply.turns)) agent.turns = reply.turns;
     renderLog();
+    await acknowledgeAgentReply(reply._ui_engine_revision);
     clearSent(input, raw, attachments);
     status(reply.ok ? `Answered${reply.provider ? ` · ${reply.provider}` : ""}${reply.model ? ` / ${reply.model}` : " · CLI default unverified"} · ${reply.session || "fresh process"}` : String(reply.error || "Agent needs attention in its existing session; do not resend blindly."));
   } catch (error) {
