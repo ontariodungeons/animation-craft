@@ -155,6 +155,51 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
     })
 }
 
+/// Resolve only an explicitly selected executable, HYPERFRAMES_CLI, or PATH; never install with npx.
+fn hyperframes_cli(explicit: Option<&str>) -> Result<PathBuf> {
+    let configured=explicit.map(PathBuf::from).or_else(||std::env::var_os("HYPERFRAMES_CLI").map(PathBuf::from));
+    let path=configured.or_else(||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file())))
+        .ok_or_else(||EngineError::InvalidParams("HyperFrames executable unavailable. Pass hyperframes_cli=/absolute/path or set HYPERFRAMES_CLI to an existing official executable; no install or npx lookup was attempted".into()))?;
+    if !path.is_absolute() || !path.is_file() {return Err(EngineError::InvalidParams(format!("HyperFrames executable must be an existing absolute file: {}",path.display())));}
+    Ok(path)
+}
+
+fn generated_files(root:&Path, relative:&Path, files:&mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(root.join(relative))? {
+        let entry=entry?;let path=relative.join(entry.file_name());let kind=entry.file_type()?;
+        if kind.is_dir(){generated_files(root,&path,files)?;}else if kind.is_file(){files.push(path);}else{return Err(EngineError::InvalidParams("Official initializer produced an unsupported symlink; generated files retained for inspection".into()));}
+    }
+    Ok(())
+}
+
+fn init_hyperframes(dir:&Path, executable:Option<&str>) -> Result<PathBuf> {
+    let cli=hyperframes_cli(executable)?;
+    let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|EngineError::InvalidParams(e.to_string()))?.as_nanos();
+    let stage=dir.join(format!(".hyperframes-init-{}-{stamp}",std::process::id()));
+    let args=["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
+    let output=std::process::Command::new(&cli).args(&args).current_dir(dir).env("HYPERFRAMES_SKIP_SKILLS","1").output()
+        .map_err(|e|EngineError::ExternalTool(cli.display().to_string(),e.to_string()))?;
+    if !output.status.success(){return Err(EngineError::ExternalTool(cli.display().to_string(),format!("official init exited {:?}: {}. Partial output retained at {}",output.status.code(),String::from_utf8_lossy(&output.stderr),stage.display())));}
+    let config=stage.join("hyperframes.json");let entry=stage.join("index.html");
+    if !entry.is_file() || !std::fs::read(&config).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).is_some_and(|v|v.is_object()) {
+        return Err(EngineError::InvalidParams(format!("Official HyperFrames init did not create a valid hyperframes.json and index.html; output retained at {}",stage.display())));
+    }
+    let dest=dir.join("hyperframes");let mut files=Vec::new();generated_files(&stage,Path::new(""),&mut files)?;
+    // Preflight every collision before moving anything; existing captions/assets remain authoritative.
+    for relative in &files {
+        let target=dest.join(relative);
+        if target.exists() || target.ancestors().skip(1).take_while(|p|p.starts_with(&dest)).any(|p|p.exists()&&!p.is_dir()) {
+            return Err(EngineError::InvalidParams(format!("Official init conflicts with existing {}; no existing file overwritten. Generated output retained at {}",target.display(),stage.display())));
+        }
+    }
+    for relative in files {
+        let target=dest.join(&relative);std::fs::create_dir_all(target.parent().ok_or_else(||EngineError::InvalidParams("Generated file has no parent".into()))?)?;
+        std::fs::rename(stage.join(relative),target)?;
+    }
+    std::fs::remove_dir_all(&stage)?;
+    Ok(dest.join("hyperframes.json"))
+}
+
 /// Ensure a video target project exists for the song folder, creating scaffolding when missing.
 pub(crate) fn ensure_video_target_project(s: &Session, dir: &Path, target: &str) -> Result<PathBuf> {
     if let Some(existing) = target_project_path(s, dir, target) {
@@ -210,11 +255,7 @@ pub(crate) fn ensure_video_target_project(s: &Session, dir: &Path, target: &str)
             }
             Ok(fcproj)
         }
-        "hyperframes" => {
-            let hf_dir = dir.join("hyperframes");
-            std::fs::create_dir_all(&hf_dir)?;
-            Ok(hf_dir.join("hyperframes.json"))
-        }
+        "hyperframes" => Err(EngineError::InvalidParams("HyperFrames project missing; use video.init with an existing official executable".into())),
         _ => Err(EngineError::InvalidParams(format!("unknown video target '{target}'"))),
     }
 }
@@ -261,14 +302,19 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .unwrap_or(&s.video_target)
         .to_string();
-    let created = ensure_video_target_project(s, &dir, &target)?;
+    let reused=target_project_path(s,&dir,&target).is_some();
+    let created = if target=="hyperframes" && !reused {init_hyperframes(&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
     if target == "hyperframes" && !created.is_file() {
         return Err(EngineError::InvalidParams(format!(
-            "video.init did not create an editable HyperFrames project: {}. The current initializer only creates a directory; existing audio/transcript files were preserved. Video project creation is not implemented by this operation.", created.display()
+            "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
         )));
     }
     let mut status = workshop_status(s)?;
     status["initialized"] = json!(created);
+    status["reused_existing_project"]=json!(reused);
+    status["video_complete"]=json!(false);
+    status["initialization_scope"]=json!("Official editable scaffold only; song composition and rendered output are separate steps");
+    if target=="hyperframes" {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
     Ok(status)
 }
 
@@ -283,7 +329,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
     if current["running"] == json!(true) {
         return workshop_status(s);
     }
-    let _ = ensure_video_target_project(s, &dir, &target)?;
+    let _ = if target=="hyperframes" && target_project_path(s,&dir,&target).is_none(){init_hyperframes(&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
     let preferred_port = params
         .get("port")
         .and_then(Value::as_u64)
@@ -309,8 +355,8 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
             let work_dir = dir.join("hyperframes");
             // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
             // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
-            std::process::Command::new("npx")
-                .args(["hyperframes", "preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", "."])
+            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str())?)
+                .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", "."])
                 .current_dir(&work_dir)
                 .process_group(0)
                 .stdout(log_file)
