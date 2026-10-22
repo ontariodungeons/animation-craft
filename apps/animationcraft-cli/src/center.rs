@@ -516,7 +516,7 @@ fn activity_wave(c: &Center) -> String {
     let levels = ['▁','▂','▃','▄','▅','▆','▇','█'];
     let wave: String = bins.iter().map(|n| levels[(*n).min(7)]).collect();
     let count=bins.iter().sum::<usize>();
-    let running=root_actions(c).into_iter().find(|a|root_finish(a).is_none() && stages(a).iter().any(|e|e["stage"]=="dispatch_running"));
+    let running=root_actions(c).into_iter().find(|a|matches!(engine_badge(a).0,"● WORKING"|"[>] RUNNING"));
     let state=running.and_then(|a|root_start(a)).map(|e|format!("[>] {} · {}s elapsed",target(e),now.saturating_sub(e["unix_micros"].as_u64().unwrap_or(now*1_000_000)/1_000_000))).unwrap_or_else(||"idle".into());
     format!("activity {wave} · {count} receipts/8s · {state}")
 }
@@ -838,6 +838,11 @@ mod feedback_tests {
     #[test]
     fn readiness_lights_do_not_infer_evidence_from_matched_revisions(){
         let c=fixture();assert!(stage_evidence(&c,0).is_none());assert_eq!(state_badge(Some("missing")).1,BLUE);assert_eq!(state_badge(Some("ready")).0,"[OK]");assert_eq!(state_badge(Some("working")).1,GREEN);assert_eq!(state_badge(Some("blocked")).1,RED);
+    }
+    #[test]
+    fn accepted_but_pending_agent_reply_still_counts_as_activity(){
+      let mut c=fixture();c.state["activity"]["actions"][0]["events"][0]["command"]=json!("agent.send");c.state["activity"]["actions"][0]["events"][1]=json!({"stage":"engine_success","request_id":"save","command":"agent.send","status":"running"});
+      assert!(activity_wave(&c).contains("[>] agent.send"));assert!(!activity_wave(&c).contains("idle"));c.state["activity"]["actions"][0]["events"][1]["status"]=json!("replied");assert!(activity_wave(&c).contains("idle"));
     }
     #[test]
     fn next_command_is_literal_pinned_and_comes_from_shared_recommendation(){
