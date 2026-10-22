@@ -19,7 +19,7 @@ live app, act through its tools, show the result, and leave work reversible and 
 
 Repository: `/run/media/jesse/Speedy/Work/omhas-animation`. Application: `apps/animationcraft-shell`.
 The shell's `--control 19897` bridge and the page share one `animationcraft_engine::Session`.
-The persistent MCP command is `animationcraft-cli --bridge 19897 mcp`. It follows whichever project
+The persistent MCP command is `mc --bridge 19897 mcp`. It follows whichever project
 is open in that window; it is not bound to a project folder. Do not create a headless session when
 the user expects changes in their open window. Never start a video studio server merely to animate.
 
@@ -81,7 +81,7 @@ chosen, the user permits Sol 6.1 only. Learn and observe regardless of model str
 
 Build `cargo build -p animationcraft-shell` after UI edits (assets are embedded). Before restarting the shared shell,
 inspect pending/dirty state and preserve unsaved edits. After every visible change run
-`animationcraft-cli --bridge 19897 exec ui.look` and inspect the PNG. With a project open, captures
+`mc --bridge 19897 exec ui.look` and inspect the PNG. With a project open, captures
 default to `<project>/.agent/looks/`. Keep project outputs inside the project.
 
 Verify the changed behavior, empty/error states, keyboard access and narrow layout. For animation,

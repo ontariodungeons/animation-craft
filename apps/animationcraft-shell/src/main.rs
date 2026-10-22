@@ -141,7 +141,7 @@ fn projects_root() -> Result<String, String> {
     animationcraft_engine::project_settings::root().map(|p|p.to_string_lossy().into_owned()).map_err(|e|e.to_string())
 }
 
-/// Run the adjacent animationcraft-cli against this Studio's private bridge. The engine stays in
+/// Run the adjacent mc against this Studio's private bridge. The engine stays in
 /// this window; the initiating frontend applies the returned state and acknowledges its revision.
 #[tauri::command]
 async fn project_open(app:tauri::AppHandle, path: String, request: Option<String>, control:Option<String>) -> Result<Value, String> {

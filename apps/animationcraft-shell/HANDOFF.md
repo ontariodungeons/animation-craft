@@ -26,7 +26,7 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
 6. `~/.agents/skills/character-rigging/SKILL.md`, `~/.agents/skills/pose-library-design/SKILL.md`,
    `~/.agents/skills/character-animation-qa/SKILL.md`.
 7. `~/.agents/skills/photocraft/SKILL.md` (matting, cut sheet, layers) and `~/.agents/skills/effectcraft/SKILL.md` (exports).
-8. `~/.agents/skills/cli-anything/SKILL.md`: script → verify → `animationcraft-cli` command → one-line README example.
+8. `~/.agents/skills/cli-anything/SKILL.md`: script → verify → `mc` command → one-line README example.
 9. `.agents/skills/craft-app-lifecycle/SKILL.md`: start and stop the live app cleanly.
 10. `~/.agents/skills/figcraft/SKILL.md` / `~/.agents/skills/designcraft/SKILL.md`: UI design and missing icons.
 11. Process: `~/.agents/skills/brainstorming/SKILL.md` before each new feature (describe the design,
@@ -64,9 +64,9 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
   Use it to see and drive the app:
   ```
   ./target/debug/animationcraft-shell --control 19897 [<project.acproj>] [--open animate|agent] [--view studio]
-  animationcraft-cli --bridge 19897 exec ui.look [region=<dom id or css>] [click=<id|label>] output=<png>
-  animationcraft-cli --bridge 19897 exec ui.state | ui.elements | ui.click id=… | ui.set id=… value=… | ui.eval js='return …'
-  animationcraft-cli --bridge 19897 exec <any engine command> …   # runs on the window's session; the page refreshes
+  mc --bridge 19897 exec ui.look [region=<dom id or css>] [click=<id|label>] output=<png>
+  mc --bridge 19897 exec ui.state | ui.elements | ui.click id=… | ui.set id=… value=… | ui.eval js='return …'
+  mc --bridge 19897 exec <any engine command> …   # runs on the window's session; the page refreshes
   ```
   Verify **every** visible change with `ui.look` and open the PNG before saying it's done.
 - `ui/`: `app.js` (Project view: blocks Song, Lyrics & notes, Transcription, Animate, plus the storyboard
@@ -102,7 +102,7 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
   drafts. Transcript nodes now persist; model options avoid needless replacement. Enter sends,
   Shift+Enter adds a line, and failed/in-flight sends preserve draft text and attachments. Verified live
   on 19897 (zero repeated fades over 5.2s) and with `tests/agent-drawer.mjs` (25 assertions).
-- Global OpenCode `animationcraft` MCP now uses `animationcraft-cli --bridge 19897 mcp`, authorized
+- Global OpenCode `animationcraft` MCP now uses `mc --bridge 19897 mcp`, authorized
   by the user. It follows the shell's project; no project path is in the command. Config was backed up
   and reloaded, and the inner agent verified the connection after switching projects. Restart persistence
   still needs a restart check. Coordinate with the inner agent through the session API, not its composer.
@@ -129,7 +129,7 @@ yourself.
 
 Where each area lives in the older UI (`crates/ui-egui/src/`):
 - Home, recent, new project: `panels/start.rs`, `panels/workshop.rs` (`new_project_dialog`)
-- Menus (every File/Edit/View/Export entry): `menus.rs`, plus the engine's command list (`animationcraft-cli exec command.list`)
+- Menus (every File/Edit/View/Export entry): `menus.rs`, plus the engine's command list (`mc exec command.list`)
 - Workshop stages, actions, briefs, subjects, storyboard pane: `panels/workshop.rs`
 - Asset header (load, rename, manage), import: `panels/header.rs`, `panels/asset_browser.rs`
 - Parts list (visibility, solo, reviewed, anchors, labels, separation), turnaround views: `panels/asset_browser.rs`
@@ -189,7 +189,7 @@ a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
 
 **Tools and MCP (last step)**
 - ✅ `--control` bridge in the shell (same protocol)
-- ◻ `animationcraft-cli` help, MCP instructions, `ui_look`/`app_quit` errors and AGENTS.md/README/skills:
+- ◻ `mc` help, MCP instructions, `ui_look`/`app_quit` errors and AGENTS.md/README/skills:
   point to `animationcraft-shell --control <port>` and remove references to the older app
 - ◻ After the user confirms: delete `crates/ui-egui` and `apps/animationcraft`, plus their workspace entries and references
 
@@ -204,7 +204,7 @@ does must be visible to the user.
   `ui.look` (picture, state, ids), `ui.click`/`ui.set`/`ui.key`/`ui.elements`, plus every engine command on the
   live session. Screen-scraping and global input on Wayland are the fallback we don't need.
 - **Next improvements, in order:** (1) the inner opencode session gets the shell's MCP permanently
-  (`animationcraft-cli --bridge <port> mcp`; propose the `opencode.json` change to the user); (2) the agent's
+  (`mc --bridge <port> mcp`; propose the `opencode.json` change to the user); (2) the agent's
   actions are visible (agent cursor/highlight, action trail, undo); (3) pointing works both ways, with drawing and
   comments on the stage or storyboard sent as notes, like HyperFrames Studio desktop, and the agent can point back;
   (4) shared context goes with every message (view, selection, time on the timeline), so "make this blink

@@ -2,8 +2,8 @@
 """
 Blender 5.3 Multi-Character & Farm School Lineup Scene Builder.
 
-Driven by `animationcraft-cli exec export.blender` and
-`animationcraft-cli exec scene.farm_school_lineup`.
+Driven by `mc exec export.blender` and
+`mc exec scene.farm_school_lineup`.
 
 Builds:
   1. Individual rigged 3D/2.5D Blender 5.3 animations (.mp4, .png, .glb, .blend)

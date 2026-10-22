@@ -223,7 +223,7 @@ impl Center {
                 map["status"].as_str().unwrap_or_default()
             ));
         }
-        text.push_str("\nREAD THE MANUAL\nanimationcraft-cli commands workshop.import_transcript\ncrates/engine/src/workshop.rs\n~/.agents/skills/media-use/audio/references/transcribe.md\n\nF7 invokes the existing native DeckCraft storyboard.init command.\n\nThis monitor does not initiate production. Explicit project.intake can run configured audio analysis when valid timing is missing; supplied valid timing is reused. Missing prerequisites remain visible.\n");
+        text.push_str("\nREAD THE MANUAL\nmc commands workshop.import_transcript\ncrates/engine/src/workshop.rs\n~/.agents/skills/media-use/audio/references/transcribe.md\n\nF7 invokes the existing native DeckCraft storyboard.init command.\n\nThis monitor does not initiate production. Explicit project.intake can run configured audio analysis when valid timing is missing; supplied valid timing is reused. Missing prerequisites remain visible.\n");
         text
     }
 }
@@ -367,7 +367,7 @@ fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
 fn styled(value:impl Into<String>,color:Color)->Line<'static>{Line::styled(value.into(),Style::default().fg(color))}
 impl Center{
  fn copy_commands(&self)->Vec<(&str,String)>{
-  let exe=shell_quote(&std::env::current_exe().map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(|_|"animationcraft-cli".into()));
+  let exe=shell_quote(&std::env::current_exe().map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(|_|"mc".into()));
   let project=self.state["project"].as_str().unwrap_or("");
   let cursor=self.state["activity"]["next_cursor"].as_u64().unwrap_or(0);
   let inspection=if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
@@ -566,7 +566,7 @@ fn action_lines(c: &Center, action: &Value, compact: bool) -> Vec<Line<'static>>
 }
 fn command_preview(command: &str) -> String {
     let exe = std::env::current_exe().ok().map(|p| shell_quote(&p.to_string_lossy()));
-    exe.as_deref().and_then(|exe| command.strip_prefix(exe)).map(|rest| format!("<ac-cli>{rest}")).unwrap_or_else(|| command.into())
+    exe.as_deref().and_then(|exe| command.strip_prefix(exe)).map(|rest| format!("<mc>{rest}")).unwrap_or_else(|| command.into())
 }
 fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narrow: bool) {
     let actions = root_actions(c);
@@ -902,7 +902,7 @@ mod feedback_tests {
     #[test]
     fn next_command_is_literal_pinned_and_comes_from_shared_recommendation(){
       let mut c=fixture();c.pinned_instance=Some("studioA.sock".into());c.state["ui"]["endpoint"]=json!("unix:/tmp/studioA.sock");c.state["next_commands"]=json!([{"label":"See asset import arguments","command":"command.list","operation":"exec","params":{"filter":"project.add_asset"},"reason":"No reference art is registered; inspect the import command before choosing an asset."}]);
-      let commands=c.copy_commands();assert_eq!(commands[0].0,"See asset import arguments");assert!(commands[0].1.contains("--bridge 'unix:/tmp/studioA.sock' exec 'command.list' 'filter=project.add_asset'"));assert!(commands[0].1.contains("_expected_project=/fixture.acproj"));assert!(commands[0].1.contains("unix:/tmp/studioA.sock"));assert!(!commands[0].1.contains("<ac-cli>"));
+      let commands=c.copy_commands();assert_eq!(commands[0].0,"See asset import arguments");assert!(commands[0].1.contains("--bridge 'unix:/tmp/studioA.sock' exec 'command.list' 'filter=project.add_asset'"));assert!(commands[0].1.contains("_expected_project=/fixture.acproj"));assert!(commands[0].1.contains("unix:/tmp/studioA.sock"));assert!(!commands[0].1.contains("<mc>"));
     }
     #[test]
     fn matching_shared_chat_receipt_clears_only_the_submitted_draft(){

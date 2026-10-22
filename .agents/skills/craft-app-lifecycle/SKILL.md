@@ -31,7 +31,7 @@ the process to exit and the port to become free.
 
 | App | Close the live window | Notes |
 |---|---|---|
-| AnimationCraft | `animationcraft-cli --bridge PORT exec app.quit` or MCP `app_quit` with `mcp --bridge PORT` | Closes immediately; save the project first. Headless MCP returns an error for `app_quit`. |
+| AnimationCraft | `mc --bridge PORT exec app.quit` or MCP `app_quit` with `mcp --bridge PORT` | Closes immediately; save the project first. Headless MCP returns an error for `app_quit`. |
 | PhotoCraft | `photocraft-cli mcp --bridge 127.0.0.1:PORT` then `control_call {"method":"app.quit","params":{}}` | The control channel needs its token: launch with `--control-token-file <file>` and pass `--control-token-file <file>` to the MCP server, or read the generated token from stderr. `app.quit` sets `allow_close`, so it does **not** prompt; save/close documents first. |
 | EffectCraft | `effectcraft-cli --bridge PORT exec app.quit`, or the control line `{"id":1,"method":"app.quit","params":{"force":true}}` | A dirty project cancels a plain `app.quit` and opens the save prompt. Save, answer the prompt, or use `force: true` to discard. |
 | VectorCraft | `vectorcraft-cli mcp --connect 127.0.0.1:PORT` then `invoke_menu {"command":"app.quit"}`, or the control line `{"id":1,"method":"app.quit","params":{}}` | A modified document returns `{"pending":"saveChanges"}` and the window stays. Save, or answer the dialog (`ui.dialog.confirm` with `discard: true`) before quitting. |

@@ -48,16 +48,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "animationcraft-cli"
-version = "0.1.0"
-dependencies = [
- "animationcraft-engine",
- "crossterm",
- "ratatui",
- "serde_json",
-]
-
-[[package]]
 name = "animationcraft-engine"
 version = "0.1.0"
 dependencies = [
@@ -1995,6 +1985,16 @@ dependencies = [
  "log",
  "tendril",
  "web_atoms",
+]
+
+[[package]]
+name = "mc"
+version = "0.1.0"
+dependencies = [
+ "animationcraft-engine",
+ "crossterm",
+ "ratatui",
+ "serde_json",
 ]
 
 [[package]]

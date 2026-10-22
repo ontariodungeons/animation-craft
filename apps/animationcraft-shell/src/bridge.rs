@@ -1,4 +1,4 @@
-//! `--control <port>`: the TCP JSON-lines bridge that `animationcraft-cli --bridge <port>` and its
+//! `--control <port>`: the TCP JSON-lines bridge that `mc --bridge <port>` and its
 //! MCP server use to drive this window. One request per line, `{"id": "...", "params": {...}}`;
 //! one reply per line, `{"ok": true, "id", "result"}` or `{"ok": false, "id", "error"}`.
 //!

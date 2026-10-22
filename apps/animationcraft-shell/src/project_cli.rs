@@ -1,4 +1,4 @@
-//! New/Open use the actual adjacent animationcraft-cli executable and this window's private bridge.
+//! New/Open use the actual adjacent mc executable and this window's private bridge.
 //! The correlated bridge reply is rendered by the initiating UI handler, without recursive Open.
 use serde_json::{Value, json};
 use std::{path::{Path, PathBuf}, sync::Mutex};
@@ -24,9 +24,9 @@ pub fn is_ui_request(app: &tauri::AppHandle, id: &str, params: &Value) -> bool {
 
 fn program() -> Result<PathBuf, String> {
     let shell = std::env::current_exe().map_err(|e| e.to_string())?;
-    let adjacent = shell.parent().ok_or("Studio executable directory unavailable")?.join("animationcraft-cli");
+    let adjacent = shell.parent().ok_or("Studio executable directory unavailable")?.join("mc");
     if !adjacent.is_file() {
-        return Err(format!("New/Open require the CLI beside Studio: {}. Build/install animationcraft-cli with the shell; no direct-engine fallback was used.", adjacent.display()));
+        return Err(format!("New/Open require the CLI beside Studio: {}. Build/install mc with the shell; no direct-engine fallback was used.", adjacent.display()));
     }
     Ok(adjacent)
 }
@@ -78,7 +78,7 @@ mod tests {
     #[cfg(unix)]
     fn fixture(body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
-        let path=std::env::temp_dir().join(format!("animationcraft-cli-fixture-{}-{}",std::process::id(),crate::feedback::new_request()));
+        let path=std::env::temp_dir().join(format!("mc-fixture-{}-{}",std::process::id(),crate::feedback::new_request()));
         std::fs::write(&path,format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path,std::fs::Permissions::from_mode(0o700)).unwrap();path
     }
@@ -96,6 +96,6 @@ mod tests {
         for body in ["echo 'unavailable bridge' >&2; exit 3","printf 'not-json'","printf '%s' '{\"ok\":false}'"] {
             let cli=fixture(body);assert!(invoke(&cli,"unix:/chosen.sock","project.open",&json!({})).is_err());std::fs::remove_file(cli).unwrap();
         }
-        assert!(invoke(Path::new("/missing/animationcraft-cli"),"unix:/chosen.sock","project.open",&json!({})).is_err());
+        assert!(invoke(Path::new("/missing/mc"),"unix:/chosen.sock","project.open",&json!({})).is_err());
     }
 }

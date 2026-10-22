@@ -30,7 +30,7 @@ PDFCraft. `workshop.build_storyboard` redraws the pages and keeps the text typed
 Read the studio intent first: `intent.md` in the song folder, or `STUDIO.md` beside the projects.
 
 ## Commands (same for the CLI, MCP and the app)
-Run `animationcraft-cli run -` with one JSON per line. Open the project first.
+Run `mc run -` with one JSON per line. Open the project first.
 ```
 {"id":"project.open","params":{"path":"<song>/<Song>.acproj"}}
 {"id":"storyboard.toc","params":{}}                      chapters: scene, title, page, status, lines, panels
