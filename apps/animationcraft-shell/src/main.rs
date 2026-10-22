@@ -519,7 +519,7 @@ fn studio_show(app: tauri::AppHandle, url: String, mode: String) -> Result<(), S
         None => {
             let url = WebviewUrl::External(url.parse().map_err(|e| format!("studio url: {e}"))?);
             window
-                .add_child(WebviewBuilder::new("studio", url), LogicalPosition::new(0.0, BAR), LogicalSize::new(1.0, 1.0))
+                .add_child(WebviewBuilder::new("studio", url).initialization_script(include_str!("../ui/studio-caption-compat.js")), LogicalPosition::new(0.0, BAR), LogicalSize::new(1.0, 1.0))
                 .map_err(|e| e.to_string())?;
         }
     }
