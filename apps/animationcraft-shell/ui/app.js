@@ -453,4 +453,4 @@ function renderDesignPlacements(){
   });page.append(node,el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',style:`left:${100*(x+w)/size[0]}%;top:${100*y/size[1]}%`,onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×'));
  }
 }
-$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.textContent='Saving…';try{await designCommand('storyboard.save_version');toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.textContent='Save new version';}});
+$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.setAttribute('aria-busy','true');try{await designCommand('storyboard.save_version');toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.removeAttribute('aria-busy');}});
