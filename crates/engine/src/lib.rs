@@ -109,7 +109,9 @@ impl Session {
         if let Some(owner)=&_writer{self.project_owner=Some(owner.clone());}
         let record=self.record_user_state&&commands::find(id).is_none_or(|c|c.journal);
         if record{activity::command(self.project_path.as_deref(),id,&params,"dispatch_running",None);}
+        let started=std::time::Instant::now();
         let result=self.execute_inner(id,params.clone());
+        if record{if let Ok(value)=&result{activity::result(self.project_path.as_deref(),id,value,started.elapsed().as_millis());}}
         if record{match &result{Ok(v)=>activity::command(self.project_path.as_deref(),id,&params,if v["ok"]==false{"engine_error"}else if v["intake_ready"]==false{"engine_needs_work"}else{"engine_success"},None),Err(e)=>activity::command(self.project_path.as_deref(),id,&params,"engine_error",Some(&e.to_string()))};}
         if _writer.is_some(){self.project_owner=prior_owner;}
         result

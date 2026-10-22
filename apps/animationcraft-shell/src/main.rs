@@ -55,7 +55,8 @@ pub fn state_of(s: &mut Session) -> Result<Value, String> {
     let storyboard = s.execute("workshop.storyboard", json!({})).unwrap_or(Value::Null);
     let assets=s.execute("project.list_assets",json!({})).map_err(|e|e.to_string())?;
     let design=s.execute("storyboard.design",json!({})).unwrap_or(json!({"placements":[]}));
-    Ok(json!({"status": status, "storyboard": storyboard,"assets":assets,"design":design}))
+    let monitoring=s.execute("center.status",json!({})).map_err(|e|e.to_string())?;
+    Ok(json!({"status": status, "storyboard": storyboard,"assets":assets,"design":design,"monitoring":monitoring}))
 }
 
 /// The project's workshop state and storyboard, straight from the engine.

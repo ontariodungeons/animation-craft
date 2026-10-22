@@ -246,8 +246,17 @@ pub fn command(
         }
     }
     append(
-        json!({"project":project,"command":id,"stage":stage,"origin":context["_origin"].as_str().unwrap_or("unspecified"),"client_label":context["_client"].as_str().unwrap_or("unspecified (unverified)"),"identity_status":"supplied label; not authentication","request_id":context["_request_id"],"control":context["_control"],"inputs":bounded,"error":error.map(|s|s.chars().take(350).collect::<String>()),"ui_ack":"not implied by engine completion"}),
+        json!({"project":project,"project_id":project,"command_id":context["_request_id"],"command":id,"stage":stage,"origin":context["_origin"].as_str().unwrap_or("unspecified"),"client_label":context["_client"].as_str().unwrap_or("unspecified (unverified)"),"identity_status":"supplied label; not authentication","request_id":context["_request_id"],"control":context["_control"],"inputs":bounded,"error":error.map(|s|s.chars().take(350).collect::<String>()),"ui_ack":"not implied by engine completion"}),
     );
+}
+/// Measured output evidence supplements the existing started/completed lifecycle, never a UI ack.
+pub fn result(project:Option<&std::path::Path>,id:&str,value:&Value,elapsed_ms:u128){
+ let context=CONTEXT.with(|v|v.borrow().clone());
+ let mut outputs=json!({});
+ for key in ["ok","project","path","deck","pdf","output","files","intake_ready","video_ready","captions","observation","prerequisites","metrics"] {
+  if let Some(v)=value.get(key){let bytes=v.to_string();outputs[key]=if bytes.len()<=16000{v.clone()}else{json!({"summary":"output exceeds receipt bound; inspect command result","bytes":bytes.len()})};}
+ }
+ append(json!({"project":project,"project_id":project,"command":id,"command_id":context["_request_id"],"request_id":context["_request_id"],"stage":"command_result","elapsed_ms":elapsed_ms,"outputs":outputs,"ui_ack":"not implied by engine completion"}));
 }
 pub fn events(s: &mut crate::Session, p: &Value) -> crate::Result<Value> {
     let text = if let Some(path) = path() {

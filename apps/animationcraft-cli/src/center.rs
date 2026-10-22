@@ -44,7 +44,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:format!("Production root: {}. Editing New song root overrides this request only. F3 opens; F5 creates; F6 resumes explicitly.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:format!("Observing shared CLI status. Green requires measured evidence; Studio acknowledgement is separate. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
@@ -160,7 +160,7 @@ impl Center {
                 map["status"].as_str().unwrap_or_default()
             ));
         }
-        text.push_str("\nREAD THE MANUAL\nanimationcraft-cli commands workshop.import_transcript\ncrates/engine/src/workshop.rs\n~/.agents/skills/media-use/audio/references/transcribe.md\n\nF7 creates native scene Markdown/TOC; it does not build or register the separate DeckCraft template.\n\nNo ASR, transcoding, install, Studio launch or project switching is automatic. Missing or invalid inputs block dependent steps only.\n");
+        text.push_str("\nREAD THE MANUAL\nanimationcraft-cli commands workshop.import_transcript\ncrates/engine/src/workshop.rs\n~/.agents/skills/media-use/audio/references/transcribe.md\n\nF7 invokes the existing native DeckCraft storyboard.init command.\n\nThis monitor does not initiate production. Explicit project.intake can run configured audio analysis when valid timing is missing; supplied valid timing is reused. Missing prerequisites remain visible.\n");
         text
     }
 }
@@ -327,6 +327,11 @@ impl Center{
   if self.state["ui"]["connection"]!="connected" || self.state["ui"]["ui_ready"]!=true{
    return vec![("Check this project's missing Studio observation",feedback),("Read the action awaiting completion",receipts)];
   }
+  if let Some(next)=self.state["next_commands"].as_array().filter(|v|!v.is_empty()){
+   let mut commands=Vec::new();let mut seen=std::collections::HashSet::new();
+   for item in next {if let Some(id)=item["command"].as_str(){if seen.insert(id){commands.push(("Inspect shared prerequisite requirements",format!("{exe} commands {}",shell_quote(id))));}}}
+   if !commands.is_empty(){return commands;}
+  }
   if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
    let design=format!("{exe} --bridge {} exec storyboard.design {} {}",shell_quote(endpoint),shell_quote(&format!("_expected_project={project}")),shell_quote(&format!("_expected_instance={instance}")));
    vec![("Inspect the active saved deck and pending image edits",design),("Read the last action's completion receipts",receipts)]
@@ -374,11 +379,11 @@ fn padded(text: &str, width: usize) -> String {
 fn wrapped_rows(lines: &[Line<'_>], width: u16) -> u16 {
     lines.iter().map(|line| line.width().max(1).div_ceil(usize::from(width.max(1))) as u16).sum()
 }
-fn round_panel(title: impl Into<String>, _accent: Color, _active: bool) -> Block<'static> {
+fn round_panel(title: impl Into<String>, accent: Color, active: bool) -> Block<'static> {
     Block::default().borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(DESK_LINE))
-        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(MUTED)))
+        .border_style(Style::default().fg(if active{accent}else{DESK_LINE}))
+        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(if active{accent}else{MUTED})))
 }
 fn root_actions(c: &Center) -> Vec<&Value> {
     c.state["activity"]["actions"].as_array().into_iter().flatten().rev().take(3).collect()
@@ -408,7 +413,7 @@ fn engine_badge(action: &Value) -> (&'static str, Color) {
         Some("engine_success") => ("✓ SUCCEEDED", GREEN),
         Some("engine_error" | "handler_error") => ("✗ FAILED", RED),
         Some("engine_needs_work") => ("! NEEDS WORK", AMBER),
-        _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("◌ RUNNING", AMBER),
+        _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("[>] RUNNING", AMBER),
         _ if root_start(action).is_some_and(|e| e["interaction"] == "navigation") => ("— UI NAVIGATION", MUTED),
         _ if stages(action).iter().any(|e| e["stage"] == "ui_click") => ("— UI INTERACTION", MUTED),
         _ => ("! COMPLETION UNKNOWN", AMBER),
@@ -452,7 +457,10 @@ fn activity_wave(c: &Center) -> String {
     }
     let levels = ['▁','▂','▃','▄','▅','▆','▇','█'];
     let wave: String = bins.iter().map(|n| levels[(*n).min(7)]).collect();
-    format!("activity {wave} · {} receipts/8s", bins.iter().sum::<usize>())
+    let count=bins.iter().sum::<usize>();
+    let running=root_actions(c).into_iter().find(|a|root_finish(a).is_none() && stages(a).iter().any(|e|e["stage"]=="dispatch_running"));
+    let state=running.and_then(|a|root_start(a)).map(|e|format!("[>] {} · {}s elapsed",target(e),now.saturating_sub(e["unix_micros"].as_u64().unwrap_or(now*1_000_000)/1_000_000))).unwrap_or_else(||"idle".into());
+    format!("activity {wave} · {count} receipts/8s · {state}")
 }
 fn action_lines(c: &Center, action: &Value, compact: bool) -> Vec<Line<'static>> {
     let Some(start) = root_start(action) else { return vec![styled("— action details unavailable", MUTED)]; };
@@ -465,14 +473,14 @@ fn action_lines(c: &Center, action: &Value, compact: bool) -> Vec<Line<'static>>
     }
     let ack = action_ack(action);
     let navigation=root_start(action).is_some_and(|e| e["interaction"]=="navigation");
-    let ui_result=if ack {if navigation {"NAVIGATION APPLIED"}else{"RESULT RENDERED"}}else if navigation {"navigation receipt pending"}else if engine_badge(action).0=="◌ RUNNING" {"waiting for result/render"}else {"no correlated Studio receipt"};
+    let ui_result=if ack {if navigation {"NAVIGATION APPLIED"}else{"RESULT RENDERED"}}else if navigation {"navigation receipt pending"}else if engine_badge(action).0=="[>] RUNNING" {"waiting for result/render"}else {"no correlated Studio receipt"};
     let mut lines = vec![heading];
     if compact {
         lines.push(Line::from(vec![Span::styled(format!("  {engine}  "), Style::default().fg(color)),
-            Span::styled(format!("{} {ui_result}",if ack {"▣"}else{"—"}), Style::default().fg(if ack { GREEN } else { MUTED }))]));
+            Span::styled(format!("{} {ui_result}",if ack {"▣"}else{"—"}), Style::default().fg(if ack { GREEN } else { AMBER }))]));
     } else {
         lines.push(styled(format!(" ├─ ENGINE: {engine}"), color));
-        lines.push(styled(format!(" ├─ STUDIO: {} {ui_result}{}",if ack {"▣"}else{"—"},if ack && !navigation {" · visual review separate"}else{""}), if ack { GREEN } else { MUTED }));
+        lines.push(styled(format!(" ├─ STUDIO: {} {ui_result}{}",if ack {"▣"}else{"—"},if ack && !navigation {" · visual review separate"}else{""}), if ack { GREEN } else { AMBER }));
         lines.push(styled(format!(" └─ AGENT: {} · {}", start["origin"].as_str().unwrap_or("unknown"), start["client_label"].as_str().unwrap_or("unverified")), MUTED));
     }
     if let Some(error) = root_finish(action).and_then(|e| e["error"].as_str()).filter(|_| !compact) { lines.push(styled(format!("    {}", error.strip_prefix("invalid parameters: ").unwrap_or(error)), RED)); }
@@ -506,13 +514,13 @@ fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narro
     if !compact_commands { lines.push(Line::raw("")); }
     let mut selected_row = 0;
     if compact_commands {
-        lines.push(styled(format!("{}  ·  ↑↓ choose", (0..commands.len()).map(|i|format!("{}[{}]", if i == selected { "▶" } else { " " }, i + 1)).collect::<Vec<_>>().join(" ")), BLUE));
-        lines.push(styled(format!("▶ [{}] {effect}", selected + 1), BLUE));
+        lines.push(styled(format!("{}  ·  ↑↓ choose", (0..commands.len()).map(|i|format!("{}[{}]", if i == selected { ">" } else { " " }, i + 1)).collect::<Vec<_>>().join(" ")), BLUE));
+        lines.push(styled(format!("> [{}] {effect}", selected + 1), BLUE));
         lines.push(styled(format!("    {}", command_preview(literal)), MUTED));
     } else {
         for (i,(effect,command)) in commands.iter().enumerate() {
             if i == selected { selected_row = wrapped_rows(&lines, parts[0].width); }
-            lines.push(styled(format!("{} [{}] {}", if i == selected { "▶" } else { " " }, i + 1, effect), if i == selected { TEAL } else { DESK_FG }).style(Style::default().fg(if i==selected {TEAL}else{DESK_FG}).add_modifier(if i==selected {Modifier::BOLD}else{Modifier::empty()})));
+            lines.push(styled(format!("{} [{}] {}", if i == selected { ">" } else { " " }, i + 1, effect), if i == selected { TEAL } else { DESK_FG }).style(Style::default().fg(if i==selected {TEAL}else{DESK_FG}).add_modifier(if i==selected {Modifier::BOLD}else{Modifier::empty()})));
             lines.push(styled(format!("       {}", command_preview(command)), BLUE));
             lines.push(Line::raw(""));
         }
@@ -549,7 +557,7 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
         let matched = current && ui["active_project"] == c.state["project"] && ui["connection"] == "connected";
         let engine = if current { actions.first().map(|a|engine_badge(a)).unwrap_or(("— UNKNOWN", DESK_FG)) } else { ("— UNKNOWN", DESK_FG) };
         let ack = if matched && ui["ui_ready"] == true { ("▣ UI UPDATED",GREEN) } else { ("! ACK UNKNOWN / MISSING",AMBER) };
-        let name = format!("{} {}", if current { "▶" } else { " " }, project["name"].as_str().unwrap_or("unnamed"));
+        let name = format!("{} {}", if current { ">" } else { " " }, project["name"].as_str().unwrap_or("unnamed"));
         if width >= 100 {
             lines.push(Line::from(vec![Span::styled(padded(&name,widths[0]),Style::default().fg(if current { BLUE } else { DESK_FG })), Span::styled(padded(engine.0,widths[1]),Style::default().fg(engine.1)), Span::styled(padded(ack.0,widths[2]),Style::default().fg(ack.1)), Span::styled(padded(&lag(ui,matched),widths[3]),Style::default().fg(if matched && ui["ui_ready"] == true { GREEN } else { AMBER })), Span::styled(padded(if current { actions.first().and_then(|a|root_start(a)).map(target).unwrap_or("—") } else { "— unobserved" },widths[4]),Style::default().fg(MUTED))]));
         } else {
@@ -576,9 +584,22 @@ fn action_height(c:&Center,width:u16,compact:bool)->u16{
 }
 fn command_height(c:&Center,width:u16,narrow:bool)->u16{
  let commands=c.copy_commands();let inner=width.saturating_sub(2);let mut lines=vec![Line::raw("Select/C copies text; nothing executes")];
- for (i,(label,cmd)) in commands.iter().enumerate(){lines.push(Line::raw(format!("▶ [{}] {label}",i+1)));lines.push(Line::raw(format!("       {}",command_preview(cmd))));lines.push(Line::raw(""));}
+ for (i,(label,cmd)) in commands.iter().enumerate(){lines.push(Line::raw(format!("> [{}] {label}",i+1)));lines.push(Line::raw(format!("       {}",command_preview(cmd))));lines.push(Line::raw(""));}
  let payload=commands.get(c.command_selected%commands.len().max(1)).map(|(_,c)|c.len().div_ceil(usize::from(inner.max(1))) as u16+1).unwrap_or(1).min(if narrow{4}else{6});
  wrapped_rows(&lines,inner).saturating_add(payload+3).max(7)
+}
+fn prerequisite_lines(c:&Center)->Vec<Line<'static>>{
+ let mut lines=Vec::new();
+ for p in c.state["prerequisites"].as_array().into_iter().flatten(){
+  let (color,word)=match p["state"].as_str(){Some("ready")=>(GREEN,"READY"),Some("blocked")=>(RED,"BLOCKED"),Some("missing")=>(AMBER,"MISSING"),_=>(AMBER,"UNKNOWN")};
+  lines.push(Line::from(vec![Span::styled(" ● ",Style::default().fg(color).add_modifier(Modifier::BOLD)),Span::styled(format!("{}: {word}",p["label"].as_str().unwrap_or("Unknown")),Style::default().fg(color))]));
+ }
+ if lines.is_empty(){lines.push(styled(" ● UNKNOWN · no shared prerequisite observation",AMBER));}
+ let m=&c.state["metrics"];
+ let number=|v:&Value|if v.is_null(){"unknown".into()}else{v.to_string()};
+ lines.push(styled(format!(" Words {} · groups {} · duration {}s · assets {}/{} · rigs {}",number(&m["timed_words"]),number(&m["lyric_groups"]),number(&m["recording_duration_sec"]),number(&m["available_assets"]),number(&m["registered_assets"]),number(&m["animatable_assets"])),MUTED));
+ lines.push(styled(format!(" CLI observation {} · {}ms",c.state["observation"]["id"].as_str().unwrap_or("unknown"),number(&c.state["observation"]["elapsed_ms"])),MUTED));
+ lines
 }
 fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let area = f.area(); let narrow = area.width < 110;
@@ -594,7 +615,7 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let projects = c.state["catalog"]["projects"].as_array().map(Vec::len).unwrap_or(0);
     let mut tabs = vec![Span::styled(format!(" [F1] CONTROL ({projects}) "),Style::default().fg(if control { TEAL } else { MUTED }).add_modifier(if control { Modifier::BOLD } else { Modifier::empty() })), Span::styled("┬",Style::default().fg(DESK_LINE)), Span::styled(format!(" [F2] BOOTH: {}{} ",fit_text(name,if narrow { 12 } else { 24 }),if engine.1 == RED { " [!]" } else { "" }),Style::default().fg(if control { MUTED } else if engine.1 == RED { RED } else { TEAL }).add_modifier(if control { Modifier::empty() } else { Modifier::BOLD })), Span::styled("┬ [F4] INTAKE ",Style::default().fg(MUTED))];
     if area.width >= 118 { tabs.push(Span::styled(" · snapshots 1s · ",Style::default().fg(MUTED))); }
-    let mut header = vec![Line::from(vec![Span::styled(if control { " WORKSPACE: " } else { " FILE: " },Style::default().fg(MUTED)),Span::styled(compact_path(if control { c.state["catalog"]["scope"].as_str().unwrap_or("shared Home recent projects") } else { project.unwrap_or("no project attached") },area.width.saturating_sub(16) as usize),Style::default().fg(DESK_FG))]),Line::from(vec![Span::styled(format!(" ENGINE: {}  │  ",engine.0),Style::default().fg(engine.1)),Span::styled(format!("STUDIO: {} · {}",if mismatch { "✗ UNMATCHED" } else if matched { "✓ MATCHED" } else { "— SELECTED PROJECT NOT OPEN / UNOBSERVED" },lag(ui,matched)),Style::default().fg(if mismatch { RED } else if matched && ui["ui_ready"] == true { GREEN } else { AMBER }))])];
+    let mut header = vec![Line::from(vec![Span::styled(if control { " WORKSPACE: " } else { " FILE: " },Style::default().fg(MUTED)),Span::styled(compact_path(if control { c.state["catalog"]["scope"].as_str().unwrap_or("shared Home recent projects") } else { project.unwrap_or("no project attached") },area.width.saturating_sub(16) as usize),Style::default().fg(DESK_FG))]),Line::from(vec![Span::styled(format!(" ENGINE: ● {}  │  ",engine.0),Style::default().fg(if engine.1==GREEN{GREEN}else if engine.1==RED{RED}else{AMBER})),Span::styled(format!("STUDIO: ● {} · {}",if mismatch { "✗ UNMATCHED" } else if matched { "✓ MATCHED" } else { "— SELECTED PROJECT NOT OPEN / UNOBSERVED" },lag(ui,matched)),Style::default().fg(if mismatch { RED } else if matched && ui["ui_ready"] == true { GREEN } else { AMBER }))])];
     let ack = if !matched { "UI RECEIPT: N/A · no matched Studio" } else if ui["ui_ready"] == true { "▣ ACK APPLIED" } else { "! ACK PENDING / UNKNOWN" };
     let busy = matched && (ui["pending_invokes"].as_u64().is_some_and(|n| n > 0) || actions.iter().any(|a| stages(a).iter().any(|e| e["stage"]=="dispatch_running") && root_finish(a).is_none()));
     let work = if busy { format!(" · {} RUNNING", ["|", "/", "-", "\\"][(c.started.elapsed().as_millis() / 120 % 4) as usize]) } else { String::new() };
@@ -612,17 +633,22 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let errors=ui["errors"].as_array().map(|a|a.iter().filter_map(|v|v["message"].as_str()).collect::<Vec<_>>().join("; ")).unwrap_or_default();
     header.push(styled(fit_text(&format!(" DOM report age: {report_age} · {}{}",if reasons.is_empty(){saved}else{&reasons},if errors.is_empty(){String::new()}else{format!(" · ERROR: {errors}")}),area.width.saturating_sub(4) as usize),if !errors.is_empty(){RED}else if !reasons.is_empty(){AMBER}else{saved_color}));
     f.render_widget(Paragraph::new(header).block(block),chunks[0]);
+    let ready_lines=prerequisite_lines(c);
+    let ready_height=wrapped_rows(&ready_lines,chunks[1].width.saturating_sub(2)).saturating_add(2).min(chunks[1].height.saturating_sub(12));
+    let body=Layout::vertical([Constraint::Length(ready_height),Constraint::Min(1)]).split(chunks[1]);
+    f.render_widget(Paragraph::new(ready_lines).wrap(Wrap{trim:false}).block(round_panel("PROJECT PREREQUISITES · shared CLI evidence",TEAL,false)),body[0]);
+    let content=body[1];
     if control {
-        let parts = Layout::vertical([Constraint::Min(5),Constraint::Length(if area.height >= 35 { 11 } else { 8 })]).split(chunks[1]);
+        let parts = Layout::vertical([Constraint::Min(5),Constraint::Length(if area.height >= 35 { 11 } else { 8 })]).split(content);
         render_catalog(f,c,parts[0]); render_commands(f,c,parts[1],true);
     } else if narrow {
-        let requested=command_height(c,chunks[1].width,true);
-        let actions=action_height(c,chunks[1].width,true);
-        let commands_height=requested.min(chunks[1].height.saturating_sub(actions.min(8))).max(5);
-        let parts=Layout::vertical([Constraint::Length(commands_height),Constraint::Length(actions),Constraint::Min(0)]).split(chunks[1]);
+        let requested=command_height(c,content.width,true);
+        let actions=action_height(c,content.width,true);
+        let commands_height=requested.min(content.height.saturating_sub(actions.min(8))).max(5);
+        let parts=Layout::vertical([Constraint::Length(commands_height),Constraint::Length(actions),Constraint::Min(0)]).split(content);
         render_commands(f,c,parts[0],true);render_actions(f,c,parts[1],true);
     } else {
-        let parts = Layout::horizontal([Constraint::Percentage(47),Constraint::Percentage(53)]).spacing(1).split(chunks[1]);
+        let parts = Layout::horizontal([Constraint::Percentage(47),Constraint::Percentage(53)]).spacing(1).split(content);
         let mut left=parts[0];left.height=action_height(c,left.width,false).min(left.height);
         let mut right=parts[1];right.height=command_height(c,right.width,false).min(right.height);
         render_actions(f,c,left,false);render_commands(f,c,right,false);
@@ -750,9 +776,9 @@ mod feedback_tests {
     #[test]
     fn actual_dispatch_is_running_until_a_matching_finish() {
         let mut a=json!({"root_request_id":"save-1","events":[{"stage":"dispatch_running","request_id":"save-1","command":"storyboard.save_version"}]});
-        assert_eq!(engine_badge(&a).0,"◌ RUNNING");
+        assert_eq!(engine_badge(&a).0,"[>] RUNNING");
         a["events"].as_array_mut().unwrap().push(json!({"stage":"engine_success","request_id":"other","command":"storyboard.save_version"}));
-        assert_eq!(engine_badge(&a).0,"◌ RUNNING");
+        assert_eq!(engine_badge(&a).0,"[>] RUNNING");
         a["events"].as_array_mut().unwrap().push(json!({"stage":"engine_error","request_id":"save-1","command":"storyboard.save_version"}));
         assert_eq!(engine_badge(&a).0,"✗ FAILED");
     }
@@ -773,6 +799,15 @@ mod feedback_tests {
     fn failed_action_gets_its_own_contract_not_generic_transcript_or_agent_commands(){
         let mut c=fixture();c.state["activity"]["actions"][0]["events"][1]["stage"]=json!("engine_error");
         let commands=c.copy_commands();assert_eq!(commands.len(),2);assert!(commands[1].1.contains("commands 'storyboard.save_version'"));assert!(!commands.iter().any(|(_,v)|v.contains("agent.config")||v.contains("workshop.import_transcript")));
+    }
+    #[test]
+    fn readiness_lights_use_shared_states_even_when_studio_revisions_match(){
+        let mut c=fixture();
+        let unknown=prerequisite_lines(&c);assert_eq!(unknown[0].style.fg,Some(AMBER));
+        c.state["prerequisites"]=json!([{"id":"song","label":"Song","state":"ready"},{"id":"assets","label":"Assets","state":"missing"},{"id":"transcript","label":"Transcription","state":"blocked"}]);
+        let lines=prerequisite_lines(&c);assert_eq!(lines[0].spans[0].style.fg,Some(GREEN));assert_eq!(lines[1].spans[0].style.fg,Some(AMBER));assert_eq!(lines[2].spans[0].style.fg,Some(RED));
+        c.state["next_commands"]=json!([{"command":"video.init","operation":"commands","reason":"Native captions missing"}]);
+        assert!(c.copy_commands()[0].1.ends_with("commands 'video.init'"));
     }
     #[test]
     fn narrow_booth_stacks_content_sized_sections(){

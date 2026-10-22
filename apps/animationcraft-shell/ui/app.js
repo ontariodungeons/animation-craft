@@ -131,20 +131,22 @@ function renderBlocks() {
   const audio = song.inputs?.[0];
   const liner = (song.inputs || []).slice(1);
 
-  const songState = song.done ? "ready" : audio ? "needs" : "empty";
-  box.append(block("song", ICONS.song, "Song", audio?.name, song.done,
+  const observed=id=>state.data?.monitoring?.prerequisites?.find(p=>p.id===id);
+  const ready=id=>observed(id)?.state==='ready';
+  const songState = observed("song")?.state || "unknown";
+  box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
     [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null], songState));
 
   const lines = sceneLines();
-  const lyricsState = lines.length > 0 ? "ready" : "needs";
-  box.append(block("lyrics", ICONS.lyrics, "Lyrics & notes", `${lines.filter((l) => l.lyric && l.lyric !== "Instrumental").length} lines`, lines.length > 0,
+  const lyricsState = observed("lyrics")?.state || "unknown";
+  box.append(block("lyrics", ICONS.lyrics, "Lyrics & notes", `${lines.filter((l) => l.lyric && l.lyric !== "Instrumental").length} lines`, ready("lyrics"),
     [...lines.map((l) => el("div", { class: "lyric" }, el("span", { class: "t" }, l.time), el("span", {}, l.lyric))),
      el("div", { class: "group-label" }, "Liner & teaching notes"),
      liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None in this project yet.")], lyricsState));
 
   const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
-  const transcriptState = transcript.done ? "ready" : outputs.length > 0 ? "needs" : "empty";
-  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, transcript.done, outputs.map(fileButton), transcriptState));
+  const transcriptState = observed("transcript")?.state || "unknown";
+  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, ready("transcript"), outputs.map(fileButton), transcriptState));
 
   const assets=state.data?.assets?.assets||[];
   const cards=assets.map(a=>{
@@ -153,14 +155,14 @@ function renderBlocks() {
       onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
     card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-animationcraft-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
   });
-  const animateState = assets.length > 0 ? "ready" : "empty";
+  const animateState = observed("animate")?.state || "unknown";
   const animateBody = assets.length > 0
     ? [el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]
     : [el('div',{class:'group-label'},'Objects'),
        el('button',{id:'asset-import-animate',class:'start',onclick:importProjectAsset},'Import artwork'),
        el('p',{class:'why'},'Drag an object onto a storyboard page once imported.')];
-  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,assets.length>0,animateBody, animateState));
-  const assetsState = (s.asset_files||[]).length > 0 ? "ready" : "empty";
+  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),animateBody, animateState));
+  const assetsState = observed("assets")?.state || "unknown";
   const assetFiles = (s.asset_files||[]);
   const assetsBody = assetFiles.length > 0
     ? [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
@@ -168,7 +170,7 @@ function renderBlocks() {
        el('details',{},el('summary',{},'Project files'),...assetFiles.map(fileButton))]
     : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
        el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
-  box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,assets.length>0,assetsBody, assetsState));
+  box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
   if (typeof imagePromptBlock === 'function') box.append(imagePromptBlock());
 
 }

@@ -120,3 +120,26 @@ fn audio_only_intake_attempts_existing_pipeline_and_retains_recoverable_failure(
     let state=reopened.execute("center.status",json!({})).unwrap();
     assert!(!state["problems"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn shared_observation_does_not_confuse_files_or_saved_receipts_with_readiness() {
+    let d = fixture("observed-prerequisites");
+    let mut s=Session::default();
+    s.execute("project.new",json!({"path":d.join("Observed.acproj")})).unwrap();
+    fs::write(d.join("intake-state.json"),json!({"intake_ready":true,"storyboard_ready":true,"video_ready":true}).to_string()).unwrap();
+    let observed=s.execute("center.status",json!({})).unwrap();
+    let find=|id:&str|observed["prerequisites"].as_array().unwrap().iter().find(|v|v["id"]==id).unwrap();
+    assert_eq!(find("song")["state"],"missing");
+    assert_eq!(find("transcript")["state"],"missing");
+    assert_eq!(find("deckcraft")["state"],"missing");
+    assert_eq!(find("hyperframes")["state"],"missing");
+    assert_eq!(observed["metrics"]["timed_words"],0);
+    assert!(observed["observation"]["id"].is_string());
+    assert_eq!(observed["studio_acknowledgement"],"unobserved; query ui.feedback separately");
+    let transcript=d.join("observed.transcript.json");
+    fs::write(&transcript,b"{\"words\":[{\"text\":\"bad\",\"start\":2,\"end\":1}]}").unwrap();
+    let bad=s.execute("center.status",json!({})).unwrap();
+    assert_eq!(bad["prerequisites"].as_array().unwrap().iter().find(|v|v["id"]=="transcript").unwrap()["state"],"blocked");
+    assert!(!bad["next_commands"].as_array().unwrap().is_empty());
+    fs::remove_dir_all(d).unwrap();
+}
