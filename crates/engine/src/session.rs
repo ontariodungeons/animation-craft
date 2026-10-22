@@ -212,6 +212,7 @@ impl LoadedCutoutRigPlan {
         let raw: Value = serde_json::from_str(&text).map_err(|e| {
             EngineError::InvalidParams(format!("invalid cutout rig plan JSON: {e}"))
         })?;
+        if let Some(layers)=raw.get("layers").and_then(Value::as_object){return Self::load_keyed_layers(path,&raw,layers);}
         if let (Some(canvas_arr), Some(layers_arr)) = (
             raw.get("canvas").and_then(Value::as_array),
             raw.get("layers").and_then(Value::as_array),
@@ -293,6 +294,42 @@ impl LoadedCutoutRigPlan {
             pose_library,
             effectcraft,
         })
+    }
+
+    /// Older HyperFrames rigs store cropped PNGs as an explicitly ordered layer map.
+    fn load_keyed_layers(path:&Path,raw:&Value,layers:&serde_json::Map<String,Value>)->Result<Self>{
+        let invalid=|message:String|EngineError::InvalidParams(format!("Invalid keyed rig {}: {message}",path.display()));
+        let canvas=raw["canvas"].as_array().filter(|v|v.len()==2).ok_or_else(||invalid("canvas must contain two positive integers".into()))?;
+        let dims:Vec<u32>=canvas.iter().map(|v|v.as_u64().filter(|n|*n>0&&*n<=8192).map(|n|n as u32).ok_or_else(||invalid("canvas values must be 1..8192".into()))).collect::<Result<_>>()?;let(cw,ch)=(dims[0],dims[1]);
+        let order=raw["layer_order"].as_array().filter(|v|!v.is_empty()).ok_or_else(||invalid("nonempty layer_order is required".into()))?;
+        let ids:Vec<&str>=order.iter().map(|v|v.as_str().ok_or_else(||invalid("layer_order entries must be IDs".into()))).collect::<Result<_>>()?;
+        let unique:std::collections::BTreeSet<_>=ids.iter().copied().collect();
+        if layers.is_empty()||unique.len()!=ids.len()||unique.len()!=layers.len()||layers.keys().any(|k|!unique.contains(k.as_str())){return Err(invalid("layer_order must contain each nonempty layer ID exactly once".into()));}
+        let base=path.parent().ok_or_else(||invalid("manifest directory missing".into()))?;let mut decoded=Vec::new();
+        for id in &ids{
+            if id.is_empty()||!id.bytes().all(|b|b.is_ascii_alphanumeric()||b"_-".contains(&b)){return Err(invalid(format!("unsafe layer ID {id}")));}
+            let layer=&layers[*id];let b=layer["box"].as_array().filter(|v|v.len()==4).ok_or_else(||invalid(format!("{id}: box must be [x,y,width,height]")))?;
+            let b:Vec<u32>=b.iter().map(|v|v.as_u64().filter(|n|*n<=8192).map(|n|n as u32).ok_or_else(||invalid(format!("{id}: box requires nonnegative integers")))).collect::<Result<_>>()?;
+            if b[2]==0||b[3]==0||b[0]+b[2]>cw||b[1]+b[3]>ch{return Err(invalid(format!("{id}: box exceeds canvas or has zero size")));}
+            let p=layer["pivot"].as_array().filter(|v|v.len()==2).ok_or_else(||invalid(format!("{id}: pivot must be [x,y]")))?;
+            let p:Vec<f32>=p.iter().map(|v|v.as_f64().filter(|n|n.is_finite()).map(|n|n as f32).ok_or_else(||invalid(format!("{id}: pivot must be finite")))).collect::<Result<_>>()?;
+            if p[0]<0.0||p[1]<0.0||p[0]>cw as f32||p[1]>ch as f32{return Err(invalid(format!("{id}: pivot lies outside canvas")));}
+            let file=base.join(format!("{id}.png"));let image=image::open(&file).map_err(|e|invalid(format!("{id}: cannot decode {}: {e}",file.display())))?;
+            if image.width()!=b[2]||image.height()!=b[3]||!image.color().has_alpha(){return Err(invalid(format!("{id}: PNG dimensions/alpha do not match declared box {}x{}",b[2],b[3])));}
+            decoded.push((id.to_string(),file,b,p,image.into_rgba8()));
+        }
+        // Derived canvas layers preserve every original PNG byte and declared placement.
+        let cache=base.join(".layered_preview_cache/keyed");std::fs::create_dir_all(&cache)?;
+        let mut rest=image::RgbaImage::new(cw,ch);let mut parts=Vec::new();let mut bbox=[cw,ch,0,0];let mut spec_layers=Vec::new();
+        for (index,(id,file,b,p,pixels)) in decoded.into_iter().enumerate(){
+            let mut full=image::RgbaImage::new(cw,ch);image::imageops::overlay(&mut full,&pixels,b[0] as i64,b[1] as i64);let full_path=cache.join(format!("{id}.png"));full.save(&full_path)?;
+            image::imageops::overlay(&mut rest,&pixels,b[0] as i64,b[1] as i64);bbox=[bbox[0].min(b[0]),bbox[1].min(b[1]),bbox[2].max(b[0]+b[2]),bbox[3].max(b[1]+b[3])];
+            spec_layers.push(serde_json::json!({"id":id,"file":full_path,"pivot":p}));
+            parts.push(CutoutRigPart{id:id.clone(),label:id,kind:"layered".into(),layer:index as i32,parent:None,pivot:[p[0],p[1]],pivot_uv:[(p[0]-b[0] as f32)/b[2] as f32,(p[1]-b[1] as f32)/b[3] as f32],crop_box:[b[0],b[1],b[0]+b[2],b[1]+b[3]],crop_size:[b[2],b[3]],cropped_path:file,full_layer_path:full_path,..Default::default()});
+        }
+        let source=cache.join("assembled-rest.png");rest.save(&source)?;
+        let controls=load_control_bindings(raw,path,&parts)?;
+        Ok(Self{control_bindings:controls,plan_path:path.into(),character_id:raw["fish"].as_str().or(raw["character_id"].as_str()).unwrap_or("keyed_subject").into(),rig_type:"layered_motion".into(),source_image:source,canvas_size:[cw,ch],character_bbox:bbox,parts,effectcraft:serde_json::json!({"canvas":[cw,ch],"fps":30,"layers":spec_layers,"tracks":[]}),..Default::default()})
     }
 
     fn load_layered_motion_spec(
@@ -1481,6 +1518,18 @@ impl Session {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn keyed_layer_map_preserves_boxes_pivots_order_and_real_pixels(){
+        let tmp=std::env::temp_dir().join(format!("ac_keyed_rig_{}",std::process::id()));let _=std::fs::remove_dir_all(&tmp);std::fs::create_dir_all(&tmp).unwrap();
+        image::RgbaImage::from_pixel(3,2,image::Rgba([200,30,10,255])).save(tmp.join("hull.png")).unwrap();
+        image::RgbaImage::from_pixel(2,2,image::Rgba([20,90,180,128])).save(tmp.join("flap.png")).unwrap();
+        let path=tmp.join("rig.json");let raw=json!({"fish":"comet","canvas":[20,10],"layer_order":["hull","flap"],"layers":{"hull":{"box":[4,3,3,2],"pivot":[5.5,4]},"flap":{"box":[9,5,2,2],"pivot":[9.5,5.25]}}});std::fs::write(&path,raw.to_string()).unwrap();
+        let rig=LoadedCutoutRigPlan::load_from_path(&path).unwrap();assert_eq!(rig.parts.len(),2);assert_eq!(rig.character_id,"comet");assert_eq!(rig.canvas_size,[20,10]);assert_eq!(rig.parts[0].crop_box,[4,3,7,5]);assert_eq!(rig.parts[1].pivot,[9.5,5.25]);
+        let rest=image::open(&rig.source_image).unwrap().to_rgba8();assert_eq!(*rest.get_pixel(4,3),image::Rgba([200,30,10,255]));assert_eq!(rest.get_pixel(0,0)[3],0);
+        for bad in [json!({"canvas":[20,10],"layers":{}}),json!({"canvas":[20,10],"layers":{"missing":{"box":[0,0,2,2],"pivot":[1,1]}},"layer_order":["missing"]}),json!({"canvas":[20,10],"layers":{"hull":{"box":[0,0,99,2],"pivot":[1,1]}},"layer_order":["hull"]})]{std::fs::write(&path,bad.to_string()).unwrap();assert!(LoadedCutoutRigPlan::load_from_path(&path).is_err(),"malformed layer map must not become a default empty rig");}
+        let _=std::fs::remove_dir_all(tmp);
+    }
+
 
     #[test]
     fn loads_arbitrary_layered_motion_spec_and_syncs_parts_alongside_pose_manifest() {
