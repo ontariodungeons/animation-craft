@@ -411,7 +411,9 @@ $("project-details").addEventListener("click",()=>{document.body.classList.toggl
 
 async function designCommand(id,params={}){
  const result=await motionCommand(id,params);
- state.data=await invoke('project_state',{path:state.project});renderBlocks();renderStoryboard();return result;
+ state.data=await invoke('project_state',{path:state.project});renderBlocks();renderStoryboard();
+ if(result?._ui_engine_revision)await acFeedback.acknowledge(result._ui_engine_revision,state.project);
+ return result;
 }
 async function importProjectAsset(){
  const path=await dialog.open({title:'Add artwork',filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});if(!path)return;

@@ -17,3 +17,13 @@ state.data.storyboard={previews:["/fixture/legacy.png"]};
 vm.runInContext("renderDesignPlacements()",context);
 assert.equal(button.hidden,true,"Legacy preview without a native deck must not advertise native Save");
 console.log("PASS: native Save remains reachable with zero placements and after final-image removal; legacy previews stay distinct");
+
+const rendered=[];
+const designContext=vm.createContext({state:{project:"/fixture/test.acproj",data:{}},
+ motionCommand:async()=>({_ui_engine_revision:2}),invoke:async()=>({}),
+ renderBlocks:()=>rendered.push("blocks"),renderStoryboard:()=>rendered.push("storyboard"),
+ acFeedback:{acknowledge:async(revision,project)=>{assert.deepEqual(rendered,["blocks","storyboard"]);assert.equal(revision,2);assert.equal(project,"/fixture/test.acproj");rendered.push("ack");}}});
+vm.runInContext(source.slice(source.indexOf("async function designCommand("),source.indexOf("async function importProjectAsset(")),designContext);
+await vm.runInContext("designCommand('storyboard.save_version')",designContext);
+assert.deepEqual(rendered,["blocks","storyboard","ack"],"Save must acknowledge its engine revision after rendering the returned state");
+console.log("PASS: native Save acknowledges the rendered project revision");
