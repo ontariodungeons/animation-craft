@@ -58,6 +58,7 @@ fn reset_for_project(s: &mut Session, path: PathBuf, assets: Vec<crate::ProjectA
     *s = Session {
         cwd: s.cwd.clone(),
         record_user_state:s.record_user_state,
+        agent_selection:s.agent_selection.clone(),
         blender_available: s.blender_available,
         project_assets: assets,
         project_path: Some(path),
@@ -171,6 +172,7 @@ pub fn cmd_project_close(s: &mut Session, _: &Value) -> Result<Value> {
     *s = Session {
         cwd: s.cwd.clone(),
         record_user_state:s.record_user_state,
+        agent_selection:s.agent_selection.clone(),
         blender_available: s.blender_available,
         ..Session::default()
     };
@@ -410,6 +412,7 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
         let mut loader = Session {
             cwd: s.cwd.clone(),
         record_user_state:s.record_user_state,
+        agent_selection:s.agent_selection.clone(),
             ..Session::default()
         };
         crate::photocraft::cmd_asset_load_manifest(&mut loader, &json!({"preset": preset}))?;

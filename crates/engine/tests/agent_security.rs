@@ -59,6 +59,8 @@ fn run_case(name: &str) {
 }
 
 #[test] fn agent_security_saved_selection_and_fresh_sessions() { run_case("fresh"); }
+#[test] fn agent_security_active_model_selection_is_isolated() { run_case("isolation"); }
+#[test] fn agent_security_queued_reply_is_retrievable() { run_case("queued"); }
 #[test] fn agent_security_auth_rejection_is_redacted() { run_case("auth"); }
 #[test] fn agent_security_model_mismatch_never_prompts() { run_case("mismatch"); }
 #[test] fn agent_security_unknown_model_never_prompts() { run_case("unknown"); }
@@ -109,6 +111,29 @@ fn agent_security_child() {
         println!("CASE_ASSERTIONS_COMPLETED");
         return;
     }
+    if case=="isolation" {
+        let before=fs::read(root.join("config/animationcraft/agent.json")).unwrap();
+        let mut other=Session::default();
+        agent::cmd_agent_config(&mut session,&json!({})).unwrap();
+        agent::cmd_agent_config(&mut other,&json!({})).unwrap();
+        agent::cmd_agent_config(&mut session,&json!({"selection":{"provider":"secondary","model":"synthetic-other-free"}})).unwrap();
+        assert_eq!(agent::cmd_agent_config(&mut session,&json!({})).unwrap()["model"],"synthetic-other-free");
+        assert_eq!(agent::cmd_agent_config(&mut other,&json!({})).unwrap()["model"],"synthetic-free");
+        assert_eq!(fs::read(root.join("config/animationcraft/agent.json")).unwrap(),before);
+        println!("CASE_ASSERTIONS_COMPLETED");return;
+    }
+    if case=="queued" {
+        params["wait"]=json!(0);params["_request_id"]=json!("queued-check");
+        let sent=agent::cmd_agent_send(&mut session,&params).unwrap();
+        assert_eq!(sent["status"],"running");assert_eq!(sent["request_id"],"queued-check");
+        let log=agent::cmd_agent_log(&mut session,&json!({"refresh":true})).unwrap();
+        assert!(log.as_array().unwrap().iter().any(|m|m["role"]=="assistant"&&m["request_id"]=="queued-check"&&m["text"]=="synthetic reply"));
+        assert_eq!(agent::cmd_agent_session(&mut session,&json!({})).unwrap()["request"]["status"],"replied");
+        let again=agent::cmd_agent_log(&mut session,&json!({"refresh":true})).unwrap();assert_eq!(log,again);
+        session.project_path=Some(root.join("project/Other.acproj"));
+        assert!(agent::cmd_agent_send(&mut session,&json!({"message":"must not cross projects","new_chat":false})).is_err());
+        println!("CASE_ASSERTIONS_COMPLETED");return;
+    }
     let reply=agent::cmd_agent_send(&mut session,&params);
     if case=="fresh" || case=="switch" {
         let first=reply.unwrap();
@@ -117,6 +142,7 @@ fn agent_security_child() {
         assert_eq!(first["text"],"synthetic reply");
         assert!(first["session"].as_str().is_some());
         if case=="switch" {
+            agent::cmd_agent_config(&mut session,&json!({"selection":{"provider":"secondary","model":"synthetic-other-free"}})).unwrap();
             fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"secondary","model":"synthetic-other-free","image_model":"preserve-me"}).to_string()).unwrap();
         }
         let second=agent::cmd_agent_send(&mut session,&params).unwrap();

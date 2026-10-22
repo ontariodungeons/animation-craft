@@ -107,7 +107,7 @@ async function agentLoad() {
 async function agentReloadLog() {
   if (!state.project) return;
   try {
-    const turns = await motionCommand("agent.log");
+    const turns = await motionCommand("agent.log",{refresh:true});
     if (Array.isArray(turns)) agent.turns = turns;
   } catch { /* the next send reports the real error */ }
   renderLog();
@@ -310,6 +310,7 @@ function agentToggle(open = !agent.open) {
   if (!open) return;
   if (agent.loaded) agentReloadLog();
   else agentLoad();
+  agent.timer=setInterval(()=>{if(!agent.sending)agentReloadLog();},1500);
   $("agent-input").focus();
 }
 

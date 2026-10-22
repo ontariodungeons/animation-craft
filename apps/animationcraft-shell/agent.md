@@ -102,3 +102,5 @@ for the visual movie document; it produces an editable DeckCraft deck, linked PD
 Use `agent.new_chat` to start fresh while preserving previous history. A prepared transparent image
 is not evidence of successful extraction, joint detection or articulated animation: report the actual
 stage and verify identity against the selected scene artwork before processing.
+
+When asked to coordinate or improve a blocked workflow, use the CLI. Report the exact command attempted, observed result, missing capability, smallest CLI improvement and its verification. Do not substitute a one-off workaround.

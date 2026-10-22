@@ -24,6 +24,8 @@ pub struct Session {
     pub project_path: Option<PathBuf>,
     /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
     pub record_user_state: bool,
+    /// Active chat selection belongs to this engine/window, never to project serialization.
+    pub agent_selection: Option<Value>,
     /// Exclusive writer lease on the canonical project file for the live Studio session.
     pub project_owner: Option<std::sync::Arc<std::fs::File>>,
     /// The song this project animates, referenced in place (never copied).
@@ -55,6 +57,7 @@ impl Default for Session {
             project_assets: Vec::new(),
             project_path: None,
             record_user_state: false,
+            agent_selection: None,
             project_owner: None,
             song_audio: None,
             draft_approved: false,

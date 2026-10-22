@@ -34,11 +34,23 @@ pub fn settings() -> Result<Value> {
     Ok(selected)
 }
 
-pub fn cmd_agent_config(_: &mut Session, _: &Value) -> Result<Value> { settings() }
+pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut value=match &s.agent_selection{Some(v)=>v.clone(),None=>settings()?};
+    if let Some(error)=value["selection_error"].as_str(){return Err(invalid(error));}
+    if let Some(patch)=p.get("selection") {
+        let fields=patch.as_object().ok_or_else(||invalid("Active selection must be an object"))?;
+        if fields.keys().any(|k|!matches!(k.as_str(),"agent"|"provider"|"model"|"thinking"|"extra_args")){return Err(invalid("Only active chat selection can be changed; credentials remain untouched"));}
+        for (key,v) in fields {
+            if (key=="extra_args"&&!v.is_array()) || (key!="extra_args"&&(!v.is_string()||v.as_str().is_some_and(|x|x.len()>256||x.chars().any(char::is_control)))) {return Err(invalid("Invalid active chat selection"));}
+            value[key]=v.clone();
+        }
+    }
+    s.agent_selection=Some(value.clone());value["scope"]=json!("active engine/window; shared defaults read only at initialization");Ok(value)
+}
 
 
-fn selected(params: &Value) -> Result<Value> {
-    let selection=settings()?;
+fn selected(s:&mut Session, params: &Value) -> Result<Value> {
+    let selection=cmd_agent_config(s,&json!({}))?;
     if params["agent"].as_str().is_some_and(|a|a!=selection["agent"].as_str().unwrap_or_default())
         || params.get("provider").is_some() || params.get("model").is_some() {
         return Err(invalid("Chat selection changed or overridden; choose provider/model in the app, then read agent.config. No request sent"));
@@ -86,7 +98,7 @@ fn models(dir:&Path)->Result<Vec<Value>> {
     Ok(list.iter().map(|m|json!({"providerID":m["providerID"],"id":m["id"],"name":m["name"],"enabled":m["enabled"],"capabilities":m["capabilities"],"cost":m["cost"]})).collect())
 }
 pub fn cmd_agent_models(s:&mut Session, p: &Value)->Result<Value> {
-    let mut selection=settings()?;
+    let mut selection=cmd_agent_config(s,&json!({}))?;
     if let Some(agent)=p["agent"].as_str(){selection["agent"]=json!(agent);}
     if selection["agent"]!="opencode" {return Ok(json!({"agent":selection["agent"],"models":[],"available":false,"reason":"Catalog discovery is supported by the existing OpenCode API route"}));}
     Ok(json!({"agent":"opencode","models":models(&crate::workshop::project_dir(s)?)?,"available":true}))
@@ -112,6 +124,40 @@ fn model_ref(dir:&Path,selection:&Value,free_only:bool)->Result<Value> {
     Ok(wanted)
 }
 fn state_dir(s:&Session)->Result<std::path::PathBuf> {Ok(crate::workshop::project_dir(s)?.join(".agent"))}
+fn chat_identity(s:&Session)->Result<Value>{
+ let path=s.project_path.as_ref().ok_or_else(||invalid("Open the target project before chat"))?;
+ let dir=crate::workshop::project_dir(s)?;
+ let files=fs::read_dir(&dir)?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("acproj"))).count();
+ if files>1{return Err(invalid("Multiple project files share this chat directory; chat blocked to prevent cross-project messages. Give each project its own directory; history was preserved"));}
+ let project=fs::canonicalize(path).unwrap_or_else(|_|path.clone());
+ let owner=state_dir(s)?.join("chat-project.json");
+ if let Ok(bytes)=fs::read(owner){let saved:Value=serde_json::from_slice(&bytes).map_err(|_|invalid("Chat project binding is invalid; no message sent"))?;if saved["project"]!=json!(project){return Err(invalid("Chat belongs to another project; no message sent or history changed"));}}
+ Ok(json!(project))
+}
+fn request_file(s:&Session)->Result<std::path::PathBuf>{Ok(state_dir(s)?.join("chat-request.json"))}
+fn request_read(s:&Session)->Value{request_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)}
+fn request_write(s:&Session,v:&Value)->Result<()>{fs::create_dir_all(state_dir(s)?)?;fs::write(request_file(s)?,serde_json::to_vec_pretty(v).map_err(|_|invalid("Cannot encode chat receipt"))?)?;Ok(())}
+fn refresh_reply(s:&Session)->Result<Value>{
+ chat_identity(s)?;let mut r=request_read(s);
+ if !matches!(r["status"].as_str(),Some("running"|"stalled")){return Ok(r);}
+ let previous_status=r["status"].clone();
+ let dir=crate::workshop::project_dir(s)?;let id=r["session"].as_str().ok_or_else(||invalid("Pending chat has no session"))?;
+ let reply=api(&dir,"session.message.list",Some(id),None)?;
+ let messages=data(&reply).as_array().ok_or_else(||invalid("OpenCode message list unavailable; pending request preserved"))?;
+ let since=r["sent_at"].as_u64().ok_or_else(||invalid("Pending chat has no native prompt receipt; inspect existing session, do not resend"))?;
+ let recent:Vec<_>=messages.iter().filter(|m|m["time"]["created"].as_u64().is_some_and(|t|t>=since)).collect();
+ let permissions=api(&dir,"session.permission.list",Some(id),None)?;let forms=api(&dir,"session.form.list",Some(id),None)?;
+ let pending=data(&permissions).as_array().is_some_and(|a|!a.is_empty())||data(&forms).as_array().is_some_and(|a|!a.is_empty());
+ let text=recent.iter().filter(|m|m["type"]=="assistant").flat_map(|m|m["content"].as_array().into_iter().flatten()).filter(|v|v["type"]=="text").filter_map(|v|v["text"].as_str()).collect::<Vec<_>>().join("\n");
+ if pending {r["status"]=json!("stalled");r["reason"]=json!("Existing OpenCode permission or question requires attention; no automatic approval");}
+ else if recent.iter().any(|m|m["type"]=="idle") {
+  if text.trim().is_empty(){r["status"]=json!("error");r["error"]=json!("OpenCode became idle without a retrievable text reply");}
+  else {verify_model(&dir,id,&r["model_ref"])?;log_push(s,json!({"role":"assistant","text":text,"request_id":r["request_id"],"project":r["project"],"session":id,"agent":"opencode","provider":r["provider"],"model":r["model"]}))?;r["text"]=json!(text);r["status"]=json!("replied");}
+ }
+ r["checked_at"]=json!(stamp());request_write(s,&r)?;
+ if s.record_user_state && previous_status!=r["status"]{crate::activity::append(json!({"stage":if r["status"]=="replied"{"engine_success"}else if r["status"]=="error"{"engine_error"}else{"agent_progress"},"command":"agent.send","request_id":r["request_id"],"project":r["project"],"project_id":r["project"],"command_id":r["request_id"],"status":r["status"],"outputs":{"status":r["status"],"session":r["session"]},"ui_ack":"reply observed; Studio rendering acknowledgement separate"}));}
+ Ok(r)
+}
 fn log_file(s:&Session)->Result<std::path::PathBuf> {Ok(state_dir(s)?.join("agent-log.json"))}
 pub(crate) fn log_read(s:&Session)->Value {log_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).filter(Value::is_array).unwrap_or_else(||json!([]))}
 fn log_push(s:&Session,entry:Value)->Result<()> {
@@ -131,7 +177,7 @@ fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
     } Ok(())
 }
 fn open_session(s:&Session,wanted:&Value,fresh:bool)->Result<String> {
-    let dir=crate::workshop::project_dir(s)?;let state=state_dir(s)?;let file=state.join("opencode-session");
+    let project=chat_identity(s)?;let dir=crate::workshop::project_dir(s)?;let state=state_dir(s)?;let file=state.join("opencode-session");
     if !fresh {
         let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
         verify_model(&dir,id.trim(),wanted)?;return Ok(id.trim().into());
@@ -145,15 +191,19 @@ fn open_session(s:&Session,wanted:&Value,fresh:bool)->Result<String> {
         let mut history=fs::OpenOptions::new().create(true).append(true).open(state.join("chat-history.jsonl"))?;
         writeln!(history,"{}",json!({"session":previous.trim(),"replaced_by":id}))?;
     }
+    fs::write(state.join("chat-project.json"),json!({"project":project}).to_string())?;
     fs::write(file,id)?;Ok(id.into())
 }
-pub fn cmd_agent_log(s:&mut Session,_:&Value)->Result<Value> {Ok(log_read(s))}
+pub fn cmd_agent_log(s:&mut Session,p:&Value)->Result<Value> {chat_identity(s)?;if p["refresh"]==true{refresh_reply(s)?;}Ok(log_read(s))}
 pub fn cmd_agent_session(s:&mut Session,_:&Value)->Result<Value> {
+    let project=chat_identity(s)?;
     let session=fs::read_to_string(state_dir(s)?.join("opencode-session")).ok().map(|s|s.trim().to_owned());
-    Ok(json!({"session":session,"selection":settings()?,"runtime_model_verified":false}))
+    let selection=cmd_agent_config(s,&json!({}))?;Ok(json!({"project":project,"session":session,"selection":selection,"request":request_read(s),"runtime_model_verified":false}))
 }
 pub fn cmd_agent_new_chat(s:&mut Session,params:&Value)->Result<Value> {
-    let selection=selected(params)?;let dir=crate::workshop::project_dir(s)?;
+    chat_identity(s)?;
+    let selection=selected(s,params)?;let dir=crate::workshop::project_dir(s)?;
+    if matches!(request_read(s)["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("Existing chat request is pending; retrieve it before starting a new chat"));}
     let session=if selection["agent"]=="opencode" {
         let model=model_ref(&dir,&selection,params["free_only"]==true)?;
         Some(open_session(s,&model,true)?)
@@ -164,38 +214,35 @@ pub fn cmd_agent_new_chat(s:&mut Session,params:&Value)->Result<Value> {
 pub fn new_chat(s:&mut Session,p:&Value)->Result<Value> {cmd_agent_new_chat(s,p)}
 
 pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
-    let dir=crate::workshop::project_dir(s)?;let selection=selected(params)?;
+    chat_identity(s)?;
+    let dir=crate::workshop::project_dir(s)?;let selection=selected(s,params)?;
     let agent=selection["agent"].as_str().ok_or_else(||invalid("No chat agent selected"))?;
     let mut said=params["message"].as_str().unwrap_or_default().trim().to_string();
     for path in params["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {said.push_str(&format!("\n[AnimationCraft picture: {path}]"));}
     if said.is_empty(){return Err(invalid("message is empty"));}
     let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/animationcraft-shell/agent.md")).unwrap_or_default();
     let fresh=params["new_chat"].as_bool().unwrap_or(true);
+    if fresh && params["session"].is_string(){return Err(invalid("An expected session requires new_chat=false; no chat created or message sent"));}
     let prompt=format!("Freshness: discover current animationcraft-cli help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
     if agent=="opencode" {
         if !selection["thinking"].as_str().unwrap_or_default().is_empty(){return Err(invalid("OpenCode reasoning variants are not wired to this setting; clear Thinking rather than silently ignoring it"));}
+        let prior=request_read(s);if matches!(prior["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("A project chat request is still pending; read agent.log refresh=true before sending another message"));}
         let model=model_ref(&dir,&selection,params["free_only"]==true)?;
         let id=open_session(s,&model,fresh)?;
-        // A resumed session also gets checked above; no prompt reaches a different model.
-        let sent=api(&dir,"session.prompt",Some(&id),Some(json!({"text":prompt})))?;
-        let since=data(&sent)["time"]["created"].as_u64().ok_or_else(||invalid("OpenCode prompt receipt lacks creation time; inspect agent.log/session before retrying: send outcome uncertain"))?;
+        if params["session"].as_str().is_some_and(|expected|expected!=id){return Err(invalid("Project agent session changed; inspect agent.session before sending. No prompt sent"));}
+        let request_id=params["_request_id"].as_str().map(str::to_owned).unwrap_or_else(||format!("chat-{}",stamp()));
+        let mut receipt=json!({"request_id":request_id,"project":chat_identity(s)?,"session":id,"provider":model["providerID"],"model":model["id"],"model_ref":model,"status":"queued","queued_at":stamp()});request_write(s,&receipt)?;
+        log_push(s,json!({"role":"user","text":said,"request_id":request_id,"project":receipt["project"],"session":id}))?;
+        let sent=match api(&dir,"session.prompt",Some(&id),Some(json!({"text":prompt}))){Ok(v)=>v,Err(e)=>{receipt["status"]=json!("error");receipt["error"]=json!(e.to_string());receipt["delivery"]=json!("uncertain; inspect existing native session before retry");request_write(s,&receipt)?;return Err(e);}};
+        let since=data(&sent)["time"]["created"].as_u64().ok_or_else(||invalid("OpenCode prompt receipt lacks creation time; pending request retained, do not resend"))?;
+        receipt["status"]=json!("running");receipt["sent_at"]=json!(since);receipt["native_message_id"]=data(&sent)["id"].clone();request_write(s,&receipt)?;
         let wait=params["wait"].as_u64().unwrap_or(300).min(300);let start=Instant::now();
-        if wait==0 {return Ok(json!({"ok":true,"status":"sent","session":id,"provider":model["providerID"],"model":model["id"],"fresh":fresh}));}
         loop {
-            let reply=api(&dir,"session.message.list",Some(&id),None)?;
-            let messages=data(&reply).as_array().ok_or_else(||invalid("OpenCode message list unavailable; inspect existing session before retrying"))?;
-            let recent:Vec<_>=messages.iter().filter(|m|m["time"]["created"].as_u64().is_some_and(|t|t>=since)).collect();
-            let permissions=api(&dir,"session.permission.list",Some(&id),None)?;
-            let forms=api(&dir,"session.form.list",Some(&id),None)?;
-            let pending=data(&permissions).as_array().is_some_and(|a|!a.is_empty()) || data(&forms).as_array().is_some_and(|a|!a.is_empty());
-            if pending || recent.iter().any(|m|m["type"]=="idle") {
-                verify_model(&dir,&id,&model)?;
-                let text=recent.iter().flat_map(|m|m["content"].as_array().into_iter().flatten()).filter(|p|p["type"]=="text").filter_map(|p|p["text"].as_str()).collect::<Vec<_>>().join("\n");
-                log_push(s,json!({"role":"user","text":said}))?;
-                log_push(s,json!({"role":"assistant","text":text,"agent":agent,"session":id,"provider":model["providerID"],"model":model["id"]}))?;
-                return Ok(json!({"ok":!pending,"status":if pending{"needs_attention"}else{"completed"},"agent":agent,"session":id,"provider":model["providerID"],"model":model["id"],"fresh":fresh,"text":text,"turns":log_read(s)}));
+            let r=if wait==0 {receipt.clone()}else{refresh_reply(s)?};
+            if wait==0 || matches!(r["status"].as_str(),Some("replied"|"stalled"|"error")) {
+                let mut result=r.clone();result["ok"]=json!(matches!(r["status"].as_str(),Some("running"|"replied")));result["fresh"]=json!(fresh);result["turns"]=log_read(s);result["next_command"]=json!("agent.log refresh=true; agent.session reports request state");return Ok(result);
             }
-            if start.elapsed()>=Duration::from_secs(wait){return Err(invalid(format!("No reply within {wait}s; inspect OpenCode session {id} before retrying. No duplicate prompt sent")));}
+            if start.elapsed()>=Duration::from_secs(wait){return Err(invalid(format!("Reply still running after {wait}s; retrieve with agent.log refresh=true. Request {request_id}; no duplicate prompt sent")));}
             std::thread::sleep(Duration::from_millis(500));
         }
     }

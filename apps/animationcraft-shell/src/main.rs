@@ -34,7 +34,7 @@ mod project_cli;
 /// The engine session of the open project: one for the window, shared by the page's commands and
 /// the `--control` bridge (the CLI and MCP), like the session of the older UI.
 pub struct Engine(pub std::sync::Mutex<Session>);
-impl Default for Engine{fn default()->Self{Self(std::sync::Mutex::new(Session::user_session()))}}
+impl Default for Engine{fn default()->Self{let mut s=Session::user_session();if let Err(e)=animationcraft_engine::agent::cmd_agent_config(&mut s,&json!({})){s.agent_selection=Some(json!({"selection_error":e.to_string()}));}Self(std::sync::Mutex::new(s))}}
 
 impl Engine {
     /// Runs `f` on the session with `path` open (opened first when another project is).
@@ -181,16 +181,7 @@ fn project_dir(project: &str) -> Result<std::path::PathBuf, String> {
 // runs it as a child process in the project folder. It needs no service, session or tool that
 // someone started elsewhere.
 
-/// The app's agent settings file folder (`$XDG_CONFIG_HOME/animationcraft`).
-fn agent_home() -> std::path::PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("animationcraft")
-}
-
-/// Settings the app supplies when the file does not name them.
+/// Defaults and runtime instructions supplied by this app.
 fn agent_defaults() -> Value {
     let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo = crate_dir.parent().and_then(std::path::Path::parent).unwrap_or(crate_dir);
@@ -204,22 +195,6 @@ fn agent_defaults() -> Value {
         "repo": repo.to_string_lossy(),
     })
 }
-
-fn agent_settings() -> Result<Value, String> {
-    let file = agent_home().join("agent.json");
-    let stored: Value = std::fs::read_to_string(&file)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_else(|| json!({}));
-    let mut merged = agent_defaults();
-    if let (Some(base), Some(over)) = (merged.as_object_mut(), stored.as_object()) {
-        for (key, value) in over {
-            base.insert(key.clone(), value.clone());
-        }
-    }
-    Ok(merged)
-}
-
 
 /// Agents Omarchy knows about; the app offers the installed ones and marks the system default.
 const AGENT_NAMES: [&str; 15] = [
@@ -258,8 +233,8 @@ fn agent_catalog() -> Value {
 
 /// The settings the agent pane shows and edits, plus the installed agents to choose from.
 #[tauri::command]
-fn agent_config() -> Result<Value, String> {
-    let mut settings = animationcraft_engine::agent::settings().map_err(|e| e.to_string())?;
+fn agent_config(engine:tauri::State<Engine>) -> Result<Value, String> {
+    let mut settings = engine.with(None,|s|s.execute("agent.config",json!({})).map_err(|e|e.to_string()))?;
     settings["instructions"] = agent_defaults()["instructions"].clone();
     if let (Some(base), Value::Object(catalog)) = (settings.as_object_mut(), agent_catalog()) {
         for (key, value) in catalog {
@@ -271,7 +246,7 @@ fn agent_config() -> Result<Value, String> {
 
 /// Merge `patch` into the agent settings; returns the settings actually stored.
 #[tauri::command]
-fn agent_config_save(patch: Value) -> Result<Value, String> {
+fn agent_config_save(engine:tauri::State<Engine>,patch: Value) -> Result<Value, String> {
     let fields = patch.as_object().ok_or("Chat settings must be an object")?;
     if fields.get("agent").is_some_and(|v|!v.is_string()) { return Err("Chat agent must be a string".into()); }
     if fields.get("extra_args").is_some_and(|v|!v.is_array()) { return Err("Extra arguments must be an array".into()); }
@@ -292,17 +267,8 @@ fn agent_config_save(patch: Value) -> Result<Value, String> {
             return Err(format!("`{agent}` is not installed on this machine"));
         }
     }
-    let mut next = agent_settings()?;
-    if let (Some(base), Some(over)) = (next.as_object_mut(), patch.as_object()) {
-        for (key, value) in over {
-            base.insert(key.clone(), value.clone());
-        }
-    }
-    let file = agent_home().join("agent.json");
-    std::fs::create_dir_all(agent_home()).map_err(|e| e.to_string())?;
-    std::fs::write(&file, serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    agent_config()
+    engine.with(None,|s|s.execute("agent.config",json!({"selection":patch})).map_err(|e|e.to_string()))?;
+    agent_config(engine)
 }
 
 /// Point: WebKit's snapshot of the project view cropped to `rect` (CSS px, x y w h), saved to

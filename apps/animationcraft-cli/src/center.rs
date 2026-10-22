@@ -39,12 +39,16 @@ struct Center {
     flash_after:u64,
     flash_started:Option<std::time::Instant>,
     pinned_instance:Option<String>,
+    chat_draft:String,
+    chat_editing:bool,
+    chat_sent:String,
+    chat_receiver:Option<std::sync::mpsc::Receiver<Result<Value,String>>>,
 }
 impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:format!("Observing shared CLI status. Green requires measured evidence; Studio acknowledgement is separate. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_receiver:None,state:json!({}),message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
@@ -57,6 +61,11 @@ impl Center {
         }else{crate::dispatch(&mut self.session,"center.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance}))};
         match inspection {
             Ok(mut value)=>{
+                if self.session.project_path.is_some() && ui["engine_unsaved"].is_boolean(){
+                    let params=json!({"_expected_instance":self.pinned_instance});
+                    match crate::dispatch(&mut self.session,"agent.log",json!({"refresh":true,"_expected_instance":self.pinned_instance})){Ok(turns)=>{value["chat_turns"]=turns;},Err(error)=>{value["chat_error"]=json!(error);}}
+                    value["chat"]=crate::dispatch(&mut self.session,"agent.session",params).unwrap_or_else(|error|json!({"error":error}));
+                }else{value["chat"]=self.state["chat"].clone();value["chat_turns"]=self.state["chat_turns"].clone();}
                 value["ui"]=ui;
                 if self.pinned_instance.is_none(){self.pinned_instance=value["ui"]["instance"].as_str().map(str::to_owned);}
                 value["catalog"]=self.session.execute("project.catalog",json!({})).unwrap_or_else(|e|json!({"error":e.to_string()}));
@@ -65,6 +74,26 @@ impl Center {
                 self.seen_cursor=cursor;self.state=value;
             },Err(error)=>{self.message=error.clone();self.state["ui"]=json!({"connection":"stale_or_unavailable","ui_ready":false,"error":error,"recovery":"F8 explicitly reattaches the same project; Studio is never switched."});},
         }
+    }
+    fn poll_chat(&mut self){
+        if let Some(result)=self.chat_receiver.as_ref().and_then(|r|r.try_recv().ok()){
+            self.chat_receiver=None;
+            self.message=match result {Ok(r)=>{if self.chat_draft==self.chat_sent{self.chat_draft.clear();}format!("Chat {} · request {} · retrieve via agent.log refresh=true",r["status"].as_str().unwrap_or("unknown"),r["request_id"].as_str().unwrap_or("unknown"))},Err(e)=>format!("Chat error: {e}. Draft retained; inspect existing receipt before retry.")};
+            self.refresh();
+        }
+    }
+    fn send_chat(&mut self){
+        if self.chat_receiver.is_some() || self.chat_draft.trim().is_empty(){return;}
+        let (Some(endpoint),Some(project),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.state["project"].as_str(),self.pinned_instance.as_deref()) else {self.message="Chat blocked: no matched pinned Studio/project; no message sent".into();return;};
+        if self.state["ui"]["active_project"].as_str()!=Some(project){self.message="Chat blocked: Studio project differs; no message sent".into();return;}
+        let Ok(exe)=std::env::current_exe()else{self.message="Chat blocked: current CLI executable unavailable".into();return;};
+        let params=json!({"message":self.chat_draft.trim(),"new_chat":!self.state["chat"]["session"].is_string(),"session":self.state["chat"]["session"],"wait":0,"_expected_project":project,"_expected_instance":instance,"_request_id":format!("booth-chat-{}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_nanos()).unwrap_or(0)),"_origin":"Booth chat","_client":"Booth user"});
+        let endpoint=endpoint.to_owned();let (tx,rx)=std::sync::mpsc::channel();self.chat_receiver=Some(rx);self.chat_sent=self.chat_draft.clone();self.message="Chat queued locally; CLI acceptance and reply not yet confirmed".into();
+        std::thread::spawn(move||{
+            let mut command=std::process::Command::new(exe);command.args(["--bridge",&endpoint,"exec","agent.send"]);
+            if let Some(fields)=params.as_object(){for(k,v)in fields{command.arg(format!("{k}={v}"));}}
+            let result=command.output().map_err(|e|e.to_string()).and_then(|o|{if !o.status.success(){return Err(String::from_utf8_lossy(&o.stderr).into_owned());}serde_json::from_slice::<Value>(&o.stdout).map_err(|e|e.to_string()).and_then(|r|if r["ok"]==false{Err(r.to_string())}else{Ok(r)})});let _=tx.send(result);
+        });
     }
     fn execute(&mut self, id: &str, mut p: Value) {
         if id=="project.open"{self.pinned_instance=None;}else if let Some(instance)=&self.pinned_instance{p["_expected_instance"]=json!(instance);}
@@ -410,7 +439,10 @@ fn root_finish(action: &Value) -> Option<&Value> {
 }
 fn engine_badge(action: &Value) -> (&'static str, Color) {
     match root_finish(action).and_then(|e| e["stage"].as_str()) {
-        Some("engine_success") => ("✓ SUCCEEDED", GREEN),
+        Some("engine_success") => {
+            let status=root_finish(action).and_then(|e|e["status"].as_str()).or_else(||stages(action).into_iter().rev().find_map(|e|e["outputs"]["status"].as_str()));
+            match status{Some("running")=>("● WORKING",GREEN),Some("stalled")=>("● STALLED",AMBER),Some("error")=>("● FAILED",RED),_=>("[OK] SUCCEEDED",DESK_FG)}
+        },
         Some("engine_error" | "handler_error") => ("✗ FAILED", RED),
         Some("engine_needs_work") => ("! NEEDS WORK", AMBER),
         _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("[>] RUNNING", AMBER),
@@ -591,15 +623,25 @@ fn command_height(c:&Center,width:u16,narrow:bool)->u16{
 fn prerequisite_lines(c:&Center)->Vec<Line<'static>>{
  let mut lines=Vec::new();
  for p in c.state["prerequisites"].as_array().into_iter().flatten(){
-  let (color,word)=match p["state"].as_str(){Some("ready")=>(GREEN,"READY"),Some("blocked")=>(RED,"BLOCKED"),Some("missing")=>(AMBER,"MISSING"),_=>(AMBER,"UNKNOWN")};
+  let (color,word)=match p["state"].as_str(){Some("ready")=>(DESK_FG,"[OK] READY"),Some("blocked")=>(RED,"BLOCKED"),Some("missing")=>(BLUE,"MISSING"),_=>(BLUE,"UNKNOWN")};
   lines.push(Line::from(vec![Span::styled(" ● ",Style::default().fg(color).add_modifier(Modifier::BOLD)),Span::styled(format!("{}: {word}",p["label"].as_str().unwrap_or("Unknown")),Style::default().fg(color))]));
  }
- if lines.is_empty(){lines.push(styled(" ● UNKNOWN · no shared prerequisite observation",AMBER));}
+ if lines.is_empty(){lines.push(styled(" ● UNKNOWN · no shared prerequisite observation",BLUE));}
  let m=&c.state["metrics"];
  let number=|v:&Value|if v.is_null(){"unknown".into()}else{v.to_string()};
  lines.push(styled(format!(" Words {} · groups {} · duration {}s · assets {}/{} · rigs {}",number(&m["timed_words"]),number(&m["lyric_groups"]),number(&m["recording_duration_sec"]),number(&m["available_assets"]),number(&m["registered_assets"]),number(&m["animatable_assets"])),MUTED));
  lines.push(styled(format!(" CLI observation {} · {}ms",c.state["observation"]["id"].as_str().unwrap_or("unknown"),number(&c.state["observation"]["elapsed_ms"])),MUTED));
  lines
+}
+fn chat_lines(c:&Center)->Vec<Line<'static>>{
+ let r=&c.state["chat"]["request"];
+ let (mark,color)=match r["status"].as_str(){Some("replied")=>("[OK] replied",DESK_FG),Some("running")=>("● working",GREEN),Some("stalled")=>("● stalled",AMBER),Some("error")=>("● failed",RED),_=>("● not started",BLUE)};
+ let mut lines=vec![styled(format!(" {mark} · session {} · {} / {}",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["selection"]["provider"].as_str().unwrap_or("unknown"),c.state["chat"]["selection"]["model"].as_str().unwrap_or("unknown")),color)];
+ if let Some(e)=c.state["chat_error"].as_str().or(c.state["chat"]["error"].as_str()).or(r["error"].as_str()){lines.push(styled(e.to_string(),RED));}
+ if let Some(reason)=r["reason"].as_str(){lines.push(styled(reason.to_string(),AMBER));}
+ if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(2).collect::<Vec<_>>().into_iter().rev(){lines.push(styled(format!(" {}: {}",t["role"].as_str().unwrap_or("message"),t["text"].as_str().unwrap_or("")),DESK_FG));}}
+ lines.push(styled(format!(" request {} · F9 {} · Enter sends · Esc leaves draft",r["request_id"].as_str().unwrap_or("none"),if c.chat_editing{"typing"}else{"compose"}),MUTED));
+ lines.push(styled(format!(" > {}{}",c.chat_draft,if c.chat_editing{"_"}else{""}),BLUE));lines
 }
 fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let area = f.area(); let narrow = area.width < 110;
@@ -635,9 +677,11 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     f.render_widget(Paragraph::new(header).block(block),chunks[0]);
     let ready_lines=prerequisite_lines(c);
     let ready_height=wrapped_rows(&ready_lines,chunks[1].width.saturating_sub(2)).saturating_add(2).min(chunks[1].height.saturating_sub(12));
-    let body=Layout::vertical([Constraint::Length(ready_height),Constraint::Min(1)]).split(chunks[1]);
+    let chat_height=if chunks[1].height>=38{12}else{7};
+    let body=Layout::vertical([Constraint::Length(ready_height),Constraint::Min(8),Constraint::Length(chat_height)]).split(chunks[1]);
     f.render_widget(Paragraph::new(ready_lines).wrap(Wrap{trim:false}).block(round_panel("PROJECT PREREQUISITES · shared CLI evidence",TEAL,false)),body[0]);
     let content=body[1];
+    let chat=chat_lines(c);let chat_block=round_panel("PROJECT AGENT · same CLI chat as Studio",BLUE,c.chat_editing);let inner=chat_block.inner(body[2]);let offset=wrapped_rows(&chat,inner.width).saturating_sub(inner.height);f.render_widget(Paragraph::new(chat).wrap(Wrap{trim:false}).scroll((offset,0)).block(chat_block),body[2]);
     if control {
         let parts = Layout::vertical([Constraint::Min(5),Constraint::Length(if area.height >= 35 { 11 } else { 8 })]).split(content);
         render_catalog(f,c,parts[0]); render_commands(f,c,parts[1],true);
@@ -653,7 +697,7 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
         let mut right=parts[1];right.height=command_height(c,right.width,false).min(right.height);
         render_actions(f,c,left,false);render_commands(f,c,right,false);
     }
-    let keys = if area.width < 90 { "F1 Control F2 Booth F4 Inputs 1–9 Select C Copy Pg Scroll ^Q Exit" } else { "[F1] Control  [F2] Booth  [F4] Intake   [1–9 / ↑↓] Select  [C] Copy literal   [PgUp/Dn] Scroll  [F8] Refresh  [Ctrl+Q] Exit" };
+    let keys = if area.width < 90 { "F1 Control F2 Booth F4 Inputs F9 Chat 1–9 Select C Copy Pg Scroll ^Q Exit" } else { "[F1] Control  [F2] Booth  [F4] Intake [F9] Chat   [1–9 / ↑↓] Select  [C] Copy literal   [PgUp/Dn] Scroll  [F8] Refresh  [Ctrl+Q] Exit" };
     let mut footer = vec![styled(keys,BLUE)];
     if chunks[2].height > 1 { footer.push(styled(c.message.clone(),if c.message.starts_with("COPIED") || c.message.starts_with("COMMAND SUCCEEDED") { GREEN } else if c.message.starts_with("BLOCKED") || c.message.contains("failed") { RED } else { MUTED })); }
     f.render_widget(Paragraph::new(footer),chunks[2]);
@@ -688,6 +732,7 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     let result = (|| -> io::Result<()> {
         let mut refreshed=std::time::Instant::now();
         loop {
+            c.poll_chat();
             if refreshed.elapsed()>Duration::from_secs(1){c.refresh();refreshed=std::time::Instant::now();}
             terminal.draw(|f| render(f, &c))?;
             if !event::poll(Duration::from_millis(120))? {
@@ -702,6 +747,8 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
                 break;
             }
+            if key.code==KeyCode::F(9){c.chat_editing=!c.chat_editing;continue;}
+            if c.chat_editing {match key.code{KeyCode::Esc=>c.chat_editing=false,KeyCode::Enter=>c.send_chat(),KeyCode::Backspace=>{c.chat_draft.pop();},KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL)=>c.chat_draft.push(ch),_=>{}}continue;}
             if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;continue;}
             if key.code==KeyCode::F(2) && !c.show_form{c.control_view=false;continue;}
             if key.code==KeyCode::F(4){c.show_form=!c.show_form;continue;}
@@ -787,7 +834,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_receiver:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){
@@ -803,9 +850,9 @@ mod feedback_tests {
     #[test]
     fn readiness_lights_use_shared_states_even_when_studio_revisions_match(){
         let mut c=fixture();
-        let unknown=prerequisite_lines(&c);assert_eq!(unknown[0].style.fg,Some(AMBER));
+        let unknown=prerequisite_lines(&c);assert_eq!(unknown[0].style.fg,Some(BLUE));
         c.state["prerequisites"]=json!([{"id":"song","label":"Song","state":"ready"},{"id":"assets","label":"Assets","state":"missing"},{"id":"transcript","label":"Transcription","state":"blocked"}]);
-        let lines=prerequisite_lines(&c);assert_eq!(lines[0].spans[0].style.fg,Some(GREEN));assert_eq!(lines[1].spans[0].style.fg,Some(AMBER));assert_eq!(lines[2].spans[0].style.fg,Some(RED));
+        let lines=prerequisite_lines(&c);assert_eq!(lines[0].spans[0].style.fg,Some(DESK_FG));assert_eq!(lines[1].spans[0].style.fg,Some(BLUE));assert_eq!(lines[2].spans[0].style.fg,Some(RED));
         c.state["next_commands"]=json!([{"command":"video.init","operation":"commands","reason":"Native captions missing"}]);
         assert!(c.copy_commands()[0].1.ends_with("commands 'video.init'"));
     }
