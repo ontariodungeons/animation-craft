@@ -79,8 +79,8 @@ Work only on assigned files and coordinate ownership before editing. Read the re
 guidelines. Preserve unrelated changes. Use the existing model unless asked to switch; if Codex is
 chosen, the user permits Sol 6.1 only. Learn and observe regardless of model strength.
 
-Build `cargo build -p animationcraft-shell` after UI edits (assets are embedded). The coordinator
-owns restarting the shared shell unless the task delegates it. After every visible change run
+Build `cargo build -p animationcraft-shell` after UI edits (assets are embedded). Before restarting the shared shell,
+inspect pending/dirty state and preserve unsaved edits. After every visible change run
 `animationcraft-cli --bridge 19897 exec ui.look` and inspect the PNG. With a project open, captures
 default to `<project>/.agent/looks/`. Keep project outputs inside the project.
 

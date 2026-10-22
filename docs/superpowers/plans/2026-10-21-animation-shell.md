@@ -26,4 +26,4 @@
 ## Execution record
 
 - Design approved; no extra plan approval requested. Existing branch ownership supersedes generic isolated-worktree defaults.
-- Inner validator assigned CLI-Anything and Craft contract research; coordinator owns source edits and restarts.
+- Inner validator assigned CLI-Anything and Craft contract research; coordinator owns source edits.

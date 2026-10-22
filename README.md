@@ -24,7 +24,7 @@ animationcraft-cli --bridge <port> exec ui.state
 animationcraft-cli --bridge <port> mcp
 ```
 
-A Studio window must have been started with `animationcraft-shell --control <port>` for that bridge to exist. Do not automatically launch/switch another window or restart services. `ui.state` does not report unsaved-change safety.
+A Studio window must have been started with `animationcraft-shell --control <port>` for that bridge to exist. Before restarting Studio, inspect pending/dirty state and preserve unsaved work. `ui.state` does not report unsaved-change safety.
 
 ## Command Center
 
