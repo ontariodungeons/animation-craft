@@ -26,6 +26,80 @@ const ICONS = {
 
 let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
 
+function setupMagicSplitters() {
+  const workstation = $('magic-workstation');
+  if (!workstation || workstation.dataset.splittersReady) return;
+  workstation.dataset.splittersReady = 'true';
+  const sizes = { chat: 160, image: 190 };
+  for (const key of Object.keys(sizes)) {
+    const saved = Number(localStorage.getItem(`magic.${key}-height`));
+    if (Number.isFinite(saved) && saved >= 120 && saved <= 700) sizes[key] = saved;
+  }
+  const apply = () => {
+    workstation.style.setProperty('--magic-chat-h', `${sizes.chat}px`);
+    workstation.style.setProperty('--magic-image-h', `${sizes.image}px`);
+  };
+  apply();
+  for (const splitter of workstation.querySelectorAll('.magic-splitter')) {
+    const key = splitter.dataset.splitter;
+    const change = (delta) => {
+      sizes[key] = Math.max(120, Math.min(700, sizes[key] + delta));
+      apply();
+      localStorage.setItem(`magic.${key}-height`, String(sizes[key]));
+    };
+    splitter.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      splitter.setPointerCapture(event.pointerId);
+      let last = event.clientY;
+      const move = (next) => { change(next.clientY - last); last = next.clientY; };
+      const done = () => {
+        splitter.removeEventListener('pointermove', move);
+        splitter.removeEventListener('pointerup', done);
+        splitter.removeEventListener('pointercancel', done);
+      };
+      splitter.addEventListener('pointermove', move);
+      splitter.addEventListener('pointerup', done);
+      splitter.addEventListener('pointercancel', done);
+    });
+    splitter.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      change(event.key === 'ArrowDown' ? 12 : -12);
+    });
+  }
+}
+setupMagicSplitters();
+
+function updateMagicSelection() {
+  const layer = motion?.meta?.layers?.find((part) => part.id === motion.selected);
+  const text = layer ? `${layer.label || layer.id} · ${layer.id}` : 'No part selected';
+  for (const id of ['magic-target-chat', 'magic-target-image', 'magic-target-parts']) {
+    const node = $(id);
+    if (node) { node.textContent = text; node.title = layer ? `Selected part ${layer.label || layer.id} (${layer.id}) on ${motion.character}` : 'Select a part to target image generation'; }
+  }
+}
+
+function renderMagicAssetCatalog() {
+  if (state.view === 'animation') return;
+  const slot = $('magic-parts-slot');
+  if (!slot) return;
+  const assets = state.data?.assets?.assets || [];
+  const draft = imageDrafts?.get(state.project);
+  slot.replaceChildren(el('div', { class: 'group-label' }, 'Project assets'));
+  if (!assets.length) { slot.append(el('p', { class: 'why' }, 'Project parts and generated candidates will appear here.')); return; }
+  for (const asset of assets) {
+    const candidate = draft?.result?.asset_id === asset.id;
+    const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
+      ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
+      : el('span', { class: 'magic-asset-placeholder' }, 'PART');
+    const row = el('button', { class: `magic-asset-row${candidate ? ' candidate' : ''}`, id: `magic-asset-${asset.id}`,
+      title: candidate ? `${asset.name || asset.id} · generated candidate awaiting review` : `${asset.name || asset.id} · show its parts`,
+      onclick: () => openAnimation(asset.id) }, image, el('span', { class: 'magic-asset-name' }, asset.name || asset.id),
+      el('span', { class: 'muted' }, candidate ? 'Candidate' : asset.id));
+    slot.append(row);
+  }
+}
+
 function toast(text) {
   const t = $("toast");
   t.textContent = text;
@@ -171,7 +245,8 @@ function renderBlocks() {
     : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
        el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
   box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
-  if (typeof imagePromptBlock === 'function') $('agent-image-tools')?.replaceChildren(imagePromptBlock());
+  if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
+  renderMagicAssetCatalog();
 
 }
 
@@ -287,6 +362,7 @@ async function setView(view, action) {
   if (view === "split") view = "studio";
   if (typeof animationPause === "function") animationPause();
   state.view = view;
+  if (view !== 'animation') renderMagicAssetCatalog();
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
     t.classList.toggle("active", on);
@@ -366,12 +442,12 @@ async function applyOpenedProject(opened, start = {}) {
   state.open = start.open && start.open !== "agent" ? start.open : "song";
   document.body.classList.remove("at-home");
   $("project-name").textContent = path.split("/").pop().replace(/\.acproj$/, "");
-  document.title = `${$("project-name").textContent} · AnimationCraft`;
+  document.title = `${$("project-name").textContent} · Magic Studio`;
   renderTarget();
   renderBlocks();
   renderStoryboard();
   await setView(start.view || "project");
-  if (start.open === "agent") agentToggle(true);
+  agentToggle(true);
   await acFeedback.acknowledge(state.data?._ui_engine_revision, path);
 }
 

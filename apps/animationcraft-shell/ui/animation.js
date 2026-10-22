@@ -27,7 +27,7 @@ function motionRange(id,label,min,max,step,value,unit,change){
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
  return el('label',{class:'motion-range'},el('span',{},label,out),input);
 }
-async function openAnimation(character){motion.character=character;motion.project=null;await setView('animation');}
+async function openAnimation(character){motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
 async function animationOpen(){
  if(motion.mode==='composite'){const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
@@ -71,15 +71,16 @@ async function animationLoad(){
  animationPause();const request=++motion.request;motion.loading=true;
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
-  motion.meta=meta;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
+  motion.meta=meta;if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=convertFileSrc(l.file);})));if(request!==motion.request)return;
   animationControls();await animationSample();
  }catch(e){animationEmpty('Artwork needs preparation',String(e));}finally{motion.loading=false;}
 }
 function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
- const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{motion.character=e.target.value;await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
+ const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
+ updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;motion.track=e.target.value;motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;animationControls();}await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{motion.track=t.id;motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
  box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
@@ -89,11 +90,25 @@ function animationControls(){
  motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],true));
  const layers=el('div',{class:'motion-layers'});
  for(const l of [...meta.layers].reverse()){
-  const row=el('div',{class:'motion-layer',title:l.id});const shown=l.state?.visible!==false;
-  row.append(el('img',{src:convertFileSrc(l.file),alt:''}),el('span',{class:'motion-layer-name'},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{part:l.id,visible:!shown});await animationRefresh();}));
+  const row=el('div',{class:`motion-layer${motion.selected===l.id?' selected':''}`,id:`motion-layer-${l.id}`,title:l.id});const shown=l.state?.visible!==false;
+  row.append(el('img',{src:convertFileSrc(l.file),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{part:l.id,visible:!shown});await animationRefresh();}));
   row.lastChild.setAttribute('aria-pressed',String(shown));if(!shown)row.classList.add('hidden-layer');layers.append(row);
  }
- const section=motionSection('Layers',layers,true);section.id='motion-layers';box.append(section);
+ const section=motionSection('Layers',layers,true);section.id='motion-layers';
+ const selected=meta.layers.find(part=>part.id===motion.selected);
+ const candidate=selected&&typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,selected.id):null;
+ const compare=selected?el('div',{class:'magic-part-compare',id:'magic-part-compare'},
+  el('div',{class:'magic-compare-title'},`${selected.label||selected.id} · ${selected.id}`),
+  el('div',{class:'magic-compare-grid'},
+   el('figure',{class:'magic-compare-frame'},el('img',{src:convertFileSrc(selected.file),alt:`Original ${selected.label||selected.id}`}),el('figcaption',{},'Original')),
+   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:convertFileSrc(candidate.image),alt:`Candidate for ${selected.label||selected.id}` }):el('div',{class:'magic-compare-empty'},'Generate a candidate for this selected part.'),el('figcaption',{},candidate?'Candidate · needs review':'Candidate'))
+  ),
+  candidate?el('p',{class:'why'},'Original source remains unchanged. Compare transparency and fit before any adoption.'):null
+ ):el('p',{class:'why'},'Select a layer to compare its original with a generated candidate.');
+ const assetRows=(motion.assets||[]).map(asset=>el('button',{class:`magic-asset-row${asset.id===motion.character?' active':''}`,id:`magic-asset-${asset.id}`,title:`Show parts for ${asset.name||asset.id}`,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}},el('span',{},asset.name||asset.id),el('span',{class:'muted'},asset.id)));
+ const assetsSection=motionSection('Project assets',assetRows.length?assetRows:el('p',{class:'why'},'No project assets are available yet.'));
+ const partsSlot=$('magic-parts-slot');
+ if(partsSlot)partsSlot.replaceChildren(assetsSection,section,compare);else box.append(section);
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`)));
