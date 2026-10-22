@@ -1574,6 +1574,10 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     // Existing JSON -> SRT conversion never runs ASR.
     if trace.run("caption_export",overwrite||!srt.is_file(),&hf,runtime,&["transcribe", &arg(&transcript), "--to", "srt",
             "-o", &arg(&srt)].map(String::from),&[srt.clone()])?.is_some(){ran.push("hyperframes transcribe --to srt → transcript.srt");}
+    if params["analyze_beats"]==false {
+        trace.import(s,json!({"path":transcript,"captions":srt,"replace":overwrite}))?;
+        return Ok(json!({"ok":true,"target":"hyperframes","ran":ran,"analysis_attempt":trace.data,"files":{"audio":bgm,"transcript":transcript,"captions":srt},"beat_analysis":"not requested; not required for native captions"}));
+    }
     if trace.run("beatgrid",overwrite||!audiomap.is_file(),&hf,"python3",&[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)],&[audiomap.clone()])?.is_some(){ran.push("analyze-beatgrid.py → audiomap.json");}
     let storyboard = hf.join("STORYBOARD.md");
     let script = super::workspace::workspace_root(s).join("pipeline/storyboard_skeleton.py");

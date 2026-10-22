@@ -50,12 +50,20 @@ fn initialization_imports_existing_song_and_native_timing_without_asr() {
  let words=json!([{"text":"hello","start":0.2,"end":1.0}]);let transcript=dir.join("fixture.transcript.json");std::fs::write(&transcript,words.to_string()).unwrap();
  let cli=runtime(&dir,r#"case "$1" in
  init) [ "$4" = --skip-transcribe ] && [ "$5" = --audio ] && [ "$6" = "$(dirname "$0")/song.wav" ] || exit 9
- mkdir -p "$2";printf '%s' '{}' > "$2/hyperframes.json";printf '%s' '<audio id="song"></audio>' > "$2/index.html";;
+ mkdir -p "$2";printf '%s' '{}' > "$2/hyperframes.json";printf '%s' '<html><body><div data-composition-id="main"><audio id="song"></audio></div></body></html>' > "$2/index.html";;
  transcribe) [ "$3" = --dir ] && [ "$5" = --json ] && [ "$6" = --no-runtime-install ] || exit 8
  cp "$2" "$4/transcript.json";printf '%s' '{"ok":true,"wordCount":1}';;
  *) exit 7;;
 esac"#);
  let result=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();
+ assert_eq!(result["captions"]["ready"],true);
+ let native=dir.join("hyperframes/compositions/captions.html");let caption=std::fs::read_to_string(&native).unwrap();
+ assert!(caption.contains("const TRANSCRIPT = [{\"end\":1.0,\"start\":0.2,\"text\":\"hello\"}];"));assert!(caption.contains("hl-group caption-group"));
+ let edited=caption+"\n<!-- saved creative/style edit -->";std::fs::write(&native,&edited).unwrap();
+ let overrides=dir.join("hyperframes/caption-overrides.json");std::fs::write(&overrides,"{\"saved\":true}").unwrap();
+ let repeated=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();assert_eq!(repeated["captions"]["reused_existing_source"],true);
+ assert_eq!(std::fs::read_to_string(&native).unwrap(),edited);assert_eq!(std::fs::read_to_string(overrides).unwrap(),"{\"saved\":true}");
+ assert_eq!(std::fs::read_to_string(dir.join("hyperframes/index.html")).unwrap().matches("data-track-kind=\"captions\"").count(),1);
  assert_eq!(result["song_imported"],true);
  let imported:serde_json::Value=serde_json::from_slice(&std::fs::read(dir.join("hyperframes/transcript.json")).unwrap()).unwrap();assert_eq!(imported,words);
  assert_eq!(std::fs::read(&audio).unwrap(),b"synthetic audio fixture");assert_eq!(std::fs::read_to_string(transcript).unwrap(),words.to_string());

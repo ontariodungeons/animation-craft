@@ -309,6 +309,45 @@ fn is_managed_video_server_pid(pid: u64) -> bool {
     text.contains("remotion") || text.contains("http.server") || text.contains("hyperframes")
 }
 
+/// Deterministic binding of native timed words into the official reusable caption component.
+/// Existing edited caption sources/visual overrides are never replaced on unchanged input.
+fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
+    use sha2::{Digest,Sha256};
+    let hf=dir.join("hyperframes");
+    let Some(transcript)=crate::workshop::transcript_files(dir).into_iter().next() else {return Ok(json!({"ready":false,"reason":"No timed transcript available"}));};
+    let raw=std::fs::read(&transcript)?;
+    let input:Value=serde_json::from_slice(&raw).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+    let words=input.as_array().or_else(||input["words"].as_array()).filter(|v|!v.is_empty()).ok_or_else(||EngineError::InvalidParams("Native captions require existing timed words".into()))?;
+    if input.is_array() {
+        if words.iter().any(|w|w["text"].as_str().is_none_or(|t|t.trim().is_empty()) || w["start"].as_f64().zip(w["end"].as_f64()).is_none_or(|(a,b)|!a.is_finite()||!b.is_finite()||a<0.0||b<a)) {return Err(EngineError::InvalidParams("Native caption words require text and valid start/end timestamps".into()));}
+    } else {
+        let problems=crate::workshop::transcript_problems(&input);if !problems.is_empty(){return Err(EngineError::InvalidParams(problems.join("; ")));}
+    }
+    let digest=format!("{:x}",Sha256::digest(serde_json::to_vec(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?));
+    let dest=hf.join("compositions/captions.html");let receipt=hf.join(".animationcraft-captions.json");let entry=hf.join("index.html");
+    let mut host=std::fs::read_to_string(&entry)?;
+    if host.contains("data-track-kind=\"captions\"") && !host.contains("data-composition-src=\"compositions/captions.html\"") {return Ok(json!({"ready":true,"preserved_existing_caption_track":true,"word_count":words.len()}));}
+    let duration=probe_audio_duration(s.song_audio.as_deref()).max(words.iter().filter_map(|w|w["end"].as_f64()).fold(0.0,f64::max));
+    let reused=dest.is_file();
+    if reused {
+        let state:Value=std::fs::read(&receipt).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        if state["input_sha256"]!=digest {return Err(EngineError::InvalidParams(format!("Existing caption source {} differs from this transcript or has no matching provenance; preserved without overwrite. Review that source before replacing timing",dest.display())));}
+    } else {
+        let groups:Vec<[usize;2]>=(0..words.len()).step_by(5).map(|start|[start,(start+4).min(words.len()-1)]).collect();
+        let text=serde_json::to_string(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?.replace('<',"\\u003c");
+        let html=include_str!("../../../pipeline/templates/hyperframes-captions.html").replace("__AC_WORDS__",&text).replace("__AC_GROUPS__",&serde_json::to_string(&groups).unwrap()).replace("__AC_DURATION__",&duration.to_string());
+        std::fs::create_dir_all(dest.parent().unwrap())?;std::fs::write(&dest,html)?;
+        std::fs::write(&receipt,serde_json::to_vec_pretty(&json!({"input_sha256":digest,"transcript":transcript,"word_count":words.len(),"duration":duration,"grouping":"provisional deterministic batches of five; no semantic or listening review claimed","source":"official caption-highlight; native caption-group classes"})).unwrap())?;
+    }
+    let marker="data-composition-src=\"compositions/captions.html\"";
+    if !host.contains(marker) {
+        if !host.contains("</body>"){return Err(EngineError::InvalidParams("Official host has no closing body; caption source retained but no host edit performed".into()));}
+        let end=host.rfind("</div>").ok_or_else(||EngineError::InvalidParams("Official host has no composition container; no host edit performed".into()))?;
+        host.insert_str(end,&format!("<div data-composition-id=\"caption-highlight\" {marker} data-track-kind=\"captions\" data-start=\"0\" data-duration=\"{duration}\" data-track-index=\"3\" data-width=\"1920\" data-height=\"1080\"></div>\n"));std::fs::write(&entry,host)?;
+    }
+    Ok(json!({"ready":true,"source":dest,"provenance":receipt,"word_count":words.len(),"duration_sec":duration,"reused_existing_source":reused,"grouping_review":"provisional; native timing preserved; no semantic correction or auditory verification"}))
+}
+
 pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let target = params
@@ -350,6 +389,7 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     }
     let mut status = workshop_status(s)?;
     status["music_assembly"]=assembly;
+    status["captions"]=if target=="hyperframes" && params["captions"]!=false {ensure_native_captions(s,&dir)?}else{Value::Null};
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
     status["video_complete"]=json!(false);

@@ -156,7 +156,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     let mut next_commands = Vec::<Value>::new();
     // Supplied/previously imported timing is authoritative. Never fall back to ASR after an import error.
     if !valid && problems.is_empty() && s.song_audio.is_some() {
-        let params=json!({"_request_id":p["_request_id"],"_client":p["_client"]});
+        let params=json!({"_request_id":p["_request_id"],"_client":p["_client"],"analyze_beats":false,"hyperframes_cli":p["hyperframes_cli"]});
         match s.execute("audio.analyze", params.clone()) {
             Ok(_) => steps.push(json!({"command":"audio.analyze","params":params,"status":"complete; native pipeline output imported"})),
             Err(e) => {
@@ -202,7 +202,16 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     if !valid && next_commands.is_empty() {
         next_commands.push(json!({"command":"workshop.import_transcript","params":{"path":"<existing timed JSON>","captions":"<optional original SRT>"},"reason":"Correct or supply timed input; no ASR fallback was attempted after a supplied-input failure"}));
     }
-    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"animationcraft-cli commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    let mut video=Value::Null;
+    let mut video_ready=s.video_target!="hyperframes" || s.song_audio.is_none();
+    if valid && storyboard_ready && problems.is_empty() && !video_ready {
+        match s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":p["hyperframes_cli"]})) {
+            Ok(value)=>{video_ready=value["captions"]["ready"]==true;steps.push(json!({"command":"video.init","status":if video_ready{"complete; native audio/caption project retained"}else{"incomplete; native captions missing"},"captions":value["captions"]}));video=value;},
+            Err(e)=>{let error=e.to_string();problems.push(error.clone());steps.push(json!({"command":"video.init","status":"failed","error":error}));}
+        }
+        if !video_ready {next_commands.push(json!({"command":"video.init","params":{"target":"hyperframes","hyperframes_cli":p["hyperframes_cli"]},"reason":"Correct the reported native video/caption handoff failure; existing timing and deck are preserved"}));}
+    }
+    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready&&video_ready,"video_ready":video_ready,"video":video,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"animationcraft-cli commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
