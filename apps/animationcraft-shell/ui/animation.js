@@ -1,5 +1,5 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
  animationPause();
  Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
@@ -14,9 +14,9 @@ const MOTION_ICONS = {
  layers:'<path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/>', export:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>', step:'<path d="m5 5 10 7-10 7zM19 5v14"/>'
 };
 function motionButton(id,label,icon,fn){return el('button',{id,class:'icon',title:label,'aria-label':label,html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`,onclick:fn});}
-function motionSection(title,body,open=false){
+function motionSection(title,body,open=false,toneOverride=null){
  const groups={Action:['motion','play'],'Path & depth':['depth','pen'],'Motion & timing':['motion','step'],Layers:['layers','layers'],'Expression & pose':['pose','eye'],'Quality checks':['check','fit'],'Export & integrations':['export','export']};
- const [tone,icon]=groups[title]||['layers','layers'];
+ const [tone,icon]=groups[title]||[toneOverride||'layers','layers'];
  const heading=el('summary',{},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`}),el('span',{},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
  const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));node.open=open;return node;
 }
@@ -29,6 +29,7 @@ function motionRange(id,label,min,max,step,value,unit,change){
 }
 async function openAnimation(character){motion.character=character;motion.project=null;await setView('animation');}
 async function animationOpen(){
+ if(motion.mode==='composite'){const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
  motion.project=state.project;motion.meta=null;motion.sample=null;motion.time=0;motion.rest=true;
  animationShell();
@@ -42,12 +43,20 @@ async function animationOpen(){
  }catch(e){animationEmpty('Artwork needs attention',String(e));}
 }
 function animationEmpty(title,detail){$('motion-stage').replaceChildren(el('div',{class:'motion-empty'},el('strong',{},title),el('p',{class:'muted'},detail),el('button',{class:'start',onclick:()=>setView('project')},'Open Project')));}
+function motionModeSwitch(){
+ return el('div',{class:'motion-modes',role:'tablist','aria-label':'Animation mode'},
+  ...['subject','composite'].map(m=>el('button',{
+   class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,role:'tab','data-mode':m,
+   'aria-selected':String(motion.mode===m),title:m==='subject'?'A subject: its rig, parts and action tracks':'A composite: images arranged in time',
+   onclick:async()=>{if(motion.mode===m)return;motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
+  },m==='subject'?'Subject':'Composite')));
+}
 function animationShell(){
  const view=$('view-animation');view.replaceChildren();
  const inspector=el('aside',{class:'motion-inspector',id:'motion-inspector','aria-label':'Animation controls'});
  const stage=el('div',{class:'motion-stage',id:'motion-stage'},el('canvas',{id:'motion-canvas','aria-label':'Character animation canvas',tabindex:0}));
  const grid=motionButton('motion-grid','Show or hide grid','grid',()=>{motion.grid=!motion.grid;localStorage.setItem('animation.grid',String(motion.grid));grid.setAttribute('aria-pressed',String(motion.grid));animationDraw();});grid.setAttribute('aria-pressed',String(motion.grid));
- const toolbar=el('div',{class:'motion-stagebar'},el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
+ const toolbar=el('div',{class:'motion-stagebar'},motionModeSwitch(),el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
   motionButton('motion-pen','Pen · draw a motion path','pen',()=>{animationPause();motion.pen=!motion.pen;$('motion-pen').setAttribute('aria-pressed',String(motion.pen));$('motion-canvas').classList.toggle('drawing',motion.pen);$('motion-path-section')?.setAttribute('open','');}), motionButton('motion-path-visible','Show or hide the motion path','eye',()=>{motion.pathVisible=!motion.pathVisible;$('motion-path-visible').setAttribute('aria-pressed',String(motion.pathVisible));animationDraw();}), grid, motionButton('motion-fit','Fit artwork','fit',()=>{motion.fit=true;motion.zoom=1;animationDraw();}),
   el('button',{class:'icon',id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
@@ -104,8 +113,10 @@ async function animationSample(){
  try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
 async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});animationControls();await animationSample();}
-function animationPause(){motion.playing=false;if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}}
+function animationPause(){
+ if(motion.mode==='composite'){seqPause();return;}motion.playing=false;if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}}
 async function animationPlay(){
+ if(motion.mode==='composite'){seqPlay();return;}
  if(motion.playing){animationPause();return;}
  if(motion.rest){motion.rest=false;motion.track=motion.track||motion.meta?.tracks?.[0]?.id;animationControls();await animationSample();}
  if(!motion.sample)return;
@@ -114,6 +125,7 @@ async function animationPlay(){
  let last=performance.now();function tick(now){if(!motion.playing)return;motion.time+=(now-last)/1000*motion.speed;last=now;if(motion.time>=motion.sample.duration){if(motion.sample.loop)motion.time%=motion.sample.duration;else{motion.time=motion.sample.duration;animationPause();}}animationDraw();if(motion.playing)requestAnimationFrame(tick);}requestAnimationFrame(tick);
 }
 function animationDraw(){
+ if(motion.mode==='composite'){seqDraw();return;}
  const canvas=$('motion-canvas'),sample=motion.sample,meta=motion.meta;if(!canvas||!sample||!meta)return;
  const rect=canvas.parentElement.getBoundingClientRect();if(!rect.width||!rect.height)return;
  const dpr=devicePixelRatio||1,w=rect.width,h=rect.height;if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}

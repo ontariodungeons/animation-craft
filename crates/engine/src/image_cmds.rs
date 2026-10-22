@@ -399,3 +399,52 @@ pub fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<V
     }))
 }
 
+/// Normalise a sheet to the contract canvas via PhotoCraft `image.imageSize`, then report it.
+/// Generated artwork arrives at whatever size the image tool chose; the sheet contract is fixed.
+pub fn cmd_image_image_size(s: &mut Session, params: &Value) -> Result<Value> {
+    let source = params
+        .get("source")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("image.image_size requires `source`".into()))?;
+    let source_path = resolve_workspace_path(s, source);
+    if !source_path.is_file() {
+        return Err(EngineError::InvalidParams(format!("image not found: {}", source_path.display())));
+    }
+    let width = params.get("width").and_then(Value::as_u64).unwrap_or(2048).clamp(16, 8192);
+    let height = params.get("height").and_then(Value::as_u64).unwrap_or(2048).clamp(16, 8192);
+    let anchor = params.get("anchor").and_then(Value::as_str).unwrap_or("center");
+    let extension = params.get("extensionColor").and_then(Value::as_str).unwrap_or("#ffffff");
+    let out_path = match params.get("out").and_then(Value::as_str).filter(|o| !o.is_empty()) {
+        Some(out) => resolve_workspace_path(s, out),
+        None => source_path.with_file_name(format!(
+            "{}-{width}x{height}.png",
+            source_path.file_stem().and_then(|v| v.to_str()).unwrap_or("image")
+        )),
+    };
+    let root = workspace_root(s);
+    if let Some(dir) = out_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let body = json!({"width": width, "height": height, "anchor": anchor, "extensionColor": extension}).to_string();
+    let args = build_photocraft_run_args(
+        &source_path.to_string_lossy(),
+        "image.imageSize",
+        Some(&body),
+        &out_path.to_string_lossy(),
+    );
+    let bin = resolve_craft_cli("photocraft-cli");
+    run_tool_in(&root, &bin, &args)?;
+    let (w, h) = if out_path.is_file() {
+        image::image_dimensions(&out_path).unwrap_or((0, 0))
+    } else {
+        (0, 0)
+    };
+    Ok(json!({
+        "ok": out_path.is_file() && w == width as u32 && h == height as u32,
+        "command": "image.image_size",
+        "source": source_path.to_string_lossy(),
+        "output": out_path.to_string_lossy(),
+        "width": w,
+        "height": h,
+    }))
+}

@@ -65,9 +65,36 @@ fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, St
 /// Execute the shared engine registry without blocking the UI thread.
 #[tauri::command]
 async fn engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Engine>().with(None, |s| s.execute(&id, params).map_err(|e| e.to_string()))
-    }).await.map_err(|e| e.to_string())?
+    let long = animationcraft_engine::find_command(&id).is_some_and(|c| c.long_running);
+    if !long {
+        return tauri::async_runtime::spawn_blocking(move || {
+            app.state::<Engine>().with(None, |s| s.execute(&id, params).map_err(|e| e.to_string()))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    // Exports, renders and agent runs take minutes. They work on a snapshot of the session so the
+    // window keeps answering (clicks, look, other engine commands); their changes merge back after.
+    let mut session = { app.state::<Engine>().0.lock().map_err(|e| e.to_string())?.clone() };
+    let (finished, result) = tauri::async_runtime::spawn_blocking(move || {
+        let result = session.execute(&id, params).map_err(|e| e.to_string());
+        (session, result)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    {
+        let engine = app.state::<Engine>();
+        let mut shared = engine.0.lock().map_err(|e| e.to_string())?;
+        shared.assets = finished.assets;
+        shared.project_assets = finished.project_assets;
+        shared.project_path = finished.project_path;
+        shared.active_asset = finished.active_asset;
+        shared.last_result = finished.last_result;
+        shared.draft_approved = finished.draft_approved;
+        shared.video_target = finished.video_target;
+        shared.song_audio = finished.song_audio;
+    }
+    result
 }
 
 /// An object's layers stacked and cropped to what is drawn, cached in the project's
@@ -203,56 +230,120 @@ fn project_dir(project: &str) -> Result<std::path::PathBuf, String> {
     std::path::Path::new(project).parent().map(std::path::Path::to_path_buf).ok_or_else(|| format!("bad project path: {project}"))
 }
 
-/// `opencode api <args…> [-d data]` from the project folder, against the user's opencode service
-/// (their subscription, models and MCP servers). opencode can exit before a pipe is drained, so its
-/// reply is written to a file and read back whole.
-#[tauri::command]
-async fn opencode(project: String, args: Vec<String>, data: Option<Value>) -> Result<Value, String> {
-    let dir = project_dir(&project)?;
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let reply = std::env::temp_dir().join(format!(
-        "animationcraft-shell-opencode-{}-{}.json",
-        std::process::id(),
-        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    let mut cmd = std::process::Command::new("opencode");
-    cmd.current_dir(&dir).arg("api").args(&args);
-    if let Some(d) = &data {
-        cmd.arg("-d").arg(d.to_string());
-    }
-    let file = std::fs::File::create(&reply).map_err(|e| e.to_string())?;
-    let out = cmd.stdout(file).output().map_err(|e| format!("opencode: {e}"))?;
-    let text = std::fs::read_to_string(&reply).unwrap_or_default();
-    let _ = std::fs::remove_file(&reply);
-    if !out.status.success() {
-        return Err(format!("opencode {}: {}", args.first().map_or("", String::as_str), String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    if text.trim().is_empty() {
-        return Ok(Value::Null);
-    }
-    serde_json::from_str(&text).map_err(|e| format!("opencode reply: {e}"))
+// ---- The in-app agent ---------------------------------------------------------------------
+//
+// The agent belongs to this window: the app stores its settings, supplies its instructions and
+// runs it as a child process in the project folder. It needs no service, session or tool that
+// someone started elsewhere.
+
+/// The app's agent settings file folder (`$XDG_CONFIG_HOME/animationcraft`).
+fn agent_home() -> std::path::PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .unwrap_or_else(std::env::temp_dir)
+        .join("animationcraft")
 }
 
-/// The project's agent session id (`<project>/.agent/opencode-session`); `set` stores a new one.
-#[tauri::command]
-fn agent_session(project: String, set: Option<String>) -> Result<Option<String>, String> {
-    let file = project_dir(&project)?.join(".agent").join("opencode-session");
-    if let Some(id) = set {
-        std::fs::create_dir_all(file.parent().ok_or("no folder")?).map_err(|e| e.to_string())?;
-        std::fs::write(&file, &id).map_err(|e| e.to_string())?;
-        return Ok(Some(id));
-    }
-    Ok(std::fs::read_to_string(&file).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+/// Settings the app supplies when the file does not name them.
+fn agent_defaults() -> Value {
+    let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repo = crate_dir.parent().and_then(std::path::Path::parent).unwrap_or(crate_dir);
+    json!({
+        "agent": "omp",
+        "model": "",
+        "thinking": "",
+        "extra_args": [],
+        "instructions": crate_dir.join("agent.md").to_string_lossy(),
+        "repo": repo.to_string_lossy(),
+    })
 }
 
-/// `herdr <args…>`: agents running in Herdr panes (list them, or send one a prompt).
-#[tauri::command]
-async fn herdr(args: Vec<String>) -> Result<Value, String> {
-    let out = std::process::Command::new("herdr").args(&args).output().map_err(|e| format!("herdr: {e}"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+fn agent_settings() -> Result<Value, String> {
+    let file = agent_home().join("agent.json");
+    let stored: Value = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| json!({}));
+    let mut merged = agent_defaults();
+    if let (Some(base), Some(over)) = (merged.as_object_mut(), stored.as_object()) {
+        for (key, value) in over {
+            base.insert(key.clone(), value.clone());
+        }
     }
-    Ok(serde_json::from_slice(&out.stdout).unwrap_or_else(|_| json!({"text": String::from_utf8_lossy(&out.stdout)})))
+    Ok(merged)
+}
+
+
+/// Agents Omarchy knows about; the app offers the installed ones and marks the system default.
+const AGENT_NAMES: [&str; 15] = [
+    "pi", "omp", "opencode", "ori", "claude", "codex", "grok", "openclaw", "agy", "hermes",
+    "copilot", "crush", "cursor-agent", "muse", "kimi",
+];
+
+fn which(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|candidate| candidate.is_file())
+}
+
+/// The agent Omarchy launches by default (`omarchy default agent`).
+fn omarchy_default_agent() -> Option<String> {
+    let out = std::process::Command::new("omarchy-default-agent").output().ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The agents installed on this machine, with the one the system runs by default.
+fn agent_catalog() -> Value {
+    let default = omarchy_default_agent();
+    let agents: Vec<Value> = AGENT_NAMES
+        .iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "installed": which(name).is_some(),
+                "headless": matches!(*name, "omp" | "claude" | "codex"),
+                "default": default.as_deref() == Some(*name),
+            })
+        })
+        .collect();
+    json!({"agents": agents, "default": default})
+}
+
+/// The settings the agent pane shows and edits, plus the installed agents to choose from.
+#[tauri::command]
+fn agent_config() -> Result<Value, String> {
+    let mut settings = agent_settings()?;
+    if let (Some(base), Value::Object(catalog)) = (settings.as_object_mut(), agent_catalog()) {
+        for (key, value) in catalog {
+            base.insert(key, value);
+        }
+    }
+    Ok(settings)
+}
+
+/// Merge `patch` into the agent settings; returns the settings actually stored.
+#[tauri::command]
+fn agent_config_save(patch: Value) -> Result<Value, String> {
+    if let Some(agent) = patch.get("agent").and_then(Value::as_str) {
+        if !AGENT_NAMES.contains(&agent) {
+            return Err(format!("unknown agent `{agent}`"));
+        }
+        if which(agent).is_none() {
+            return Err(format!("`{agent}` is not installed on this machine"));
+        }
+    }
+    let mut next = agent_settings()?;
+    if let (Some(base), Some(over)) = (next.as_object_mut(), patch.as_object()) {
+        for (key, value) in over {
+            base.insert(key.clone(), value.clone());
+        }
+    }
+    let file = agent_home().join("agent.json");
+    std::fs::create_dir_all(agent_home()).map_err(|e| e.to_string())?;
+    std::fs::write(&file, serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    agent_settings()
 }
 
 /// Point: WebKit's snapshot of the project view cropped to `rect` (CSS px, x y w h), saved to
@@ -496,7 +587,7 @@ fn main() {
         .manage(AgentDock::default())
         .manage(Engine::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, opencode, agent_session, herdr, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("AnimationCraft").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);

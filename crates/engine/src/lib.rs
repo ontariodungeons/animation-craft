@@ -30,6 +30,8 @@ pub mod parts;
 pub mod photocraft;
 pub mod project;
 pub mod rig;
+pub mod sequence;
+pub mod sheets;
 pub mod session;
 pub mod storyboard;
 pub mod storyboard_design;

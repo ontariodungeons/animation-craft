@@ -1,49 +1,70 @@
 # AnimationCraft
 
-AnimationCraft's active desktop application is **Rust + egui/eframe**. It imports
-artwork and reference sheets, previews available animation data, and delegates
-image/media operations to installed Craft CLIs through the Rust engine and Python
-pipeline. Inputs may be any supported image: no face, body type, number of limbs,
-pose count, or sheet layout can be assumed.
+**The AnimationCraft application is the Tauri shell** in
+`apps/animationcraft-shell` (HTML/JS in `apps/animationcraft-shell/ui`, embedded at
+build time). It picks a project, plans the song, animates and assembles, imports
+artwork and reference sheets, and delegates image/media operations to installed
+Craft CLIs through the Rust engine and Python pipeline. Inputs may be any
+supported image: no face, body type, number of limbs, pose count, or sheet layout
+can be assumed.
 
-**Start here for current development.** Older HTML/TypeScript files and dated
-specifications are references, not the active native UI implementation or an
-automatic task list. Read [AGENTS.md](AGENTS.md) before editing alongside other
-agents.
+## Which app is which — read this before launching anything
 
-## Where the running application lives
+| Surface | What it is | Launch |
+|---|---|---|
+| **AnimationCraft shell — the app** | Tauri desktop app, `apps/animationcraft-shell/ui` | `cargo build -p animationcraft-shell` then `./target/debug/animationcraft-shell` |
+| egui engine inspector | eframe window over the same engine (`crates/ui-egui`); a debugging/agent surface, **not** the product UI | `cargo build --bin animationcraft` then `./target/debug/animationcraft --control <port>` |
+| Headless CLI / MCP | engine without a window; `--bridge <port>` attaches to a live window, otherwise a separate session | `animationcraft-cli exec <command> …`, `animationcraft-cli mcp [--bridge <port>]` |
+| Legacy web studio | Bun server + `public/index.html`; not current | `bun server.ts` → http://127.0.0.1:8765/ |
+
+The desktop entry `ai.storyteller.animationcraft.desktop` launches the shell.
+Do not tell a user that the egui window is "the app", and do not rebuild the
+legacy web UI to change product behavior.
+
+## Where the code lives
 
 | Area | Entry points |
 |---|---|
-| Native app | `apps/animationcraft/src/main.rs` |
-| UI state and dispatch | `crates/ui-egui/src/lib.rs` |
-| Center views and playback | `crates/ui-egui/src/panels/center.rs` |
-| Sheets, poses and parts browser | `crates/ui-egui/src/panels/pose_viewer.rs` |
-| Asset sidebar / inspector | `crates/ui-egui/src/panels/left.rs`, `right.rs` |
-| Headless CLI and MCP server | `apps/animationcraft-cli/src/main.rs` |
-| Engine commands and asset data | `crates/engine/src/commands.rs`, `session.rs` |
-| Pipeline entry point | `studio_pipeline_cli.py`, `pipeline/` |
+| **Shell app (the product UI)** | `apps/animationcraft-shell/ui/*` (`app.js`, `home.js`, `animation.js`, `bridge.js`, `style.css`), `src/`, `tauri.conf.json` |
+| Shell design system | skill `animationcraft-shell-ui`, `apps/animationcraft-shell/agent.md` |
+| Engines/CLI entry | `apps/animationcraft-cli/src/main.rs`, `crates/engine/src/commands.rs`, `session.rs` |
+| egui inspector | `apps/animationcraft/src/main.rs`, `crates/ui-egui/src/lib.rs`, `panels/` |
+| Pipeline | `studio_pipeline_cli.py`, `pipeline/` |
 | External CLI discovery | `pipeline/craft_cli.py`, Rust `resolve_craft_cli` |
-| Older browser implementation | `public/index.html`, `src/`, `server.ts`, `package.json` |
+| Legacy web studio | `public/index.html`, `src/`, `server.ts`, `package.json` |
 
-Editing `src/animation/*.ts` or running the Bun bundle build does **not** update
-the Rust viewport. Reuse useful behavior from the older frontend deliberately;
-do not rebuild its asset-specific geometry as the default for arbitrary imports.
-The older web mouth/eye mappings are in `public/index.html` and
-`src/animation/proceduralAnimation.ts`; their existence does not mean the native
-renderer is already connected to them.
+Editing `ui/*` requires rebuilding the shell (`ui/` is embedded). Editing
+`src/animation/*.ts` or running the Bun bundle build updates the legacy web page
+only — not the shell and not the egui inspector. Reuse useful behavior from the
+older frontend deliberately; do not rebuild its asset-specific geometry as the
+default for arbitrary imports.
 
 ## Build and run
 
-From the repository/worktree root:
+From the repository/worktree root. **The app** is the shell:
+
+```bash
+cargo build -p animationcraft-shell
+./target/debug/animationcraft-shell
+```
+
+`ui/` is embedded, so rebuild after editing anything under
+`apps/animationcraft-shell/ui/`. The engine and CLI are shared with it:
 
 ```bash
 cargo check --workspace
-cargo build --bin animationcraft --bin animationcraft-cli
+cargo build --bin animationcraft-cli
+```
+
+The egui inspector is a separate window over the same engine; use it for agent
+inspection, not to show the product UI:
+
+```bash
+cargo build --bin animationcraft
 ./target/debug/animationcraft --control 19897
 ```
 
-In another terminal, use the **same instance's port**:
+With that window open, use the **same instance's port**:
 
 ```bash
 ./target/debug/animationcraft-cli --bridge 19897 exec ui.state
@@ -52,7 +73,7 @@ In another terminal, use the **same instance's port**:
 ```
 
 Without `--bridge`, the CLI/MCP uses a separate headless engine session; it does
-not control or inherit the open GUI's state. A `run` script keeps one session
+not control or inherit any open window's state. A `run` script keeps one session
 across its commands. Discover current contracts instead of relying on copied
 parameter tables or hardcoded command counts:
 

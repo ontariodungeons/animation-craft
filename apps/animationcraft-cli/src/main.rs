@@ -114,19 +114,25 @@ EXIT STATUS
   0 success · 1 a command failed · 2 usage error
 ";
 
-fn bridge_timeout() -> std::time::Duration {
-    let ms = std::env::var("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS")
+/// How long to wait for one bridge reply. An explicit `ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS` wins;
+/// otherwise commands the engine marks `long_running` (exports, renders, agent runs) get an hour
+/// and everything else 30 s, so a slow render is not reported as a dead bridge.
+fn bridge_timeout(id: &str) -> std::time::Duration {
+    if let Some(ms) = std::env::var("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(30_000);
-    std::time::Duration::from_millis(ms.max(50))
+    {
+        return std::time::Duration::from_millis(ms.max(50));
+    }
+    let long = animationcraft_engine::find_command(id).is_some_and(|c| c.long_running);
+    std::time::Duration::from_secs(if long { 3600 } else { 30 })
 }
 
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
     use std::io::{BufRead, BufReader};
     use std::net::{TcpStream, ToSocketAddrs};
 
-    let timeout = bridge_timeout();
+    let timeout = bridge_timeout(id);
     let sock_addr = addr
         .to_socket_addrs()
         .map_err(|e| format!("bridge resolve {addr}: {e}"))?

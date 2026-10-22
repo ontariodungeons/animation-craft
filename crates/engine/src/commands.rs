@@ -33,7 +33,7 @@ pub use crate::vision::{analyze_rgba_image, analyze_viewport_region};
 pub use crate::project::write_project_file;
 
 // Import command handlers into this module so the `build()` array can reference them.
-use crate::image_cmds::{cmd_image_break_apart, cmd_image_color_to_alpha, cmd_image_content_aware_fill, cmd_image_puppet_warp};
+use crate::image_cmds::{cmd_image_break_apart, cmd_image_color_to_alpha, cmd_image_content_aware_fill, cmd_image_image_size, cmd_image_puppet_warp};
 use crate::parts::{cmd_part_set_state, cmd_part_show_all};
 use crate::photocraft::{
     cmd_asset_build_cutout_rig, cmd_asset_cut_sheet, cmd_asset_extract_background,
@@ -45,6 +45,9 @@ use crate::project::{
     cmd_project_new, cmd_project_open, cmd_project_remove_asset, cmd_project_save, cmd_project_update_asset,
 };
 use crate::rig::cmd_mesh_build_4dir;
+use crate::sequence::cmd_sequence_render;
+use crate::sheets::cmd_assets_agent_sheets;
+use crate::agent::{cmd_agent_log, cmd_agent_new_chat, cmd_agent_send};
 use crate::turnaround::{cmd_anim_preview_2d, cmd_turnaround_optimize_accuracy};
 use crate::exports::{
     cmd_effectcraft_run_script, cmd_export_blender,
@@ -186,7 +189,7 @@ pub fn build() -> Vec<CommandSpec> {
     vec![
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
-        cmd!("agent.new_chat", "Start a new project conversation", ["Agent"], None, "{\"model\":\"optional {id,providerID}\"}", always, crate::agent::new_chat),
+        cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{}", always, cmd_agent_new_chat),
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
@@ -332,6 +335,15 @@ pub fn build() -> Vec<CommandSpec> {
             cmd_image_content_aware_fill
         ),
         cmd!(
+            "sequence.render",
+            "Render Image Sequence",
+            ["Animation", "Sequence"],
+            None,
+            "{\"name\":\"sequence\",\"canvas\":[1080,1080],\"fps\":30,\"duration\":4.0,\"background\":\"#101820|null\",\"layers\":[{\"id\":\"title\",\"file\":\"path.png\",\"center\":[540,540],\"scale\":100,\"entry\":{\"kind\":\"fade|rise|drop|left|right|zoom_in|zoom_out|turn\",\"duration\":0.6,\"delay\":0.0,\"ease\":\"linear|smooth|in|out\"},\"exit\":{\"kind\":\"fade\",\"duration\":0.5,\"delay\":3.4}}],\"stills\":0,\"video\":true}",
+            always,
+            cmd_sequence_render
+        ),
+        cmd!(
             "validate.motion",
             "Validate Motion Clip",
             ["Export"],
@@ -367,6 +379,10 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("assets.fixlist_add", "Add to Asset Fix List", ["Workshop"], None,
             "{\"asset\": \"id\", \"path\": \"png\", \"decision\": \"clean|recreate\", \"problem\": \"what is wrong\", \"tool\": \"exact command (clean)\", \"reference\": \"optional\", \"status\": \"open|done\"}", always, cmd_assets_fixlist_add),
         cmd!("assets.request_sheet", "Request Asset Sheet (one pass)", ["Workshop"], None, "{}", always, cmd_assets_request_sheet),
+        cmd!("image.image_size", "Image Size (normalise a sheet)", ["Edit"], None, "{\"source\":\"path.png\",\"out\":\"path.png\",\"width\":2048,\"height\":2048,\"anchor\":\"center\",\"extensionColor\":\"#ffffff\"}", always, cmd_image_image_size),
+        query!("agent.log", "Agent Transcript", "{}", cmd_agent_log),
+        cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":false,\"agent\":\"codex|omp|claude\"}", always, cmd_agent_send),
+        cmd!("assets.agent_sheets", "Draw Asset Sheets (agent)", ["Rig & Matting"], None, "{\"character\":\"optional id\",\"kinds\":[\"turnaround\",\"skeleton\",\"poses\"],\"agent\":\"codex|omp|claude\",\"run\":true,\"check\":false,\"timeout_s\":1800,\"note\":\"optional\"}", always, cmd_assets_agent_sheets),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
         query!("storyboard.design", "Inspect storyboard placements", "{}", crate::storyboard_design::inspect),
         cmd!("storyboard.place_asset", "Place an asset on a storyboard page", ["Storyboard"], None, "{\"asset\":\"id\",\"page\":1,\"x\":100,\"y\":100,\"width\":160,\"placement\":\"optional existing placement id\"}", always, crate::storyboard_design::place),

@@ -3,6 +3,19 @@
 Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
 UI, engine, pipeline, and test work from overwriting one another.
 
+## The app is the Tauri shell — not the egui window
+
+| Surface | What it is | Launch |
+|---|---|---|
+| **`apps/animationcraft-shell` (the app)** | product UI: Home, Project, Animation, Studio; `ui/*` embedded | `cargo build -p animationcraft-shell && ./target/debug/animationcraft-shell` |
+| `apps/animationcraft` + `crates/ui-egui` | egui engine inspector for agents/debugging; never present it as the product | `cargo build --bin animationcraft && ./target/debug/animationcraft --control <port>` |
+| `public/index.html` + `src/` + `server.ts` | legacy web studio; not current | `bun server.ts` |
+
+Rebuild the shell after any `ui/` edit (`ui/` is embedded). The desktop entry
+`ai.storyteller.animationcraft.desktop` starts the shell. If a user says "the app",
+they mean the shell; ask which surface only when they name the egui window or the
+web page.
+
 ## Drive the app: CLI, MCP and skill
 
 - Skill: `~/.agents/skills/animationcraft/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
