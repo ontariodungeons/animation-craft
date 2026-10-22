@@ -40,3 +40,9 @@ assert.equal(scrolled.at(-1),'sb-sheet-1','Refresh must show the selected slide 
 renderContext.state.page=2;vm.runInContext('renderStoryboard()',renderContext);
 assert.equal(scrolled.at(-1),'sb-sheet-2');
 console.log('PASS: storyboard refresh retains the visibly selected page');
+
+const labels=[];renderContext.el=(tag,attrs={},...children)=>{if(tag==='button'&&attrs.role==='tab')labels.push(children[0]);return dom(attrs.id);};
+renderContext.state.data.storyboard.page_titles=['Song story & backgrounds','Contents','Scene 01'];
+vm.runInContext('renderStoryboard()',renderContext);
+assert.deepEqual(labels,['Song story & backgrounds','Contents','Scene 01'],'Navigation must use document headings when supplied, without per-song button maps');
+console.log('PASS: document-derived page headings populate the existing runtime navigation loop');

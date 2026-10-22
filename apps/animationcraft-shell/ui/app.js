@@ -214,7 +214,7 @@ function renderStoryboard() {
   }
   state.page = Math.max(0, Math.min(state.page, pages.length - 1));
   const first = (sb.first_scene_page || 2) - 1;
-  const nav = sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
+  const nav = sb.page_titles?.length === pages.length ? sb.page_titles.map((title,i)=>[title,i]) : sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
     ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
   const isBacklot = sb.template === "backlot";
   const chapterCount = isBacklot ? first : 3;

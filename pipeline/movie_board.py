@@ -25,7 +25,7 @@ def canonical_scenes(scene_map):
 
 def build(transcript, source, out, title, scene_map):
     # The transcript is already the CLI schema. No lyric reformatting or second editable document.
-    from deckcraft_template import generate
+    from deckcraft_template import generate, SIZE, SCENE_ART_REGION
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
     packets=canonical_scenes(scene_map)
     metadata=json.loads(Path(scene_map).read_text())
@@ -46,20 +46,10 @@ def build(transcript, source, out, title, scene_map):
     subprocess.run(['deckcraft-cli','render',str(deck),'--all','--scale','1',str(pages)],check=True,capture_output=True,text=True)
     validation=result['validation'];page_list=validation['pages']
     first_scene=next(i for i,page in enumerate(page_list) if page['kind']=='scene')
-    links=[]
-    # Link rectangles follow the existing template's native TOC and Contents objects.
-    for i,page in enumerate(page_list):
-        if page['kind']=='toc':
-            at=int(page['key'].split(':')[1])-1
-            for slot in range(12):
-                index=at*12+slot
-                if index>=len(page_list):break
-                x=48+(slot//6)*696;y=230+(slot%6)*128
-                links.append(dict(page=i+1,to_page=index+1,rect=[x,y,x+648,y+104]))
-        else:links.append(dict(page=i+1,to_page=1,rect=[1250,28,1392,56]))
+    links=validation['link_regions']
     result.update(template='backlot',template_file=str(template),scene_map=str(scene_map),scene_targets=[p['id'] for p in packets],scene_count=len(packets),first_scene_page=first_scene+1,
         scene_titles=[f'{p["id"]} · {p["start_seconds"]:.3f}–{p["end_seconds"]:.3f}' for p in packets],
-        previews=[str(p) for p in sorted(pages.glob('slide-*.png'))],page_size=[1440,1080],stage_rect=[70,430,556,200],links=links,title=title,
+        previews=[str(p) for p in sorted(pages.glob('slide-*.png'))],page_size=SIZE,stage_rect=SCENE_ART_REGION,links=links,page_titles=[p['title'] for p in result['page_plan']],title=title,
         editor='Existing DeckCraft template/document and Studio picture placement/Save; no parallel Markdown editor',
         next_commands=[shlex.join(['deckcraft-cli','info',str(deck)]),shlex.join(['deckcraft-cli','run','--in',str(deck),'--print','--cmd','slide.inspect={"index":'+str(first_scene)+'}'])])
     (out/'manifest.json').write_text(json.dumps(result,indent=2));return result

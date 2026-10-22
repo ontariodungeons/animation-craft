@@ -3,12 +3,13 @@
 import argparse, collections, contextlib, hashlib, json, math, os, re, select, shutil, subprocess, time
 from pathlib import Path
 
-VERSION = '3.2'
-SIZE = [1440,1080]
-SCENE_ART_REGION = [70,430,556,200]
-INK='#17363D'; TEAL='#176E69'; PAPER='#F4F1E9'; MUTED='#52676C'
+VERSION = '4.0'
+SIZE = [1080,1600]
+TOC_PAGE_SIZE = 20
+SCENE_ART_REGION = [60,220,960,540]
+INK='#F0EBDC'; TEAL='#D7B46A'; PAPER='#111216'; MUTED='#B7B4AB'
 STATES={'missing':('#F8E5DE','#983F29'),'draft':('#E7EDF2','#435D71'),'needs review':('#FFF0CE','#8B5C0D'),'approved':('#DDEFE4','#296246')}
-CREDIT="Inspired by and built on the Backlot concept and Jesse Naiman's 'I Went Down into the Barnyard' storyboard and production workflow."
+CREDIT="Production storyboard / original source material remains linked and unchanged"
 STOP=set('the a an and or but on in at to of with from for by into then their our its'.split())
 def dump(p,v): Path(p).write_text(json.dumps(v,indent=2,ensure_ascii=False)+'\n')
 def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -108,18 +109,55 @@ class Deck:
     def text(self,t,rect,size=22,color=INK,bold=False,role=None):
         self.q('insert.textBox',rect=rect,text=t);self.q('format.font',family='DejaVu Sans');self.q('format.size',size=size);self.q('format.color',color=color);self.q('format.bold',on=bold);self.q('format.margins',left=0,right=0,top=0,bottom=0)
         if role:self.q('shape.altText',text=role);self.q('shape.rename',name=role)
-    def card(self,title,instruction,rect,role,state='missing',size=22):
-        x,y,w,h=rect;bg,fg=STATES[state];self.box(rect,'#FFFFFF','layout.card.'+role);self.box([x,y,6,h],fg)
-        self.text(title.upper(),[x+22,y+18,w-44,28],18,TEAL,True)
-        self.text(state.upper(),[x+22,y+h-28,w-44,22],15,fg,True,'state.'+role)
-        self.text(instruction,[x+22,y+54,w-44,h-88],size,MUTED,role='user.'+role)
-    def page(self,kind,title,sub):
-        self.q('slide.new',layout='blank');self.q('slide.rename',name='template.'+kind);self.q('design.background',color=PAPER);self.box([0,0,1440,10],TEAL)
-        self.text('ANIMATION STUDIO / '+kind.upper(),[48,28,1100,26],18,TEAL,True)
-        self.text(title,[48,75,1344,65],42,INK,True,'auto.title');self.text(sub,[48,147,1344,40],20,MUTED,role='auto.subtitle')
-        self.text('Contents',[1250,28,142,28],18,TEAL,True,'nav.contents')
-        self.box([48,1030,1344,1],'#C9D1C9');self.text(CREDIT,[48,1044,1344,24],12,MUTED)
+    def card(self,title,instruction,rect,role,state='missing',size=21):
+        x,y,w,h=rect;self.box(rect,'#1B1D22','layout.card.'+role)
+        self.text(title.upper(),[x+18,y+16,w-36,28],18,TEAL,True)
+        self.text(instruction,[x+18,y+56,w-36,h-76],size,MUTED,role='user.'+role)
+    def page(self,kind,title,sub,new=True):
+        if new:self.q('slide.new',layout='blank')
+        self.q('slide.rename',name='template.'+kind);self.q('design.background',color=PAPER)
+        for x in range(0,1080,90):self.box([x,0,45,18],'#E8E5DC')
+        self.text('PRODUCTION / '+kind.upper(),[60,50,740,24],17,TEAL,True)
+        self.text(title,[60,96,960,64],38,INK,True,'auto.title');self.text(sub,[60,165,960,30],18,MUTED,role='auto.subtitle')
+        self.text('Contents',[880,50,140,28],17,TEAL,True,'nav.contents')
+        self.box([60,1550,960,1],'#494238');self.text(CREDIT,[60,1563,960,22],12,MUTED)
         self.q('slide.notes',text=json.dumps(dict(sb_template=VERSION,kind=kind)))
+
+def revise_template(template):
+    """Revise existing native template slides through DeckCraft; no alternate renderer."""
+    template=Path(template).resolve();d=Deck(template.parent,template.parent)
+    try:
+        d.cmd('file.open',path=str(template));d.cmd('design.slideSize',w=SIZE[0],h=SIZE[1],scale='none')
+        for i,slide in reversed(list(enumerate(inspect_pages(d)))):
+            if note(slide).get('kind') in ['lyrics','qc']:d.cmd('slide.delete',index=i)
+        for i,slide in enumerate(inspect_pages(d)):
+            kind=note(slide)['kind'];d.cmd('slide.go',index=i);d.cmd('edit.delete',ids=[sh['id'] for sh in slide['shapes']]);d.page(kind,kind.title(),'Imported source timing',new=False)
+            if kind=='toc':
+                for slot in range(TOC_PAGE_SIZE):
+                    y=220+slot*64;d.box([60,y,960,54],'#1B1D22','layout.toc.row.'+str(slot));d.text('Document page',[78,y+14,780,30],22,INK,False,'auto.toc.label.'+str(slot));d.text('00',[930,y+15,68,28],18,TEAL,False,'auto.toc.meta.'+str(slot))
+            elif kind=='overview':
+                d.card('Song story','Describe the story, characters and progression of this song.',[60,220,960,280],'story')
+                d.card('Background A / main location','Name this location and place its background reference.',[60,540,464,330],'background.main')
+                d.card('Background B / alternate location','Name this location and place its background reference.',[556,540,464,330],'background.alternate')
+                d.card('Characters and props','Name the cast and reusable props for this song.',[60,910,960,220],'cast')
+                d.card('Source material','',[60,1170,960,260],'source')
+            elif kind in ['assets','locations']:
+                d.card('Character / asset' if kind=='assets' else 'Background / location','Name and reference for this production asset.',[60,220,960,640],'asset.reference' if kind=='assets' else 'location.reference')
+                d.card('Identity and reuse','Record appearance, linked source and scenes where this asset is used.',[60,900,960,500],'asset.notes' if kind=='assets' else 'location.notes')
+            elif kind=='scene':
+                d.text('SCENE IMAGE / 16:9',[60,195,960,23],17,TEAL,True)
+                d.box(SCENE_ART_REGION,'#08090C','layout.scene.picturewell');d.text('Place the scene reference here',[90,455,900,50],28,MUTED,False,'user.scene.reference');d.text('',[80,726,920,24],16,TEAL,False,'state.scene.reference')
+                d.box([60,790,960,150],'#F3ECD7','layout.scene.lyrics');d.text('LYRICS',[80,803,920,22],16,'#6D5631',True);d.text('',[80,838,920,90],27,'#211E18',False,'auto.scene.lyrics')
+                for title,role,x,y,w,h,instruction in [
+                    ('Action / staging','action',60,970,464,190,'Describe the visible action, framing and movement.'),
+                    ('Continuity / linked assets','continuity',556,970,464,190,'Link cast, props and locations. Record continuity.'),
+                    ('Image prompt','image_prompt',60,1180,464,160,'Describe the reference image to create.'),
+                    ('Animation prompt','animation_prompt',556,1180,464,160,'Describe movement, timing and camera action.'),
+                    ('Animated text','animated_text',60,1360,464,170,'Text, word IDs, reveal timing and placement.'),
+                    ('Drawing cues','drawing',556,1360,464,170,'What is drawn, when it appears and where.')]:d.card(title,instruction,[x,y,w,h],'scene.'+role)
+            d.flush()
+        d.cmd('file.saveAs',path=str(template))
+    finally:d.close()
 
 def inspect_pages(d):
     info=d.cmd('document.inspect');return [d.cmd('slide.inspect',index=i) for i in range(len(info['slides']))]
@@ -129,17 +167,17 @@ def note(slide):
 def snapshot(d):return [dict(id=s['id'],notes=s['notes'],shapes=s['shapes']) for s in inspect_pages(d)]
 def source_fingerprint(c,groups):
     return hashlib.sha256(json.dumps(dict(config=c,inputs={k:sha(c[k]) for k in ['transcript','captions','audiomap'] if c.get(k)},groups=groups),sort_keys=True).encode()).hexdigest()
+def toc_entries(pages):return [(i,p) for i,p in enumerate(pages) if p['kind']!='toc']
 def build_plan(c,cues,groups,representative=False):
-    if representative:return [dict(kind='scene',key='scene:'+groups[0]['id'],title='Scene 01 / '+groups[0]['kind'],group=groups[0])]
-    pages=[dict(kind='overview',key='overview',title='Song overview & writeup')]
-    pages += [dict(kind='lyrics',key=f'lyrics:{i//4+1}',title=f'Lyrics verification {i//4+1}',cues=cues[i:i+4]) for i in range(0,len(cues),4)]
-    pages += [dict(kind='assets',key='asset:'+x['id'],title=x.get('name','Character / asset inventory'),asset=x) for x in c.get('assets',[dict(id='inventory',name='Character / asset inventory')])]
-    pages += [dict(kind='locations',key='location:'+x['id'],title=x.get('name','Location / clean plate inventory'),location=x) for x in c.get('locations',[dict(id='inventory',name='Location / clean plate inventory')])]
-    pages += [dict(kind='scene',key='scene:'+x['id'],title=f'Scene {i+1:02} / '+x['kind'],group=x) for i,x in enumerate(groups)]
-    pages += [dict(kind='qc',key='qc',title='Delivery, QC & ownership')]
-    ntoc=math.ceil((len(pages)+1)/12)
-    while ntoc!=math.ceil((len(pages)+ntoc)/12):ntoc=math.ceil((len(pages)+ntoc)/12)
-    return [dict(kind='toc',key=f'toc:{i+1}',title=f'Contents {i+1}/{ntoc}') for i in range(ntoc)]+pages
+    if representative:return [dict(kind='scene',key='scene:'+groups[0]['id'],title='Scene 01',group=groups[0])]
+    pages=[dict(kind='overview',key='overview',title='Song story & backgrounds')]
+    pages += [dict(kind='assets',key='asset:'+x['id'],title=x.get('name','Characters & props'),asset=x) for x in c.get('assets',[dict(id='inventory',name='Characters & props')])]
+    pages += [dict(kind='locations',key='location:'+x['id'],title=x.get('name','Backgrounds & locations'),location=x) for x in c.get('locations',[dict(id='inventory',name='Backgrounds & locations')])]
+    pages += [dict(kind='scene',key='scene:'+x['id'],title=f'Scene {i+1:02}',group=x) for i,x in enumerate(groups)]
+    count=math.ceil(len(pages)/TOC_PAGE_SIZE)
+    contents=[dict(kind='toc',key=f'toc:{i+1}',title='Contents' if count==1 else f'Contents {i+1}/{count}') for i in range(count)]
+    return pages[:1]+contents+pages[1:]
+
 def fill_text(d,slide,role,value,size=None):
     sh=next((x for x in slide['shapes'] if x.get('altText')==role),None)
     if sh:
@@ -167,56 +205,44 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
     kind=page['kind'];fill=lambda r,t,sz=None:fill_text(d,slide,r,t,sz)
     duration_label='Measured recording' if c.get('recording_duration_verified',False) else 'Supplied timing extent; recording duration unknown'
     fill('auto.title',c['title']+' / '+page['title'],36)
-    fill('auto.subtitle',f'{c.get("artist","Artist unassigned")} / {clock(duration)} / NEEDS REVIEW / '+page['key'],20)
-    nav=next(x for x in slide['shapes'] if x.get('altText')=='nav.contents');d.q('shape.action',ids=[nav['id']],action='none' if representative else 'slide',**({} if representative else {'slide':0}))
+    fill('auto.subtitle',f'{clock(duration)} / '+page['title'],18)
+    nav=next(x for x in slide['shapes'] if x.get('altText')=='nav.contents');d.q('shape.action',ids=[nav['id']],action='none' if representative or kind=='toc' else 'slide',**({} if representative or kind=='toc' else {'slide':next(i for i,p in enumerate(all_pages) if p['kind']=='toc')}))
     if kind=='toc':
         at=int(page['key'].split(':')[1])-1
-        for slot in range(12):
-            index=at*12+slot;target=all_pages[index] if index<len(all_pages) else None
+        for slot in range(TOC_PAGE_SIZE):
+            entry=at*TOC_PAGE_SIZE+slot;entries=toc_entries(all_pages);index,target=entries[entry] if entry<len(entries) else (None,None)
             if target is None:
                 ids=[x['id'] for x in slide['shapes'] if x.get('altText') in ['layout.toc.row.'+str(slot),'auto.toc.label.'+str(slot),'auto.toc.meta.'+str(slot)]]
                 d.q('edit.delete',ids=ids);continue
             fill('auto.toc.label.'+str(slot),target['title'] if target else '',22)
-            fill('auto.toc.meta.'+str(slot),f'Page {index+1:02} · NEEDS REVIEW' if target else '',18)
+            fill('auto.toc.meta.'+str(slot),f'{index+1:02}' if target else '',18)
             sh=next(x for x in slide['shapes'] if x.get('altText')=='auto.toc.label.'+str(slot))
             d.q('shape.action',ids=[sh['id']],action='slide' if target else 'none',**({'slide':index} if target else {}))
     if kind=='overview':
-        fill('user.source',f'{c.get("album","Album unassigned")} / track {c.get("track","?")}\n{duration_label}: {clock(duration)}\n{len(words)} words / {len(cues)} original cues\n{len(groups)} proposed scene spans\nTranscript: ASR, not verified by listening.',21)
-        links=[('Audio',c.get('audio')),('Words',c['transcript']),('Cues',c['captions']),('Project',c.get('project'))]
+        if c.get('story'):fill('user.story',c['story'],24)
+        fill('user.source',f'{duration_label}: {clock(duration)}\n{len(words)} timed words / {len(groups)} scenes\nExisting transcript and caption timing imported automatically.',22)
+        links=[('Audio',c.get('audio')),('Transcript',c['transcript']),('Captions',c['captions']),('Project',c.get('project'))]
         for i,(label,path) in enumerate(links):
-            if path and Path(path).exists():d.text(label+' ↗',[930+i*110,413,108,26],16,TEAL,True,'source.'+str(i));d.q('insert.hyperlink',url=Path(path).resolve().as_uri(),tooltip=label)
-    if kind=='lyrics':
-        offset=int(page['key'].split(':')[1])*4-4
-        for slot in range(4):
-            if slot>=len(page['cues']):
-                ids=[x['id'] for x in slide['shapes'] if x.get('altText') in [r+str(slot) for r in ['layout.cue.row.','auto.cue.time.','auto.cue.raw.','auto.cue.state.','user.correction.','auto.correction.label.']]]
-                d.q('edit.delete',ids=ids)
-                continue
-            cue=page['cues'][slot];ids=[w['id'] for w in words if w['start']<cue['end'] and w['end']>cue['start']]
-            mapped=[g['id'] for g in groups if any(w in g['word_ids'] for w in ids)]
-            fill('auto.cue.time.'+str(slot),f'{cue["id"]} · {clock(cue["start"])}–{clock(cue["end"])} · '+(', '.join(ids[:1]+ids[-1:]) if ids else 'timing uncertain'),18)
-            fill('auto.cue.raw.'+str(slot),cue['text'],24)
-            fill('auto.cue.state.'+str(slot),'NEEDS REVIEW · '+', '.join(mapped),16)
+            if path and Path(path).exists():d.text(label+' ↗',[60+i*240,1470,220,30],18,TEAL,True,'source.'+str(i));d.q('insert.hyperlink',url=Path(path).resolve().as_uri(),tooltip=label)
     if kind=='scene':
-        g=page['group'];ids=g['word_ids'];raw=g['text'] or 'No transcribed words in this interval — listen before labelling it instrumental.'
+        g=page['group'];ids=g['word_ids'];raw=g['text'] or ''
         fill('auto.scene.lyrics',raw,27)
         existing=c.get('scene_content',{}).get(g['id'],{})
         sections=existing.get('sections') or {}
-        for source_role,target_role in [('reference_prompt','user.scene.image_prompt'),('animation_prompt','user.scene.animation_prompt'),('layer_stack','user.scene.continuity')]:
+        for source_role,target_role in [('reference_prompt','user.scene.image_prompt'),('animation_prompt','user.scene.animation_prompt'),('layer_stack','user.scene.continuity'),('action','user.scene.action'),('animated_text','user.scene.animated_text'),('drawing_cues','user.scene.drawing')]:
             if sections.get(source_role):fill(target_role,sections[source_role],21)
         t=f'Scene span {clock(g["span_start"])}–{clock(g["span_end"])}'
         if ids:t+=f' / Words {clock(g["lyric_start"])}–{clock(g["lyric_end"])} / {ids[0]}…{ids[-1]}'
-        fill('auto.subtitle',t+' / PROVISIONAL · NEEDS REVIEW',19)
-        for label,targetkey,x in [('Asset pages','asset:',1078),('Clean plates','location:',1220)]:
+        fill('auto.subtitle',t,18)
+        for label,targetkey,x in [('Assets','asset:',574),('Locations','location:',780)]:
             target=next((i for i,p in enumerate(all_pages) if p['key'].startswith(targetkey)),None)
-            if target is not None:d.text(label,[x,616,140,24],16,TEAL,True,'nav.'+targetkey);d.q('shape.action',action='slide',slide=target,tooltip=label)
-    if kind=='qc':fill('user.qc.settings',f'{duration_label}: {clock(duration)}\nCanvas / fps / codec: NOT SET\nExport destination: NOT SET\nEnter proposed settings, then record approval.',22)
+            if target is not None:d.text(label,[x,1130,140,24],16,TEAL,True,'nav.'+targetkey);d.q('shape.action',action='slide',slide=target,tooltip=label)
     # Configured pictures become real independently replaceable DeckCraft picture objects.
     record=page.get('asset') or page.get('location') or {}
     if record.get('file'):
         path=Path(record['file']).resolve()
         if not path.is_file():raise ValueError('Configured asset does not exist: '+str(path))
-        rect=[70,320,550,220] if kind=='assets' else [70,320,750,220]
+        rect=[80,300,920,518]
         d.q('insert.picture',path=str(path),rect=rect,name=record.get('name',path.stem));d.q('shape.altText',text='user.picture.'+record['id'])
     reference=None
     if kind=='scene' and page['group']['id'] in c.get('scene_images',{}):reference=place_scene_picture(d,slide,c['scene_images'][page['group']['id']],page['group']['id'])
@@ -228,7 +254,7 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
 def validate_deck(d,pages,words,cues,groups,duration,representative=False):
     slides=inspect_pages(d);assert len(slides)==len(pages),'Page count mismatch'
     keys=[note(s).get('page_key') for s in slides];assert keys==[p['key'] for p in pages],'Page mapping mismatch'
-    overflow=[];links=0;file_links=0;actual_cues=[];creative_instructions=0
+    overflow=[];links=0;file_links=0;actual_cues=[];creative_instructions=0;link_regions=[]
     for i,(sl,page) in enumerate(zip(slides,pages)):
         d.cmd('slide.go',index=i)
         cards={x['altText'][12:]:x['box'] for x in sl['shapes'] if x.get('altText','').startswith('layout.card.')}
@@ -238,28 +264,30 @@ def validate_deck(d,pages,words,cues,groups,duration,representative=False):
             if role.startswith('user.'):creative_instructions+=1
             if role.startswith('user.') and role[5:] in cards:
                 card=cards[role[5:]]
-                if y+h>card[1]+card[3]-30:overflow.append(dict(page=i+1,role=role,reason='Text collides with its card status; shorten or enlarge the editable card',box=sh['box']))
-            if role=='auto.scene.lyrics' and y+h>342:overflow.append(dict(page=i+1,role=role,reason='Lyric block exceeds its allocated area',box=sh['box']))
+                if y+h>card[1]+card[3]-12:overflow.append(dict(page=i+1,role=role,reason='Text collides with its card status; shorten or enlarge the editable card',box=sh['box']))
+            if role=='auto.scene.lyrics' and y+h>940:overflow.append(dict(page=i+1,role=role,reason='Lyric block exceeds its allocated area',box=sh['box']))
             if role.startswith('auto.cue.raw.'):
                 limit=220+int(role.split('.')[-1])*194+128
                 if y+h>limit:overflow.append(dict(page=i+1,role=role,reason='Caption text exceeds its verification row; reflow this template before saving',box=sh['box']))
             target=None
-            if role=='nav.contents' and not representative:target=0
+            if role=='nav.contents' and not representative and page['kind']!='toc':target=next(j for j,p in enumerate(pages) if p['kind']=='toc')
             if role.startswith('auto.toc.label.'):
-                at=(int(page['key'].split(':')[1])-1)*12+int(role.split('.')[-1]);target=at if at<len(pages) else None
+                at=(int(page['key'].split(':')[1])-1)*TOC_PAGE_SIZE+int(role.split('.')[-1]);entries=toc_entries(pages);target=entries[at][0] if at<len(entries) else None
             if role in ['nav.asset:','nav.location:']:
                 prefix=role[4:];target=next(j for j,p in enumerate(pages) if p['key'].startswith(prefix))
             if target is not None:
-                full=d.cmd('shape.inspect',id=sh['id']);assert full['shape']['click']['action']==dict(kind='slide',slide=slides[target]['id']),'Native TOC target mismatch';links+=1
+                full=d.cmd('shape.inspect',id=sh['id']);assert full['shape']['click']['action']==dict(kind='slide',slide=slides[target]['id']),'Native TOC target mismatch';links+=1;link_regions.append(dict(page=i+1,to_page=target+1,rect=[x,y,x+w,y+h]))
             if role.startswith('source.'):
                 from urllib.parse import unquote,urlparse
                 action=d.cmd('shape.inspect',id=sh['id'])['shape']['click']['action'];uri=urlparse(action['url'])
                 assert action['kind']=='url' and uri.scheme=='file' and Path(unquote(uri.path)).is_file(),'Source file link does not resolve';file_links+=1
-        if page['kind']=='lyrics':
-            for j,cue in enumerate(page['cues']):actual_cues.append(next(x['text'] for x in sl['shapes'] if x.get('altText')=='auto.cue.raw.'+str(j)))
-    if not representative:assert actual_cues==[x['text'] for x in cues],'Original caption occurrence lost';assert {'toc','overview','lyrics','assets','locations','scene','qc'}.issubset({x['kind'] for x in pages})
+        if page['kind']=='scene':actual_cues.extend(page['group']['word_ids'])
+    if not representative:
+        assert actual_cues==[w['id'] for w in words],'Original word occurrence lost from scenes'
+        assert {'toc','overview','assets','locations','scene'}.issubset({x['kind'] for x in pages})
+        assert not {'lyrics','qc'}.intersection(x['kind'] for x in pages)
     validate_groups(groups,words,duration)
-    return dict(ok=not overflow,slides=len(slides),native_links=links,resolving_source_links=file_links,caption_occurrences=len(actual_cues),source_words=len(words),scene_spans=len(groups),duration=duration,source_sequence_preserved=True,provisional_grouping=True,overflow=overflow,editable_fields=creative_instructions,approval='needs review',pages=[dict(key=p['key'],id=s['id'],kind=p['kind']) for p,s in zip(pages,slides)])
+    return dict(ok=not overflow,slides=len(slides),native_links=links,link_regions=link_regions,resolving_source_links=file_links,caption_occurrences=len(actual_cues),source_words=len(words),scene_spans=len(groups),duration=duration,source_sequence_preserved=True,provisional_grouping=True,overflow=overflow,editable_fields=creative_instructions,approval='needs review',pages=[dict(key=p['key'],id=s['id'],kind=p['kind']) for p,s in zip(pages,slides)])
 
 def generate(template,config,output,grouping=None,representative=False):
     template=Path(template).resolve();output=Path(output).resolve();output.parent.mkdir(parents=True,exist_ok=True)
@@ -295,10 +323,10 @@ def generate(template,config,output,grouping=None,representative=False):
         d.cmd('file.export',path=str(output.with_suffix('.pdf')),format='pdf')
         scene=next(i for i,p in enumerate(pages) if p['kind']=='scene');d.cmd('file.export',path=str(output.with_name(output.stem+'-scene.png')),format='png',slide=scene,scale=1)
         if not representative:
-            for kind in ['toc','overview','lyrics','assets','locations','qc']:
+            for kind in ['toc','overview','assets','locations']:
                 i=next(i for i,p in enumerate(pages) if p['kind']==kind);d.cmd('file.export',path=str(output.with_name(output.stem+'-'+kind+'.png')),format='png',slide=i,scale=1)
         validation['authored_edits_preserved']=before is not None;dump(output.with_suffix('.validation.json'),validation)
-        return dict(ok=True,deck=str(output),pdf=str(output.with_suffix('.pdf')),proof=str(output.with_name(output.stem+'-scene.png')),reopened_existing=before is not None,validation=validation)
+        return dict(ok=True,page_plan=pages,deck=str(output),pdf=str(output.with_suffix('.pdf')),proof=str(output.with_name(output.stem+'-scene.png')),reopened_existing=before is not None,validation=validation)
     finally:
         if d:d.close()
         lock.unlink(missing_ok=True)
