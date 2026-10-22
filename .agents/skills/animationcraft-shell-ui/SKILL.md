@@ -130,8 +130,9 @@ lifts, a 90° chevron); nothing bounces. Respect `prefers-reduced-motion` (alrea
 
 Follow the implementation order in research.md: persistent live MCP → visible actions/history/undo →
 two-way pointing/drawings/comments → captured message context → inline questions/progress → vendored
-Markdown. Global `mc --bridge 19897 mcp` follows the open window's project; never bind
-it to a song path. Persistent config edits require user authorization (the current switch was authorized).
+Markdown. Use `mc --bridge <selected-endpoint> mcp` for the verified Studio window; never bind
+it to a song path or guess a port. Discover its project/instance and endpoint with `mc exec ui.feedback`.
+Persistent config edits require user authorization.
 
 Capture view, selection, scene, track/instance, song/local time, range and revision when sending a
 message. Show the captured context and retain it throughout the job. Ask inline when “later” is
@@ -152,9 +153,9 @@ Upgrade only touched dependencies to latest stable releases and record versions;
 ## Verify loop (every visible change)
 
 ```
-cargo build -p animationcraft-shell            # ui/ is embedded: rebuild after edits
-./target/debug/animationcraft-shell --control 19897 [<project.acproj>]
-mc --bridge 19897 exec ui.look [region=<id|css>] [click=<id|label>] output=<project>/.agent/look.png
+cargo build -p animationcraft-shell -p mc      # ui/ is embedded: rebuild after edits
+./target/debug/animationcraft-shell --control <port> [<project.acproj>]
+mc --bridge <selected-endpoint> exec ui.look [region=<id|css>] [click=<id|label>] output=<project>/.agent/look.png
 ```
 Open the PNG and check, every time: alignment, truncation, contrast, empty states, hover-only controls
 still reachable, the narrow window. For layout bugs, `ui.eval js='return …getBoundingClientRect()…'`
