@@ -92,7 +92,8 @@ pub struct CommandSpec {
 const fn is_long_running_id(id: &str) -> bool {
     matches!(
         id.as_bytes(),
-        b"intake.validate"
+        b"project.intake"
+            | b"intake.validate"
             | b"intake.three_question"
             | b"asset.make_transparent"
             | b"asset.extract_background"
@@ -196,7 +197,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("ui.feedback", "Live Studio Feedback", "{\"project\":\"optional canonical project path\"}", crate::command_center::requires_ui),
         query!("ui.components", "Rendered Studio Components", "{\"region\":\"#view-project\",\"filter\":\"optional ID filter\",\"limit\":30}", crate::command_center::requires_ui),
         query!("center.status", "Command Center", "{}", crate::command_center::status),
-        cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .acproj override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false}", always, crate::command_center::intake),
+        cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .acproj override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false}", always, crate::command_center::intake),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
         query!("agent.session", "Current Chat Session", "{}", cmd_agent_session),

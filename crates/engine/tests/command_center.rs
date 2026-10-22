@@ -18,6 +18,8 @@ fn new_intake_retains_invalid_received_bytes_and_remains_openable() {
         .unwrap();
     assert_eq!(r["ok"], true);
     assert_eq!(r["intake_ready"], false);
+    assert_eq!(r["storyboard_ready"], false);
+    assert!(!r["steps"].as_array().unwrap().iter().any(|v|v["command"]=="audio.analyze"));
     assert!(r["problems"].as_array().unwrap().len() > 0);
     let received = r["received"][0]["path"].as_str().unwrap();
     assert_eq!(fs::read(received).unwrap(), b"[broken");
@@ -48,10 +50,20 @@ fn hyperframes_words_import_without_srt_preserves_occurrences_and_end_tail() {
         )
         .unwrap();
     assert_eq!(r["intake_ready"], true);
+    assert_eq!(r["storyboard_ready"], true);
+    assert!(PathBuf::from(r["storyboard"]["deck"].as_str().unwrap()).is_file());
+    assert!(!r["steps"].as_array().unwrap().iter().any(|v|v["command"]=="audio.analyze"));
     let imported: serde_json::Value =
         serde_json::from_slice(&fs::read(d.join("case/project/case.transcript.json")).unwrap())
             .unwrap();
     assert_eq!(imported["words"], words);
+    let deck=PathBuf::from(r["storyboard"]["deck"].as_str().unwrap());
+    let before=fs::read(&deck).unwrap();
+    let resumed=s.execute("project.intake",json!({"path":d.join("case/project/Case.acproj"),"resume":true})).unwrap();
+    assert_eq!(resumed["storyboard_ready"],true);
+    assert_eq!(resumed["storyboard"]["reused_existing_document"],true);
+    assert!(!resumed["steps"].as_array().unwrap().iter().any(|v|v["command"]=="audio.analyze"));
+    assert_eq!(fs::read(deck).unwrap(),before);
     let toc = s.execute("storyboard.init", json!({})).unwrap();
     assert_eq!(toc["ok"], true);
     let read = s.execute("storyboard.read", json!({"scene":3})).unwrap();
@@ -85,4 +97,26 @@ fn resumed_intake_requires_explicit_transcript_replacement() {
         .unwrap();
     assert_eq!(r["intake_ready"], false);
     assert_eq!(fs::read(dest).unwrap(), before);
+}
+
+#[test]
+fn audio_only_intake_attempts_existing_pipeline_and_retains_recoverable_failure() {
+    let d=fixture("bad-audio");
+    let audio=d.join("invalid.wav");
+    fs::write(&audio,b"not audio").unwrap();
+    let project=d.join("case/project/Case.acproj");
+    let mut s=Session::default();
+    let r=s.execute("project.intake",json!({"path":project,"audio":audio})).unwrap();
+    assert_eq!(r["intake_ready"],false);
+    assert_eq!(r["storyboard_ready"],false);
+    let step=r["steps"].as_array().unwrap().iter().find(|v|v["command"]=="audio.analyze").expect("intake must attempt the shared audio pipeline");
+    assert_eq!(step["status"],"failed");
+    assert!(step["error"].as_str().unwrap().len()>0);
+    assert_eq!(r["next_commands"][0]["command"],"audio.analyze");
+    assert_eq!(fs::read(audio).unwrap(),b"not audio");
+    assert!(project.is_file());
+    let mut reopened=Session::default();
+    reopened.execute("project.open",json!({"path":project})).unwrap();
+    let state=reopened.execute("center.status",json!({})).unwrap();
+    assert!(!state["problems"].as_array().unwrap().is_empty());
 }

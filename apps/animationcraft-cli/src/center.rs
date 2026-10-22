@@ -86,7 +86,7 @@ impl Center {
                             .join(" | ")
                     )
                 } else {
-                    if id=="project.intake" {format!("INTAKE {}. Storyboard readiness: pending. Studio verification: pending.",if v["intake_ready"]==true{"READY"}else{"NEEDS WORK"})} else {format!("COMMAND SUCCEEDED: {id}. This is not storyboard or Studio readiness.")}
+                    if id=="project.intake" {format!("INTAKE {}. Native storyboard: {}. Studio verification: pending.",if v["intake_ready"]==true{"READY"}else{"NEEDS WORK"},if v["storyboard_ready"]==true{"created or reopened"}else{"not ready"})} else {format!("COMMAND SUCCEEDED: {id}. This is not storyboard or Studio readiness.")}
                 };
             }
             Err(e) => {

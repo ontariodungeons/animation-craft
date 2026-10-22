@@ -116,7 +116,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
         match s.execute("workshop.set_audio", json!({"path":audio})) {
             Ok(_) => steps
                 .push(json!({"command":"workshop.set_audio","status":"complete; local reference"})),
-            Err(e) => problems.push(e.to_string()),
+            Err(e) => {let error=e.to_string();steps.push(json!({"command":"workshop.set_audio","status":"failed","error":error}));problems.push(error);},
         };
     }
     if let Some(t) = p["transcript"].as_str().filter(|v| !v.is_empty()) {
@@ -127,7 +127,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
                 params[k] = json!(v);
             }
         }
-        match s.execute("workshop.import_transcript",params){Ok(_)=>steps.push(json!({"command":"workshop.import_transcript","status":"complete; reused existing words/timing"})),Err(e)=>problems.push(e.to_string())};
+        match s.execute("workshop.import_transcript",params){Ok(_)=>steps.push(json!({"command":"workshop.import_transcript","status":"complete; reused existing words/timing"})),Err(e)=>{let error=e.to_string();steps.push(json!({"command":"workshop.import_transcript","status":"failed","error":error}));problems.push(error);}};
     }
     let mut received = read_state(dir)["received"]
         .as_array()
@@ -148,16 +148,61 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => problems.push(format!("material {v}: {e}")),
         }
     }
-    let valid = crate::workshop::transcript_files(dir).iter().any(|f| {
-        fs::read(f)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    let valid_transcript = || crate::workshop::transcript_files(dir).iter().any(|f| {
+        fs::read(f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .is_some_and(|v| crate::workshop::transcript_problems(&v).is_empty())
     });
-    if !valid && problems.is_empty() {
-        problems.push("No valid transcript yet. Import existing HyperFrames words (JSON) with optional original SRT; audio processing is never automatic.".into());
+    let mut valid = valid_transcript();
+    let mut next_commands = Vec::<Value>::new();
+    // Supplied/previously imported timing is authoritative. Never fall back to ASR after an import error.
+    if !valid && problems.is_empty() && s.song_audio.is_some() {
+        let params=json!({"_request_id":p["_request_id"],"_client":p["_client"]});
+        match s.execute("audio.analyze", params.clone()) {
+            Ok(_) => steps.push(json!({"command":"audio.analyze","params":params,"status":"complete; native pipeline output imported"})),
+            Err(e) => {
+                let error=e.to_string();
+                steps.push(json!({"command":"audio.analyze","params":params,"status":"failed","error":error}));
+                problems.push(error);
+                next_commands.push(json!({"command":"audio.analyze","params":{},"reason":"Correct the reported pipeline dependency/input failure, then retry; existing outputs are reused"}));
+            }
+        }
+        for record in read_state(dir)["received"].as_array().into_iter().flatten() {
+            if !received.iter().any(|v|v["path"]==record["path"]) {received.push(record.clone());}
+        }
+        valid=valid_transcript();
     }
-    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid,"storyboard_ready":false,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !problems.iter().any(|v|v.contains("transcript")||v.contains("JSON")),"manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs","next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    if !valid && problems.is_empty() {
+        problems.push("No valid timed transcript or linked audio. Provide audio to project.intake, or import existing timed JSON with workshop.import_transcript.".into());
+    }
+    let mut storyboard=Value::Null;
+    let mut storyboard_ready=false;
+    if valid && problems.is_empty() {
+        match s.execute("storyboard.init", json!({})) {
+            Ok(board) => {
+                storyboard_ready=board["deck"].as_str().is_some_and(|v|Path::new(v).is_file());
+                storyboard=json!({"deck":board["deck"],"pdf":board["pdf"],"reused_existing_document":board["reused_existing_document"]});
+                if storyboard_ready {
+                    steps.push(json!({"command":"storyboard.init","status":"complete","deck":board["deck"],"reused_existing_document":board["reused_existing_document"]}));
+                } else {
+                    let error="storyboard.init returned no existing native DeckCraft document";
+                    problems.push(error.into());
+                    steps.push(json!({"command":"storyboard.init","status":"failed","error":error}));
+                }
+            }
+            Err(e) => {
+                let error=e.to_string();
+                steps.push(json!({"command":"storyboard.init","status":"failed","error":error}));
+                problems.push(error);
+            }
+        }
+        if !storyboard_ready {
+            next_commands.push(json!({"command":"storyboard.init","params":{},"reason":"Correct the reported native document/tool failure, then retry; existing timing is preserved"}));
+        }
+    }
+    if !valid && next_commands.is_empty() {
+        next_commands.push(json!({"command":"workshop.import_transcript","params":{"path":"<existing timed JSON>","captions":"<optional original SRT>"},"reason":"Correct or supply timed input; no ASR fallback was attempted after a supplied-input failure"}));
+    }
+    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"animationcraft-cli commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
