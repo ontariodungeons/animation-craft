@@ -56,3 +56,7 @@ context.nativeInvoke=async()=>{throw new Error('Native view failed');};context.t
 const failed=vm.runInContext("setView('studio',tabAction)",context);frames.shift()();await assert.rejects(failed,/Native view failed/);
 assert.equal(reports.filter(r=>r.report.event?.stage==='ui_navigation_applied').length,beforeTab+1,'A failed native view must not create navigation completion');
 console.log('PASS: Studio tab emits one correlated navigation receipt after native view completion; failure and engine revisions remain truthful');
+
+const field=(id,value,defaultValue)=>({id,value,defaultValue,tagName:'INPUT',getBoundingClientRect:()=>({width:90,height:20}),closest:()=>null});
+context.document.querySelectorAll=()=>[field('motion-scrub','2.236','0'),field('agent-input','unsent draft','')];
+assert.deepEqual(Array.from(vm.runInContext('feedbackSnapshot().draft_fields',context)),['agent-input'],'playhead navigation is not an unsaved document edit; text drafts remain protected');

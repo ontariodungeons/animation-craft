@@ -199,15 +199,41 @@ fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
     }
     Ok(())
 }
-fn open_session(s:&Session,wanted:&Value,fresh:bool)->Result<String> {
+// Native per-session policy for one bounded image task; no global config or auth changes.
+fn image_task_cli() -> Result<std::path::PathBuf> {
+    let exe=std::env::current_exe()?;
+    let folder=exe.parent().ok_or_else(||invalid("Cannot locate the installed AC CLI"))?;
+    let candidate=folder.join("animationcraft-cli");
+    let candidate=if candidate.is_file(){candidate}else{folder.parent().unwrap_or(folder).join("animationcraft-cli")};
+    fs::canonicalize(&candidate).map_err(|_|invalid(format!("Image task needs the matching installed CLI at {}; no alternative installed",candidate.display())))
+}
+fn image_task_permissions() -> Result<Value> {
+    let cli=image_task_cli()?.to_string_lossy().into_owned();
+    Ok(json!([
+        {"action":"*","resource":"*","effect":"deny"},
+        {"action":"read","resource":"*","effect":"allow"},
+        {"action":"skill","resource":"*","effect":"allow"},
+        {"action":"question","resource":"*","effect":"allow"},
+        {"action":"shell","resource":format!("{cli} commands image.generate"),"effect":"allow"},
+        {"action":"shell","resource":format!("{cli} exec image.generate *"),"effect":"allow"}
+    ]))
+}
+fn verify_image_task(s:&Session,id:&str)->Result<()> {
+    let got=api(&crate::workshop::project_dir(s)?,"session.get",Some(id),None)?;
+    if data(&got)["permissions"]!=image_task_permissions()? {return Err(invalid("Native image-task permissions differ; no prompt sent. Start agent.new_chat image_task=true"));}
+    Ok(())
+}
+fn open_session(s:&Session,wanted:&Value,fresh:bool,image_task:bool)->Result<String> {
     let project=chat_identity(s)?;let dir=crate::workshop::project_dir(s)?;let state=state_dir(s)?;let file=state.join("opencode-session");
     if !fresh {
         let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
-        verify_model(&dir,id.trim(),wanted)?;return Ok(id.trim().into());
+        verify_model(&dir,id.trim(),wanted)?;if image_task{verify_image_task(s,id.trim())?;}return Ok(id.trim().into());
     }
-    let response=api(&dir,"session.create",None,Some(json!({"title":"AnimationCraft fresh chat","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}})))?;
+    let mut body=json!({"title":"Sproket · AnimationCraft","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}});
+    if image_task{body["permissions"]=image_task_permissions()?;}
+    let response=api(&dir,"session.create",None,Some(body))?;
     let id=data(&response)["id"].as_str().filter(|id|id.starts_with("ses_")&&!id.chars().any(char::is_control)).ok_or_else(||invalid("OpenCode did not return a valid session ID; no prompt sent"))?;
-    verify_model(&dir,id,wanted)?;
+    verify_model(&dir,id,wanted)?;if image_task{verify_image_task(s,id)?;}
     fs::create_dir_all(&state)?;archive(s)?;
     if let Ok(previous)=fs::read_to_string(&file) {
         use std::io::Write;
@@ -229,7 +255,7 @@ pub fn cmd_agent_new_chat(s:&mut Session,params:&Value)->Result<Value> {
     if matches!(request_read(s)["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("Existing chat request is pending; retrieve it before starting a new chat"));}
     let session=if selection["agent"]=="opencode" {
         let model=model_ref(&dir,&selection,params["free_only"]==true)?;
-        Some(open_session(s,&model,true)?)
+        Some(open_session(s,&model,true,params["image_task"]==true)?)
     } else {archive(s)?;None};
     Ok(json!({"ok":true,"session":session,"fresh":true,"turns":[],"selection":selection,"inference_started":false}))
 }
@@ -246,15 +272,16 @@ pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
     let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/animationcraft-shell/agent.md")).unwrap_or_default();
     let fresh=params["new_chat"].as_bool().unwrap_or(true);
     if fresh && params["session"].is_string(){return Err(invalid("An expected session requires new_chat=false; no chat created or message sent"));}
-    let prompt=format!("Freshness: discover current animationcraft-cli help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
+    let task=if params["image_task"]==true {format!("You are Sproket. This is one bounded image repair task. Native permissions allow reading images, skills and ONLY these shell commands: `{0} commands image.generate` and `{0} exec image.generate ...`. Use this exact installed CLI, not a relative executable. Do not call yourself, chat, OpenCode, subagents, scripts, or another harness. Inspect original references with native read; use existing image.generate with references and transparent_background=true, default model gpt-6-luna. After one job, inspect the returned draft image with native read, report observed defects, and STOP for review. Do not replace the original or regenerate a background.\n",image_task_cli()?.display())}else{String::new()};
+    let prompt=format!("{task}Freshness: discover current animationcraft-cli help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
     if agent=="opencode" {
         if !selection["thinking"].as_str().unwrap_or_default().is_empty(){return Err(invalid("OpenCode reasoning variants are not wired to this setting; clear Thinking rather than silently ignoring it"));}
         let prior=request_read(s);if matches!(prior["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("A project chat request is still pending; read agent.log refresh=true before sending another message"));}
         let model=model_ref(&dir,&selection,params["free_only"]==true)?;
-        let id=open_session(s,&model,fresh)?;
+        let id=open_session(s,&model,fresh,params["image_task"]==true)?;
         if params["session"].as_str().is_some_and(|expected|expected!=id){return Err(invalid("Project agent session changed; inspect agent.session before sending. No prompt sent"));}
         let request_id=params["_request_id"].as_str().map(str::to_owned).unwrap_or_else(||format!("chat-{}",stamp()));
-        let mut receipt=json!({"request_id":request_id,"project":chat_identity(s)?,"session":id,"provider":model["providerID"],"model":model["id"],"model_ref":model,"status":"queued","queued_at":stamp()});request_write(s,&receipt)?;
+        let mut receipt=json!({"request_id":request_id,"project":chat_identity(s)?,"session":id,"provider":model["providerID"],"model":model["id"],"model_ref":model,"status":"queued","image_task":params["image_task"]==true,"queued_at":stamp()});request_write(s,&receipt)?;
         log_push(s,json!({"role":"user","text":said,"request_id":request_id,"project":receipt["project"],"session":id}))?;
         let sent=match api(&dir,"session.prompt",Some(&id),Some(json!({"text":prompt}))){Ok(v)=>v,Err(e)=>{receipt["status"]=json!("error");receipt["error"]=json!(e.to_string());receipt["delivery"]=json!("uncertain; inspect existing native session before retry");request_write(s,&receipt)?;return Err(e);}};
         let since=data(&sent)["time"]["created"].as_u64().ok_or_else(||invalid("OpenCode prompt receipt lacks creation time; pending request retained, do not resend"))?;

@@ -23,6 +23,7 @@ elif operation=='session.create':
  (root/'counter').write_text(str(n))
  body=json.loads(args[-1]);model=body['model']
  (root/'active-model').write_text(json.dumps(model))
+ (root/'active-permissions').write_text(json.dumps(body.get('permissions',[])))
  (root/'active-location').write_text(json.dumps(body.get('location',{'directory':'/wrong-service-default'})))
  print(json.dumps({'data':{'id':'ses_synthetic_'+str(n),'model':model,'location':json.loads((root/'active-location').read_text())}}))
 elif operation=='session.get':
@@ -30,7 +31,7 @@ elif operation=='session.get':
  if case=='mismatch': model['id']='synthetic-paid'
  location=json.loads((root/'active-location').read_text())
  if case=='location_mismatch': location={'directory':'/wrong-service-default'}
- print(json.dumps({'data':{'id':'ses_synthetic_'+(root/'counter').read_text(),'model':model,'location':location}}))
+ print(json.dumps({'data':{'id':'ses_synthetic_'+(root/'counter').read_text(),'model':model,'location':location,'permissions':json.loads((root/'active-permissions').read_text())}}))
 elif operation=='session.prompt': print(json.dumps({'data':{'id':'msg_synthetic','time':{'created':1}}}))
 elif operation=='session.message.list':
  print(json.dumps({'data':[{'id':'reply','type':'assistant','time':{'created':2},'content':[{'type':'text','text':'synthetic reply'}]},{'type':'idle','time':{'created':3}}]}))
@@ -75,6 +76,7 @@ fn run_case(name: &str) {
 #[test] fn agent_security_invalid_saved_model_never_falls_back() { run_case("invalid"); }
 #[test] fn agent_security_free_only_rejects_paid_model() { run_case("paid"); }
 #[test] fn agent_security_new_chat_has_no_inference_and_preserves_history() { run_case("newchat"); }
+#[test] fn agent_security_image_task_blocks_recursive_tools() { run_case("image_scope"); }
 #[test] fn agent_security_extra_args_cannot_override_selection_or_permissions() { run_case("extra"); }
 
 #[test]
@@ -85,6 +87,7 @@ fn agent_security_child() {
     let mut session=Session::default();
     session.project_path=Some(root.join("project/Synthetic.acproj"));
     let mut params=json!({"message":"Synthetic offline check","wait":5});
+    if case=="image_scope" { params["image_task"]=json!(true); }
     if case=="invalid" {
         fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"opencode","model":123}).to_string()).unwrap();
     }
@@ -152,7 +155,7 @@ fn agent_security_child() {
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
     let reply=agent::cmd_agent_send(&mut session,&params);
-    if case=="fresh" || case=="switch" || case=="location" {
+    if case=="fresh" || case=="switch" || case=="location" || case=="image_scope" {
         let first=reply.unwrap();
         assert_eq!(first["model"],"synthetic-free");
         assert_eq!(first["provider"],"opencode");
@@ -173,6 +176,13 @@ fn agent_security_child() {
         assert!(!second.to_string().contains("dummy-config-secret"));
         let calls=fs::read_to_string(root.join("calls.jsonl")).unwrap();
         for line in calls.lines().filter(|l|l.contains("session.create")) {
+            if case=="image_scope" {
+                let args:serde_json::Value=serde_json::from_str(line).unwrap();
+                let body:serde_json::Value=serde_json::from_str(args.as_array().unwrap().last().unwrap().as_str().unwrap()).unwrap();
+                let rules=body["permissions"].as_array().expect("image task must carry native permissions");
+                assert!(rules.iter().any(|r|r["action"]=="*"&&r["effect"]=="deny"));
+                assert!(!rules.iter().any(|r|r["action"]=="shell"&&r["resource"]=="*"&&r["effect"]=="allow"));
+            }
             assert!(line.contains("synthetic-free") || line.contains("synthetic-other-free"));
             assert!(!line.contains("parentID"));
             if case=="location" {
