@@ -6,6 +6,7 @@ use std::{fs, path::PathBuf, process::Command};
 
 const TOOL: &str = r#"#!/usr/bin/python3
 import json, os, sys, pathlib
+if pathlib.Path(sys.argv[0]).name != 'opencode': sys.exit(19)
 root=pathlib.Path(os.environ['AC_SECURITY_FIXTURE'])
 args=sys.argv[1:]
 with (root/'calls.jsonl').open('a') as f: f.write(json.dumps(args)+'\n')
@@ -48,6 +49,10 @@ fn run_case(name: &str) {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(root.join("opencode"), fs::Permissions::from_mode(0o700)).unwrap();
     }
+    #[cfg(unix)] if name=="shim" {
+        fs::rename(root.join("opencode"),root.join("dispatcher")).unwrap();
+        std::os::unix::fs::symlink(root.join("dispatcher"),root.join("opencode")).unwrap();
+    }
     fs::write(root.join("config/animationcraft/agent.json"), json!({
         "agent":"opencode","provider":"opencode","model":"synthetic-free",
         "api_key":"dummy-config-secret"
@@ -76,6 +81,7 @@ fn run_case(name: &str) {
 #[test] fn agent_security_invalid_saved_model_never_falls_back() { run_case("invalid"); }
 #[test] fn agent_security_free_only_rejects_paid_model() { run_case("paid"); }
 #[test] fn agent_security_new_chat_has_no_inference_and_preserves_history() { run_case("newchat"); }
+#[test] fn agent_security_preserves_name_based_launcher() { run_case("shim"); }
 #[test] fn agent_security_image_task_blocks_recursive_tools() { run_case("image_scope"); }
 #[test] fn agent_security_extra_args_cannot_override_selection_or_permissions() { run_case("extra"); }
 
@@ -155,7 +161,7 @@ fn agent_security_child() {
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
     let reply=agent::cmd_agent_send(&mut session,&params);
-    if case=="fresh" || case=="switch" || case=="location" || case=="image_scope" {
+    if case=="fresh" || case=="switch" || case=="location" || case=="image_scope" || case=="shim" {
         let first=reply.unwrap();
         assert_eq!(first["model"],"synthetic-free");
         assert_eq!(first["provider"],"opencode");

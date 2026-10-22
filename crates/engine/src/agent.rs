@@ -75,7 +75,8 @@ pub fn opencode_program() -> Result<std::path::PathBuf> {
             use std::os::unix::fs::PermissionsExt;
             if metadata.permissions().mode() & 0o111 == 0 { continue; }
         }
-        return fs::canonicalize(path).map_err(Into::into);
+        // Name-based launchers (e.g. mise shims) require the discovered argv[0].
+        return Ok(path);
     }
     Err(invalid("Installed OpenCode executable not found on PATH; no fallback installed"))
 }
