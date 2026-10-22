@@ -16,8 +16,24 @@ window.addEventListener('unhandledrejection',e=>{acFeedback.errors.push({message
 let feedbackTimer;
 document.addEventListener('input',()=>{clearTimeout(feedbackTimer);feedbackTimer=setTimeout(()=>acFeedback.report(),150);});
 acFeedback.report('booting');
+// Refresh observation health without creating activity or acknowledging new engine work.
+setInterval(()=>acFeedback.report(),1000);
 
-document.addEventListener('click',e=>{const n=e.target.closest('button,[role=button],[role=tab]');if(!n)return;const control=n.id||n.getAttribute('aria-label')||'unknown-control';const request_id=`ui-${Date.now()}-${Math.random().toString(16).slice(2,8)}`;e.acAction={control,request_id};acFeedback.actions.set(n,e.acAction);acFeedback.report(null,null,{stage:'ui_click',control,request_id,verified_commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:n.dataset.commands?'verified handler annotation':'unknown'});},true);
+document.addEventListener('click',e=>{
+ const n=e.target.closest('button,[role=button],[role=tab]');if(!n)return;
+ const control=n.id||n.getAttribute('aria-label')||n.getAttribute('title')||n.textContent.trim().slice(0,80)||'unknown-control';
+ const request_id=`ui-${Date.now()}-${Math.random().toString(16).slice(2,8)}`;
+ const navigation=n.matches('#project-details,#sb-prev,#sb-next,.sb-link,#sb-chips [role=tab]');
+ const previous=acFeedback.action,errors=acFeedback.errors.length;
+ e.acAction={control,request_id};acFeedback.actions.set(n,e.acAction);acFeedback.action=e.acAction;
+ // Static handlers run during this dispatch too; invoke captures this context before awaiting.
+ queueMicrotask(()=>{if(acFeedback.action===e.acAction)acFeedback.action=previous;});
+ acFeedback.report(null,null,{stage:'ui_click',control,request_id,interaction:navigation?'navigation':'control',verified_commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:navigation?'existing navigation handler':n.dataset.commands?'verified handler annotation':'unknown'});
+ if(navigation)requestAnimationFrame(()=>{
+  const current=feedbackSnapshot();
+  if(current.rendered&&acFeedback.errors.length===errors)acFeedback.report(null,null,{stage:'ui_navigation_applied',control,request_id,view:current.view,page:state.page+1});
+ });
+},true);
 
 acFeedback.acknowledge=async function(revision,project){
  await new Promise(requestAnimationFrame);

@@ -74,7 +74,8 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
     let ui_project_request = crate::project_cli::is_ui_request(app,id,params);
     if let Some(expected)=params["_expected_project"].as_str(){
         let expected=animationcraft_engine::studio_sessions::canonical(std::path::Path::new(expected))?;
-        let actual=app.state::<Engine>().with(None,|s|Ok(s.project_path.clone()))?;
+        // Read-only observation must not wait for the operation it is observing.
+        let actual=if id=="ui.feedback"{crate::feedback::snapshot(app)?["active_project"].as_str().map(std::path::PathBuf::from)}else{app.state::<Engine>().with(None,|s|Ok(s.project_path.clone()))?};
         if actual.as_deref()!=Some(expected.as_path()){return Err("Pinned Studio changed project; request refused without switching".into());}
     }
     #[cfg(unix)]

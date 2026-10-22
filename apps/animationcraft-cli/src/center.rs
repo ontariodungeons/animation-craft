@@ -47,10 +47,17 @@ impl Center {
         Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,state:json!({}),message:format!("Production root: {}. Editing New song root overrides this request only. F3 opens; F5 creates; F6 resumes explicitly.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
-        match crate::dispatch(&mut self.session,"center.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance})) {
+        let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
+        let ui=crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":self.pinned_instance})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+        // Keep the last project inspection while the engine is busy; read its real journal directly.
+        let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null(){
+            let mut value=self.state.clone();
+            value["activity"]=self.session.execute("center.events",json!({"project":project,"limit":192})).unwrap_or_else(|e|json!({"error":e.to_string()}));
+            Ok(value)
+        }else{crate::dispatch(&mut self.session,"center.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance}))};
+        match inspection {
             Ok(mut value)=>{
-                let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
-                value["ui"]=crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":self.pinned_instance})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+                value["ui"]=ui;
                 if self.pinned_instance.is_none(){self.pinned_instance=value["ui"]["instance"].as_str().map(str::to_owned);}
                 value["catalog"]=self.session.execute("project.catalog",json!({})).unwrap_or_else(|e|json!({"error":e.to_string()}));
                 let cursor=value["activity"]["next_cursor"].as_u64().unwrap_or(0);
@@ -391,11 +398,14 @@ fn engine_badge(action: &Value) -> (&'static str, Color) {
         Some("engine_success") => ("✓ ENGINE OK", GREEN),
         Some("engine_error" | "handler_error") => ("✗ FAILED", RED),
         Some("engine_needs_work") => ("! NEEDS WORK", AMBER),
+        _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("◌ RUNNING", BLUE),
+        _ if root_start(action).is_some_and(|e| e["interaction"] == "navigation") => ("— UI NAVIGATION", MUTED),
+        _ if stages(action).iter().any(|e| e["stage"] == "ui_click") => ("— UI INTERACTION", MUTED),
         _ => ("! COMPLETION UNKNOWN", AMBER),
     }
 }
 fn action_ack(action: &Value) -> bool {
-    stages(action).iter().any(|e| e["stage"] == "frontend_ack" && (
+    stages(action).iter().any(|e| matches!(e["stage"].as_str(), Some("frontend_ack" | "ui_navigation_applied")) && (
         e["request_id"].as_str().is_some_and(|id| Some(id) == root_start(action).and_then(|s| s["request_id"].as_str())) ||
         root_finish(action).is_some_and(|finish| finish["engine_revision"].is_u64() && finish["engine_revision"] == e["engine_revision"])
     ))
@@ -486,12 +496,12 @@ fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narro
     if compact_commands {
         lines.push(styled(format!("{}  ·  ↑↓ choose", (0..commands.len()).map(|i|format!("{}[{}]", if i == selected { "▶" } else { " " }, i + 1)).collect::<Vec<_>>().join(" ")), BLUE));
         lines.push(styled(format!("▶ [{}] {effect}", selected + 1), BLUE));
-        lines.push(styled(format!("    {}", fit_text(&command_preview(literal), inner.width.saturating_sub(4) as usize)), MUTED));
+        lines.push(styled(format!("    {}", command_preview(literal)), MUTED));
     } else {
         for (i,(effect,command)) in commands.iter().enumerate() {
             if i == selected { selected_row = wrapped_rows(&lines, parts[0].width); }
-            lines.push(styled(format!("{} [{}] {}", if i == selected { "▶" } else { " " }, i + 1, fit_text(effect, inner.width.saturating_sub(7) as usize)), if i == selected { BLUE } else { DESK_FG }));
-            lines.push(styled(format!("       {}", fit_text(&command_preview(command), inner.width.saturating_sub(7) as usize)), BLUE));
+            lines.push(styled(format!("{} [{}] {}", if i == selected { "▶" } else { " " }, i + 1, effect), if i == selected { BLUE } else { DESK_FG }));
+            lines.push(styled(format!("       {}", command_preview(command)), BLUE));
             lines.push(Line::raw(""));
         }
     }
@@ -559,7 +569,7 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     if area.width >= 118 { tabs.push(Span::styled(" · snapshots 1s · ",Style::default().fg(MUTED))); }
     let mut header = vec![Line::from(vec![Span::styled(if control { " WORKSPACE: " } else { " FILE: " },Style::default().fg(MUTED)),Span::styled(compact_path(if control { c.state["catalog"]["scope"].as_str().unwrap_or("shared Home recent projects") } else { project.unwrap_or("no project attached") },area.width.saturating_sub(16) as usize),Style::default().fg(DESK_FG))]),Line::from(vec![Span::styled(format!(" ENGINE: {}  │  ",engine.0),Style::default().fg(engine.1)),Span::styled(format!("STUDIO: {} · {}",if mismatch { "✗ UNMATCHED" } else if matched { "✓ MATCHED" } else { "— SELECTED PROJECT NOT OPEN / UNOBSERVED" },lag(ui,matched)),Style::default().fg(if mismatch { RED } else if matched && ui["ui_ready"] == true { GREEN } else { AMBER }))])];
     let ack = if !matched { "UI RECEIPT: N/A · no matched Studio" } else if ui["ui_ready"] == true { "▣ ACK APPLIED" } else { "! ACK PENDING / UNKNOWN" };
-    let busy = matched && ui["pending_invokes"].as_u64().is_some_and(|n| n > 0);
+    let busy = matched && (ui["pending_invokes"].as_u64().is_some_and(|n| n > 0) || actions.iter().any(|a| stages(a).iter().any(|e| e["stage"]=="dispatch_running") && root_finish(a).is_none()));
     let work = if busy { format!(" · {} RUNNING", ["|", "/", "-", "\\"][(c.started.elapsed().as_millis() / 120 % 4) as usize]) } else { String::new() };
     let status = format!(" {ack} · engine rev {} / ack rev {} · unsaved {}{work}",revision(&ui["engine_revision"]),revision(&ui["ack_engine_revision"]),ui["unsaved_state"].as_str().unwrap_or("unknown"));
     if narrow {
@@ -695,4 +705,29 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     })();
     ratatui::restore();
     result.map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+    #[test]
+    fn navigation_is_not_engine_work_and_requires_its_own_receipt() {
+        let mut a=json!({"root_request_id":"nav-1","events":[{"stage":"ui_click","request_id":"nav-1","interaction":"navigation","control":"sb-next"}]});
+        assert_eq!(engine_badge(&a).0,"— UI NAVIGATION");assert!(!action_ack(&a));
+        a["events"].as_array_mut().unwrap().push(json!({"stage":"ui_navigation_applied","request_id":"nav-1"}));
+        assert!(action_ack(&a));
+    }
+    #[test]
+    fn actual_dispatch_is_running_until_a_matching_finish() {
+        let mut a=json!({"root_request_id":"save-1","events":[{"stage":"dispatch_running","request_id":"save-1","command":"storyboard.save_version"}]});
+        assert_eq!(engine_badge(&a).0,"◌ RUNNING");
+        a["events"].as_array_mut().unwrap().push(json!({"stage":"engine_success","request_id":"other","command":"storyboard.save_version"}));
+        assert_eq!(engine_badge(&a).0,"◌ RUNNING");
+        a["events"].as_array_mut().unwrap().push(json!({"stage":"engine_error","request_id":"save-1","command":"storyboard.save_version"}));
+        assert_eq!(engine_badge(&a).0,"✗ FAILED");
+    }
+    #[test]
+    fn unmapped_click_is_not_reported_as_failed_engine_work() {
+        assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
+    }
 }

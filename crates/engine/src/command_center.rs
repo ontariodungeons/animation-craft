@@ -204,7 +204,7 @@ pub fn status(s: &mut Session, _: &Value) -> Result<Value> {
  {"label":"Read storyboard contents","command":"storyboard.toc","enabled":valid},
  {"label":"Save project","command":"project.save","enabled":s.project_path.is_some()}]);
     Ok(
-        json!({"ok":true,"warnings":saved["warnings"],"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":crate::activity::events(s,&json!({"limit":12}))?,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
+        json!({"ok":true,"warnings":saved["warnings"],"project":s.project_path,"audio":s.song_audio,"target":s.video_target,"transcript":{"path":transcript,"valid":valid,"words":parsed.as_ref().and_then(|v|v["words"].as_array()).map(Vec::len)},"problems":problems,"received":saved["received"],"steps":saved["steps"],"provenance":provenance,"actions":actions,"commands":commands,"ui_mapping":mapping,"activity":crate::activity::events(s,&json!({"limit":192}))?,"visual_review":"pending","studio":"Not launched or switched. Attach only to an explicitly selected existing control bridge."}),
     )
 }
 
