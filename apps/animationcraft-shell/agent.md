@@ -18,10 +18,15 @@ live app, act through its tools, show the result, and leave work reversible and 
 ## One application, one live session
 
 Repository: `/run/media/jesse/Speedy/Work/omhas-animation`. Application: `apps/animationcraft-shell`.
-The shell's `--control 19897` bridge and the page share one `animationcraft_engine::Session`.
-The persistent MCP command is `mc --bridge 19897 mcp`. It follows whichever project
-is open in that window; it is not bound to a project folder. Do not create a headless session when
-the user expects changes in their open window. Never start a video studio server merely to animate.
+The shell's selected bridge and page share one `animationcraft_engine::Session`. Native Tauri
+`engine_command` handlers call that engine directly; New/Open invoke the adjacent `mc` process
+through the window's private bridge. A shared registry does not imply every UI action starts `mc`.
+
+Use `mc --bridge <selected-endpoint> mcp` for the selected Studio window. Discover and verify its
+project/instance with `mc exec ui.feedback`, then use its reported endpoint or the explicitly selected
+`--control` address; never guess a port. This connection follows the window's open project, rather
+than binding a project folder. Do not create a headless session when the user expects changes in
+their open window. Never start a video studio server merely to animate.
 
 The native computer-use surface is `ui.look`, `ui.state`, `ui.elements`, `ui.click`, `ui.set`,
 `ui.key`, and engine commands. Use stable IDs and typed parameters. Read back changed state and
@@ -79,9 +84,9 @@ Work only on assigned files and coordinate ownership before editing. Read the re
 guidelines. Preserve unrelated changes. Use the existing model unless asked to switch; if Codex is
 chosen, the user permits Sol 6.1 only. Learn and observe regardless of model strength.
 
-Build `cargo build -p animationcraft-shell` after UI edits (assets are embedded). Before restarting the shared shell,
+Build `cargo build -p animationcraft-shell -p mc` after UI edits (assets are embedded). Before restarting the shared shell,
 inspect pending/dirty state and preserve unsaved edits. After every visible change run
-`mc --bridge 19897 exec ui.look` and inspect the PNG. With a project open, captures
+`mc --bridge <selected-endpoint> exec ui.look` and inspect the PNG. With a project open, captures
 default to `<project>/.agent/looks/`. Keep project outputs inside the project.
 
 Verify the changed behavior, empty/error states, keyboard access and narrow layout. For animation,

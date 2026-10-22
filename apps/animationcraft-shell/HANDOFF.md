@@ -1,17 +1,18 @@
 # AnimationCraft shell — handoff (2026-10-21)
 
-**Latest takeover:** user handed ownership back to Claude (`wD:pV`). Read [CLAUDE-HANDOFF.md](CLAUDE-HANDOFF.md) for the current checkpoint, clipped mouse hands, scene14 and shared-work split. This supersedes the older Codex ownership paragraph below.
+**Historical checkpoint — not current operating instructions.** This records the 2026-10-21
+shell migration. Use [README](../../README.md), [AGENTS.md](../../AGENTS.md), and the current task
+for active architecture, commands, ownership and validation. Old pane assignments, completion claims
+and port observations below do not grant ownership or identify a current running window.
 
-The Tauri shell in `apps/animationcraft-shell` **is AnimationCraft now**. The egui app
-(`crates/ui-egui`, `apps/animationcraft`) is "the older UI": a reference only, tagged
-`older-egui-ui`. Don't maintain or extend it. Port every feature into the shell in the shell's design.
-The user deletes the older UI after they confirm the checklist below.
+The current application is the Tauri shell in `apps/animationcraft-shell`; `mc` is its CLI/MCP
+entrypoint. The older egui application directories have been retired from this checkout. Their
+historical source can be consulted through Git; do not launch a removed application package.
 
 ## Ownership
 
-You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and the running shell on port
-19897 from now on. No other agent commits here while you work. If you run the older UI to compare
-(port 19898), close it when you're done, following craft-app-lifecycle.
+Follow the current task's assigned files and the isolated-worktree rules in `AGENTS.md`.
+Coordinate overlapping files before editing; this historical handoff assigns no exclusive owner.
 
 ## Read these skills first (in this order)
 
@@ -63,10 +64,10 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
 - `src/bridge.rs` + `ui/bridge.js`: `--control <port>` uses the same JSON-lines protocol as the older app.
   Use it to see and drive the app:
   ```
-  ./target/debug/animationcraft-shell --control 19897 [<project.acproj>] [--open animate|agent] [--view studio]
-  mc --bridge 19897 exec ui.look [region=<dom id or css>] [click=<id|label>] output=<png>
-  mc --bridge 19897 exec ui.state | ui.elements | ui.click id=… | ui.set id=… value=… | ui.eval js='return …'
-  mc --bridge 19897 exec <any engine command> …   # runs on the window's session; the page refreshes
+  ./target/debug/animationcraft-shell --control <port> [<project.acproj>] [--open animate|agent] [--view studio]
+  mc --bridge <selected-endpoint> exec ui.look [region=<dom id or css>] [click=<id|label>] output=<png>
+  mc --bridge <selected-endpoint> exec ui.state | ui.elements | ui.click id=… | ui.set id=… value=… | ui.eval js='return …'
+  mc --bridge <selected-endpoint> exec <any engine command> …   # runs on the window's session; the page refreshes
   ```
   Verify **every** visible change with `ui.look` and open the PNG before saying it's done.
 - `ui/`: `app.js` (Project view: blocks Song, Lyrics & notes, Transcription, Animate, plus the storyboard
@@ -102,10 +103,10 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
   drafts. Transcript nodes now persist; model options avoid needless replacement. Enter sends,
   Shift+Enter adds a line, and failed/in-flight sends preserve draft text and attachments. Verified live
   on 19897 (zero repeated fades over 5.2s) and with `tests/agent-drawer.mjs` (25 assertions).
-- Global OpenCode `animationcraft` MCP now uses `mc --bridge 19897 mcp`, authorized
-  by the user. It follows the shell's project; no project path is in the command. Config was backed up
-  and reloaded, and the inner agent verified the connection after switching projects. Restart persistence
-  still needs a restart check. Coordinate with the inner agent through the session API, not its composer.
+- Historical OpenCode MCP configuration checks belonged to the window used at this checkpoint.
+  Confirm current client configuration and the selected Studio endpoint before relying on it; this
+  handoff does not establish today's installed command, authorization, reload or restart state.
+  Coordinate with the inner agent through the session API, not its composer.
 - Design proposal and all 76 review acceptance criteria: `.agents/skills/animationcraft-shell-ui/research.md`.
   User requires the animation inspector on the left and useful artwork after import. Full Animation
   frame approved on 2026-10-21; implementation is in progress. Permanent app knowledge is `apps/animationcraft-shell/agent.md`; keep
@@ -119,15 +120,13 @@ You (Codex, Herdr pane `wD:pW`) own this branch, `feat/production-pipeline`, and
 - Agent replies show raw markdown. Render it with a vendored library, not a hand-written parser.
 - Hey Ho's `remotion/` has no installed packages (`npm error could not determine executable`).
 
-## Pull every feature from the older UI until all of it is in the shell
+## Historical feature reference from the older UI
 
-The older UI stays in the tree (`crates/ui-egui`, `apps/animationcraft`, tag `older-egui-ui`) until the user
-confirms the checklist. It's the **source** for every feature: read its code before porting a feature, and
-run it beside the shell to compare behavior (`cargo run -p animationcraft -- --control 19898`; the shell uses
-19897). Port behavior and engine calls, never egui code or its look. Don't edit or maintain it, and don't delete it
-yourself.
+The following migration map records former source locations. Consult Git history when an assigned
+feature needs that reference; use the current shell and shared engine for implementation. There is
+no runnable older-UI package in this checkout, and this map is not an instruction to recreate one.
 
-Where each area lives in the older UI (`crates/ui-egui/src/`):
+Former source locations in the older UI (`crates/ui-egui/src/`):
 - Home, recent, new project: `panels/start.rs`, `panels/workshop.rs` (`new_project_dialog`)
 - Menus (every File/Edit/View/Export entry): `menus.rs`, plus the engine's command list (`mc exec command.list`)
 - Workshop stages, actions, briefs, subjects, storyboard pane: `panels/workshop.rs`
@@ -143,7 +142,7 @@ Where each area lives in the older UI (`crates/ui-egui/src/`):
 
 For each ported feature: tick it in the checklist below, with the commit hash.
 
-## Feature checklist: older UI → shell (the user confirms this, then the older UI is deleted)
+## Historical feature checklist: older UI → shell
 
 Legend: ✅ in the shell · ◻ to do · ⚙ becomes a CLI chain (the shell shows a step) · ❓ ask the user first:
 a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
