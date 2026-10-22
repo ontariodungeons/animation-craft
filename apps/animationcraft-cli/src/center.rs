@@ -314,13 +314,23 @@ impl Center{
    let status=json!({"id":"center.status","params":{}}).to_string();
    format!("printf '%s\\n' {} {} | {exe} run -",shell_quote(&attach),shell_quote(&status))
   }else{format!("{exe} exec project.catalog")};
-  let commands=vec![
-   ("Inspect selected project's Studio connection; never opens or switches",format!("{exe} exec ui.feedback {}",if project.is_empty(){String::new()}else{shell_quote(&format!("project={project}"))})),
-   ("Read this project's next persisted action stages",format!("{exe} exec center.events after={cursor} limit=192 {}",if project.is_empty(){String::new()}else{shell_quote(&format!("project={project}"))})),
-   ("Inspect project state; closed projects use read-only disk metadata",inspection),
-   ("Read the actual transcript import contract; no processing",format!("{exe} commands workshop.import_transcript")),
-   ("Read saved app chat selection; no inference or settings change",format!("{exe} exec agent.config"))];
-  commands
+  let feedback=format!("{exe} exec ui.feedback {}",shell_quote(&format!("project={project}")));
+  let receipts=format!("{exe} exec center.events after={cursor} limit=192 {}",shell_quote(&format!("project={project}")));
+  let actions=root_actions(self);
+  if let Some(failed)=actions.iter().find(|a|root_finish(a).is_some_and(|e|matches!(e["stage"].as_str(),Some("engine_error"|"handler_error"|"engine_needs_work")))){
+   let command=root_start(failed).map(target).unwrap_or("");
+   return vec![("Read the failed action's actual receipts",receipts),("Inspect the failed command's supported parameters",format!("{exe} commands {}",shell_quote(command)))];
+  }
+  if actions.iter().any(|a|stages(a).iter().any(|e|e["stage"]=="dispatch_running")&&root_finish(a).is_none()){
+   return vec![("Read completion of the running action",receipts)];
+  }
+  if self.state["ui"]["connection"]!="connected" || self.state["ui"]["ui_ready"]!=true{
+   return vec![("Check this project's missing Studio observation",feedback),("Read the action awaiting completion",receipts)];
+  }
+  if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
+   let design=format!("{exe} --bridge {} exec storyboard.design {} {}",shell_quote(endpoint),shell_quote(&format!("_expected_project={project}")),shell_quote(&format!("_expected_instance={instance}")));
+   vec![("Inspect the active saved deck and pending image edits",design),("Read the last action's completion receipts",receipts)]
+  }else{vec![("Inspect this project's saved state",inspection)]}
  }
  fn copy_command(&mut self){
   use std::io::Write;
@@ -364,11 +374,11 @@ fn padded(text: &str, width: usize) -> String {
 fn wrapped_rows(lines: &[Line<'_>], width: u16) -> u16 {
     lines.iter().map(|line| line.width().max(1).div_ceil(usize::from(width.max(1))) as u16).sum()
 }
-fn round_panel(title: impl Into<String>, accent: Color, active: bool) -> Block<'static> {
+fn round_panel(title: impl Into<String>, _accent: Color, _active: bool) -> Block<'static> {
     Block::default().borders(Borders::ALL)
-        .border_type(if active { ratatui::widgets::BorderType::Thick } else { ratatui::widgets::BorderType::Rounded })
-        .border_style(Style::default().fg(if active { accent } else { DESK_LINE }))
-        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(accent).add_modifier(Modifier::BOLD)))
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(DESK_LINE))
+        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(MUTED)))
 }
 fn root_actions(c: &Center) -> Vec<&Value> {
     c.state["activity"]["actions"].as_array().into_iter().flatten().rev().take(3).collect()
@@ -398,7 +408,7 @@ fn engine_badge(action: &Value) -> (&'static str, Color) {
         Some("engine_success") => ("✓ SUCCEEDED", GREEN),
         Some("engine_error" | "handler_error") => ("✗ FAILED", RED),
         Some("engine_needs_work") => ("! NEEDS WORK", AMBER),
-        _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("◌ RUNNING", BLUE),
+        _ if stages(action).iter().any(|e| e["stage"] == "dispatch_running") => ("◌ RUNNING", AMBER),
         _ if root_start(action).is_some_and(|e| e["interaction"] == "navigation") => ("— UI NAVIGATION", MUTED),
         _ if stages(action).iter().any(|e| e["stage"] == "ui_click") => ("— UI INTERACTION", MUTED),
         _ => ("! COMPLETION UNKNOWN", AMBER),
@@ -502,7 +512,7 @@ fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narro
     } else {
         for (i,(effect,command)) in commands.iter().enumerate() {
             if i == selected { selected_row = wrapped_rows(&lines, parts[0].width); }
-            lines.push(styled(format!("{} [{}] {}", if i == selected { "▶" } else { " " }, i + 1, effect), if i == selected { BLUE } else { DESK_FG }));
+            lines.push(styled(format!("{} [{}] {}", if i == selected { "▶" } else { " " }, i + 1, effect), if i == selected { TEAL } else { DESK_FG }).style(Style::default().fg(if i==selected {TEAL}else{DESK_FG}).add_modifier(if i==selected {Modifier::BOLD}else{Modifier::empty()})));
             lines.push(styled(format!("       {}", command_preview(command)), BLUE));
             lines.push(Line::raw(""));
         }
@@ -555,10 +565,25 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
     let scroll = c.scroll.min(wrapped_rows(&lines,inner.width).saturating_sub(inner.height));
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll,0)).block(block),area);
 }
+fn saved_observation(ui:&Value)->(&'static str,Color){
+ if ui["connection"]!="connected" {return ("? Saved state unobserved",AMBER);}
+ if ui["draft_fields"].as_array().is_some_and(|v|!v.is_empty()){return ("! Unsaved form edits",AMBER);}
+ match ui["engine_unsaved"].as_bool(){Some(true)=>("! Engine differs from saved project",AMBER),Some(false)=>("✓ Engine matches saved project",GREEN),None=>("? Saved state unknown; engine busy/unreadable",AMBER)}
+}
+fn action_height(c:&Center,width:u16,compact:bool)->u16{
+ let mut lines=Vec::new();for (i,a) in root_actions(c).iter().enumerate(){if i>0&&!compact{lines.push(Line::raw(""));}lines.extend(action_lines(c,a,compact));}
+ wrapped_rows(&lines,width.saturating_sub(2)).saturating_add(2).max(3)
+}
+fn command_height(c:&Center,width:u16,narrow:bool)->u16{
+ let commands=c.copy_commands();let inner=width.saturating_sub(2);let mut lines=vec![Line::raw("Select/C copies text; nothing executes")];
+ for (i,(label,cmd)) in commands.iter().enumerate(){lines.push(Line::raw(format!("▶ [{}] {label}",i+1)));lines.push(Line::raw(format!("       {}",command_preview(cmd))));lines.push(Line::raw(""));}
+ let payload=commands.get(c.command_selected%commands.len().max(1)).map(|(_,c)|c.len().div_ceil(usize::from(inner.max(1))) as u16+1).unwrap_or(1).min(if narrow{4}else{6});
+ wrapped_rows(&lines,inner).saturating_add(payload+3).max(7)
+}
 fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let area = f.area(); let narrow = area.width < 110;
     f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
-    let chunks = Layout::vertical([Constraint::Length(if narrow { 8 } else { 7 }),Constraint::Min(1),Constraint::Length(if area.height >= 28 { 2 } else { 1 })]).split(area);
+    let chunks = Layout::vertical([Constraint::Length(if narrow { 7 } else { 6 }),Constraint::Min(1),Constraint::Length(if area.height >= 28 { 2 } else { 1 })]).split(area);
     let project = c.state["project"].as_str();
     let name = project.and_then(|p|std::path::Path::new(p).file_stem()).and_then(|n|n.to_str()).unwrap_or("No project");
     let ui = &c.state["ui"];
@@ -573,31 +598,34 @@ fn render_desk(f: &mut Frame, c: &Center, control: bool) {
     let ack = if !matched { "UI RECEIPT: N/A · no matched Studio" } else if ui["ui_ready"] == true { "▣ ACK APPLIED" } else { "! ACK PENDING / UNKNOWN" };
     let busy = matched && (ui["pending_invokes"].as_u64().is_some_and(|n| n > 0) || actions.iter().any(|a| stages(a).iter().any(|e| e["stage"]=="dispatch_running") && root_finish(a).is_none()));
     let work = if busy { format!(" · {} RUNNING", ["|", "/", "-", "\\"][(c.started.elapsed().as_millis() / 120 % 4) as usize]) } else { String::new() };
-    let status = format!(" {ack} · engine rev {} / ack rev {} · unsaved {}{work}",revision(&ui["engine_revision"]),revision(&ui["ack_engine_revision"]),ui["unsaved_state"].as_str().unwrap_or("unknown"));
+    let (saved,saved_color)=saved_observation(ui);
+    let status = format!(" {ack} · engine rev {} / ack rev {}{work}",revision(&ui["engine_revision"]),revision(&ui["ack_engine_revision"]));
     if narrow {
         let short_rev = |v: &Value| v.as_u64().map(|n|n.to_string()).unwrap_or_else(||"?".into());
-        header.push(styled(format!(" {} · rev {}/{} · {} · unsaved {}", if matched && ui["ui_ready"] == true { "▣ UI APPLIED" } else { "— NO UI RECEIPT" }, short_rev(&ui["engine_revision"]), short_rev(&ui["ack_engine_revision"]), lag(ui,matched), ui["unsaved_state"].as_str().unwrap_or("unknown")),if matched && ui["ui_ready"] == true { GREEN } else { AMBER }));
+        header.push(styled(format!(" {} · rev {}/{} · {} · unsaved {}", if matched && ui["ui_ready"] == true { "▣ UI APPLIED" } else { "— NO UI RECEIPT" }, short_rev(&ui["engine_revision"]), short_rev(&ui["ack_engine_revision"]), lag(ui,matched), saved),if matched && ui["ui_ready"] == true { GREEN } else { AMBER }));
     }
     else { header.push(Line::from(vec![Span::styled(fit_text(&status,area.width.saturating_sub(42) as usize),Style::default().fg(if matched && ui["ui_ready"] == true { GREEN } else { AMBER })),Span::styled(format!("  {}",activity_wave(c)),Style::default().fg(TEAL))])); }
     if narrow { header.push(styled(activity_wave(c),TEAL)); }
     let block = Block::default().borders(Borders::ALL).border_type(ratatui::widgets::BorderType::Rounded).border_style(Style::default().fg(DESK_LINE)).title(Line::from(tabs));
-    let selected=&ui["chat_selection"];
-    header.push(styled(fit_text(&format!(" VIEW: {} · CHAT: {} / {} / {} · runtime model unverified",ui["view"].as_str().unwrap_or("unobserved"),selected["agent"].as_str().filter(|s|!s.is_empty()).unwrap_or("unknown"),selected["provider"].as_str().filter(|s|!s.is_empty()).unwrap_or("default/unknown"),selected["model"].as_str().filter(|s|!s.is_empty()).unwrap_or("default/unknown")),area.width.saturating_sub(4) as usize),BLUE));
     let report_age=ui["frontend_report_age_ms"].as_u64().map(|ms|format!("{}s",ms/1000)).unwrap_or_else(||"unknown".into());
     let reasons=ui["dirty_reasons"].as_array().map(|a|a.iter().map(|v|v.as_str().map(str::to_owned).unwrap_or_else(||v.to_string())).collect::<Vec<_>>().join("; ")).unwrap_or_default();
     let errors=ui["errors"].as_array().map(|a|a.iter().filter_map(|v|v["message"].as_str()).collect::<Vec<_>>().join("; ")).unwrap_or_default();
-    header.push(styled(fit_text(&format!(" DOM report age: {report_age} · {}{}",if reasons.is_empty(){"no reported dirty reason"}else{&reasons},if errors.is_empty(){String::new()}else{format!(" · ERROR: {errors}")}),area.width.saturating_sub(4) as usize),if !errors.is_empty()||!reasons.is_empty(){AMBER}else{MUTED}));
+    header.push(styled(fit_text(&format!(" DOM report age: {report_age} · {}{}",if reasons.is_empty(){saved}else{&reasons},if errors.is_empty(){String::new()}else{format!(" · ERROR: {errors}")}),area.width.saturating_sub(4) as usize),if !errors.is_empty(){RED}else if !reasons.is_empty(){AMBER}else{saved_color}));
     f.render_widget(Paragraph::new(header).block(block),chunks[0]);
     if control {
         let parts = Layout::vertical([Constraint::Min(5),Constraint::Length(if area.height >= 35 { 11 } else { 8 })]).split(chunks[1]);
         render_catalog(f,c,parts[0]); render_commands(f,c,parts[1],true);
     } else if narrow {
-        let commands_height = chunks[1].height.saturating_sub(if chunks[1].height >= 22 { 11 } else { 8 }).max(5);
-        let parts = Layout::vertical([Constraint::Length(commands_height),Constraint::Min(1)]).split(chunks[1]);
-        render_commands(f,c,parts[0],true); render_actions(f,c,parts[1],true);
+        let requested=command_height(c,chunks[1].width,true);
+        let actions=action_height(c,chunks[1].width,true);
+        let commands_height=requested.min(chunks[1].height.saturating_sub(actions.min(8))).max(5);
+        let parts=Layout::vertical([Constraint::Length(commands_height),Constraint::Length(actions),Constraint::Min(0)]).split(chunks[1]);
+        render_commands(f,c,parts[0],true);render_actions(f,c,parts[1],true);
     } else {
         let parts = Layout::horizontal([Constraint::Percentage(47),Constraint::Percentage(53)]).spacing(1).split(chunks[1]);
-        render_actions(f,c,parts[0],false); render_commands(f,c,parts[1],false);
+        let mut left=parts[0];left.height=action_height(c,left.width,false).min(left.height);
+        let mut right=parts[1];right.height=command_height(c,right.width,false).min(right.height);
+        render_actions(f,c,left,false);render_commands(f,c,right,false);
     }
     let keys = if area.width < 90 { "F1 Control F2 Booth F4 Inputs 1–9 Select C Copy Pg Scroll ^Q Exit" } else { "[F1] Control  [F2] Booth  [F4] Intake   [1–9 / ↑↓] Select  [C] Copy literal   [PgUp/Dn] Scroll  [F8] Refresh  [Ctrl+Q] Exit" };
     let mut footer = vec![styled(keys,BLUE)];
@@ -732,4 +760,26 @@ mod feedback_tests {
     fn unmapped_click_is_not_reported_as_failed_engine_work() {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
+    fn fixture()->Center{
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,started:std::time::Instant::now(),seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None}
+    }
+    #[test]
+    fn unknown_saved_state_is_not_reported_as_clean(){
+        assert_eq!(saved_observation(&json!({"connection":"connected","engine_unsaved":null})).1,AMBER);
+        assert_eq!(saved_observation(&json!({"connection":"connected","engine_unsaved":true})).1,AMBER);
+        assert_eq!(saved_observation(&json!({"connection":"connected","engine_unsaved":false})).1,GREEN);
+    }
+    #[test]
+    fn failed_action_gets_its_own_contract_not_generic_transcript_or_agent_commands(){
+        let mut c=fixture();c.state["activity"]["actions"][0]["events"][1]["stage"]=json!("engine_error");
+        let commands=c.copy_commands();assert_eq!(commands.len(),2);assert!(commands[1].1.contains("commands 'storyboard.save_version'"));assert!(!commands.iter().any(|(_,v)|v.contains("agent.config")||v.contains("workshop.import_transcript")));
+    }
+    #[test]
+    fn narrow_booth_stacks_content_sized_sections(){
+        let c=fixture();let backend=ratatui::backend::TestBackend::new(90,40);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();
+        let rows:Vec<String>=(0..40).map(|y|(0..90).map(|x|b[(x,y)].symbol()).collect()).collect();
+        let next=rows.iter().position(|v|v.contains("WHAT TO DO NEXT")).unwrap();let recent=rows.iter().position(|v|v.contains("LAST 3 ROOT ACTIONS")).unwrap();assert!(recent>next,"Narrow mode must stack the next action above recent actions");
+        assert!(action_height(&c,90,true)<15);assert!(command_height(&c,90,true)<30);assert!(rows.iter().any(|v|v.contains("SUCCEEDED")));
+    }
+
 }
