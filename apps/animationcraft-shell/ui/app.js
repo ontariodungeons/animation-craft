@@ -184,13 +184,10 @@ function renderStoryboard() {
   const cards = $("sb-cards");
   cards.replaceChildren();
   $("sb-empty")?.remove();
-  cards.classList.remove('native-document');
-  if (sb?.native_scenes?.length && typeof renderNativeStoryboard === 'function') {
-    chips.replaceChildren();
-    for (const id of ['sb-prev','sb-next','sb-pdf','sb-save-version']) $(id).disabled = true;
-    $('sb-page').textContent = `${sb.native_scenes.length} editable draft scenes`;
-    renderNativeStoryboard(sb, cards);
-    return;
+  if(sb?.deck){
+    cards.append(el('div',{class:'why'},el('strong',{},'Editable DeckCraft deck'),
+      el('p',{},sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Placements are saved as native DeckCraft picture objects; other slide text/object edits use DeckCraft commands.'),
+      ...(sb.next_commands||[]).map(command=>el('pre',{},command))));
   }
 
   for (const id of ["sb-prev", "sb-next", "sb-pdf", "sb-save-version"]) $(id).disabled = !pages.length;
@@ -198,7 +195,7 @@ function renderStoryboard() {
     $("sb-page").textContent = "no storyboard yet";
     const imported=state.data?.status?.stages?.find(s=>s.id==='transcript')?.done===true;
     if(imported){
-      cards.append(el('div',{id:'sb-empty',class:'sb-empty'},el('strong',{},'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
+      cards.append(el('div',{id:'sb-empty',class:'sb-empty'},el('strong',{},sb?.scene_packets_available?'Scene map available · editable deck not built':'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
       return;
     }
     cards.append(el("div", {id:"sb-empty", class:"sb-empty"},
@@ -230,25 +227,30 @@ function renderStoryboard() {
   chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   $("sb-page").textContent = `${state.page + 1} / ${pages.length}`;
 
-  // Render one title card per storyboard page
-  const sceneTitles = sb.scene_titles || [];
-  pages.forEach((path, i) => {
-    const active = i === state.page;
-    // Extract a short title from the scene title or use the page number
-    const sceneTitle = sceneTitles[i] || `Page ${i + 1}`;
-    const titleParts = sceneTitle.split(" · ");
-    const cardTitle = titleParts.length > 1 ? titleParts.slice(0, 2).join(" · ") : sceneTitle;
-    const cardTime = titleParts.length > 2 ? titleParts[titleParts.length - 1] : "";
-    const card = el("button", { class: `sb-title-card${active ? " active" : ""}`, title: sceneTitle, "aria-label": `Storyboard page ${i + 1}: ${sceneTitle}`,
-      onclick: () => showPage(i) },
-      el("div", { class: "sb-title-card-thumb" },
-        el("img", { src: convertFileSrc(path), alt: `Storyboard page ${i + 1}`, loading: "lazy" })),
-      el("div", { class: "sb-title-card-body" },
-        el("div", { class: "sb-title-card-title" }, cardTitle),
-        cardTime ? el("div", { class: "sb-title-card-time" }, cardTime) : null,
-        el("div", { class: "sb-title-card-meta" }, `Page ${i + 1} of ${pages.length}`)));
-    cards.append(card);
-  });
+  const wrap=cards;
+  const key=JSON.stringify([state.project,pages,sb.layout]);
+  {
+    wrap.dataset.document=key;wrap.replaceChildren();wrap.classList.add("sb-page-wrap","document-pages");
+    const size=sb.layout?.page_size||[595,842];
+    pages.forEach((path,i)=>{
+      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet",style:`aspect-ratio:${size[0]}/${size[1]}`});
+      page.append(el("img",{src:convertFileSrc(path),alt:`Storyboard page ${i+1}`,loading:"lazy"}));
+      for(const [j,link] of (sb.layout?.links||[]).entries())if(link.page===i+1){
+        const [x,y,r,b]=link.rect;
+        page.append(el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${(r-x)/size[0]*100}%;height:${(b-y)/size[1]*100}%`,onclick:()=>showPage(link.to_page-1)}));
+      }
+      page.addEventListener('dragover',e=>{e.preventDefault();page.classList.add('drop-target');e.dataTransfer.dropEffect='copy';});
+      page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
+      page.addEventListener('drop',async e=>{
+        e.preventDefault();page.classList.remove('drop-target');
+        const id=e.dataTransfer.getData('application/x-animationcraft-asset');if(!id)return;
+        const r=page.getBoundingClientRect();
+        try{await designCommand('storyboard.place_asset',{asset:id,page:i+1,x:(e.clientX-r.left)/r.width*size[0]-80,y:(e.clientY-r.top)/r.height*size[1]-80,width:160});}catch(error){toast(String(error));}
+      });
+      wrap.append(page);
+    });
+    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
+  }
 
   renderDesignPlacements();
 }
@@ -257,6 +259,7 @@ function showPage(n) {
   const total = state.data?.storyboard?.previews?.length || 0;
   state.page = Math.max(0, Math.min(total - 1, n));
   renderStoryboard();
+  $(`sb-sheet-${state.page}`)?.scrollIntoView({block:"start",behavior:"instant"});
 }
 
 // ---- Tabs and the studio webview ----------------------------------------------------------

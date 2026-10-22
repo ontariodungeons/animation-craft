@@ -447,22 +447,5 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 .objects .stack img { display:block; width:100%; height:140px; min-height:0; max-height:140px; object-fit:contain; }
 .objects .object .label { overflow-wrap:anywhere; }
 
-/* Existing native scene packets: one continuous document with stable scene targets. */
-.sb-title-cards.native-document { max-width:900px; width:100%; }
-.native-scene,.native-contents { padding:18px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); scroll-margin-top:12px; }
-.native-contents { display:flex; flex-wrap:wrap; gap:8px 16px; }
-.native-contents h2,.native-contents p { width:100%; margin:0; }
-.native-contents a { color:var(--accent); font-size:12px; }
-.native-scene header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
-.native-scene h3 { margin:0; font-size:18px; }
-.native-status { color:var(--amber); }
-.native-time { font:12px ui-monospace,monospace; color:var(--muted); }
-.native-field { display:flex; flex-direction:column; gap:6px; margin-top:14px; }
-.native-field label { color:var(--muted); }
-.native-field textarea { width:100%; min-width:0; resize:vertical; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit; }
-.native-field textarea:focus { outline:1px solid var(--accent); }
-.native-field-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-.native-heard { color:var(--text); line-height:1.65; }
-.native-art-slot { border:1px dashed var(--line); border-radius:8px; padding:16px; color:var(--amber); margin:14px 0; }
-.native-reference { max-width:100%; max-height:280px; object-fit:contain; }
-.native-source { font-size:11px; margin-top:10px; }
+/* Restore the existing continuous DeckCraft placement surface. */
+.sb-title-cards.document-pages { max-width:1200px; width:100%; }

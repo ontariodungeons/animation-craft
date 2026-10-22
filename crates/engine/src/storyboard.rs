@@ -497,6 +497,7 @@ pub fn assembled_parts(parts: &[PathBuf], out: &Path) -> Option<PathBuf> {
 
 /// The PDF page of scene 1: after the lyrics page and the Cast & sets board.
 fn first_scene_page(dir: &Path) -> usize {
+    if let Some(page)=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["first_scene_page"].as_u64()) {return page as usize;}
     2 + board_layout(&board_cards(dir)).1
 }
 
@@ -577,8 +578,14 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
         let out=dir.join("storyboard").join(format!("movie-board-{stamp}"));
+        let title=title.to_owned();
+        let count=storyboard_scenes(&dir)?.len();
+        let scenes=(1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?;
+        std::fs::create_dir_all(&out)?;
+        let scene_map=out.join("scene-map.json");
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":caption_file(&dir).ok_or_else(||EngineError::InvalidParams("DeckCraft template needs existing timed captions; import the original SRT with workshop.import_transcript".into()))?,"duration_sec":song_seconds(&dir),"audio":s.song_audio,"project":s.project_path})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
-        let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title.into()];
+        let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
         if let Some(source)=params["source"].as_str(){args.extend(["--source".into(),resolve_workspace_path(s,source).to_string_lossy().into_owned()]);}
         let output=run_tool_in(&dir,"python3",&args)?;
         let result:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
@@ -906,12 +913,7 @@ pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
         (Some(b), Some(changed)) => changed > b,
         (Some(_), None) => false,
     };
-    let native_scenes=if scene_doc_path(&dir,1).is_file(){
-        let count=storyboard_scenes(&dir)?.len();
-        (1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?
-    }else{Vec::new()};
-    let native_section_schema:Vec<Value>=SCENE_SECTIONS.iter().map(|(field,label)|json!({"field":field,"label":label})).collect();
-    Ok(json!({"native_scenes":native_scenes,"native_section_schema":native_section_schema,"native_editor":"scene packets; DeckCraft editing is separate","ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
+    Ok(json!({"scene_packets_available":scene_doc_path(&dir,1).is_file(),"editable_slide_integration":"Build the DeckCraft deck; Studio displays previews only","ok": true, "pdf": pdf, "exists": pdf.is_file(), "approved": s.draft_approved, "previews": previews,
         "scene_titles": layout.get("scene_titles").cloned().unwrap_or_else(|| json!([])),
         "first_scene_page": layout.get("first_scene_page").cloned().unwrap_or_else(|| json!(2)), "layout": layout, "stale": stale}))
 }

@@ -46,6 +46,7 @@ pub(crate) const FILMCRAFT_TICKS_PER_SECOND: f64 = 254_016_000_000.0;
 pub(crate) const FIXLIST: &str = "asset-fixes.json";
 
 pub(crate) fn song_seconds(dir: &Path) -> Option<f64> {
+    if let Some(duration)=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["recording_duration_sec"].as_f64()).filter(|v|v.is_finite()&&*v>0.0){return Some(duration);}
     let fcproj = video_project_path(dir)?;
     let out = run_tool_in(
         dir,

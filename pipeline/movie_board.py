@@ -1,87 +1,70 @@
 #!/usr/bin/env python3
 """Build an editable Backlot-style scene document through DeckCraft, headlessly."""
-import argparse, json, math, subprocess
+import argparse, json, math, subprocess, shlex
 from pathlib import Path
 
 
-def build(transcript, source, out, title):
-    out=Path(out); out.mkdir(parents=True,exist_ok=True)
-    doc=json.loads(Path(transcript).read_text())
-    paragraphs=doc.get('paragraphs',[])
-    if not paragraphs: raise ValueError('Transcript needs authored paragraphs with text/start/end')
-    assets=[]; sections=[]
-    if source:
-        source=Path(source)
-        scenes=json.loads((source/'artifacts/scene_plan.json').read_text())['scenes']
-        assets=json.loads((source/'artifacts/asset_manifest.json').read_text()).get('assets',[])
-        script=source/'artifacts/script.json'
-        sections=json.loads(script.read_text()).get('sections',[]) if script.exists() else []
-    else:
-        scenes=[dict(id=f'scene-{i+1:02}',start_seconds=p['start'],end_seconds=p['end'],lyric_text=p['text']) for i,p in enumerate(paragraphs)]
-    if not scenes: raise ValueError('No scenes to build')
-    # Transcript remains the text authority even when a source plan supplies artwork/actions.
-    for scene in scenes:
-        start,end=scene['start_seconds'],scene['end_seconds']
-        if not (math.isfinite(start) and math.isfinite(end) and 0<=start<end):
-            raise ValueError('Every scene needs finite, ordered start/end times')
-        scene['lyric_text']=' '.join(p['text'] for p in paragraphs if start-0.001<=p['start']<end-0.001)
-    contents_pages=math.ceil(len(scenes)/12)
-    first_scene=contents_pages
-    commands=[]; links=[];titles=[]
-    def cmd(command,**params): commands.append((command,params))
-    def text(value,rect,size=18,color='#e8ecf3'):
-        cmd('insert.textBox',rect=rect,text=value);cmd('format.size',size=size);cmd('format.color',color=color)
-    cmd('slide.layout',layout='blank')
-    for _ in range(contents_pages+len(scenes)-1): cmd('slide.new',layout='blank')
-    current_page=-1
-    def page():
-        nonlocal current_page
-        current_page+=1
-        cmd('slide.go',index=current_page)
-        cmd('design.background',color='#101319')
-    def clock(n):return f'{int(n)//60}:{int(n)%60:02}'
-    for c in range(contents_pages):
-        page();text('BACKLOT / MOVIE BOARD',[32,22,800,20],11,'#64d7c2')
-        text(title,[32,48,880,44],30)
-        text(f'{len(scenes)} scenes · Contents {c+1}/{contents_pages} · Select a scene to jump',[32,102,880,28],15,'#8e97a8')
-        for j,scene in enumerate(scenes[c*12:(c+1)*12]):
-            i=c*12+j; x=32+(j//6)*456; y=156+(j%6)*56
-            label=scene.get('lyric_text') or 'Instrumental'
-            label=' '.join(label.split());label=label[:35]+'…' if len(label)>36 else label
-            text(f'{i+1:02}   {label}',[x,y,424,30],14)
-            cmd('insert.hyperlink',slide=first_scene+i,tooltip=f'Open scene {i+1}')
-            text(f'{clock(scene["start_seconds"])}–{clock(scene["end_seconds"])}',[x+32,y+27,390,20],11,'#8e97a8')
-            links.append(dict(page=c+1,to_page=first_scene+i+1,rect=[x,y,x+424,y+49]))
-    for i,scene in enumerate(scenes):
-        page();start,end=scene['start_seconds'],scene['end_seconds']; lyric=scene.get('lyric_text','')
-        label=f'{i+1:02} · {clock(start)}–{clock(end)}';titles.append(label+' · '+(lyric or 'Instrumental'))
-        text(title.upper(),[32,20,720,20],11,'#8e97a8')
-        text(label,[32,48,820,38],28)
-        text('Contents',[812,27,116,26],13,'#64d7c2');cmd('insert.hyperlink',slide=i//12)
-        links.append(dict(page=first_scene+i+1,to_page=i//12+1,rect=[812,27,928,53]))
-        ref=next((a for a in reversed(assets) if a.get('scene_id')==scene['id'] and a.get('type')=='image' and a.get('subtype')=='storyboard_design_reference_only' and (source/a['path']).is_file()),None)
-        if ref: cmd('insert.picture',path=str(source/ref['path']),rect=[32,102,620,349])
-        else: text('Scene artwork to come',[70,245,540,50],24,'#8e97a8')
-        text('ACTION',[680,106,248,24],11,'#64d7c2')
-        section=next((s for s in sections if s.get('id')==scene.get('script_section_id',scene['id'])),{})
-        acting=' '.join(c.get('description','') for c in section.get('enhancement_cues',[]) if c.get('type')=='animation')
-        action=(acting or scene.get('movement') or scene.get('description') or 'Add the movement for this scene.').replace('_',' ')
-        words=action.split(); excerpt=' '.join(words[:48])+('…' if len(words)>48 else '')
-        text(excerpt,[680,140,248,230],18)
-        text('DESIGN REFERENCE\nArtwork and acting still need review.',[680,378,248,70],12,'#8e97a8')
-        text(lyric or 'Instrumental',[32,470,896,55],23)
-        cmd('slide.notes',text='REFERENCE PROMPT\n'+(ref.get('prompt','') if ref else 'No reference artwork attached.')+'\n\nACTION\n'+action+'\n\nSOURCE\n'+scene['id'])
-    deck=out/'movie-board.deckcraft';pdf=out/'movie-board.pdf'
-    args=['deckcraft-cli','run']
-    for command,params in commands:args+=['--cmd',command+'='+json.dumps(params)]
-    args+=['--save',str(deck),'--export',str(pdf)]
-    subprocess.run(args,check=True,capture_output=True,text=True)
-    previews=out/'pages';subprocess.run(['deckcraft-cli','render',str(deck),'--all','--scale','1.5',str(previews)],check=True,capture_output=True,text=True)
-    result=dict(pdf=str(pdf),deck=str(deck),previews=[str(p) for p in sorted(previews.glob('slide-*.png'))],page_size=[960,540],stage_rect=[32,102,620,349],links=links,scene_titles=titles,first_scene_page=first_scene+1,title=title,template='backlot')
-    (out/'manifest.json').write_text(json.dumps(result,indent=2))
-    return result
+def canonical_scenes(scene_map):
+    doc=json.loads(Path(scene_map).read_text())
+    scenes=[]
+    previous=0.0
+    targets=set()
+    for packet in doc.get('scenes',[]):
+        start,end=packet['start'],packet['end']
+        if not (math.isfinite(start) and math.isfinite(end) and 0<=start<end and start>=previous-0.001):
+            raise ValueError('Canonical scenes need finite ordered non-overlapping recording times')
+        target=packet['target']
+        if target in targets: raise ValueError('Duplicate canonical scene target: '+target)
+        targets.add(target);previous=end
+        # Keep each mapped occurrence/correction; do not independently regroup caption paragraphs.
+        scenes.append(dict(packet,id=target,start_seconds=start,end_seconds=end,
+            lyric_text=' '.join(str(line['lyric']) for line in packet.get('lines',[]))))
+    if not scenes: raise ValueError('No canonical scenes; run storyboard.init first')
+    return scenes
+
+
+def build(transcript, source, out, title, scene_map):
+    # The transcript is already the CLI schema. No lyric reformatting or second editable document.
+    from deckcraft_template import generate
+    out=Path(out);out.mkdir(parents=True,exist_ok=True)
+    packets=canonical_scenes(scene_map)
+    metadata=json.loads(Path(scene_map).read_text())
+    words_doc=json.loads(Path(transcript).read_text())
+    words=words_doc if isinstance(words_doc,list) else words_doc['words']
+    groups=[]
+    for packet in packets:
+        selected=[w for w in words if packet['start_seconds']-0.001<=w['start']<packet['end_seconds']-0.001]
+        group=dict(id=packet['id'],word_ids=[w['id'] for w in selected],span_start=packet['start_seconds'],span_end=packet['end_seconds'],kind=packet.get('kind','provisional scene'),status=packet.get('status','needs review'),reason='Canonical CLI scene span; review grouping without forced verse taxonomy.')
+        groups.append(group)
+    config=dict(title=title,transcript=str(transcript),captions=metadata['captions'],duration_sec=metadata['duration_sec'],audio=metadata.get('audio'),project=metadata.get('project'),scene_content={p['id']:dict(sections=p.get('sections',{}),notes=p.get('notes',[]),source=p.get('source'),lines=p.get('lines',[])) for p in packets})
+    config_path=out/'template-inputs.json';config_path.write_text(json.dumps(config,indent=2))
+    grouping=out/'scene-map-input.json';grouping.write_text(json.dumps(dict(groups=groups),indent=2))
+    template=Path(__file__).parent/'templates/studio-template.deckcraft'
+    deck=out/'movie-board.deckcraft'
+    result=generate(template,config_path,deck,grouping)
+    pages=out/'pages'
+    subprocess.run(['deckcraft-cli','render',str(deck),'--all','--scale','1',str(pages)],check=True,capture_output=True,text=True)
+    validation=result['validation'];page_list=validation['pages']
+    first_scene=next(i for i,page in enumerate(page_list) if page['kind']=='scene')
+    links=[]
+    # Link rectangles follow the existing template's native TOC and Contents objects.
+    for i,page in enumerate(page_list):
+        if page['kind']=='toc':
+            at=int(page['key'].split(':')[1])-1
+            for slot in range(12):
+                index=at*12+slot
+                if index>=len(page_list):break
+                x=48+(slot//6)*696;y=230+(slot%6)*128
+                links.append(dict(page=i+1,to_page=index+1,rect=[x,y,x+648,y+104]))
+        else:links.append(dict(page=i+1,to_page=1,rect=[1250,28,1392,56]))
+    result.update(template='backlot',template_file=str(template),scene_map=str(scene_map),scene_targets=[p['id'] for p in packets],scene_count=len(packets),first_scene_page=first_scene+1,
+        scene_titles=[f'{p["id"]} · {p["start_seconds"]:.3f}–{p["end_seconds"]:.3f}' for p in packets],
+        previews=[str(p) for p in sorted(pages.glob('slide-*.png'))],page_size=[1440,1080],stage_rect=[70,430,556,200],links=links,title=title,
+        editor='Existing DeckCraft template/document and Studio picture placement/Save; no parallel Markdown editor',
+        next_commands=[shlex.join(['deckcraft-cli','info',str(deck)]),shlex.join(['deckcraft-cli','run','--in',str(deck),'--print','--cmd','slide.inspect={"index":'+str(first_scene)+'}'])])
+    (out/'manifest.json').write_text(json.dumps(result,indent=2));return result
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--transcript',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);a=p.parse_args()
-    try: print(json.dumps(build(a.transcript,a.source,a.out,a.title)))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--transcript',required=True);p.add_argument('--scene-map',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);a=p.parse_args()
+    try: print(json.dumps(build(a.transcript,a.source,a.out,a.title,a.scene_map)))
     except subprocess.CalledProcessError as e: raise SystemExit(e.stderr or e.stdout or str(e))
