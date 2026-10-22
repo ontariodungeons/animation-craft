@@ -262,6 +262,11 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or(&s.video_target)
         .to_string();
     let created = ensure_video_target_project(s, &dir, &target)?;
+    if target == "hyperframes" && !created.is_file() {
+        return Err(EngineError::InvalidParams(format!(
+            "video.init did not create an editable HyperFrames project: {}. The current initializer only creates a directory; existing audio/transcript files were preserved. Video project creation is not implemented by this operation.", created.display()
+        )));
+    }
     let mut status = workshop_status(s)?;
     status["initialized"] = json!(created);
     Ok(status)
