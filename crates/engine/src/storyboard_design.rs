@@ -7,11 +7,17 @@ fn read(path:&Path)->Result<Value>{serde_json::from_slice(&std::fs::read(path)?)
 fn write(path:&Path,value:&Value)->Result<()>{std::fs::write(path,serde_json::to_vec_pretty(value).map_err(|e|invalid(&e.to_string()))?)?;Ok(())}
 fn draft(s:&Session)->Result<std::path::PathBuf>{Ok(crate::workshop::project_dir(s)?.join("storyboard/design-draft.json"))}
 pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
- let file=draft(s)?;
- if file.exists(){let doc=read(&file)?;if doc["dirty"]==true || doc["placements"].as_array().is_some_and(|v|!v.is_empty()){return Ok(doc);}}
  let board=crate::workshop::project_dir(s)?.join("storyboard/movie-board.json");
- if board.exists(){let b=read(&board)?;if b["design"]["placements"].is_array(){return Ok(b["design"].clone());}}
- Ok(json!({"placements":[]}))
+ let board=if board.exists(){read(&board)?}else{json!({})};
+ // The saved snapshot is already committed to a deck. Older versions copied the draft's
+ // dirty flag into it; only an outstanding draft can represent unsaved design work.
+ let mut doc=if board["design"]["placements"].is_array(){board["design"].clone()}else{json!({"placements":[]})};
+ doc["dirty"]=json!(false);
+ let file=draft(s)?;
+ if file.exists(){let mut pending=read(&file)?;if pending["dirty"]==true || pending["placements"].as_array().is_some_and(|v|!v.is_empty()){pending["dirty"]=json!(true);doc=pending;}}
+ doc["dirty"]=json!(doc["dirty"]==true);
+ doc["deck"]=board["deck"].clone();doc["pdf"]=board["pdf"].clone();
+ Ok(doc)
 }
 pub(crate) fn base(board:&Value)->Value{
  if board["design_base"].is_object(){return board["design_base"].clone();}
@@ -60,9 +66,9 @@ pub fn save(s:&mut Session,_:&Value)->Result<Value>{
  crate::workspace::run_tool_in(&dir,"deckcraft-cli",&args)?;
  let pages=out.join("pages");crate::workspace::run_tool_in(&dir,"deckcraft-cli",&["render".into(),deck.to_string_lossy().into_owned(),"--all".into(),"--scale".into(),"1.5".into(),pages.to_string_lossy().into_owned()])?;
  let mut previews=std::fs::read_dir(&pages)?.filter_map(|e|e.ok().map(|e|e.path())).filter(|p|p.extension().is_some_and(|e|e=="png")).collect::<Vec<_>>();previews.sort();
- board["parent_deck"]=board["deck"].clone();board["deck"]=json!(deck);board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design;
+ board["parent_deck"]=board["deck"].clone();board["deck"]=json!(deck);board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=json!({"placements":entries,"dirty":false});
  write(&out.join("manifest.json"),&board)?;write(&active,&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
- Ok(json!({"ok":true,"deck":deck,"pdf":pdf,"previous_deck":original}))
+ Ok(json!({"ok":true,"deck":deck,"pdf":pdf,"previous_deck":board["parent_deck"],"dirty":false,"placements":entries}))
 }
 
 pub fn remove(s:&mut Session,p:&Value)->Result<Value>{
