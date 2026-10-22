@@ -64,13 +64,30 @@ fn selected(s:&mut Session, params: &Value) -> Result<Value> {
     Ok(selection)
 }
 
+/// Login and chat resolve the same installed OpenCode executable; never install a fallback.
+pub fn opencode_program() -> Result<std::path::PathBuf> {
+    let paths = std::env::var_os("PATH").ok_or_else(|| invalid("OpenCode unavailable: PATH is unset"))?;
+    for directory in std::env::split_paths(&paths) {
+        let path = directory.join("opencode");
+        let Ok(metadata) = fs::metadata(&path) else { continue };
+        if !metadata.is_file() { continue; }
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 { continue; }
+        }
+        return fs::canonicalize(path).map_err(Into::into);
+    }
+    Err(invalid("Installed OpenCode executable not found on PATH; no fallback installed"))
+}
+
 /// Never propagate raw child output into UI, journal or logs on failure: it can contain credentials.
 fn run(dir:&Path, tool:&str, args:&[String]) -> Result<String> {
+    let program = if tool == "opencode" { opencode_program()? } else { tool.into() };
     let reply=std::env::temp_dir().join(format!("ac-agent-{}-{}.reply",std::process::id(),stamp()));
     let mut options=fs::OpenOptions::new();options.write(true).create_new(true);
     #[cfg(unix)] {use std::os::unix::fs::OpenOptionsExt;options.mode(0o600);}
     let file=options.open(&reply)?;
-    let output=Command::new(tool).current_dir(dir).args(args).stdout(file).output();
+    let output=Command::new(program).current_dir(dir).args(args).stdout(file).output();
     let bytes=fs::read(&reply).unwrap_or_default();let _=fs::remove_file(&reply);
     let output=output.map_err(|_|invalid(format!("Cannot start selected agent `{tool}`; check its installed CLI locally. No fallback attempted")))?;
     if !output.status.success() {

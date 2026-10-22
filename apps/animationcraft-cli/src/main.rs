@@ -84,6 +84,7 @@ SUBCOMMANDS
   exec ui.components region=#view-project limit=30
                                       bounded actual DOM geometry/style/state; no input values
   exec center.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
+  login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
@@ -606,6 +607,24 @@ fn main() {
     match cmd {
         "help" | "-h" => outln!("{HELP}"),
         "version" => outln!("animationcraft-cli {}", env!("CARGO_PKG_VERSION")),
+        "login" => {
+            use std::io::IsTerminal;
+            if a.bridge_addr().is_some() || a.pos(2).is_some() {
+                usage("login [provider] runs locally without --bridge");
+            }
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()
+                || !std::io::stderr().is_terminal()
+            {
+                fail("Login requires your interactive terminal");
+            }
+            let program = animationcraft_engine::agent::opencode_program().unwrap_or_else(|e| fail(e));
+            diag(format_args!("Using OpenCode: {}", program.display()));
+            let mut command = std::process::Command::new(program);
+            command.args(["auth", "login"]);
+            if let Some(provider) = a.pos(1) { command.arg(provider); }
+            let status = command.status().unwrap_or_else(|_| fail("Cannot start installed OpenCode"));
+            std::process::exit(status.code().unwrap_or(1));
+        }
         "center" => {
             if a.bridge_addr().is_some(){usage("Command Center currently uses an explicit headless project; --bridge is reserved for existing live command access");}
             if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),std::env::args().any(|a|a=="--print")){fail(e);}
