@@ -96,6 +96,7 @@ pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     let out = dir.join("asset.png");
     let instruction = format!(
         "Use your native built-in image_gen.imagegen tool exactly once to generate the raster image described below. \
+         Only create or redraw one asset, or repair a bounded region. Never regenerate an entire background, even as a fallback; stop and return that request to the supervising agent. Preserve reference/background originals and unaffected content. \
          Do not write or copy files or reconstruct image bytes. The application imports the native staged image itself. Once the tool returns, stop; do not retry, even if no image bytes appear in the text response. No SVG, HTML, code-drawn art, APIs, \
          external providers or MCP substitutes. If native image generation is unavailable, stop and report it. \
          Do not install anything, request API keys, read session history or unrelated files, or modify project files. \
