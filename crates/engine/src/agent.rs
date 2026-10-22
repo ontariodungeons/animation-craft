@@ -191,7 +191,13 @@ fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
     let got=api(dir,"session.get",Some(id),None)?;
     if data(&got)["model"]["id"]!=wanted["id"] || data(&got)["model"]["providerID"]!=wanted["providerID"] {
         return Err(invalid("OpenCode session model differs from the app selection; no prompt sent or fallback attempted"));
-    } Ok(())
+    }
+    let expected=fs::canonicalize(dir)?;
+    let actual=data(&got)["location"]["directory"].as_str().and_then(|path|fs::canonicalize(path).ok());
+    if actual.as_deref()!=Some(expected.as_path()) {
+        return Err(invalid("OpenCode session location differs from the open project; use agent.new_chat to create a correctly scoped session. Existing history preserved; no prompt sent"));
+    }
+    Ok(())
 }
 fn open_session(s:&Session,wanted:&Value,fresh:bool)->Result<String> {
     let project=chat_identity(s)?;let dir=crate::workshop::project_dir(s)?;let state=state_dir(s)?;let file=state.join("opencode-session");
@@ -199,7 +205,7 @@ fn open_session(s:&Session,wanted:&Value,fresh:bool)->Result<String> {
         let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
         verify_model(&dir,id.trim(),wanted)?;return Ok(id.trim().into());
     }
-    let response=api(&dir,"session.create",None,Some(json!({"title":"AnimationCraft fresh chat","model":wanted})))?;
+    let response=api(&dir,"session.create",None,Some(json!({"title":"AnimationCraft fresh chat","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}})))?;
     let id=data(&response)["id"].as_str().filter(|id|id.starts_with("ses_")&&!id.chars().any(char::is_control)).ok_or_else(||invalid("OpenCode did not return a valid session ID; no prompt sent"))?;
     verify_model(&dir,id,wanted)?;
     fs::create_dir_all(&state)?;archive(s)?;

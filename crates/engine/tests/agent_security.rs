@@ -21,13 +21,16 @@ if operation=='model.list':
 elif operation=='session.create':
  n=int((root/'counter').read_text())+1 if (root/'counter').exists() else 1
  (root/'counter').write_text(str(n))
- model=json.loads(args[-1])['model']
+ body=json.loads(args[-1]);model=body['model']
  (root/'active-model').write_text(json.dumps(model))
- print(json.dumps({'data':{'id':'ses_synthetic_'+str(n),'model':model}}))
+ (root/'active-location').write_text(json.dumps(body.get('location',{'directory':'/wrong-service-default'})))
+ print(json.dumps({'data':{'id':'ses_synthetic_'+str(n),'model':model,'location':json.loads((root/'active-location').read_text())}}))
 elif operation=='session.get':
  model=json.loads((root/'active-model').read_text())
  if case=='mismatch': model['id']='synthetic-paid'
- print(json.dumps({'data':{'id':'ses_synthetic_'+(root/'counter').read_text(),'model':model}}))
+ location=json.loads((root/'active-location').read_text())
+ if case=='location_mismatch': location={'directory':'/wrong-service-default'}
+ print(json.dumps({'data':{'id':'ses_synthetic_'+(root/'counter').read_text(),'model':model,'location':location}}))
 elif operation=='session.prompt': print(json.dumps({'data':{'id':'msg_synthetic','time':{'created':1}}}))
 elif operation=='session.message.list':
  print(json.dumps({'data':[{'id':'reply','type':'assistant','time':{'created':2},'content':[{'type':'text','text':'synthetic reply'}]},{'type':'idle','time':{'created':3}}]}))
@@ -58,6 +61,9 @@ fn run_case(name: &str) {
     assert!(String::from_utf8_lossy(&result.stdout).contains("CASE_ASSERTIONS_COMPLETED"));
 }
 
+#[test] fn agent_security_session_location_is_explicit_and_verified() { run_case("location"); }
+#[test] fn agent_security_wrong_native_location_never_prompts() { run_case("location_mismatch"); }
+#[test] fn agent_security_continuation_rechecks_location() { run_case("continued_location_mismatch"); }
 #[test] fn agent_security_saved_selection_and_fresh_sessions() { run_case("fresh"); }
 #[test] fn agent_security_active_model_selection_is_isolated() { run_case("isolation"); }
 #[test] fn agent_security_queued_reply_is_retrievable() { run_case("queued"); }
@@ -122,6 +128,17 @@ fn agent_security_child() {
         assert_eq!(fs::read(root.join("config/animationcraft/agent.json")).unwrap(),before);
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
+    if case=="continued_location_mismatch" {
+        agent::cmd_agent_send(&mut session,&params).unwrap();
+        let before=fs::read_to_string(root.join("calls.jsonl")).unwrap();
+        fs::write(root.join("active-location"),json!({"directory":"/wrong-service-default"}).to_string()).unwrap();
+        params["new_chat"]=json!(false);
+        let error=agent::cmd_agent_send(&mut session,&params).unwrap_err().to_string();
+        assert!(error.contains("location differs"),"{error}");
+        let after=fs::read_to_string(root.join("calls.jsonl")).unwrap();
+        assert_eq!(before.lines().filter(|l|l.contains("session.prompt")).count(),after.lines().filter(|l|l.contains("session.prompt")).count());
+        println!("CASE_ASSERTIONS_COMPLETED");return;
+    }
     if case=="queued" {
         params["wait"]=json!(0);params["_request_id"]=json!("queued-check");
         let sent=agent::cmd_agent_send(&mut session,&params).unwrap();
@@ -135,7 +152,7 @@ fn agent_security_child() {
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
     let reply=agent::cmd_agent_send(&mut session,&params);
-    if case=="fresh" || case=="switch" {
+    if case=="fresh" || case=="switch" || case=="location" {
         let first=reply.unwrap();
         assert_eq!(first["model"],"synthetic-free");
         assert_eq!(first["provider"],"opencode");
@@ -158,6 +175,11 @@ fn agent_security_child() {
         for line in calls.lines().filter(|l|l.contains("session.create")) {
             assert!(line.contains("synthetic-free") || line.contains("synthetic-other-free"));
             assert!(!line.contains("parentID"));
+            if case=="location" {
+                let args:Vec<String>=serde_json::from_str(line).unwrap();
+                let body:serde_json::Value=serde_json::from_str(args.last().unwrap()).unwrap();
+                assert_eq!(body["location"]["directory"],json!(root.join("project")),"session.create must carry a structured native location");
+            }
         }
     } else {
         let error=reply.unwrap_err().to_string();
@@ -172,6 +194,7 @@ fn agent_security_child() {
         if case=="extra" {assert!(error.contains("Extra chat arguments"),"{error}");}
         if case=="unknown" {assert!(error.contains("absent or disabled"),"{error}");}
         if case=="mismatch" {assert!(error.contains("differs"),"{error}");}
+        if case=="location_mismatch" {assert!(error.contains("location differs"),"{error}");}
         if case=="override" {assert!(error.contains("overridden"),"{error}");}
         let calls=fs::read_to_string(root.join("calls.jsonl")).unwrap_or_default();
         assert!(!calls.contains("session.prompt"),"must reject before inference: {calls}");

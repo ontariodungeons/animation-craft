@@ -100,7 +100,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         v = json!({});
     }
     let engine = app.state::<Engine>();
-    let (project, dirty) = if let Ok(s) = engine.0.try_lock() {
+    let (project, dirty, chat_selection) = if let Ok(s) = engine.0.try_lock() {
         let dirty = if let Some(path) = &s.project_path {
             std::fs::read(path)
                 .ok()
@@ -120,10 +120,11 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         } else {
             Some(false)
         };
-        (s.project_path.clone(), dirty)
+        (s.project_path.clone(), dirty, s.agent_selection.clone())
     } else {
         (
             v["session_project"].as_str().map(std::path::PathBuf::from),
+            None,
             None,
         )
     };
@@ -136,9 +137,9 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     v["project_identity_kind"] = json!("canonical project path");
     v["observed_unix_ms"] = json!(now());
     v["frontend_report_age_ms"] = v["updated_unix_ms"].as_u64().map(|updated|json!(now().saturating_sub(updated as u128))).unwrap_or(Value::Null);
-    v["chat_selection"] = match animationcraft_engine::agent::settings(){
-        Ok(selected)=>json!({"agent":selected["agent"],"provider":selected["provider"],"model":selected["model"],"source":"saved app selection","runtime_model_verified":false}),
-        Err(error)=>json!({"status":"unknown","error":error.to_string(),"runtime_model_verified":false}),
+    v["chat_selection"] = match chat_selection {
+        Some(selected)=>json!({"agent":selected["agent"],"provider":selected["provider"],"model":selected["model"],"source":"active engine selection","runtime_model_verified":false}),
+        None=>json!({"status":"unknown","reason":"active engine selection unavailable","runtime_model_verified":false}),
     };
     let mut reasons=Vec::new();
     if dirty==Some(true){reasons.push(json!("engine state differs from saved project"));}
