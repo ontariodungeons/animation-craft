@@ -1547,6 +1547,8 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
         .or_else(|| s.song_audio.clone())
         .filter(|p| p.is_file())
         .ok_or_else(|| EngineError::InvalidParams("no song audio: pass audio=<file> or workshop.set_audio".into()))?;
+    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str())?;
+    let runtime = runtime.to_str().ok_or_else(|| EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?;
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let hf = project_dir(s)?.join("hyperframes");
     std::fs::create_dir_all(hf.join("assets"))?;
@@ -1566,11 +1568,11 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     let mut trace=crate::audio_trace::AudioTrace::new(&project_dir(s)?,&audio,params)?;
     if trace.run("audio_conversion",overwrite||!bgm.is_file(),&hf,"ffmpeg",&["-v", "error", "-y", "-i", &arg(&audio),
             "-codec:a", "libmp3lame", "-q:a", "2", &arg(&bgm)].map(String::from),&[bgm.clone()])?.is_some(){ran.push("ffmpeg → assets/bgm.mp3");}
-    if trace.run("transcription",overwrite||!transcript.is_file(),&hf,"npx",&["--no-install", "hyperframes", "transcribe", &arg(&bgm), "-d", &arg(&hf), "--json", "--no-runtime-install"]
+    if trace.run("transcription",overwrite||!transcript.is_file(),&hf,runtime,&["transcribe", &arg(&bgm), "-d", &arg(&hf), "--json", "--no-runtime-install"]
             .map(String::from),&[transcript.clone()])?.is_some(){ran.push("hyperframes transcribe → transcript.json");}
     let srt = hf.join("transcript.srt");
     // Existing JSON -> SRT conversion never runs ASR.
-    if trace.run("caption_export",overwrite||!srt.is_file(),&hf,"npx",&["--no-install", "hyperframes", "transcribe", &arg(&transcript), "--to", "srt",
+    if trace.run("caption_export",overwrite||!srt.is_file(),&hf,runtime,&["transcribe", &arg(&transcript), "--to", "srt",
             "-o", &arg(&srt)].map(String::from),&[srt.clone()])?.is_some(){ran.push("hyperframes transcribe --to srt → transcript.srt");}
     if trace.run("beatgrid",overwrite||!audiomap.is_file(),&hf,"python3",&[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)],&[audiomap.clone()])?.is_some(){ran.push("analyze-beatgrid.py → audiomap.json");}
     let storyboard = hf.join("STORYBOARD.md");

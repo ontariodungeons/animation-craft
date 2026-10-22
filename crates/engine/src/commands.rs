@@ -444,7 +444,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Analyze Song (HyperFrames)",
             ["File"],
             None,
-            "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false}",
+            "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false, \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH; no npx install\"}",
             always,
             cmd_audio_analyze
         ),

@@ -156,7 +156,7 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
 }
 
 /// Resolve only an explicitly selected executable, HYPERFRAMES_CLI, or PATH; never install with npx.
-fn hyperframes_cli(explicit: Option<&str>) -> Result<PathBuf> {
+pub(crate) fn hyperframes_cli(explicit: Option<&str>) -> Result<PathBuf> {
     let configured=explicit.map(PathBuf::from).or_else(||std::env::var_os("HYPERFRAMES_CLI").map(PathBuf::from));
     let path=configured.or_else(||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file())))
         .ok_or_else(||EngineError::InvalidParams("HyperFrames executable unavailable. Pass hyperframes_cli=/absolute/path or set HYPERFRAMES_CLI to an existing official executable; no install or npx lookup was attempted".into()))?;

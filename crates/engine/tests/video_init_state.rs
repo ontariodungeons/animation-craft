@@ -71,3 +71,12 @@ fn requested_music_assembly_requires_the_documented_machine_plan() {
  assert!(result.is_err(),"An assembly request without the owning workflow plan must not silently succeed");assert_eq!(std::fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(),"existing");
  std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn audio_analysis_rejects_missing_explicit_runtime_without_npx_fallback() {
+ let dir=std::env::temp_dir().join(format!("ac-audio-runtime-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
+ let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.acproj")})).unwrap();s.video_target="hyperframes".into();
+ let audio=dir.join("source.wav");std::fs::write(&audio,b"original fixture").unwrap();s.song_audio=Some(audio.clone());
+ let error=s.execute("audio.analyze",json!({"hyperframes_cli":"/missing/explicit-hyperframes"})).unwrap_err().to_string();
+ assert!(error.contains("HyperFrames executable"),"{error}");assert!(!dir.join("hyperframes/assets/bgm.mp3").exists());assert_eq!(std::fs::read(audio).unwrap(),b"original fixture");std::fs::remove_dir_all(dir).unwrap();
+}
