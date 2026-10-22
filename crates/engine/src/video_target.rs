@@ -172,28 +172,42 @@ fn generated_files(root:&Path, relative:&Path, files:&mut Vec<PathBuf>) -> Resul
     Ok(())
 }
 
-fn init_hyperframes(dir:&Path, executable:Option<&str>) -> Result<PathBuf> {
+fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>, replace_scaffold:bool) -> Result<PathBuf> {
     let cli=hyperframes_cli(executable)?;
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|EngineError::InvalidParams(e.to_string()))?.as_nanos();
     let stage=dir.join(format!(".hyperframes-init-{}-{stamp}",std::process::id()));
-    let args=["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
+    let mut args=vec!["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
+    if let Some(audio)=&s.song_audio {args.extend(["--audio".into(),audio.to_string_lossy().into_owned()]);}
     let output=std::process::Command::new(&cli).args(&args).current_dir(dir).env("HYPERFRAMES_SKIP_SKILLS","1").output()
         .map_err(|e|EngineError::ExternalTool(cli.display().to_string(),e.to_string()))?;
     if !output.status.success(){return Err(EngineError::ExternalTool(cli.display().to_string(),format!("official init exited {:?}: {}. Partial output retained at {}",output.status.code(),String::from_utf8_lossy(&output.stderr),stage.display())));}
+    if let Some(transcript)=crate::workshop::transcript_files(dir).into_iter().next() {
+        let imported=run_tool_in(dir,cli.to_str().ok_or_else(||EngineError::InvalidParams("Runtime path must be UTF-8".into()))?,&["transcribe".into(),transcript.to_string_lossy().into_owned(),"--dir".into(),stage.to_string_lossy().into_owned(),"--json".into(),"--no-runtime-install".into()])?;
+        let result:Value=serde_json::from_str(&imported).map_err(|e|EngineError::InvalidParams(format!("Official existing-transcript import returned invalid JSON: {e}")))?;
+        if result["ok"]!=true || !stage.join("transcript.json").is_file(){return Err(EngineError::InvalidParams(format!("Official existing-transcript import failed: {imported}; staged files retained at {}",stage.display())));}
+    }
     let config=stage.join("hyperframes.json");let entry=stage.join("index.html");
     if !entry.is_file() || !std::fs::read(&config).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).is_some_and(|v|v.is_object()) {
         return Err(EngineError::InvalidParams(format!("Official HyperFrames init did not create a valid hyperframes.json and index.html; output retained at {}",stage.display())));
     }
     let dest=dir.join("hyperframes");let mut files=Vec::new();generated_files(&stage,Path::new(""),&mut files)?;
-    // Preflight every collision before moving anything; existing captions/assets remain authoritative.
+    // Replacement is explicit and backed up; captions, artwork and other files cannot be overwritten.
+    let replaceable=|p:&Path|replace_scaffold&&matches!(p.to_str(),Some("index.html"|"hyperframes.json"|"package.json"|"meta.json"));
     for relative in &files {
         let target=dest.join(relative);
-        if target.exists() || target.ancestors().skip(1).take_while(|p|p.starts_with(&dest)).any(|p|p.exists()&&!p.is_dir()) {
+        let same=target.is_file()&&std::fs::read(&target)?==std::fs::read(stage.join(relative))?;
+        if (target.exists()&&!same&&!replaceable(relative)) || target.ancestors().skip(1).take_while(|p|p.starts_with(&dest)).any(|p|p.exists()&&!p.is_dir()) {
             return Err(EngineError::InvalidParams(format!("Official init conflicts with existing {}; no existing file overwritten. Generated output retained at {}",target.display(),stage.display())));
         }
     }
     for relative in files {
-        let target=dest.join(&relative);std::fs::create_dir_all(target.parent().ok_or_else(||EngineError::InvalidParams("Generated file has no parent".into()))?)?;
+        let target=dest.join(&relative);
+        if target.is_file() {
+            if std::fs::read(&target)?==std::fs::read(stage.join(&relative))?{continue;}
+            let backup=dest.join(".animationcraft-history").join(format!("init-{stamp}")).join(&relative);
+            std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Backup has no parent".into()))?)?;std::fs::copy(&target,backup)?;
+        }
+        std::fs::create_dir_all(target.parent().ok_or_else(||EngineError::InvalidParams("Generated file has no parent".into()))?)?;
         std::fs::rename(stage.join(relative),target)?;
     }
     std::fs::remove_dir_all(&stage)?;
@@ -302,8 +316,10 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .unwrap_or(&s.video_target)
         .to_string();
-    let reused=target_project_path(s,&dir,&target).is_some();
-    let created = if target=="hyperframes" && !reused {init_hyperframes(&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
+    let existed=target_project_path(s,&dir,&target).is_some();
+    let replace=params["replace_scaffold"]==true;
+    let reused=existed&&!replace;
+    let created = if target=="hyperframes" && !reused {init_hyperframes(s,&dir,params["hyperframes_cli"].as_str(),replace)?}else{ensure_video_target_project(s, &dir, &target)?};
     if target == "hyperframes" && !created.is_file() {
         return Err(EngineError::InvalidParams(format!(
             "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
@@ -313,7 +329,10 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
     status["video_complete"]=json!(false);
-    status["initialization_scope"]=json!("Official editable scaffold only; song composition and rendered output are separate steps");
+    status["song_imported"]=json!(target=="hyperframes"&&!reused&&s.song_audio.is_some());
+    status["existing_timing_imported"]=json!(target=="hyperframes"&&!reused&&!crate::workshop::transcript_files(&dir).is_empty());
+    status["replaced_existing_scaffold"]=json!(existed&&replace);
+    status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
     if target=="hyperframes" {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
     Ok(status)
 }
@@ -329,7 +348,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
     if current["running"] == json!(true) {
         return workshop_status(s);
     }
-    let _ = if target=="hyperframes" && target_project_path(s,&dir,&target).is_none(){init_hyperframes(&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
+    let _ = if target=="hyperframes" && target_project_path(s,&dir,&target).is_none(){init_hyperframes(s,&dir,params["hyperframes_cli"].as_str(),false)?}else{ensure_video_target_project(s, &dir, &target)?};
     let preferred_port = params
         .get("port")
         .and_then(Value::as_u64)

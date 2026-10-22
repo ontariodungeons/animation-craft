@@ -432,7 +432,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("workshop.remove", "Remove Workshop File", ["Workshop"], None,
             "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}", always, cmd_workshop_remove),
         cmd!("video.init", "Initialize Target Video Project", ["Workshop"], None,
-            "{\"target\": \"optional remotion|filmcraft|hyperframes\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH, no npx install\"}", always, cmd_video_init),
+            "{\"target\": \"optional remotion|filmcraft|hyperframes\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH, no npx install\", \"replace_scaffold\": \"optional false; explicitly rebuild initial scaffold from linked song/timing with backups; existing artwork/captions preserved\"}", always, cmd_video_init),
         cmd!("video.server_start", "Start Video Editor Web Server", ["Workshop"], None,
             "{\"target\": \"optional remotion|hyperframes\", \"port\": 3057, \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, cmd_video_server_start),
         cmd!("video.server_stop", "Stop Video Editor Web Server", ["Workshop"], None,

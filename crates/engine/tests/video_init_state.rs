@@ -41,3 +41,23 @@ fn initializer_success_without_files_is_failure_and_existing_files_survive() {
  let r=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli}));assert!(r.is_err(),"exit0 alone is not initialization");assert_eq!(std::fs::read_to_string(captions).unwrap(),"Keep");
  std::fs::remove_dir_all(dir).unwrap();
 }
+#[test]
+#[cfg(unix)]
+fn initialization_imports_existing_song_and_native_timing_without_asr() {
+ let dir=std::env::temp_dir().join(format!("ac-video-song-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
+ let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.acproj")})).unwrap();
+ let audio=dir.join("song.wav");std::fs::write(&audio,b"synthetic audio fixture").unwrap();s.song_audio=Some(audio.clone());
+ let words=json!([{"text":"hello","start":0.2,"end":1.0}]);let transcript=dir.join("fixture.transcript.json");std::fs::write(&transcript,words.to_string()).unwrap();
+ let cli=runtime(&dir,r#"case "$1" in
+ init) [ "$4" = --skip-transcribe ] && [ "$5" = --audio ] && [ "$6" = "$(dirname "$0")/song.wav" ] || exit 9
+ mkdir -p "$2";printf '%s' '{}' > "$2/hyperframes.json";printf '%s' '<audio id="song"></audio>' > "$2/index.html";;
+ transcribe) [ "$3" = --dir ] && [ "$5" = --json ] && [ "$6" = --no-runtime-install ] || exit 8
+ cp "$2" "$4/transcript.json";printf '%s' '{"ok":true,"wordCount":1}';;
+ *) exit 7;;
+esac"#);
+ let result=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();
+ assert_eq!(result["song_imported"],true);
+ let imported:serde_json::Value=serde_json::from_slice(&std::fs::read(dir.join("hyperframes/transcript.json")).unwrap()).unwrap();assert_eq!(imported,words);
+ assert_eq!(std::fs::read(&audio).unwrap(),b"synthetic audio fixture");assert_eq!(std::fs::read_to_string(transcript).unwrap(),words.to_string());
+ std::fs::remove_dir_all(dir).unwrap();
+}
