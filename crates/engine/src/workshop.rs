@@ -417,6 +417,7 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty(), "why": transcript_why,
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
             "outputs": transcript_outputs,
+            "document": transcripts.first().and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()),
             "target": target_project, "brief": stage_brief(s, &dir, "transcript")}),
         json!({"id": "reference", "title": "Reference art", "done": !panels.is_empty() && approved, "why": reference_why,
             "inputs": panels.iter().enumerate().map(|(i, p)| {
@@ -484,7 +485,7 @@ fn numbered_prompts(text: &str) -> std::collections::BTreeMap<usize, String> {
 }
 
 /// Checks a transcript has the shape audio.transcribe writes.
-fn transcript_problems(doc: &Value) -> Vec<String> {
+pub(crate) fn transcript_problems(doc: &Value) -> Vec<String> {
     let mut problems = Vec::new();
     let timed = |v: &Value| {
         v.get("start")
@@ -502,7 +503,7 @@ fn transcript_problems(doc: &Value) -> Vec<String> {
                     .and_then(Value::as_str)
                     .is_some_and(|t| !t.trim().is_empty());
                 match (text_ok, timed(w)) {
-                    (true, Some((a, b))) if b >= a && a >= last - 0.001 => last = a,
+                    (true, Some((a, b))) if a>=0.0 && a.is_finite() && b.is_finite() && b >= a && a >= last - 0.001 => last = a,
                     (true, Some(_)) => {
                         problems.push(format!("word {} is out of order or ends before it starts", i + 1))
                     }
@@ -519,8 +520,16 @@ fn transcript_problems(doc: &Value) -> Vec<String> {
             "missing \"paragraphs\": [{text, start, end}] (the sung lines or stanzas)".into(),
         ),
         Some(lines) => {
-            if lines.iter().any(|p| timed(p).is_none()) {
-                problems.push("every paragraph needs start and end".into());
+            let mut previous=0.0;
+            if lines.is_empty() || lines.iter().any(|p| match timed(p){Some((a,b)) if a.is_finite()&&b.is_finite()&&a>=previous&&a>=0.0&&b>=a&&p["text"].as_str().is_some_and(|t|!t.trim().is_empty())=>{previous=a;false},_=>true}){
+                problems.push("paragraphs need ordered nonnegative start/end and nonempty text".into());
+            }
+        }
+    }
+    if let Some(duration)=doc["recording_duration_sec"].as_f64().filter(|v|v.is_finite()&&*v>=0.0){
+        for key in ["words","paragraphs"]{
+            for (i,v) in doc[key].as_array().into_iter().flatten().enumerate(){
+                if v["end"].as_f64().is_some_and(|end|end>duration+0.001){problems.push(format!("{key} item {} ends after the recording ({duration:.6}s). Check matching audio/transcript; original received bytes retained.",i+1));}
             }
         }
     }
@@ -721,7 +730,10 @@ pub fn cmd_workshop_add(s: &mut Session, params: &Value) -> Result<Value> {
             )
         };
         if dest != *path {
-            std::fs::copy(path, &dest)?;
+            if dest.is_file() && std::fs::read(&dest)?!=std::fs::read(path)? {
+                return Err(EngineError::InvalidParams(format!("Material destination exists with different bytes: {}. Rename or explicitly resolve the collision; original retained.",dest.display())));
+            }
+            if !dest.exists(){std::fs::copy(path, &dest)?;}
         }
         added.push(dest);
     }
@@ -857,7 +869,23 @@ fn import_caption_paragraphs(text: &str) -> Result<Vec<Value>> {
 }
 
 /// Supplies a transcript made earlier instead of transcribing again.
-pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result<Value> {
+pub fn cmd_workshop_import_transcript(s: &mut Session, params:&Value)->Result<Value>{
+ let dir=project_dir(s)?;let mut adjusted=params.clone();
+ let mut received=std::fs::read(dir.join("intake-state.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["received"].as_array().cloned()).unwrap_or_default();
+ for (key,original) in [("path","original_source"),("captions","original_captions"),("audiomap","original_audiomap")] {
+  if let Some(raw)=params[key].as_str(){
+   let source=resolve_workspace_path(s,raw);
+   let record=crate::command_center::receive(&dir,&source)?;
+   adjusted[original]=json!(source);adjusted[key]=record["path"].clone();if !received.iter().any(|v|v["path"]==record["path"]){received.push(record);}
+  }
+ }
+ let result=import_transcript_inner(s,&adjusted);
+ let errors=match &result{Ok(_)=>vec![],Err(e)=>vec![e.to_string()]};
+ crate::command_center::write_state(&dir,&json!({"received":received,"problems":errors,"valid":result.is_ok(),"command":"workshop.import_transcript","manual":"animationcraft-cli commands workshop.import_transcript; crates/engine/src/workshop.rs"}))?;
+ result
+}
+
+fn import_transcript_inner(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let source = params
         .get("path")
@@ -867,11 +895,24 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
     let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&source)?)
         .map_err(|e| EngineError::InvalidParams(format!("not a JSON transcript: {e}")))?;
     let captions = params["captions"].as_str().map(|p| resolve_workspace_path(s,p));
-    let caption_text = captions.as_ref().map(std::fs::read_to_string).transpose()?;
+    let mut caption_text = captions.as_ref().map(std::fs::read_to_string).transpose()?;
     if doc.is_array() { doc=json!({"words":doc}); }
     if let Some(text)=&caption_text {
         doc["paragraphs"]=json!(import_caption_paragraphs(text)?);
     }
+
+    let mut grouping="provided paragraphs";
+    if doc.get("paragraphs").and_then(Value::as_array).is_none() {
+        if let Some(words)=doc["words"].as_array(){
+            doc["paragraphs"]=json!(words.iter().map(|w|json!({"text":w["text"],"start":w["start"],"end":w["end"]})).collect::<Vec<_>>());
+            grouping="provisional word fallback; original word timestamps";
+        }
+    }
+    if caption_text.is_none(){
+        let stamp=|v:f64|{let ms=(v*1000.0).round() as u64;format!("{:02}:{:02}:{:02},{:03}",ms/3600000,(ms/60000)%60,(ms/1000)%60,ms%1000)};
+        caption_text=doc["paragraphs"].as_array().map(|ps|ps.iter().enumerate().map(|(i,p)|format!("{}\n{} --> {}\n{}\n\n",i+1,stamp(p["start"].as_f64().unwrap_or(0.0)),stamp(p["end"].as_f64().unwrap_or(0.0)),p["text"].as_str().unwrap_or_default())).collect::<String>());
+    }
+    doc["grouping"]=json!(grouping);
 
     let mut problems = transcript_problems(&doc);
     if let (Some(recorded), Some(song)) = (doc.get("audio").and_then(Value::as_str), &s.song_audio)
@@ -882,30 +923,17 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
             song.display()
         ));
     }
-    if let Some(song) = &s.song_audio
-        && let Ok(probe) = run_tool_in(
-            &dir,
-            "filmcraft-cli",
-            &["probe".into(), song.to_string_lossy().into_owned()],
-        )
-        && let Some(ticks) = serde_json::from_str::<Value>(&probe)
-            .ok()
-            .and_then(|p| p.get("duration").and_then(Value::as_f64))
-    {
-        let song_seconds = ticks / FILMCRAFT_TICKS_PER_SECOND;
-        let last_end = doc
-            .get("words")
-            .and_then(Value::as_array)
-            .and_then(|w| w.last())
-            .and_then(|w| w.get("end"))
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        if last_end > song_seconds + 1.0 {
-            problems.push(format!(
-                "words run to {last_end:.1}s but the song is {song_seconds:.1}s long"
-            ));
-        }
+    let mapped_duration=params["audiomap"].as_str().map(|v|resolve_workspace_path(s,v)).and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["audio"]["duration_sec"].as_f64()).filter(|v|v.is_finite()&&*v>=0.0);
+    let probe_output=s.song_audio.as_ref().map(|p|std::process::Command::new("ffprobe").args(["-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1"]).arg(p).output());
+    let probed_duration=probe_output.as_ref().and_then(|r|r.as_ref().ok()).filter(|o|o.status.success()).and_then(|o|std::str::from_utf8(&o.stdout).ok()).and_then(|v|v.trim().parse::<f64>().ok()).filter(|v|v.is_finite()&&*v>=0.0);
+    doc["recording_duration_sec"]=json!(probed_duration);
+    problems.extend(transcript_problems(&doc).into_iter().filter(|e|e.contains("recording")));
+    if let (Some(recording),Some(mapped))=(probed_duration,mapped_duration){
+        if (recording-mapped).abs()>0.001{problems.push(format!("Audiomap duration {mapped:.6}s disagrees with recording {recording:.6}s. Supply the matching map or omit it; recording duration will not be extended."));}
     }
+    // The recording is authoritative. A supplied map is explicitly unverified when no probe succeeded.
+    let duration=probed_duration.or(mapped_duration);
+    let duration_warning=if probed_duration.is_none(){Some("Recording duration is unknown: provide readable matching audio and a working ffprobe. Supplied map duration, if any, is unverified; transcript endpoints are not recording-length evidence.")}else{None};
     if !problems.is_empty() {
         return Err(EngineError::InvalidParams(format!(
             "transcript does not match: {}",
@@ -929,6 +957,12 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
     }
     let dest = dir.join(format!("{stem}.transcript.json"));
     let serialized=serde_json::to_vec_pretty(&doc).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+    if dest.is_file() && !params["replace"].as_bool().unwrap_or(false) {
+        let old:Value=serde_json::from_slice(&std::fs::read(&dest)?).unwrap_or(Value::Null);
+        if old["words"]!=doc["words"] || old["paragraphs"]!=doc["paragraphs"] {
+            return Err(EngineError::InvalidParams("Transcript differs from existing authored data. Inspect received files; pass replace=true only to replace explicitly.".into()));
+        }
+    }
     std::fs::write(&dest, serialized)?;
     let mut copied = vec![dest];
     if let Some(text)=caption_text {
@@ -953,9 +987,13 @@ pub fn cmd_workshop_import_transcript(s: &mut Session, params: &Value) -> Result
         std::fs::copy(&fcproj, &to)?;
         copied.push(to);
     }
+    let provenance=json!({"mode":"reused existing transcript; no ASR or transcoding","source":params["original_source"],"captions_source":params["original_captions"],"duration_sec":duration,"duration_source":if probed_duration.is_some(){"authoritative recording probe"}else{"unverified supplied audiomap or unknown"},"duration_warning":duration_warning, "recording_duration_sec":probed_duration,"audiomap_duration_sec":mapped_duration,"provider":"unknown; not recorded by source","model":"unknown; not recorded by source","manual":"~/.agents/skills/media-use/audio/references/transcribe.md","executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"tool":"workshop.import_transcript (native Rust; ASR not called)","grouping":grouping});
+    std::fs::write(dir.join("transcript-provenance.json"),serde_json::to_vec_pretty(&provenance).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
     let _ = ensure_video_target_project(s, &dir, &s.video_target);
     let mut status = workshop_status(s)?;
     status["imported"] = json!(copied);
+    status["recording_duration_sec"]=json!(probed_duration);
+    status["duration_warning"]=json!(duration_warning);
     Ok(status)
 }
 
@@ -1549,6 +1587,7 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     let words: Value = serde_json::from_str(&std::fs::read_to_string(&transcript)?)
         .map_err(|e| EngineError::InvalidParams(format!("unreadable transcript.json: {e}")))?;
     let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
+    cmd_workshop_import_transcript(s,&json!({"path":transcript,"captions":srt,"audiomap":audiomap,"replace":overwrite}))?;
     Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,
         "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap, "storyboard": storyboard},
         "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
@@ -1877,4 +1916,14 @@ mod tests {
         let (share, aspect) = smear_band(&part(false), 200.0);
         assert!(share < 0.02 || aspect < 3.0, "share {share}, aspect {aspect}");
     }
+    #[test]
+    fn recording_bounds_validate_every_word_and_paragraph_without_extending_duration() {
+        let mut v=serde_json::json!({"recording_duration_sec":2.0,"words":[{"text":"a","start":0.0,"end":3.0},{"text":"b","start":1.0,"end":1.5}],"paragraphs":[{"text":"a b","start":0.0,"end":1.5}]});
+        assert!(super::transcript_problems(&v).iter().any(|e|e.contains("recording")));
+        v["words"][0]["end"]=serde_json::json!(0.5);v["paragraphs"][0]["end"]=serde_json::json!(3.0);
+        assert!(super::transcript_problems(&v).iter().any(|e|e.contains("recording")));
+        v["recording_duration_sec"]=serde_json::Value::Null;
+        assert!(super::transcript_problems(&v).is_empty());
+    }
+
 }

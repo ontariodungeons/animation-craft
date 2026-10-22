@@ -110,7 +110,7 @@ impl Args {
 
     pub fn bridge_addr(&self) -> Option<String> {
         self.inner.opt("--bridge").map(|v| {
-            if v.contains(':') {
+            if v=="auto" || v.contains(':') {
                 v
             } else {
                 format!("127.0.0.1:{v}")

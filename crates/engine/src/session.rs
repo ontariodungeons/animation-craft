@@ -22,6 +22,10 @@ pub struct Session {
     pub project_assets: Vec<ProjectAsset>,
     /// The open `.acproj` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
+    /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
+    pub record_user_state: bool,
+    /// Exclusive writer lease on the canonical project file for the live Studio session.
+    pub project_owner: Option<std::sync::Arc<std::fs::File>>,
     /// The song this project animates, referenced in place (never copied).
     pub song_audio: Option<PathBuf>,
     /// Whether the user approved the workshop draft PDF.
@@ -50,6 +54,8 @@ impl Default for Session {
             assets: HashMap::new(),
             project_assets: Vec::new(),
             project_path: None,
+            record_user_state: false,
+            project_owner: None,
             song_audio: None,
             draft_approved: false,
             video_target: "remotion".into(),
@@ -61,6 +67,10 @@ impl Default for Session {
             blender_available: false,
         }
     }
+}
+
+impl Session {
+    pub fn user_session()->Self{Self{record_user_state:true,..Self::default()}}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

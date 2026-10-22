@@ -19,7 +19,9 @@
 )]
 
 pub mod agent;
+pub mod activity;
 pub mod commands;
+pub mod command_center;
 pub mod control_bindings;
 pub mod doctor;
 pub mod exports;
@@ -95,7 +97,21 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 impl Session {
     /// Execute one command by id with JSON parameters, returning JSON.
-    pub fn execute(&mut self, id: &str, params: Value) -> Result<Value> {
+    pub fn execute(&mut self,id:&str,params:Value)->Result<Value>{
+        let _context=activity::enter(id,&params);
+        let _writer=if commands::find(id).is_some_and(|c|c.journal) && !matches!(id,"project.open"|"project.close"|"project.new"|"project.intake") {
+            self.project_path.as_deref().map(|path|project::claim(self,path)).transpose()?
+        }else{None};
+        let prior_owner=self.project_owner.clone();
+        if let Some(owner)=&_writer{self.project_owner=Some(owner.clone());}
+        let record=self.record_user_state&&commands::find(id).is_none_or(|c|c.journal);
+        if record{activity::command(self.project_path.as_deref(),id,&params,"dispatch_running",None);}
+        let result=self.execute_inner(id,params.clone());
+        if record{match &result{Ok(v)=>activity::command(self.project_path.as_deref(),id,&params,if v["ok"]==false{"engine_error"}else if v["intake_ready"]==false{"engine_needs_work"}else{"engine_success"},None),Err(e)=>activity::command(self.project_path.as_deref(),id,&params,"engine_error",Some(&e.to_string()))};}
+        if _writer.is_some(){self.project_owner=prior_owner;}
+        result
+    }
+    fn execute_inner(&mut self, id: &str, params: Value) -> Result<Value> {
         let spec = commands::find(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         check_param_types(spec.params, &params)?;
         (spec.enabled)(self).map_err(|e| EngineError::CommandFailed(id.to_string(), e))?;
@@ -158,3 +174,8 @@ impl Session {
         Ok(out)
     }
 }
+
+pub mod local_ipc;
+
+pub mod project_catalog;
+pub mod studio_sessions;

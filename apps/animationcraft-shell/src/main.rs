@@ -28,11 +28,12 @@ fn startup() -> Value {
 }
 
 mod bridge;
+mod feedback;
 
 /// The engine session of the open project: one for the window, shared by the page's commands and
 /// the `--control` bridge (the CLI and MCP), like the session of the older UI.
-#[derive(Default)]
 pub struct Engine(pub std::sync::Mutex<Session>);
+impl Default for Engine{fn default()->Self{Self(std::sync::Mutex::new(Session::user_session()))}}
 
 impl Engine {
     /// Runs `f` on the session with `path` open (opened first when another project is).
@@ -41,7 +42,7 @@ impl Engine {
         if let Some(path) = path
             && s.project_path.as_deref() != Some(std::path::Path::new(path))
         {
-            s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
+            return Err("Different workspace requested: use the guarded project.open command explicitly; current Studio state was preserved.".into());
         }
         f(&mut s)
     }
@@ -63,8 +64,7 @@ fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, St
 }
 
 /// Execute the shared engine registry without blocking the UI thread.
-#[tauri::command]
-async fn engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
+async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
     let long = animationcraft_engine::find_command(&id).is_some_and(|c| c.long_running);
     if !long {
         return tauri::async_runtime::spawn_blocking(move || {
@@ -97,6 +97,19 @@ async fn engine_command(app: tauri::AppHandle, id: String, params: Value) -> Res
     result
 }
 
+#[tauri::command]
+async fn engine_command(app:tauri::AppHandle,id:String,mut params:Value)->Result<Value,String>{
+    feedback::guard(&app,&id,true)?;
+    if params.is_object(){params["_origin"]=json!("UI control");}
+    if params["_request_id"].is_null(){params["_request_id"]=json!(feedback::new_request());}
+    let request_id=params["_request_id"].as_str().map(str::to_owned);
+    let mut result=execute_engine_command(app.clone(),id.clone(),params).await?;
+    if animationcraft_engine::find_command(&id).is_some_and(|c|!c.journal){return Ok(result);}
+    let revision=feedback::command_finished(&app,&id,&result,request_id.as_deref());
+    if result.is_object(){result["_ui_engine_revision"]=json!(revision);}
+    Ok(result)
+}
+
 /// An object's layers stacked and cropped to what is drawn, cached in the project's
 /// `storyboard/.theme/` (the engine's own assembler, also used for the PDF's cast cards).
 #[tauri::command]
@@ -112,106 +125,43 @@ fn object_preview(project: String, name: String, layers: Vec<String>) -> Result<
 
 /// Recent projects (`$XDG_CONFIG_HOME/animationcraft/recent_projects.json`, the same list the
 /// older UI kept), newest first.
-fn recent_file() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
-    Some(base.join("animationcraft").join("recent_projects.json"))
-}
-
-fn recent_list() -> Vec<String> {
-    recent_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
-}
-
-fn recent_save(list: &[String]) -> Result<(), String> {
-    let file = recent_file().ok_or("no config folder")?;
-    std::fs::create_dir_all(file.parent().ok_or("no config folder")?).map_err(|e| e.to_string())?;
-    std::fs::write(file, json!(list).to_string()).map_err(|e| e.to_string())
-}
-
-/// Puts a project at the top of Recent (ten kept).
-fn recent_record(path: &str) -> Result<(), String> {
-    let mut list = recent_list();
-    list.retain(|p| p != path);
-    list.insert(0, path.to_string());
-    list.truncate(10);
-    recent_save(&list)
-}
-
-/// Home: recent projects with name, folder, whether it still exists, and a thumbnail (the
-/// storyboard's first page when it has been drawn).
+fn recent_list()->Vec<String>{animationcraft_engine::project_catalog::list()}
 #[tauri::command]
-fn recent_projects() -> Value {
-    // One card per project: paths through compatibility symlinks resolve to the real file.
-    let mut seen = std::collections::HashSet::new();
-    let (mut found, missing): (Vec<String>, Vec<String>) = recent_list()
-        .into_iter()
-        .map(|p| std::fs::canonicalize(&p).map_or(p, |c| c.to_string_lossy().into_owned()))
-        .filter(|p| seen.insert(p.clone()))
-        .partition(|p| std::path::Path::new(p).is_file());
-    found.extend(missing);
-    let items: Vec<Value> = found
-        .into_iter()
-        .map(|p| {
-            let path = std::path::Path::new(&p);
-            let dir = path.parent().unwrap_or(path);
-            let thumb = dir.join("storyboard").join(".preview").join("page-01.png");
-            json!({
-                "path": p,
-                "name": path.file_stem().and_then(|n| n.to_str()).unwrap_or(&p),
-                "folder": dir.to_string_lossy(),
-                "exists": path.is_file(),
-                "thumb": thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
-            })
-        })
-        .collect();
-    json!(items)
-}
+fn recent_projects(engine:tauri::State<Engine>)->Result<Value,String>{engine.with(None,|s|s.execute("project.catalog",json!({})).map(|v|v["projects"].clone()).map_err(|e|e.to_string()))}
 
 /// Takes a project off Recent (the files are untouched).
 #[tauri::command]
-fn recent_forget(path: String) -> Result<(), String> {
-    let mut list = recent_list();
-    list.retain(|p| *p != path);
-    recent_save(&list)
-}
+fn recent_forget(path:String)->Result<(),String>{animationcraft_engine::project_catalog::forget(&path)}
 
 /// Where a new song project goes by default: beside the most recent project that still exists.
 #[tauri::command]
 fn projects_root() -> Option<String> {
     recent_list().iter().map(std::path::Path::new).find(|p| p.is_file())
-        .and_then(|p| p.parent()?.parent().map(|d| d.to_string_lossy().into_owned()))
+        .and_then(|p| {let parent=p.parent()?;let root=if parent.file_name().is_some_and(|v|v=="project"){parent.parent()?.parent()?}else{parent.parent()?};Some(root.to_string_lossy().into_owned())})
 }
 
 /// Opens a project with the engine's `project.open` (so a bad file is refused here), records it in
 /// Recent and returns its state.
 #[tauri::command]
-fn project_open(engine: tauri::State<Engine>, path: String) -> Result<Value, String> {
-    let state = engine.with(None, |s| {
-        s.execute("project.open", json!({"path": path})).map_err(|e| e.to_string())?;
+fn project_open(app:tauri::AppHandle, engine: tauri::State<Engine>, path: String, request: Option<String>, control:Option<String>) -> Result<Value, String> {
+    let request=request.unwrap_or_else(feedback::new_request);
+    if let Some(result)=feedback::reuse_open(&app,&json!({"path":path,"_request_id":request,"_origin":"UI control"}))?{return Ok(result);}
+    feedback::guard(&app,"project.open",true)?;
+    let mut state = engine.with(None, |s| {
+        s.execute("project.open", json!({"path": path,"claim_owner":true,"_origin":"UI control","_client":"Studio user (unverified label)","_request_id":request,"_control":control})).map_err(|e| e.to_string())?;
         state_of(s)
     })?;
-    recent_record(&path)?;
+    state["project"]=json!(engine.with(None,|s|Ok(s.project_path.clone()))?);
+    state["_ui_engine_revision"]=json!(feedback::command_finished(&app,"project.open",&state,Some(&request)));
     Ok(state)
 }
 
-/// New song project: `<root>/<slug>/<Name>.acproj` with the song audio, through the engine's
-/// `project.new` and `video.init` (the same commands as the CLI and MCP). Returns the project path.
+/// UI intake uses the same project.intake command and root/layout contract as terminal/MCP.
 #[tauri::command]
-fn project_create(engine: tauri::State<Engine>, name: String, audio: String, root: String) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("the song needs a name".into());
-    }
-    let slug = animationcraft_engine::commands::sanitize_asset_id(name).replace('_', "-");
-    let path = std::path::Path::new(root.trim()).join(slug).join(format!("{name}.acproj"));
-    engine.with(None, |s| {
-        s.execute("project.new", json!({"path": path, "audio": audio})).map_err(|e| e.to_string())?;
-        s.execute("video.init", json!({})).map_err(|e| e.to_string()).map(|_| ())
-    })?;
-    let path = path.to_string_lossy().into_owned();
-    recent_record(&path)?;
-    Ok(path)
+fn project_create(app:tauri::AppHandle,engine:tauri::State<Engine>,name:String,audio:String,root:String,request:Option<String>,control:Option<String>)->Result<String,String>{
+ feedback::guard(&app,"project.intake",true)?;
+ let result=engine.with(None,|s|s.execute("project.intake",json!({"root":root,"name":name,"audio":audio,"_origin":"UI click","_client":"Studio user (unverified label)","_request_id":request,"_control":control})).map_err(|e|e.to_string()))?;
+ let path=result["project"].as_str().ok_or("Intake did not return a project path")?.to_string();Ok(path)
 }
 
 /// Starts (`on`) or stops the project's studio server with the engine's own commands
@@ -586,8 +536,9 @@ fn main() {
         .manage(View::default())
         .manage(AgentDock::default())
         .manage(Engine::default())
+        .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("AnimationCraft").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
@@ -596,6 +547,8 @@ fn main() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(size.width, size.height),
             )?;
+            #[cfg(unix)]
+            if let Err(e)=bridge::serve_local(app.handle().clone()){eprintln!("private UI feedback: {e}");}
             // `--control <port>`: the CLI and MCP drive this window (same protocol as before).
             if let Some(port) = std::env::args().skip_while(|a| a != "--control").nth(1) {
                 let port: u16 = port.parse().map_err(|_| format!("--control needs a port, got {port}"))?;
@@ -604,12 +557,17 @@ fn main() {
             // Every resize re-applies the layout for the open tab.
             let handle = app.handle().clone();
             window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested{api,..}=event {
+                    if let Err(error)=feedback::guard(&handle,"app.quit",false){api.prevent_close();if let Some(view)=handle.get_webview("project"){let _=view.eval(format!("toast({});",json!(error)));}}
+                    else{#[cfg(unix)] bridge::cleanup(&handle);}
+                }
                 if let WindowEvent::Resized(_) = event {
                     layout(&handle);
                 }
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("AnimationCraft shell failed to start");
+        .build(tauri::generate_context!())
+        .expect("AnimationCraft shell failed to start")
+        .run(|app,event|{if matches!(event,tauri::RunEvent::Exit){#[cfg(unix)] bridge::cleanup(app);}});
 }

@@ -69,10 +69,25 @@ fn output(app: &AppHandle, params: &Value, name: &str) -> Result<std::path::Path
     Ok(dir.join(format!("{name}-{stamp}.png")))
 }
 
-fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
+pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
     let none = Value::Null;
+    if let Some(expected)=params["_expected_project"].as_str(){
+        let expected=animationcraft_engine::studio_sessions::canonical(std::path::Path::new(expected))?;
+        let actual=app.state::<Engine>().with(None,|s|Ok(s.project_path.clone()))?;
+        if actual.as_deref()!=Some(expected.as_path()){return Err("Pinned Studio changed project; request refused without switching".into());}
+    }
+    #[cfg(unix)]
+    if let Some(expected)=params["_expected_instance"].as_str(){let socket=app.state::<LocalSocket>();if socket.0.file_name().and_then(|p|p.to_str())!=Some(expected){return Err("Studio instance changed; explicit reattach required".into());}}
+    if id=="project.open"{if let Some(result)=crate::feedback::reuse_open(app,params)?{return Ok(result);}}
+
+    if matches!(id,"project.open"|"project.new"|"project.close"|"project.intake"|"app.quit"){
+        eval(app,"await acFeedback.report(); return true;")?;
+    }
     match id {
         "ui.eval" => eval(app, params["js"].as_str().ok_or("ui.eval needs js")?),
+        "ui.feedback" => crate::feedback::snapshot(app),
+        "ui.focus"=>{let window=app.get_window("main").ok_or("Studio window unavailable")?;window.set_focus().map_err(|e|e.to_string())?;Ok(json!({"ok":true,"focused":true,"reused_session":true}))},
+        "ui.components" => page(app,"components", &[params]),
         "ui.state" => page(app, "state", &[]),
         "ui.elements" => page(app, "elements", &[params.get("region").unwrap_or(&none)]),
         "ui.click" => page(app, "click", &[params.get("id").or(params.get("target")).unwrap_or(&none)]),
@@ -98,14 +113,24 @@ fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
             Ok(json!({"output": out, "state": page(app, "state", &[])?, "elements": page(app, "elements", &[region])?}))
         }
         "app.quit" => {
-            app.exit(0);
-            Ok(json!({"ok": true}))
+            crate::feedback::guard(app,id,false)?;
+            animationcraft_engine::activity::append(json!({"stage":"close_requested","command":"app.quit","origin":params["_origin"],"client_label":params["_client"],"request_id":params["_request_id"],"project":crate::feedback::snapshot(app)?["active_project"]}));
+            let close_app=app.clone();std::thread::spawn(move||{std::thread::sleep(Duration::from_millis(100));close_app.exit(0);});
+            Ok(json!({"ok":true,"status":"close_requested","exited":false,"verification":"Check endpoint/process exit after this response; no force kill or silent discard."}))
         }
         _ => {
-            let result = app.state::<Engine>().with(None, |s| s.execute(id, params.clone()).map_err(|e| e.to_string()))?;
+            crate::feedback::guard(app,id,false)?;
+            let mut supplied=params.clone();
+            if supplied.is_object(){if supplied.get("_origin").is_none(){supplied["_origin"]=json!("CLI/MCP bridge");}}
+            if supplied["_request_id"].is_null(){supplied["_request_id"]=json!(crate::feedback::new_request());}
+            if id=="project.open"{supplied["claim_owner"]=json!(true);}
+            let request_id=supplied["_request_id"].as_str().map(str::to_owned);
+            let result = app.state::<Engine>().with(None, |s| s.execute(id, supplied).map_err(|e| e.to_string()))?;
+            if animationcraft_engine::find_command(id).is_some_and(|c|!c.journal){return Ok(result);}
+            let revision=crate::feedback::command_finished(app,id,&result,request_id.as_deref());
             // The page shows the change (and follows a project opened or created from outside).
             let project = app.state::<Engine>().with(None, |s| Ok(s.project_path.clone()))?;
-            page(app, "refresh", &[&json!(id), &json!(project)])?;
+            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision)])?;
             Ok(result)
         }
     }
@@ -145,3 +170,30 @@ pub fn serve(app: AppHandle, port: u16) {
         }
     });
 }
+
+/// Same-user window IPC. Files are private; discovery does not require visibility into host PIDs.
+#[cfg(unix)]
+pub fn serve_local(app:AppHandle)->Result<(),String>{
+ use std::os::unix::{net::UnixListener,fs::{PermissionsExt,DirBuilderExt}};
+ let runtime=std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is missing; private UI feedback unavailable")?;
+ let dir=std::path::PathBuf::from(&runtime).join("animationcraft-studio");
+ animationcraft_engine::local_ipc::private_path(std::path::Path::new(&runtime),true)?;
+ if !dir.exists(){std::fs::DirBuilder::new().mode(0o700).create(&dir).map_err(|e|e.to_string())?;}
+ animationcraft_engine::local_ipc::private_path(&dir,true)?;
+ let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+ let socket=dir.join(format!("{}-{nonce}.sock",std::process::id()));let listener=UnixListener::bind(&socket).map_err(|e|e.to_string())?;
+ app.manage(LocalSocket(socket.clone()));
+ std::fs::set_permissions(&socket,std::fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?;
+ std::thread::spawn(move||{for stream in listener.incoming().flatten(){if animationcraft_engine::local_ipc::peer(&stream).is_err(){continue;}let app=app.clone();std::thread::spawn(move||{
+  let _=stream.set_read_timeout(Some(Duration::from_secs(10)));let Ok(mut writer)=stream.try_clone() else{return;};
+  for line in BufReader::new(stream).lines().map_while(Result::ok){
+   let reply=match serde_json::from_str::<Value>(&line){Ok(v)=>{let id=v["id"].as_str().unwrap_or_default();let p=v.get("params").cloned().unwrap_or(json!({}));match handle(&app,id,&p){Ok(result)=>json!({"ok":true,"result":result}),Err(e)=>json!({"ok":false,"error":e})}},Err(e)=>json!({"ok":false,"error":e.to_string()})};
+   if writeln!(writer,"{reply}").is_err(){break;}
+  }
+ });}});Ok(())
+}
+
+#[cfg(unix)]
+pub struct LocalSocket(pub std::path::PathBuf);
+#[cfg(unix)]
+pub fn cleanup(app:&AppHandle){if let Some(socket)=app.try_state::<LocalSocket>(){if animationcraft_engine::local_ipc::private_path(&socket.0,false).is_ok(){let _=std::fs::remove_file(&socket.0);}}}

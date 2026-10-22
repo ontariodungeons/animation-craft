@@ -1,6 +1,19 @@
 // AnimationCraft shell: the project view. Data comes from animationcraft-engine through the
 // shell's commands; files open with one click; the studio tab hosts the video target's studio.
-const { invoke, convertFileSrc } = window.__TAURI__.core;
+const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
+async function invoke(command,params){
+ const action=acFeedback.action;
+ acFeedback.pending++;await acFeedback.report();
+ if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id}};}
+ if(command==='project_create'||command==='project_open'){params={...params,request:params?.request??action?.request_id??null,control:params?.control??action?.control??null};}
+ acFeedback.report(null,null,{stage:'handler_dispatch',control:action?.control||null,request_id:action?.request_id||null,command:params?.id||command});
+ try{
+  const result=await nativeInvoke(command,params);acFeedback.last={transport:command,id:params?.id||null,status:'success'};
+  if(result?._ui_engine_revision) acFeedback.pendingRevision=result._ui_engine_revision;
+  return result;
+ }catch(error){acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
+ finally{acFeedback.pending--;await acFeedback.report();}
+}
 const $ = (id) => document.getElementById(id);
 
 const ICONS = {
@@ -26,7 +39,7 @@ function el(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") node.className = v;
     else if (k === "html") node.innerHTML = v;
-    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), event=>{const previous=acFeedback.action;acFeedback.action=event.acAction;try{return v(event);}finally{acFeedback.action=previous;}});
     else node.setAttribute(k, v);
   }
   for (const c of children.flat()) if (c != null) node.append(c);
@@ -49,7 +62,7 @@ async function openPath(path) {
 
 function block(id, icon, title, meta, done, body, blockState) {
   const open = state.open === id;
-  const head = el("button", { class: "block-head", "aria-expanded": String(open), title: `${title}${meta ? " · " + meta : ""}`,
+  const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? " · " + meta : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
     el("span", { class: `dot ${done ? "ok" : "warn"}`, title: done ? "Ready" : "Needs work" }),
     el("span", { class: "ico", html: icon }),
@@ -62,6 +75,8 @@ function block(id, icon, title, meta, done, body, blockState) {
 
 function sceneLines() {
   // "Scene 3 · arm. · 0:06–0:07" -> {time, lyric}
+  const doc=state.data?.status?.stages?.find(s=>s.id==='transcript')?.document;
+  if(doc?.paragraphs?.length) return doc.paragraphs.map(p=>({time:`${p.start}–${p.end}s`,lyric:p.text||''}));
   return (state.data?.storyboard?.scene_titles || []).map((t) => {
     const parts = t.split(" · ");
     return { lyric: parts.slice(1, -1).join(" · "), time: (parts.at(-1) || "").split("–")[0] };
@@ -160,13 +175,18 @@ function renderStoryboard() {
   const cards = $("sb-cards");
   cards.replaceChildren();
   $("sb-empty")?.remove();
-  for (const id of ["sb-prev", "sb-next", "sb-pdf"]) $(id).disabled = !pages.length;
+  for (const id of ["sb-prev", "sb-next", "sb-pdf", "sb-save-version"]) $(id).disabled = !pages.length;
   if (!pages.length) {
     $("sb-page").textContent = "no storyboard yet";
+    const imported=state.data?.status?.stages?.find(s=>s.id==='transcript')?.done===true;
+    if(imported){
+      cards.append(el('div',{id:'sb-empty',class:'sb-empty'},el('strong',{},'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
+      return;
+    }
     cards.append(el("div", {id:"sb-empty", class:"sb-empty"},
       el("strong", {}, `Start ${$("project-name").textContent}`),
       el("p", {}, "Add a transcript to plan the song’s scenes."),
-      el("button", {id:"sb-import-transcript", class:"start", onclick:async () => {
+      el("button", {id:"sb-import-transcript", "data-commands":"workshop.import_transcript", class:"start", onclick:async () => {
         const path = await dialog.open({title:"Import transcript", filters:[{name:"Transcript", extensions:["json"]}]});
         if (!path) return;
         try {
@@ -301,8 +321,8 @@ async function load() {
 
 // Opens a project (engine `project.open`, recorded in Recent) and shows the Project view.
 async function openProject(path, start = {}) {
-  try { state.data = await invoke("project_open", { path }); }
-  catch (e) { toast(String(e)); return showHome(); }
+  try { const opened=await invoke("project_open", { path }); if(opened.reused_session){toast("Focused the existing project session");return;}path=opened.project||path;state.data=opened; }
+  catch (e) { toast(String(e)); throw e; }
   if (state.project !== path) animationReset();
   state.project = path;
   state.page = 0;
@@ -315,6 +335,7 @@ async function openProject(path, start = {}) {
   renderStoryboard();
   await setView(start.view || "project");
   if (start.open === "agent") agentToggle(true);
+  await acFeedback.acknowledge(state.data?._ui_engine_revision, path);
 }
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view)));
@@ -323,6 +344,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 // buttons collapse either side (studio only / project only).
 (() => {
   const handle = $("frame-handle");
+  if (!handle) return; // The current layout has no legacy splitter; continue startup.
   let total = 0, frame = null;
   handle.addEventListener("pointerdown", async (e) => {
     if (e.target.closest("button")) return;
@@ -353,7 +375,7 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("resize", placeInk);
 placeInk();
-load();
+load().catch(e=>{toast(String(e));acFeedback.errors.push({message:String(e).slice(0,300)});acFeedback.report('error');});
 
 $("project-details").addEventListener("click",()=>{document.body.classList.toggle("project-details-open");$("project-details").setAttribute("aria-pressed",String(document.body.classList.contains("project-details-open")));});
 

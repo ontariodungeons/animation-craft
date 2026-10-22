@@ -406,3 +406,28 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 /* ---- Section-tone sliders ---------------------------------------------------------------- */
 /* Section-tone accents already cascade via --control-accent on .motion-section[data-tone];
    the existing .motion-range rules consume it. No extra rules needed. */
+
+/* Compact Studio keeps controls readable without clipping the creative workspace. */
+.blocks.collapsed {padding:8px 4px;}
+.blocks.collapsed .block-head {position:relative;min-height:40px;gap:0;padding:9px 4px;}
+.blocks.collapsed .block-head .dot {position:absolute;right:3px;top:3px;width:5px;height:5px;}
+.block-head .ico svg {width:20px;height:20px;}
+.sb-empty {max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;}
+@media(max-width:640px){
+ .blocks{padding:8px 4px;}
+ .blocks .block-head{position:relative;min-height:40px;gap:0;padding:9px 4px;}
+ .blocks .block-head .dot{position:absolute;right:3px;top:3px;width:5px;height:5px;}
+ .blocks .block:has(.block-head[aria-expanded=true]) .block-body{display:block;position:fixed;left:56px;top:58px;bottom:12px;width:min(280px,calc(100vw - 68px));overflow:auto;background:var(--surface);z-index:20;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px #0008;}
+ .sb-head{flex-wrap:wrap;min-width:0;gap:4px;padding:6px;}
+ .sb-empty{padding:18px 12px;}
+ .sb-empty .start{max-width:100%;white-space:normal;}
+ #project-name{max-width:100px;overflow:hidden;text-overflow:ellipsis;}
+}
+
+/* Home uses the shared project status; artwork is a small reference, not a readiness signal. */
+.recent{grid-template-columns:repeat(auto-fill,minmax(280px,1fr));}
+.proj{display:flex;align-items:flex-start;gap:12px;padding:12px;text-align:left;position:relative;}
+.proj .thumb{width:48px;height:48px;min-width:48px;aspect-ratio:1;border-radius:8px;}
+.project-summary{min-width:0;flex:1;}.project-main{display:flex;flex-direction:column;gap:5px;max-width:100%;text-align:left;}
+.project-main .folder{font-size:11px;overflow-wrap:anywhere;color:var(--muted);}.project-state{font-size:12px;}.project-state.is-open{color:var(--accent);}.project-state.needs-check{color:var(--amber);}
+.project-quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}.project-quick button{font-size:11px;padding:5px;}.project-quick button:disabled{opacity:.45;cursor:not-allowed;}

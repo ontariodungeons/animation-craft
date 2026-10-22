@@ -26,6 +26,16 @@ animationcraft-cli --bridge <port> mcp
 
 A Studio window must have been started with `animationcraft-shell --control <port>` for that bridge to exist. Do not automatically launch/switch another window or restart services. `ui.state` does not report unsaved-change safety.
 
+## Command Center
+
+`animationcraft-cli center` opens the native Ratatui Command Center. `center project=/absolute/project.acproj` resumes inspection; `center --print project=...` prints its state. F1/F2 switch Control/Booth monitoring views; F4 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 creates native scene Markdown/TOC, F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+
+Scripted clients use the same `project.intake` and `center.status` engine commands. `project.intake root=... name=...` resolves `<root>/<song-slug>/project/<Name>.acproj`; an explicit `path` is also accepted. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
+
+Recent activity stores three root action groups per project. Engine results and matched Studio acknowledgements remain separate; closed projects use a disk snapshot. Control shows the existing ten-entry recent-project catalog, not a complete filesystem inventory; selecting a different catalog project is not implemented.
+
+This first slice does not wire the Tauri New form to `project.intake`, build/register the separate DeckCraft template, or infer creative fields. Current shell source exposes guarded dirty-state and UI-feedback queries; a running older shell must be rebuilt and safely restarted before those updated contracts apply. Its UI mapping panel labels remaining gaps. Audio-tool provider/model provenance is reported unknown when the received source did not record it.
+
 ## Existing material intake
 
 Discover contracts from `animationcraft-cli commands workshop` and `commands project`. `workshop.set_audio` references original audio. `workshop.import_transcript` accepts JSON with optional original SRT via `captions`; preserve every word/timestamp and distinguish raw transcription from corrections. Audio analysis/transcription is an explicit operation, never a prerequisite for reusing valid existing timing. Existing imported or generated files are not proof of approval.

@@ -15,6 +15,8 @@
 )]
 
 mod args;
+mod center;
+mod local_ui;
 
 use animationcraft_engine::Session;
 use serde_json::{Value, json};
@@ -72,9 +74,16 @@ USAGE
   animationcraft-cli [--bridge <port|host:port>] <SUBCOMMAND> [ARGS]
 
 OPTIONS
-  --bridge <port|host:port>           send commands to a running `animationcraft-shell --control <port>` GUI window
+  --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
 
 SUBCOMMANDS
+  center [project=<file>]             interactive Command Center (no automatic Studio launch)
+                                      optional root= name= audio= transcript= captions= audiomap=
+                                      --print prints current state without entering terminal UI
+  exec ui.feedback                    discover canonical Studio identity, readiness, unsaved and ack state
+  exec ui.components region=#view-project limit=30
+                                      bounded actual DOM geometry/style/state; no input values
+  exec center.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
@@ -101,8 +110,8 @@ LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec 
                                       the app state and the ids inside it (MCP: ui_look returns the image)
   ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
                                       switch live GUI viewport tab, action cycle, yaw, or pose range
-  app.quit                            close the live GUI window (save the project first)
-  app_quit (MCP tool)                 same, only when the MCP server runs with --bridge
+  app.quit                            request guarded close; unsaved/unknown state refuses
+  app_quit (MCP tool)                 same guarded close, current Studio auto-discovery
 
 VALUES
   key=value parses value as JSON when it can (3.5, true, [1,2], {\"a\":1}), else as a string.
@@ -129,6 +138,7 @@ fn bridge_timeout(id: &str) -> std::time::Duration {
 }
 
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
+    if addr=="auto"||addr.starts_with("unix:"){return local_ui::call(addr,id,params);}
     use std::io::{BufRead, BufReader};
     use std::net::{TcpStream, ToSocketAddrs};
 
@@ -181,7 +191,16 @@ fn run_script_argument<'a>(positional: Option<&'a str>, raw_args: &[String]) -> 
 
 /// Typed MCP input schemas for commands whose parameters are fixed; the rest keep a bare object
 /// and publish their parameter shape in the tool description.
-fn tool_input_schema(id: &str) -> Value {
+fn tool_input_schema(id:&str)->Value{
+    let mut schema=command_input_schema(id);
+    if schema["properties"].is_object(){
+        schema["properties"]["_client"]=json!({"type":"string","description":"Optional supplied agent/client label; not authentication"});
+        schema["properties"]["_request_id"]=json!({"type":"string","description":"Optional request/correlation ID for action receipts"});
+    }
+    schema
+}
+
+fn command_input_schema(id: &str) -> Value {
     let asset = json!({ "type": "string", "description": "Loaded asset id; defaults to the active asset" });
     let source = json!({ "type": "string", "description": "Source image path; defaults to the asset's image" });
     let out = json!({ "type": "string", "description": "Output PNG path" });
@@ -331,7 +350,7 @@ animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `animation
 fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
-    let mut session = Session::default();
+    let mut session = Session::user_session();
     let mut stop_after_reply = false;
     for line in stdin.lock().lines().map_while(Result::ok) {
         let trimmed = line.trim();
@@ -379,7 +398,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .find(|s| s.id == raw_name || s.id.replace('.', "_") == raw_name)
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
-                let args = params.get("arguments").cloned().unwrap_or(json!({}));
+                let mut args = params.get("arguments").cloned().unwrap_or(json!({}));args["_origin"]=json!("MCP");
                 if raw_name == "ui_look" || raw_name == "ui.look" {
                     outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": ui_look(bridge.as_deref(), args)}));
                     continue;
@@ -390,10 +409,11 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         stop_after_reply = true;
                     }
                     out
+                } else if cmd_id=="ui.feedback"||cmd_id=="ui.components" {bridge_call(bridge.as_deref().unwrap_or("auto"),cmd_id,args)
                 } else if let Some(addr) = &bridge {
                     bridge_call(addr, cmd_id, args)
                 } else {
-                    session.execute(cmd_id, args).map_err(|e| e.to_string())
+                    dispatch(&mut session,cmd_id,args)
                 };
                 match res {
                     Ok(v) => {
@@ -462,8 +482,8 @@ fn mcp_tools() -> Vec<Value> {
     tools.push(json!({
         "name": "app_quit",
         "description": "Quit the live AnimationCraft window this server is bridged to. \
-            Save the project first; this closes the window without a prompt. \
-            It needs `mcp --bridge <port>` and reports an error in headless mode.",
+            Refuses unsaved, pending or unknown state; reports close requested, not proof of exit. \
+            Uses current Studio auto-discovery or the explicit --bridge target; never launches an app.",
         "inputSchema": {
             "type": "object",
             "properties": {},
@@ -627,14 +647,26 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
-fn call_app_quit(bridge: Option<&str>, args: Value) -> Result<Value, String> {
-    match bridge {
-        Some(addr) => bridge_call(addr, "app.quit", args),
-        None => Err(
-            "app_quit needs the native window: start `animationcraft-shell --control <port>` and run this MCP server with `--bridge <port>`; a headless session has no app process to quit"
-                .into(),
-        ),
-    }
+pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Value,String>{
+ let requested=if id=="project.open" || (id=="project.intake" && params["path"].as_str().is_some_and(|p|std::path::Path::new(p).is_file())){Some(session.execute("project.identity",params.clone()).map_err(|e|e.to_string())?["project"].as_str().ok_or("No canonical project")?.to_string())}else if id=="project.intake"{None}else{session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned())};
+ if let Some(project)=requested{
+  if let Some(live)=animationcraft_engine::studio_sessions::for_project(std::path::Path::new(&project))?{
+   if let Some(pin)=params["_expected_instance"].as_str(){if Some(pin)!=live["instance"].as_str(){return Err("Pinned Studio instance changed; explicitly reload this project attachment before further commands".into());}}
+   params["_expected_project"]=json!(project);params["_expected_instance"]=live["instance"].clone();
+   if live["project_guard_version"]!=1 && animationcraft_engine::find_command(id).is_some_and(|c|!c.journal){let mut value=session.execute(id,params).map_err(|e|e.to_string())?;if value.is_object(){value["state_source"]=json!("disk snapshot; matched Studio requires current guarded-attachment build");}return Ok(value);}
+   let endpoint=live["endpoint"].as_str().ok_or("Matched Studio has no endpoint")?;
+   let value=local_ui::call(endpoint,id,params.clone())?;
+   if id=="project.open"{session.execute("project.attach",json!({"path":project})).map_err(|e|e.to_string())?;}
+   return Ok(value);
+  }
+ }
+ if params["_expected_instance"].is_string(){return Err("Pinned Studio is no longer available for this project. Explicit reload is required; no fallback writer was used.".into());}
+ session.execute(id,params).map_err(|e|e.to_string())
+}
+
+fn call_app_quit(bridge: Option<&str>, mut args: Value) -> Result<Value, String> {
+    args["_origin"]=json!("MCP");
+    bridge_call(bridge.unwrap_or("auto"), "app.quit", args)
 }
 
 fn main() {
@@ -653,6 +685,10 @@ fn main() {
     match cmd {
         "help" | "-h" => outln!("{HELP}"),
         "version" => outln!("animationcraft-cli {}", env!("CARGO_PKG_VERSION")),
+        "center" => {
+            if a.bridge_addr().is_some(){usage("Command Center currently uses an explicit headless project; --bridge is reserved for existing live command access");}
+            if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),std::env::args().any(|a|a=="--print")){fail(e);}
+        }
         "info" => {
             let specs = animationcraft_engine::command_specs();
             outln!("AnimationCraft engine v{}", env!("CARGO_PKG_VERSION"));
@@ -692,12 +728,12 @@ fn main() {
                     if let Some(addr) = bridge_opt {
                         bridge_call(&addr, "vision.analyze", params)
                     } else {
-                        let mut s = Session::default();
+                        let mut s = Session::user_session();
                         s.execute("vision.analyze", params).map_err(|e| e.to_string())
                     }
                 }
                 (None, None) => {
-                    let mut s = Session::default();
+                    let mut s = Session::user_session();
                     s.execute("vision.analyze", json!({ "character": "hopper" }))
                         .map_err(|e| e.to_string())
                 }
@@ -716,12 +752,14 @@ fn main() {
             let id = a
                 .pos(1)
                 .unwrap_or_else(|| usage("exec <id> [key=value ...]"));
-            let params = a.params_from(2).unwrap_or_else(|e| usage(e));
-            let res = if let Some(addr) = a.bridge_addr() {
+            let mut params = a.params_from(2).unwrap_or_else(|e| usage(e));
+            params["_origin"]=json!("CLI");
+            let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
+            }else if let Some(addr) = a.bridge_addr() {
                 bridge_call(&addr, id, params)
             } else {
-                let mut s = Session::default();
-                s.execute(id, params).map_err(|e| e.to_string())
+                let mut s = Session::user_session();
+                dispatch(&mut s,id,params)
             };
             match res {
                 Ok(v) => {
@@ -743,7 +781,7 @@ fn main() {
                 std::fs::read_to_string(script).unwrap_or_else(|e| fail(format!("{script}: {e}")))
             };
             let bridge = a.bridge_addr();
-            let mut s = Session::default();
+            let mut s = Session::user_session();
             let mut failed = 0;
             for (n, line) in text
                 .lines()
@@ -755,15 +793,17 @@ fn main() {
                 let id = v["id"]
                     .as_str()
                     .unwrap_or_else(|| usage(format!("line {}: missing \"id\"", n + 1)));
-                let params = v.get("params").cloned().unwrap_or(json!({}));
-                let res = if let Some(addr) = &bridge {
+                let mut params = v.get("params").cloned().unwrap_or(json!({}));
+                params["_origin"]=json!("CLI JSONL");
+                let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(bridge.as_deref().unwrap_or("auto"),id,params)
+                }else if let Some(addr) = &bridge {
                     bridge_call(addr, id, params)
                 } else {
-                    s.execute(id, params).map_err(|e| e.to_string())
+                    dispatch(&mut s,id,params)
                 };
                 match res {
                     Ok(r) => {
-                        let cmd_ok = r.get("ok").and_then(Value::as_bool) == Some(true);
+                        let cmd_ok = !is_payload_error(&r);
                         if !cmd_ok {
                             outln!(
                                 "{}",
@@ -812,7 +852,7 @@ fn main() {
                     obj.insert("clean".to_string(), Value::Bool(true));
                 }
             }
-            let mut s = Session::default();
+            let mut s = Session::user_session();
             match s.execute("app.doctor", params) {
                 Ok(v) => {
                     outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
@@ -845,13 +885,6 @@ mod tests {
             parse_value("{\"key\":\"val\"}"),
             serde_json::json!({"key": "val"})
         );
-    }
-
-    #[test]
-    fn app_quit_without_a_bridge_refuses_instead_of_pretending_to_close() {
-        let err = call_app_quit(None, json!({})).unwrap_err();
-        assert!(err.contains("--bridge"), "unexpected error: {err}");
-        assert!(err.contains("no app process"), "unexpected error: {err}");
     }
 
     #[test]

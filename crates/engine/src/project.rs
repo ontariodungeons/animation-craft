@@ -32,12 +32,13 @@ pub fn write_project_file(s: &Session) -> Result<()> {
     }
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| EngineError::InvalidParams(format!("cannot encode project: {e}")))?;
-    std::fs::write(path, text)?;
+    std::fs::write(path, &text)?;
+    if s.record_user_state{crate::activity::stored(path,text.len());}
     Ok(())
 }
 
 /// Resolve and canonicalize a project path, appending `.acproj` when missing.
-fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
+pub(crate) fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
     let raw = params
         .get("path")
         .and_then(Value::as_str)
@@ -47,16 +48,20 @@ fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
     if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("acproj")) {
         path.as_mut_os_string().push(".acproj");
     }
+    if path.exists(){return std::fs::canonicalize(&path).map_err(EngineError::from);}
     Ok(path)
 }
 
 /// A fresh session for a project: no assets loaded, nothing active.
 fn reset_for_project(s: &mut Session, path: PathBuf, assets: Vec<crate::ProjectAsset>) {
+    let owner=if s.project_path.as_ref()==Some(&path){s.project_owner.clone()}else{None};
     *s = Session {
         cwd: s.cwd.clone(),
+        record_user_state:s.record_user_state,
         blender_available: s.blender_available,
         project_assets: assets,
         project_path: Some(path),
+        project_owner: owner,
         ..Session::default()
     };
 }
@@ -92,15 +97,24 @@ pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
         Some(raw) => Some(super::workspace::song_audio_path(s, raw)?),
         None => None,
     };
+    if let Some(parent)=path.parent(){std::fs::create_dir_all(parent)?;}
+    let owner=if path.exists(){claim(s,&path)?}else{
+        let file=std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
+        file.try_lock().map_err(|e|EngineError::InvalidParams(format!("Cannot own new project: {e}")))?;
+        std::sync::Arc::new(file)
+    };
     reset_for_project(s, path.clone(), Vec::new());
+    s.project_owner=Some(owner);
     s.song_audio = audio;
     write_project_file(s)?;
+    if s.record_user_state{crate::project_catalog::record(&path.to_string_lossy()).map_err(EngineError::InvalidParams)?;}
     Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "workshop": super::workshop::workshop_status(s)?}))
 }
 
 /// Open an existing `.acproj` session.
 pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let path = project_file_path(s, params)?;
+    let owner=if params["claim_owner"]==true {Some(claim(s,&path)?)} else {None};
     let text = std::fs::read_to_string(&path)?;
     let doc: Value = serde_json::from_str(&text)
         .map_err(|e| EngineError::InvalidParams(format!("invalid project file: {e}")))?;
@@ -121,11 +135,13 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
         .collect::<Vec<_>>();
     let missing = json!(missing);
     reset_for_project(s, path.clone(), assets);
+    if let Some(owner)=owner{s.project_owner=Some(owner);}
     s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
         s.video_target = target.into();
     }
+    if s.record_user_state&&params["record_recent"]!=false{crate::project_catalog::record(&path.to_string_lossy()).map_err(EngineError::InvalidParams)?;}
     Ok(json!({"ok": true, "project": path, "assets": s.project_assets, "missing": missing, "workshop": super::workshop::workshop_status(s)?}))
 }
 
@@ -145,6 +161,7 @@ pub fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
 pub fn cmd_project_close(s: &mut Session, _: &Value) -> Result<Value> {
     *s = Session {
         cwd: s.cwd.clone(),
+        record_user_state:s.record_user_state,
         blender_available: s.blender_available,
         ..Session::default()
     };
@@ -383,6 +400,7 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
     if let Some(preset) = &entry.preset {
         let mut loader = Session {
             cwd: s.cwd.clone(),
+        record_user_state:s.record_user_state,
             ..Session::default()
         };
         crate::photocraft::cmd_asset_load_manifest(&mut loader, &json!({"preset": preset}))?;
@@ -589,4 +607,22 @@ mod tests {
         assert!(res["missing"].as_array().unwrap().contains(&json!("moved")));
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Canonical paths identify existing projects without changing their file format.
+pub fn cmd_project_identity(s:&mut Session,p:&Value)->Result<Value>{
+ let path=project_file_path(s,p)?;let path=std::fs::canonicalize(path)?;
+ Ok(json!({"ok":true,"project":path,"project_id":path,"identity_kind":"canonical path"}))
+}
+pub(crate) fn claim(s:&Session,path:&Path)->Result<std::sync::Arc<std::fs::File>>{
+ if s.project_path.as_deref()==Some(path){if let Some(owner)=&s.project_owner{return Ok(owner.clone());}}
+ let file=std::fs::OpenOptions::new().read(true).write(true).open(path)?;
+ file.try_lock().map_err(|_|EngineError::InvalidParams(format!("Project is owned by another live writer: {}. Inspect project.catalog and attach to its existing Studio; no competing write performed.",path.display())))?;
+ Ok(std::sync::Arc::new(file))
+}
+
+/// Attach disk metadata without a UI switch, writer lease, action receipt or navigation-history change.
+pub fn cmd_project_attach(s:&mut Session,p:&Value)->Result<Value>{
+ let mut p=p.clone();p["record_recent"]=json!(false);p["claim_owner"]=json!(false);
+ let mut value=cmd_project_open(s,&p)?;value["attachment"]=json!("read-only disk metadata; Studio unchanged");Ok(value)
 }

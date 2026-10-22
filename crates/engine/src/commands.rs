@@ -187,6 +187,14 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 pub fn build() -> Vec<CommandSpec> {
     vec![
+        query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .acproj path\"}", crate::project::cmd_project_attach),
+        query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .acproj path\"}", crate::project::cmd_project_identity),
+        query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
+        query!("center.events", "Recent Activity Receipts", "{\"after\":0,\"limit\":20,\"project\":\"optional absolute project filter\"}", crate::activity::events),
+        query!("ui.feedback", "Live Studio Feedback", "{\"project\":\"optional canonical project path\"}", crate::command_center::requires_ui),
+        query!("ui.components", "Rendered Studio Components", "{\"region\":\"#view-project\",\"filter\":\"optional ID filter\",\"limit\":30}", crate::command_center::requires_ui),
+        query!("center.status", "Command Center", "{}", crate::command_center::status),
+        cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional .acproj\",\"root\":\"selected song root\",\"name\":\"song name\",\"audio\":\"optional existing audio\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false}", always, crate::command_center::intake),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{}", always, cmd_agent_new_chat),
@@ -406,7 +414,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("workshop.split_panels", "Split Storyboard Grid (PhotoCraft)", ["Workshop"], None,
             "{\"image\": \"storyboard grid\", \"columns\": 3, \"rows\": 2, \"inset\": 8, \"prompts\": \"optional prompt.md with a numbered panel list\"}", always, cmd_workshop_split_panels),
         cmd!("workshop.import_transcript", "Import Transcript", ["Workshop"], None,
-            "{\"path\": \"transcript.json\", \"captions\": \"optional authored .srt (required for a word array)\", \"filmcraft_project\": \"optional .fcproj\"}", always, cmd_workshop_import_transcript),
+            "{\"path\": \"transcript.json\", \"captions\": \"optional original SRT; without it use provisional timed-word fallback\", \"audiomap\": \"optional existing audiomap.json\", \"replace\": false, \"filmcraft_project\": \"optional .fcproj\"}", always, cmd_workshop_import_transcript),
         cmd!("workshop.build_storyboard", "Build Storyboard PDF", ["Workshop"], None,
             "{\"template\":\"pdf|backlot\",\"source\":\"optional OpenMontage project folder\"}", always, cmd_workshop_build_storyboard),
         cmd!("workshop.approve_draft", "Approve Storyboard", ["Workshop"], None,

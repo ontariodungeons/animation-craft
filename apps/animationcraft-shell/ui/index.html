@@ -38,7 +38,7 @@
           <div class="home-actions">
             <button class="start" id="home-new" title="New song project (Ctrl+N)">
               <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New song</span><kbd>Ctrl+N</kbd></button>
-            <button class="ghost" id="home-open" title="Open a project (Ctrl+O)">
+            <button class="ghost" id="home-open" data-commands="project.open" title="Open a project (Ctrl+O)">
               <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open…</span><kbd>Ctrl+O</kbd></button>
           </div>
         </div>
@@ -58,7 +58,7 @@
           <p class="faint" id="new-where"></p>
           <div class="sheet-actions">
             <button type="button" class="ghost" id="new-cancel">Cancel</button>
-            <button type="submit" class="start" id="new-create">Create</button>
+            <button type="submit" class="start" id="new-create" data-commands="project.intake">Create</button>
           </div>
         </form>
       </div>
@@ -136,6 +136,7 @@
   </main>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
+  <script src="feedback.js"></script>
   <script src="app.js"></script>
   <script src="animation.js"></script>
   <script src="sequence.js"></script>

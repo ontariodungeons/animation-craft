@@ -37,6 +37,17 @@ window.acBridge = {
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
     };
   },
+  components(params={}) {
+    const root=regionNode(params.region||'#view-project');if(!root)throw new Error('Unknown component region');
+    const nodes=[root,...root.querySelectorAll('[id],button,[role],h1,h2,h3,label')].filter(n=>!n.closest('#agent-log,#agent-messages'));
+    const limit=Math.min(80,Math.max(1,Number(params.limit)||30));
+    const entries=nodes.filter(n=>!params.filter||idOf(n).toLowerCase().includes(String(params.filter).toLowerCase())).slice(0,limit).map((n,i)=>{
+      const r=n.getBoundingClientRect(),style=getComputedStyle(n);const input=n.matches('input,textarea,[contenteditable=true]');
+      const result={id:n.id||`${root.id||'region'}/${n.tagName.toLowerCase()}-${i}`,tag:n.tagName.toLowerCase(),text:input?null:(n.matches('button,h1,h2,h3,label,[role=tab],#project-name,#sb-empty p,#sb-empty strong')?n.textContent.trim().slice(0,160):null),rect:[r.x,r.y,r.width,r.height],visible:visible(n),enabled:!n.disabled,selected:n.getAttribute('aria-selected')||n.getAttribute('aria-pressed')||n.classList.contains('active'),commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:n.dataset.commands?'verified handler annotation':'unknown',style:{}};
+      for(const k of ['display','visibility','opacity','color','backgroundColor','fontSize','fontWeight','overflow','position'])result.style[k]=style[k];
+      return result;
+    });return {ok:true,region:params.region||'#view-project',viewport:[innerWidth,innerHeight],components:entries,truncated:nodes.length>limit,phase:acFeedback.phase,visual_correctness:'requires screenshot review'};
+  },
   elements(region) {
     const root = regionNode(region);
     if (!root) throw new Error(`no region "${region}"`);
@@ -75,19 +86,20 @@ window.acBridge = {
     return [x, y, Math.min(innerWidth, r.right + pad) - x, Math.min(innerHeight, r.bottom + pad) - y];
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
-  async refresh(id, project) {
+  async refresh(id, project, revision) {
     if (id.startsWith("motion.")) return { refreshed: id };
     if (id === "agent.new_chat") {
       agent.session=await invoke("agent_session",{project:state.project,set:null});agent.messages=[];agent.permissions=[];agent.forms=[];
       renderLog();renderWatch();renderModels();return {refreshed:id,session:agent.session};
     }
-    if (project && project !== state.project) return openProject(project);
-    if (!project) return showHome();
+    if (project && project !== state.project) {await openProject(project);await acFeedback.acknowledge(revision,project);return {refreshed:id,project,ack_engine_revision:revision};}
+    if (!project) {await showHome();await acFeedback.acknowledge(revision,null);return {refreshed:id,ack_engine_revision:revision};}
     state.data = await invoke("project_state", { path: state.project });
     renderTarget();
     renderBlocks();
     renderStoryboard();
     if (state.view === "animation") await animationRefresh();
-    return { refreshed: id };
+    await acFeedback.acknowledge(revision,project);
+    return { refreshed: id, ack_engine_revision:revision };
   },
 };

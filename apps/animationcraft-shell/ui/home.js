@@ -6,6 +6,7 @@ const FILM = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" 
 const CROSS = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 async function showHome() {
+  if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
   animationReset();
   if (agent.open) agentToggle(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
@@ -17,7 +18,8 @@ async function showHome() {
   document.title = "AnimationCraft";
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-home"));
   await invoke("studio_hide").catch(() => {});
-  renderRecent();
+  await renderRecent();
+  requestAnimationFrame(()=>acFeedback.report('ready'));
 }
 
 async function renderRecent() {
@@ -37,11 +39,14 @@ async function renderRecent() {
       await invoke("recent_forget", { path: p.path });
       renderRecent();
     });
-    return el("button", { class: `proj${p.exists ? "" : " missing"}`, title: p.exists ? p.path : `Not found: ${p.path}`,
-      onclick: () => p.exists ? openProject(p.path) : toast("That project was moved or deleted") },
-      thumb, forget,
-      el("div", { class: "meta" }, el("span", { class: "name" }, p.name),
-        el("span", { class: "folder" }, p.exists ? `‎${p.folder}` : "moved or deleted")));
+    const status=p.open_state||'unknown';
+    const main=el('button',{class:'project-main',title:p.path,onclick:()=>p.exists?openProject(p.path):toast('That project was moved or deleted')},
+      el('span',{class:'name'},p.name),el('span',{class:'folder'},p.exists?p.folder:'Moved or deleted'),
+      el('span',{class:'project-state '+(status==='open'?'is-open':'needs-check')},status==='open'?'● Open in Studio':status==='not_observed_open'?'○ Not observed open':`△ ${status}`));
+    const links=el('div',{class:'project-quick'});
+    for(const action of p.readiness?.quick_actions||[]){links.append(el('button',{class:'ghost',...(action.enabled?{}:{disabled:''}),title:action.enabled?action.label:(p.readiness?.next_step||'Requirements not met'),onclick:()=>openProject(p.path,{view:action.view,open:action.open_block})},action.label));}
+    return el('div',{class:`proj${p.exists?'':' missing'}`,title:p.path},thumb,forget,
+      el('div',{class:'project-summary'},main,el('p',{class:'why'},p.readiness?.next_step||'Inspect project state'),links));
   }));
 }
 
@@ -58,7 +63,7 @@ function slug(name) {
 
 function renderWhere() {
   const name = $("new-name").value.trim(), root = $("new-root").value.trim();
-  $("new-where").textContent = name && root ? `Creates ${root}/${slug(name)}/${name}.acproj` : "";
+  $("new-where").textContent = name && root ? `Creates ${root}/${slug(name)}/project/${name}.acproj` : "";
 }
 
 async function newSheet(open = true) {
@@ -91,7 +96,8 @@ $("new-form").addEventListener("submit", async (e) => {
   if (!$("new-audio").value) return toast("Choose the song's audio first");
   $("new-create").disabled = true;
   try {
-    const path = await invoke("project_create", { name: $("new-name").value, audio: $("new-audio").value, root: $("new-root").value });
+    const action=acFeedback.actions.get(e.submitter);
+    const path = await invoke("project_create", {request:action?.request_id,control:action?.control, name: $("new-name").value, audio: $("new-audio").value, root: $("new-root").value });
     newSheet(false);
     $("new-form").reset();
     await openProject(path);

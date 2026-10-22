@@ -123,6 +123,7 @@ pub(crate) fn caption_scenes(dir: &Path) -> Option<Vec<Value>> {
     let audiomap: Option<Value> = std::fs::read_to_string(srt.with_file_name("audiomap.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
     let total = audiomap
         .and_then(|m| m["audio"]["duration_sec"].as_f64())
+        .or_else(|| std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["duration_sec"].as_f64()))
         .or_else(|| song_seconds(dir))
         .or_else(|| cues.last().map(|c| c.2))?;
     let instrumental = |from: f64, to: f64| json!({"kind": "instrumental", "start": from, "end": to, "lines": []});
