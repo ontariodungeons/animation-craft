@@ -131,7 +131,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     v["project_guard_version"] = json!(1);
     v["ok"] = json!(true);
     v["connection"] = json!("connected");
-    v["identity"] = json!({"application":"AnimationCraft Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("ANIMATIONCRAFT_BUILD_ID")});
+    v["identity"] = json!({"application":"Magic Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("ANIMATIONCRAFT_BUILD_ID")});
     v["active_project"] = json!(project);
     v["project_id"] = json!(project);
     v["project_identity_kind"] = json!("canonical project path");
