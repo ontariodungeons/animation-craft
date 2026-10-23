@@ -101,9 +101,7 @@ fn readiness(path: &Path) -> Value {
         .as_array()
         .is_some_and(|v| v.iter().any(|s| s["id"] == "song" && s["done"] == true));
     let transcript = control["transcript"]["valid"] == true;
-    let editor_ready = workshop["video_project"]
-        .as_str()
-        .is_some_and(|p| Path::new(p).is_file())
+    let editor_ready = workshop["video_project_exists"] == true
         && workshop["video_server"]["running"] == true;
     let next = if !audio {
         "Choose existing song audio"

@@ -39,3 +39,54 @@ fn no_project_means_no_video_project_path() {
     let s = Session::default();
     assert!(s.video_project_path.is_none());
 }
+#[cfg(unix)]
+fn fixture(name: &str) -> (std::path::PathBuf, Session, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("ac-wiring-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session::default();
+    s.execute("project.new", json!({"path": dir.join("Fixture.magic")})).unwrap();
+    let cli = runtime(&dir, "mkdir -p \"$2\"; printf '%s' '{}' > \"$2/hyperframes.json\"; printf '%s' '<div></div>' > \"$2/index.html\"");
+    (dir, s, cli)
+}
+
+#[test]
+#[cfg(unix)]
+fn status_reports_only_the_stored_video_project() {
+    let (dir, mut s, _) = fixture("stored-only");
+    // A FilmCraft file left in the folder is not this project's video project until video.init says so.
+    std::fs::write(dir.join("Old.fcproj"), "{}").unwrap();
+    let status = s.execute("workshop.status", json!({})).unwrap();
+    assert!(status["video_project_path"].is_null(), "nothing was initialised: {status}");
+    assert!(status.get("video_project").is_none(), "one answer, not a stored one and a guessed one");
+    assert_eq!(status["video_project_exists"], false);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn deleted_video_project_reports_missing_not_another_file() {
+    let (dir, mut s, cli) = fixture("deleted");
+    s.video_target = "hyperframes".into();
+    let r = s.execute("video.init", json!({"target": "hyperframes", "hyperframes_cli": cli})).unwrap();
+    let stored = r["video_project_path"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(dir.join("hyperframes")).unwrap();
+    std::fs::write(dir.join("Old.fcproj"), "{}").unwrap();
+    let status = s.execute("workshop.status", json!({})).unwrap();
+    assert_eq!(status["video_project_path"], json!(stored), "the stored answer stays the answer");
+    assert_eq!(status["video_project_exists"], false, "and it says the file is gone");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn changing_target_does_not_keep_the_old_targets_project() {
+    let (dir, mut s, cli) = fixture("retarget");
+    s.video_target = "hyperframes".into();
+    let r = s.execute("video.init", json!({"target": "hyperframes", "hyperframes_cli": cli})).unwrap();
+    let hyperframes = r["video_project_path"].as_str().unwrap().to_string();
+    let status = s.execute("workshop.set_target", json!({"target": "remotion"})).unwrap();
+    assert_ne!(status["video_project_path"], json!(hyperframes), "remotion must not report the HyperFrames project");
+    assert_eq!(status["video_project_exists"], status["video_project_path"].as_str().is_some_and(|p| std::path::Path::new(p).exists()));
+    std::fs::remove_dir_all(dir).unwrap();
+}

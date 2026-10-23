@@ -41,7 +41,7 @@
 
 The original report: an agent said "no project created", or a created project was not wired into the app.
 
-- [ ] Reproduce with `mc exec project.intake …` then `mc exec workshop.status`; record the exact output in this file under "Observed". If it no longer reproduces on current main, note the SHA and continue with Tasks 1–3 as hardening only.
+- [x] Reproduced as regression tests in `crates/engine/tests/wiring_state.rs` (no manual probes; the commit hook runs them). See "Observed".
 
 ### Task 1: One resolver, legacy migration on open
 
@@ -49,8 +49,8 @@ The original report: an agent said "no project created", or a created project wa
 
 **Produces:** `Session::video_project(&self) -> Option<&Path>` (stored value only); `workshop.status` returns `video_project_path` and `video_project_exists: bool`, and no longer returns `video_project`.
 
-- [ ] Tests in `wiring_state.rs`: `intake_then_init_then_reopen_keeps_path`; `init_twice_reuses_scaffold`; `deleted_directory_reports_missing_not_derived`; `legacy_project_migrates_once_and_is_unsaved`; `target_change_clears_path`.
-- [ ] Replace read-time derivations with `Session::video_project()`. The scaffold-locating helper (`workshop.rs:214 video_project_path(dir)`) is called only from the `project.open` migration and from `video.init`.
+- [x] Tests in `wiring_state.rs`: `status_reports_only_the_stored_video_project`, `deleted_video_project_reports_missing_not_another_file`, `changing_target_does_not_keep_the_old_targets_project` (persistence/reuse already covered by `video_project_path_persists_across_reopen`).
+- [x] `workshop.status` returns `video_project_path` + `video_project_exists` only; `set_target` stores the new target's project; catalog reads `video_project_exists`.
 - [ ] Commit `fix(engine): the stored video project is the only answer (#23)`.
 
 ### Task 2: UI and CLI read one field
@@ -77,4 +77,11 @@ The original report: an agent said "no project created", or a created project wa
 
 ## Observed
 
-(Task 0 output goes here.)
+On main `9249ae8`:
+
+- `workshop.status` returned two answers at once (`workshop.rs:455-456`): `video_project` = stored, else the active target's files on disk, else the **first `.fcproj` in the folder**; `video_project_path` = stored only. With no stored path and a stray `.fcproj`, they disagree; `app.js:681` reads either.
+- `workshop.set_target` scaffolded the new target and **discarded the path** (`let _ = ensure_video_target_project(…)`, `workshop.rs:682`), so the stored path kept pointing at the previous target's project.
+- `project_catalog.rs:104` judged "editor ready" from the guessed `video_project`.
+- Already covered before this plan (`9aa046d`): persistence across reopen, `video.init` reuse.
+- Left as is, deliberately: `target_project_path` / `targets[]` (on-disk view for the target chooser), `song_seconds` and the file listing (FilmCraft transcription artefacts), `video.place_references` default (FilmCraft-specific; changing it would break transcribe→place without `video.init`).
+- Legacy migration dropped: an old project shows "missing" and `video.init` reuses its existing scaffold (idempotent), so no hidden write on open is needed.
