@@ -1,7 +1,7 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
 function animationFeedback(){
- return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,layer_order:motion.meta?.layer_order||null,selected_layer_depth:motion.meta?.layers?.find(l=>l.id===motion.selected)?.depth??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
+ return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,layer_order:motion.meta?.layer_order||null,selected_layer_depth:motion.meta?.layers?.find(l=>l.id===motion.selected)?.depth??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_export:motion.lastExport?.project===state.project?motion.lastExport:null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
 }
 // UI view preferences are project-scoped; rig/Theatre persistence remains owned by the engine.
 function animationRemember(){
@@ -178,13 +178,7 @@ function animationControls(){
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));
- const exportStatus=el('div',{class:'why'});
- const exportButton=el('button',{class:'start',id:'motion-export',title:'Export this action as a transparent video track',onclick:async()=>{
-  exportButton.disabled=true;exportStatus.textContent='Rendering transparent track…';
-  try{const result=await motionCommand('motion.export_track',{character:motion.character,track:motion.track,amount:motion.amount,duration:motion.sample.duration/motion.speed});
-   const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
-  }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
- }},'Export track');
+ const {button:exportButton,status:exportStatus}=motionExportControl();
  box.append(motionSection('Export & integrations',[exportButton,exportStatus,el('button',{id:'motion-mlt-assembly',class:'ghost',title:'Assemble an existing clip/audio timeline with MLT',onclick:()=>nativeAnimationOpen({backend:'mlt'}).catch(error=>toast(String(error)))},'MLT clip/audio assembly'),authoring.pose],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
@@ -194,6 +188,26 @@ function animationControls(){
  renderPartControlsBar(selected,authoring.part);
  if(typeof theatreSyncClips==='function')theatreSyncClips();
  animationRemember();
+}
+function motionExportControl(){
+ const status=el('div',{id:'motion-export-status',class:'why',role:'status'});let busy=false;
+ const button=el('button',{class:'start',id:'motion-export','data-commands':'motion.export_track',title:'Export the current rest/action preview as a transparent track',onclick:async()=>{
+  if(busy)return;const project=state.project,character=motion.character;
+  try{
+   theatreRequireSaved();
+   const duration=motion.sample?.duration/motion.speed;
+   if(!character||!motion.track||!Number.isFinite(duration)||duration<=0)throw Error('Choose a sampled action before exporting.');
+   const params={character,track:motion.track,rest:motion.rest,amount:motion.amount,duration};busy=true;button.disabled=true;status.textContent='Rendering transparent track…';
+   const result=await motionCommand('motion.export_track',params);
+   motion.lastExport={project,character,params,result};
+   if(state.project!==project||motion.character!==character)return;
+   const file=result.outputs?.[0]?.file;
+   if(result.ok!==true||typeof file!=='string'||!file)throw Error(result.error||'Export returned no confirmed output file; inspect the retained receipt.');
+   status.textContent='Track ready';status.append(fileButton({path:file,name:file.split('/').pop()}));
+  }catch(error){if(state.project===project&&motion.character===character)status.textContent=String(error);}
+  finally{busy=false;button.disabled=false;}
+ }},'Export track');
+ return {button,status};
 }
 function renderPartControlsBar(selected,controls){
  const bar=$('anim-selected-part-inspector');if(!bar)return;
