@@ -32,6 +32,8 @@ struct Center {
     message: String,
     agent_gang: Value,
     agent_gang_at: Option<std::time::Instant>,
+    studios: Value,
+    studios_at: Option<std::time::Instant>,
     muppets_view: bool,
     catalog_selected: usize,
     spy: Option<String>,
@@ -60,7 +62,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         // No project is attached: the booth waits in the workshop for you to choose one.
@@ -133,6 +135,15 @@ impl Center {
                     self.spy_at=Some(std::time::Instant::now());
                 }
                 self.sample_studio();
+                // Which Studio instances exist, and what each one has open. The roster
+                // needs real evidence per project instead of a placeholder, so this is
+                // read off the instances themselves and refreshed on its own cadence.
+                if self.studios_at.map(|t|t.elapsed().as_secs()>=3).unwrap_or(true){
+                    let (sender,receiver)=std::sync::mpsc::channel();
+                    std::thread::spawn(move||{let _=sender.send(magicstudio_engine::studio_sessions::discover());});
+                    if let Ok(discovery)=receiver.recv_timeout(Duration::from_millis(400)){self.studios=discovery;}
+                    self.studios_at=Some(std::time::Instant::now());
+                }
                 if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
                 self.observe_chat_delivery();
 
@@ -960,31 +971,64 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
     let block = round_panel("ALL PROJECTS · shared Home recent catalog", TEAL, false);
     let inner = block.inner(area); let width = inner.width as usize;
     let mut lines = vec![styled("Existing Home catalog · j/k choose · Enter observes from the booth · readiness is not approval", MUTED)];
-    let widths = if width >= 100 { [width * 24 / 100, width * 20 / 100, width * 25 / 100, width * 12 / 100, width * 19 / 100] } else { [width,0,0,0,0] };
-    if width >= 100 { lines.push(styled(format!("{}{}{}{}{}", padded("PROJECT",widths[0]), padded("ENGINE",widths[1]), padded("STUDIO UI",widths[2]), padded("REV LAG",widths[3]), padded("LAST ACTION",widths[4])), MUTED)); }
+    // One column grid for every row: the same widths, so the roster reads as a table.
+    let columns = if width >= 100 { [width * 22 / 100, width * 11 / 100, width * 15 / 100, width * 18 / 100] } else { [width,0,0,0] };
+    if width >= 100 { lines.push(styled(format!("{}{}{}{}", padded("PROJECT",columns[0]), padded("STUDIO",columns[1]), padded("SAVED",columns[2]), padded("WORKER",columns[3])), MUTED)); }
+    let owner = &c.state["animation_worker"]["worker_owner"];
+    let owner_project = owner["project"].as_str();
     let actions = root_actions(c);
     for (index, project) in projects.iter().enumerate() {
         let current = project["path"] == c.state["project"] && c.state["project"].is_string();
         let ui = &c.state["ui"];
         let matched = current && ui["active_project"] == c.state["project"] && ui["connection"] == "connected";
-        let engine = if current { actions.first().map(|a|engine_badge(a)).unwrap_or(("— UNKNOWN", DESK_FG)) } else { ("— UNKNOWN", DESK_FG) };
-        let ack = if matched && ui["ui_ready"] == true { ("▣ UI UPDATED",GREEN) } else { ("! ACK UNKNOWN / MISSING",AMBER) };
+        // Which live instance actually has this project open, and whether it is saved.
+        let identity = project["project_id"].as_str().or(project["path"].as_str()).unwrap_or("");
+        let sessions: Vec<&Value> = c.studios["sessions"].as_array().into_iter().flatten()
+            .filter(|s| s["canonical_project"].as_str()==Some(identity) || s["active_project"].as_str()==Some(identity))
+            .collect();
+        let studio = if sessions.is_empty() { "—".to_string() } else {
+            sessions.iter().filter_map(|s|s["instance"].as_str().map(|i|i.split('-').next().unwrap_or(i).to_string())).collect::<Vec<_>>().join(",")
+        };
+        let saved = match sessions.first() {
+            Some(s) if s["engine_unsaved"] == true => "! unsaved".to_string(),
+            Some(s) if s["engine_unsaved"] == false => "[OK] saved".to_string(),
+            Some(_) => "? unknown".to_string(),
+            None => "—".to_string(),
+        };
+        let worker = if owner.is_object() && owner_project == Some(identity) {
+            format!("{} · {}",owner["job"].as_str().unwrap_or("job").rsplit('-').next().unwrap_or("job"),owner["state"].as_str().unwrap_or("?"))
+        } else { "—".to_string() };
         let picked = index == c.catalog_selected;
         let name = format!("{}{} {}", if current { ">" } else { " " }, if picked { "›" } else { " " }, project["name"].as_str().unwrap_or("unnamed"));
         if width >= 100 {
-            lines.push(Line::from(vec![Span::styled(padded(&name,widths[0]),Style::default().fg(if current { BLUE } else { DESK_FG })), Span::styled(padded(engine.0,widths[1]),Style::default().fg(engine.1)), Span::styled(padded(ack.0,widths[2]),Style::default().fg(ack.1)), Span::styled(padded(&lag(ui,matched),widths[3]),Style::default().fg(if matched && ui["ui_ready"] == true { GREEN } else { AMBER })), Span::styled(padded(if current { actions.first().and_then(|a|root_start(a)).map(target).unwrap_or("—") } else { "— unobserved" },widths[4]),Style::default().fg(MUTED))]));
+            let saved_colour = match saved.as_str() { "[OK] saved" => GREEN, "! unsaved" => AMBER, _ => MUTED };
+            let worker_colour = if worker == "—" { MUTED } else { TEAL };
+            lines.push(Line::from(vec![
+                Span::styled(padded(&name,columns[0]),Style::default().fg(if current { BLUE } else { DESK_FG })),
+                Span::styled(padded(&studio,columns[1]),Style::default().fg(if sessions.is_empty(){MUTED}else{GREEN})),
+                Span::styled(padded(&saved,columns[2]),Style::default().fg(saved_colour)),
+                Span::styled(padded(&worker,columns[3]),Style::default().fg(worker_colour)),
+                Span::styled(fit_text(project["readiness"]["next_step"].as_str().unwrap_or("no next step observed"),width.saturating_sub(columns.iter().sum::<usize>()).saturating_sub(1)),Style::default().fg(MUTED)),
+            ]));
         } else {
             lines.push(styled(name, if picked { TEAL } else { BLUE }));
-            lines.push(Line::from(vec![Span::styled(format!("  {}  ",engine.0),Style::default().fg(engine.1)), Span::styled(ack.0,Style::default().fg(ack.1))]));
+            lines.push(Line::from(vec![Span::styled(format!("  studio {studio}  "),Style::default().fg(if sessions.is_empty(){MUTED}else{GREEN})),Span::styled(saved.clone(),Style::default().fg(MUTED))]));
         }
         lines.push(styled(format!("  └─ {}",compact_path(project["path"].as_str().unwrap_or("path unavailable"), width.saturating_sub(5))),MUTED));
-        if let Some(next) = project["readiness"]["next_step"].as_str() { lines.push(styled(format!("     {}",fit_text(next,width.saturating_sub(5))),MUTED)); }
+        if width < 100 { if let Some(next) = project["readiness"]["next_step"].as_str() { lines.push(styled(format!("     {}",fit_text(next,width.saturating_sub(5))),MUTED)); } }
+        if current && let Some(action) = actions.first() {
+            let (badge,colour)=engine_badge(action);
+            lines.push(styled(format!("     engine {badge} · {}",lag(ui,matched)),colour));
+        }
         lines.push(Line::raw(""));
     }
     if lines.len() <= 2 { lines.push(styled("— No projects returned by the shared Home catalog.",MUTED)); }
     if let Some(error) = c.state["catalog"]["error"].as_str() { lines.push(styled(format!("✗ Catalog: {error}"),RED)); }
+    for error in c.studios["errors"].as_array().into_iter().flatten().take(2) {
+        lines.push(styled(fit_text(&format!("✗ Studio: {}",error["error"].as_str().unwrap_or("unreachable")),width),AMBER));
+    }
     let scroll = c.scroll.min(wrapped_rows(&lines,inner.width).saturating_sub(inner.height));
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll,0)).block(block),area);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((scroll,0)).block(block),area);
 }
 #[allow(dead_code)]
 fn saved_observation(ui:&Value)->(&'static str,Color){
@@ -1469,7 +1513,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){
@@ -1641,13 +1685,15 @@ mod feedback_tests {
             {"path":"/run/media/jesse/Speedy/media/hey-ho-little-fish/project/Hey Ho Little Fish.magic","name":"Hey Ho Little Fish","readiness":{"next_step":"Review project; editor setup or server is still required","problems":[]}},
             {"path":"/run/media/jesse/Speedy/media/merriweather/bumble-bee/Bumble Bee.magic","name":"Bumble Bee","readiness":{"next_step":"Review project; editor setup or server is still required","problems":[]}}],"error":null});
         c.state["animation_worker"]=json!({"project":c.state["project"].clone(),"job":"magicstudio-blender-test","state":"running","phase":"rendering","frames_completed":42,"frames_total":180,"telemetry":{"memory_current_bytes":419430400,"memory_max_bytes":4294967296u64}});
-        for (w,h) in [(140,44),(90,38)]{
-            let backend=ratatui::backend::TestBackend::new(w,h);
-            let mut terminal=ratatui::Terminal::new(backend).unwrap();
-            terminal.draw(|f|render_desk(f,&c,false)).unwrap();
-            let b=terminal.backend().buffer();
-            println!("=== {w}x{h} ===");
-            for y in 0..h{println!("{:>3}|{}",y,(0..w).map(|x|b[(x,y)].symbol()).collect::<String>());}
+        for control in [false,true]{
+            for (w,h) in [(140,44),(90,38)]{
+                let backend=ratatui::backend::TestBackend::new(w,h);
+                let mut terminal=ratatui::Terminal::new(backend).unwrap();
+                terminal.draw(|f|render_desk(f,&c,control)).unwrap();
+                let b=terminal.backend().buffer();
+                println!("=== control={control} {w}x{h} ===");
+                for y in 0..h{println!("{:>3}|{}",y,(0..w).map(|x|b[(x,y)].symbol()).collect::<String>());}
+            }
         }
     }
     #[test]
