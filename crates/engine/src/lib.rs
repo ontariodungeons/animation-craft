@@ -19,6 +19,7 @@
 )]
 
 pub mod agent;
+pub mod blender;
 pub(crate) mod audio_trace;
 pub mod activity;
 pub mod commands;

@@ -29,16 +29,39 @@ function imageCandidateForPart(assetId, partId) {
   return { ...target, image: draft.result.image, result: draft.result };
 }
 
+// A created asset stays successful even when refreshing its current view fails.
+async function imagePromptCompleted(project, draft, result, captured) {
+  draft.result = result;
+  draft.candidateTarget = captured;
+  draft.refreshError = '';
+  if (state.project !== project) return;
+  try {
+    const data = await invoke('project_state', { path: project });
+    if (state.project !== project) return;
+    state.data = data;
+    if (state.view === 'animation') await animationRefresh();
+    if (state.project !== project) return;
+    renderBlocks();
+    await acFeedback.report(null, null, { stage: 'image_block_rendered', command: 'image.generate', asset_id: result.asset_id, receipt: result.receipt, captured_part: captured?.partId || null });
+  } catch (error) { draft.refreshError = `Artwork created; view refresh failed: ${String(error)}`; }
+}
+
 function imagePromptBlock() {
   const project = state.project;
   let draft = imageDrafts.get(project);
   if (!draft) { draft = { prompt: '', model: 'gpt-6-luna', busy: false, result: null, error: '', startedAt: null, target: null, candidateTarget: null, timer: null }; imageDrafts.set(project, draft); }
-  const prompt = el('textarea', { id: 'image-prompt', rows: '3', placeholder: 'Describe the artwork or part repair…', 'aria-label': 'Image prompt' });
+  const prompt = el('textarea', { id: 'image-prompt', rows: '3', placeholder: 'Describe the artwork or part repair…', 'aria-label': 'Gaffer artwork prompt' });
   prompt.value = prompt.defaultValue = draft.prompt;
   prompt.addEventListener('input', () => { draft.prompt = prompt.value; updateCommand(); });
-  const model = el('input', { id: 'image-model', value: draft.model, list: 'image-model-options', 'aria-label': 'Codex image agent model', title: 'Selected Codex model; pixel dimensions are determined by its native image tool' });
+  const model = el('input', { id: 'image-model', value: draft.model, list: 'image-model-options', 'aria-label': 'Gaffer artwork model', title: 'Selected Codex model; pixel dimensions are determined by its native image tool' });
   const models = el('datalist', { id: 'image-model-options' }, el('option', { value: 'gpt-6-luna' }), el('option', { value: 'gpt-6-sol' }));
-  model.addEventListener('input', () => { draft.model = model.value; updateCommand(); });
+  model.addEventListener('input', () => {
+    draft.model = model.value; updateCommand();
+    if (!draft.busy && !draft.result && !draft.error) {
+      section.querySelector('.meta').textContent = draft.model;
+      section.querySelector('.block-head').title = `Gaffer · Artwork · ${draft.model}`;
+    }
+  });
   const command = el('code', { id: 'image-command' });
   const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
   function updateCommand() {
@@ -53,11 +76,11 @@ function imagePromptBlock() {
     status.className = draft.error ? 'image-error' : draft.result ? 'why magic-image-review' : 'why';
     if (draft.busy) status.textContent = `image.generate request running · ${elapsed()}s elapsed${targetLabel ? ` · target ${targetLabel}` : ''}`;
     else if (draft.error) status.textContent = draft.error;
-    else if (draft.result) status.textContent = `✓ Completed in ${draft.completedElapsed ?? 0}s · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · candidate needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}`;
+    else if (draft.result) status.textContent = `✓ Completed in ${draft.completedElapsed ?? 0}s · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · candidate needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}${draft.refreshError ? ` · ${draft.refreshError}` : ''}`;
     else status.textContent = 'Native Codex image tool · current login · quality and dimensions are tool-controlled.';
   }
   updateStatus();
-  const generate = el('button', { id: 'image-generate', class: 'start', 'data-commands': 'image.generate', 'aria-label': 'Generate image candidate', onclick: async () => {
+  const generate = el('button', { id: 'image-generate', class: 'start', 'data-commands': 'image.generate', 'aria-label': 'Gaffer: generate artwork candidate', onclick: async () => {
     if (!draft.prompt.trim()) { prompt.focus(); return; }
     if (draft.busy) return;
     // Freeze the target and reference at invocation time; later selection changes cannot retarget this job.
@@ -68,7 +91,7 @@ function imagePromptBlock() {
     }
     const captured = selectedPartTarget();
     draft.target = captured;
-    draft.busy = true; draft.error = ''; draft.result = null; draft.startedAt = performance.now();
+    draft.busy = true; draft.error = ''; draft.refreshError = ''; draft.result = null; draft.startedAt = performance.now();
     generate.disabled = true;
     updateStatus();
     draft.timer = setInterval(updateStatus, 250);
@@ -77,14 +100,7 @@ function imagePromptBlock() {
     try {
       const result = await invoke('engine_command', { id: 'image.generate', params: submitted });
       draft.completedElapsed = elapsed();
-      draft.result = result;
-      draft.candidateTarget = captured;
-      if (state.project === project) {
-        state.data = await invoke('project_state', { path: project });
-        if (state.view === 'animation' && motion.meta) animationControls();
-        renderBlocks();
-        await acFeedback.report(null, null, { stage: 'image_block_rendered', command: 'image.generate', asset_id: result.asset_id, receipt: result.receipt, captured_part: captured?.partId || null });
-      }
+      await imagePromptCompleted(project, draft, result, captured);
     } catch (error) { draft.completedElapsed = elapsed(); draft.error = String(error); }
     finally {
       clearInterval(draft.timer); draft.timer = null; draft.busy = false;
@@ -101,7 +117,7 @@ function imagePromptBlock() {
     el('details', {}, el('summary', {}, 'CLI command'), command, copy)];
   if (draft.result?.image) body.push(el('img', { class: 'image-result', src: convertFileSrc(draft.result.image), alt: 'Generated candidate artwork · needs visual review' }),
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
-  const section = block('image', ICONS.animate, 'Generate image', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : 'Codex · Luna', false, body, draft.error ? 'needs' : 'empty');
+  const section = block('image', '🐈', 'Gaffer · Artwork', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : draft.model, false, body, draft.error ? 'needs' : 'empty');
   section.classList.add('image-prompt-block');
   section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
   const indicator = section.querySelector('.block-head .dot');

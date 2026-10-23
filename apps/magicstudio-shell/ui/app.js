@@ -442,6 +442,7 @@ async function setView(view, action) {
   if (view === "split") view = "studio";
   if (state.view === "animation" && view !== "animation" && typeof theatreCanLeave === "function" && !theatreCanLeave()) return false;
   if (typeof animationPause === "function") animationPause();
+  if (view !== 'animation' && typeof blenderDispose === 'function') blenderDispose();
   state.view = view;
   if (view !== 'animation') renderMagicAssetCatalog();
   document.querySelectorAll(".tab").forEach((t) => {
