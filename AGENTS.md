@@ -5,7 +5,7 @@ UI, engine, pipeline, and test work from overwriting one another.
 
 ## Canonical application
 
-The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p magicstudio-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
+The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p magicstudio-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless. The product is **Magic Studio**; project files use the `.magic` extension (legacy `.acproj` files are migrated with `mc exec project.migrate path=<file>`).
 
 ## Drive the app: CLI, MCP and skill
 

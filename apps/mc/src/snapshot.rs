@@ -175,6 +175,20 @@ pub fn status_line(s: &Value) -> String {
     )
 }
 
+/// The same facts, dense: a status strip a person can scan in one pass.
+pub fn status_strip(s: &Value) -> String {
+    let clip = s["clip"].as_str().map(str::to_owned).unwrap_or_else(|| "?".into());
+    let time = s["playhead_sec"].as_f64().map(|t| format!("{t:.2}s")).unwrap_or_else(|| "?".into());
+    let part = s["selected_part"].as_str().map(str::to_owned).unwrap_or_else(|| "?".into());
+    let unsaved = s["unsaved_edits"].as_u64().map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+    let mut parts = vec![format!("@{}", clip.trim_start_matches('@')), format!("▶{time}"), format!("part {part}")];
+    if unsaved != "0" { parts.push(format!("unsaved {unsaved}")); }
+    if let Some(hf) = s["hyperframes"].as_bool() { parts.push(if hf {"HF on"} else {"HF off"}.into()); }
+    if let Some(conv) = s["converting"].as_str() { parts.push(format!("converting {conv}")); }
+    if let Some(err) = s["last_error"]["message"].as_str() { parts.push(format!("err {err}")); }
+    parts.join(" · ")
+}
+
 fn now_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

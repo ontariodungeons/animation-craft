@@ -16,8 +16,10 @@
 
 mod args;
 mod center;
+mod logo;
 mod local_ui;
 mod snapshot;
+mod telemetry;
 
 use magicstudio_engine::Session;
 use serde_json::{Value, json};

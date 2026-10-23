@@ -32,6 +32,9 @@ struct Center {
     message: String,
     agent_gang: Value,
     agent_gang_at: Option<std::time::Instant>,
+    muppets_view: bool,
+    pulse: Option<(f64, f64, Vec<crate::telemetry::Proc>)>,
+    pulse_at: Option<std::time::Instant>,
     scroll: u16,
     show_form: bool,
     control_view: bool,
@@ -54,7 +57,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,muppets_view:false,pulse:None,pulse_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
         if self.session.project_path.is_none() {
@@ -119,6 +122,19 @@ impl Center {
                     }
                 }
                 self.state["agent_gang"]=self.agent_gang.clone();
+                if self.pulse_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true){
+                    if let Some(endpoint)=self.state["ui"]["endpoint"].as_str(){
+                        if let Some(pid)=crate::telemetry::pid_from_socket(std::path::Path::new(endpoint.trim_start_matches("unix:"))){
+                            let tree=crate::telemetry::tree(pid);
+                            let previous=self.pulse.as_ref().map(|(cpu,_,_)|*cpu).unwrap_or(0.0);
+                            let ticks=tree.iter().map(|p|p.cpu_pct).sum::<f64>();
+                            let cpu=crate::telemetry::cpu_since(previous,&tree);
+                            let _=ticks;
+                            self.pulse=Some((cpu,crate::telemetry::rss_mb(&tree),tree));
+                            self.pulse_at=Some(std::time::Instant::now());
+                        }
+                    }
+                }
                 if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
                 self.observe_chat_delivery();
 
@@ -721,6 +737,7 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
     let scroll = c.scroll.min(wrapped_rows(&lines,inner.width).saturating_sub(inner.height));
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll,0)).block(block),area);
 }
+#[allow(dead_code)]
 fn saved_observation(ui:&Value)->(&'static str,Color){
  if ui["connection"]!="connected" {return ("? Saved state unobserved",AMBER);}
  if ui["draft_fields"].as_array().is_some_and(|v|!v.is_empty()){return ("! Unsaved form edits",AMBER);}
@@ -845,6 +862,48 @@ fn gang_tally_spans(c: &Center, compact: bool)->Vec<Span<'static>>{
  spans
 }
 
+
+/// PULSE: the Studio's own health — memory, CPU and the recent error tail, from `/proc`.
+fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ match &c.pulse{
+  Some((cpu,rss,procs))=>{
+   lines.push(styled(format!("studio · {} · cpu {:.0}% · mem {:.0}M",procs.len(),cpu,rss),DESK_FG));
+   for p in procs.iter().take(6){lines.push(styled(format!("  {:<22} pid {:<8} {}",p.name,p.pid,crate::telemetry::mib(p.rss_kb)),MUTED));}
+  }
+  None=>lines.push(styled("Studio process not observed",AMBER)),
+ }
+ let errors=c.state["activity"]["actions"].as_array().into_iter().flatten().flat_map(|a|a["events"].as_array().into_iter().flatten().filter(|e|e["stage"]=="engine_error"||e["ok"]==false)).collect::<Vec<_>>();
+ let errors=errors.iter().rev().take(5).collect::<Vec<_>>();
+ lines.push(styled(if errors.is_empty(){"no errors in the journal".to_string()}else{format!("{} error event(s) in the journal",errors.len())},if errors.is_empty(){GREEN}else{RED}));
+ for e in errors{lines.push(styled(format!("  {} {}",e["command"].as_str().unwrap_or("?"),e["error"].as_str().unwrap_or("failed")),RED));}
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel("PULSE · studio health · D closes",BLUE,false)),area);
+}
+
+/// MAPPETS: every agent in the gang, what it is building, and whether it is free.
+fn render_muppets(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ lines.push(styled("The gang on this project",DESK_FG));
+ lines.push(styled("● working · ◐ stalled · ○ idle — ○ is who you can hand the next scene to.",MUTED));
+ let mut free=0usize;
+ for g in c.state["agent_gang"].as_array().into_iter().flatten(){
+  let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?");
+  let (colour,word)=tally(g["agent_status"].as_str().unwrap_or(""));
+  if word=="IDLE"{free+=1;}
+  let task=g["terminal_title_stripped"].as_str().unwrap_or("");
+  lines.push(Line::from(vec![
+   Span::styled(format!("{} {name}",if word=="WORKING"{"●"}else if word=="STALLED"{"◐"}else{"○"}),colour),
+   Span::styled(format!("  {:<9}",g["agent"].as_str().unwrap_or("?")),MUTED),
+   Span::styled(format!("{word:<8}"),colour),
+   Span::styled(format!(" {task}"),DESK_FG),
+  ]));
+ }
+ lines.push(styled(format!("{free} idle and available"),if free>0{GREEN}else{MUTED}));
+ let sprocket=c.state["chat"]["request"]["status"].as_str().unwrap_or("");
+ let (colour,word)=match sprocket{"replied"=>(GREEN,"REPLIED"),"running"|"queued"=>(AMBER,"WORKING"),"error"=>(RED,"ERROR"),_=>(MUTED,"IDLE")};
+ lines.push(Line::from(vec![Span::styled(format!("{} Sprocket",if word=="WORKING"{"●"}else{"○"}),colour),Span::styled(format!("  {:<9}","in-app"),MUTED),Span::styled(format!("{word:<8}"),colour),Span::styled(" the app's own agent",DESK_FG)]));
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel("MOPPETS · the gang",TEAL,true)),area);
+}
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
  let gang_rows=if narrow{0}else{5};
@@ -859,13 +918,21 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ BACKSTAGE","")),chunks[5]);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
- let (saved,_)=saved_observation(ui);let status=if !matched{"? Studio unobserved"}else if ui["ui_ready"]==true{"[OK] Studio rendered"}else{"? Studio receipt pending"};
- let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED),styled(crate::snapshot::status_line(&c.state["snapshot"]),TEAL)];
- f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 GREEN ROOM | F2 ON AIR | F4 ROLL CALL"}else{"🎬 F1 GREEN ROOM | F2 ON AIR | F4 ROLL CALL · D details"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
- if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[2]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
+ let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let light=|on:bool,label:&str|{if on{Span::styled(format!("● {label}"),GREEN)}else{Span::styled(format!("○ {label}"),AMBER)}};
+ let header=vec![
+  styled(format!("{name}  ·  {}  ·  {}/{}",ui["view"].as_str().unwrap_or("?"),sel["provider"].as_str().unwrap_or("?"),sel["model"].as_str().unwrap_or("?")),DESK_FG),
+  Line::from(vec![light(matched,"studio"),Span::raw("  "),light(ui["engine_unsaved"]!=true,"saved"),Span::raw("  "),light(!chat_status.contains("?"),"chat"),Span::raw("  "),Span::styled(crate::snapshot::status_strip(&c.state["snapshot"]),TEAL)]),
+ ];
+ f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS"}else{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS · D PULSE"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
+ if c.muppets_view{render_muppets(f,c,chunks[2]);}
+ else if control{let p=Layout::vertical([Constraint::Length(4),Constraint::Min(5),Constraint::Length(9)]).split(chunks[2]);
+  let card=crate::logo::title_card_fitted(p[0].width as usize);
+  if card.is_empty(){f.render_widget(Paragraph::new(styled("MAGIC STUDIO",TEAL)).block(round_panel("WORKSHOP · the studio",TEAL,false)),p[0]);}
+  else{f.render_widget(Paragraph::new(card),p[0]);}
+  render_catalog(f,c,p[1]);render_commands(f,c,p[2],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
- else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
+ else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));if c.details_open{render_pulse(f,c,conversation);}else{render_conversation(f,c,conversation);}}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  if gang_rows>0{render_gang(f,c,chunks[3]);}
@@ -934,8 +1001,9 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
             }
             if key.code==KeyCode::F(9){c.chat_editing=!c.chat_editing;continue;}
             if c.chat_editing {match key.code{KeyCode::Esc=>c.chat_editing=false,KeyCode::Enter=>c.send_chat(),KeyCode::Backspace=>{c.chat_draft.pop();},KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL)=>c.chat_draft.push(ch),_=>{}}continue;}
-            if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;continue;}
-            if key.code==KeyCode::F(2) && !c.show_form{c.control_view=false;continue;}
+            if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;c.muppets_view=false;continue;}
+            if key.code==KeyCode::F(3) && !c.show_form{c.muppets_view=true;c.control_view=false;continue;}
+            if key.code==KeyCode::F(2) && !c.show_form{c.control_view=false;c.muppets_view=false;continue;}
             if key.code==KeyCode::F(10){c.check_storyboard();continue;}
             if key.code==KeyCode::F(4){c.show_form=!c.show_form;continue;}
             if !c.show_form {
@@ -1032,7 +1100,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,muppets_view:false,pulse:None,pulse_at:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){
@@ -1084,7 +1152,7 @@ mod feedback_tests {
         assert_eq!(merge_tail(&c.state["tail"],crate::snapshot::tail(&json!({"events":[{"sequence":9,"stage":"saved_state","command":"project.save"}]}),None)).as_array().unwrap().len(),1,"polling the same journal row twice adds it once");
         for control in [false,true]{for(w,h)in [(90,38),(140,44)]{
             let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,control)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");
-            assert!(screen.contains("subject bee · clip fly · ▶ 1.500s · part wing"),"{w} control={control}: missing status line\n{screen}");
+            assert!(screen.contains("@fly · ▶1.50s · part wing · unsaved 1"),"{w} control={control}: missing status line\n{screen}");
             if !control{assert!(screen.contains("EVENTS")&&screen.contains("saved project.save"),"{w}: missing event tail\n{screen}");}
         }}
     }
