@@ -120,6 +120,12 @@ before collection; success is published only after the renderer/encoder exits. L
 require matching unit Description and invocation ID, so an old project cannot display a
 replacement job's memory. Missing terminal receipts are failures with unknown usage,
 never inferred success. Historical foundation jobs keep their existing receipts.
+If the user bus or `systemctl` is unavailable, status can still return a saved terminal
+completed/cancelled/failed receipt. That response preserves the receipt timestamp and
+measurements, labels `state_source`/`telemetry_source` as `terminal_receipt`, sets
+`telemetry_stale:true` and `service_state:null`, and includes `service_error`. These are
+historical measurements, not a claim about a live service. Without a terminal receipt,
+the service-query error is returned; running/cancelling state is never invented.
 
 ## Tool roles and next migration boundary
 

@@ -332,8 +332,10 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
             serde_json::to_value(entry(s, p)?).map_err(|e| invalid(e.to_string()))?;
         request["motion"] = json!({"character":p["character"],"track":p["track"],"fps":p["fps"].as_f64().unwrap_or(30.0)});
         // Use the rig's authored rate unless explicitly overridden.
-        if p.get("fps").is_none() {
-            request["motion"].as_object_mut().unwrap().remove("fps");
+        if p.get("fps").is_none()
+            && let Some(motion) = request["motion"].as_object_mut()
+        {
+            motion.remove("fps");
         }
         let executable = std::env::current_exe()?.with_file_name("mc");
         if !executable.is_file() {
@@ -459,7 +461,28 @@ pub fn cmd_blender_list(s: &mut Session, _: &Value) -> Result<Value> {
 }
 pub fn cmd_blender_status(s: &mut Session, p: &Value) -> Result<Value> {
     let (id, dir) = job(s, p)?;
-    let service = service()?;
+    let service = match service() {
+        Ok(service) => service,
+        Err(error) => {
+            let result = dir.join("result.json");
+            if result.is_file() {
+                let mut receipt = read_json(&result)?;
+                if matches!(
+                    receipt["state"].as_str(),
+                    Some("completed" | "cancelled" | "failed")
+                ) {
+                    receipt["job"] = json!(id);
+                    receipt["state_source"] = json!("terminal_receipt");
+                    receipt["telemetry_source"] = json!("terminal_receipt");
+                    receipt["telemetry_stale"] = json!(true);
+                    receipt["service_state"] = Value::Null;
+                    receipt["service_error"] = json!(error.to_string());
+                    return Ok(receipt);
+                }
+            }
+            return Err(error);
+        }
+    };
     let invocation = read_json(&dir.join("invocation.json")).ok();
     let matches = service["Description"] == id
         && invocation
