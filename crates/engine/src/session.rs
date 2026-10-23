@@ -22,6 +22,8 @@ pub struct Session {
     pub project_assets: Vec<ProjectAsset>,
     /// The open `.acproj` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
+    /// Opaque native Theatre save-file state; absent on projects that have never saved Theatre edits.
+    pub theatre_state: Option<Value>,
     /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
     pub record_user_state: bool,
     /// Active chat selection belongs to this engine/window, never to project serialization.
@@ -60,6 +62,7 @@ impl Default for Session {
             assets: HashMap::new(),
             project_assets: Vec::new(),
             project_path: None,
+            theatre_state: None,
             record_user_state: false,
             agent_selection: None,
             project_owner: None,

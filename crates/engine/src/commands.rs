@@ -208,6 +208,8 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
+        query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .acproj identity\"}", crate::theatre::read),
+        cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .acproj identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
         query!(
             "project.list_assets",
             "List Project Assets",
@@ -493,6 +495,24 @@ pub fn build() -> Vec<CommandSpec> {
             "{}",
             has_asset,
             cmd_part_show_all
+        ),
+        cmd!(
+            "part.replace_image",
+            "Replace One Rig Part Image",
+            ["Edit"],
+            None,
+            "{\"asset\":\"asset id\",\"part\":\"stable part id\",\"candidate\":\"project-local PNG\",\"expected_rig_sha256\":\"captured rig hash\",\"expected_part_sha256\":\"captured source hash\",\"expected_candidate_sha256\":\"captured candidate hash\",\"expected_revision\":0}",
+            always,
+            crate::part_replacement::cmd_part_replace_image
+        ),
+        cmd!(
+            "part.undo_image",
+            "Undo Rig Part Image Replacement",
+            ["Edit"],
+            None,
+            "{\"asset\":\"asset id\",\"undo\":\"replacement receipt token\"}",
+            always,
+            crate::part_replacement::cmd_part_undo_image
         ),
         cmd!(
             "export.agent_prompt",

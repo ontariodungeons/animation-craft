@@ -458,10 +458,14 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     }),
                 }
             }
+            "ping" => json!({"jsonrpc":"2.0","id":id,"result":{}}),
+            "resources/list" => json!({"jsonrpc":"2.0","id":id,"result":{"resources":[]}}),
+            "resources/templates/list" => json!({"jsonrpc":"2.0","id":id,"result":{"resourceTemplates":[]}}),
+            "prompts/list" => json!({"jsonrpc":"2.0","id":id,"result":{"prompts":[]}}),
             _ => json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "result": {}
+                "error": {"code":-32601,"message":format!("Method not found: {method}")}
             }),
         };
         outln!("{}", resp);

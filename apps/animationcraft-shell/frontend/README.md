@@ -6,8 +6,9 @@ selected part's additional rotation. Both timelines share seconds.
 
 Build the declared dependencies with `bun run build` in this directory before
 building the Tauri app. The generated bundle is embedded with the other UI files.
-The current integration is a local evaluation: Theatre edits are not persisted
-to `.acproj`, and native engine Undo is not yet connected to Theatre history.
+Save motion stores the native Theatre snapshot in `.acproj` and restores it on
+reopen. Original sampled motion remains intact. Theatre history and native engine
+Undo are still separate. This integration remains a local evaluation.
 
 Bun 1.4.4 rewrites JSZip's optional CommonJS fallback to `__require` without
 declaring it. The browser build banner declares that absent fallback explicitly;
