@@ -52,13 +52,13 @@ fn history_path() -> Option<PathBuf> {
 const HISTORY_LIMIT: usize = 512;
 fn notable(event: &Value) -> bool {
     let stage = event["stage"].as_str().unwrap_or_default();
-    matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched")
+    matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched" | "theatre_selection" | "theatre_saved" | "theatre_error")
         || (matches!(event["command"].as_str(), Some("image.generate" | "motion.path" | "motion.undo_path"))
             && matches!(stage, "dispatch_running" | "engine_success" | "engine_needs_work"))
 }
 /// Page selection reports would each become a root action; they live only in the history.
 fn history_only(event: &Value) -> bool {
-    matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched"))
+    matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched" | "theatre_selection"))
 }
 fn read_rows(path: &std::path::Path) -> Vec<Value> {
     fs::read_to_string(path)
@@ -398,7 +398,8 @@ mod tests {
         assert!(notable(&json!({"stage":"engine_error","command":"project.open"})));
         assert!(!notable(&json!({"stage":"ui_click","control":"Generate image"})));
         assert!(!notable(&json!({"stage":"engine_success","command":"center.status"})));
-        assert!(history_only(&json!({"stage":"selection_changed"})) && !history_only(&json!({"stage":"saved_state"})));
+        assert!(history_only(&json!({"stage":"selection_changed"})) && history_only(&json!({"stage":"theatre_selection"})) && !history_only(&json!({"stage":"saved_state"})));
+        assert!(notable(&json!({"stage":"theatre_error"})) && !notable(&json!({"stage":"theatre_playback"})));
         let dir = std::env::temp_dir().join(format!("ac-history-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("activity-history.jsonl");

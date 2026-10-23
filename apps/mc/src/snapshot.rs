@@ -38,11 +38,9 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
     } else {
         &Value::Null
     };
-    let unsaved = if connected && ui["engine_unsaved"].is_boolean() {
-        json!(ui["dirty_reasons"].as_array().map_or(0, Vec::len))
-    } else {
-        Value::Null
-    };
+    // Studio builds before the edit counter report only reasons; their count stays null.
+    let unsaved = if connected && ui["unsaved_edits"].is_u64() { ui["unsaved_edits"].clone() } else { Value::Null };
+    let reasons = if connected { ui["dirty_reasons"].clone() } else { Value::Null };
     // workshop.set_target saves immediately, so the project file holds the live target.
     let hyperframes = project
         .and_then(|p| std::fs::read(p).ok())
@@ -74,6 +72,7 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
         "playhead_sec": animation["time"],
         "selected_part": animation["selected_layer"],
         "unsaved_edits": unsaved,
+        "unsaved_reasons": reasons,
         "hyperframes": hyperframes,
         "fps": if animation.is_null() { Value::Null } else { live["fps"].clone() },
         "last_error": last_error,
@@ -94,7 +93,9 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
         let stage = e["stage"].as_str().unwrap_or_default();
         let failed = matches!(stage, "engine_error" | "handler_error");
         let kinds: &[&str] = match (command, stage) {
-            (_, "saved_state") => &["saved"],
+            (_, "saved_state" | "theatre_saved") => &["saved"],
+            (_, "theatre_selection") => &["selection_changed"],
+            (_, "theatre_error") => &["error"],
             (_, "selection_changed") => &["selection_changed"],
             (_, "clip_switched") => &["clip_switched"],
             ("image.generate", "dispatch_running") => &["generation_started"],
@@ -117,7 +118,8 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
                 "client": e["client_label"],
                 "request_id": e["request_id"],
                 "project": e["project"],
-                "part": e["part"],
+                // Theatre reports its selection as [{sheet, part}]; the first object is the part.
+                "part": if e["part"].is_null() { e["objects"][0]["part"].clone() } else { e["part"].clone() },
                 "clip": e["clip"],
             }));
         }
@@ -181,14 +183,16 @@ mod tests {
             {"sequence": 6, "stage": "engine_success", "command": "center.status"},
             {"sequence": 7, "stage": "ui_click", "control": "motion-play"},
             {"sequence": 8, "stage": "selection_changed", "part": "wing"},
-            {"sequence": 9, "stage": "clip_switched", "clip": "fly"}
+            {"sequence": 9, "stage": "clip_switched", "clip": "fly"},
+            {"sequence": 10, "stage": "theatre_selection", "objects": [{"sheet": "bee", "part": "antenna-l"}]}
         ]})
     }
 
     #[test]
     fn tail_types_journal_rows_and_skips_untyped_ones() {
         let kinds: Vec<_> = tail(&activity(), None).iter().map(|e| e["type"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "keyframe_added", "keyframe_removed", "saved", "selection_changed", "clip_switched"]);
+        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "keyframe_added", "keyframe_removed", "saved", "selection_changed", "clip_switched", "selection_changed"]);
+        assert_eq!(tail(&activity(), None)[8]["part"], "antenna-l");
         assert_eq!(tail(&activity(), None)[6]["part"], "wing");
         // The engine's separate history wins over the three-root journal rows.
         let both = json!({"events": activity()["events"], "history": [{"sequence": 10, "stage": "saved_state"}]});
@@ -201,7 +205,7 @@ mod tests {
     #[test]
     fn snapshot_keeps_stable_keys_and_null_when_unobserved() {
         let s = build(None, &json!({"connection": "not_observed_open"}), &json!({}), &json!({}));
-        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "hyperframes", "fps", "last_error"] {
+        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "unsaved_reasons", "hyperframes", "fps", "last_error"] {
             assert!(s.get(key).is_some(), "missing {key}");
         }
         assert!(s["subject"].is_null() && s["unsaved_edits"].is_null() && s["fps"].is_null() && s["hyperframes"].is_null());
@@ -215,7 +219,7 @@ mod tests {
         let project = dir.join("song.acproj");
         std::fs::write(&project, r#"{"workshop":{"target":"hyperframes"}}"#).unwrap();
         let path = project.to_str().unwrap();
-        let ui = json!({"connection": "connected", "active_project": path, "engine_unsaved": true, "dirty_reasons": ["engine state differs", {"draft_field": "x"}]});
+        let ui = json!({"connection": "connected", "active_project": path, "engine_unsaved": true, "unsaved_edits": 2, "dirty_reasons": ["engine state differs", {"draft_field": "x"}]});
         let page = json!({"page": {"project": path, "animation": {"character": "bee", "track": "fly", "time": 1.25, "selected_layer": "wing"}}, "fps": 24});
         let mut journal = activity();
         for e in journal["events"].as_array_mut().unwrap() { e["project"] = json!(path); }

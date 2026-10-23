@@ -100,7 +100,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         v = json!({});
     }
     let engine = app.state::<Engine>();
-    let (project, dirty, chat_selection) = if let Ok(s) = engine.0.try_lock() {
+    let (project, dirty, chat_selection, edits) = if let Ok(s) = engine.0.try_lock() {
         let dirty = if let Some(path) = &s.project_path {
             std::fs::read(path)
                 .ok()
@@ -120,10 +120,11 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         } else {
             Some(false)
         };
-        (s.project_path.clone(), dirty, s.agent_selection.clone())
+        (s.project_path.clone(), dirty, s.agent_selection.clone(), Some(s.edits_since_save))
     } else {
         (
             v["session_project"].as_str().map(std::path::PathBuf::from),
+            None,
             None,
             None,
         )
@@ -147,6 +148,10 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     for field in v["draft_fields"].as_array().into_iter().flatten(){reasons.push(json!({"draft_field":field}));}
     if v["pending_invokes"].as_u64().unwrap_or(0)>0 {reasons.push(json!({"pending_invokes":v["pending_invokes"]}));}
     v["dirty_reasons"]=json!(reasons);
+    // Engine edits since the last project write, plus each changed form field. A clean diff
+    // means 0 even after commands (e.g. exports) that never touch project state.
+    let drafts=v["draft_fields"].as_array().map_or(0,Vec::len) as u64;
+    v["unsaved_edits"]=match (dirty,edits) {(Some(false),_)=>json!(drafts),(Some(true),Some(n))=>json!(n.max(1)+drafts),_=>Value::Null};
     v["engine_unsaved"] = json!(dirty);
     v["unsaved_state"] = json!(if dirty == Some(true)
         || v["draft_fields"].as_array().is_some_and(|a| !a.is_empty())
