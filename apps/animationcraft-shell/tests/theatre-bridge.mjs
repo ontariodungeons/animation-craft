@@ -6,18 +6,22 @@ const firstId=await theatreProjectId('/long/project/path/Bumble Bee.acproj');
 assert.ok(firstId.length<=32);
 assert.equal(firstId,await theatreProjectId('/long/project/path/Bumble Bee.acproj'));
 assert.notEqual(firstId,await theatreProjectId('/different/project/Bumble Bee.acproj'));
-const messages=[],listeners={},nodes=new Map(),events=[];
+const messages=[],listeners={},nodes=new Map(),events=[],commands=[];
+const nativeState={definitionVersion:'0.4.0',revisionHistory:[],sheetsById:{bee:{}}};
 const frameWindow={postMessage:message=>messages.push(message)};
 const context=vm.createContext({window:{addEventListener:(type,handler)=>listeners[type]=handler},location:{origin:'tauri://localhost'},
  el:(tag,props)=>{const node={...props,contentWindow:tag==='iframe'?frameWindow:undefined};if(props.id)nodes.set(props.id,node);return node;},
  $:id=>nodes.get(id),state:{project:'/project/Bee.acproj'},motion:{character:'bee',selected:'antenna',meta:{layers:[{id:'antenna'}]},sample:{duration:5},time:0},
- animationDraw(){},animationPause(){},acFeedback:{report:(phase,ack,event)=>events.push(event)}});
+ animationDraw(){},animationPause(){},setTimeout,clearTimeout,motionCommand:async(id,params)=>{commands.push({id,params});return id.endsWith('.read')?{status:'saved',state:nativeState}:{saved:true,project:params.expected_project};},acFeedback:{report:(phase,ack,event)=>events.push(event)}});
 vm.runInContext(readFileSync(new URL('../ui/theatre.js',import.meta.url),'utf8'),context);
 vm.runInContext('theatreMount({append(){}})',context);
 listeners.message({source:{},data:{magicTheatre:true,type:'loaded'}});
 assert.equal(messages.length,0,'unrelated iframe cannot control animation');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'loaded'}});
+await new Promise(setImmediate);
 assert.equal(messages[0].part,'antenna');
+assert.equal(messages[0].state,nativeState,'native saved state loads before the first Theatre context');
+assert.equal(commands[0].params.expected_project,'/project/Bee.acproj');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'seek',time:12}});
 assert.equal(context.motion.time,5,'Theatre seek clamps to actual native track duration');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'other',rotation:30}});
@@ -38,6 +42,17 @@ for(let i=0;i<20;i++)listeners.message({source:frameWindow,data:{magicTheatre:tr
 assert.equal(events.filter(e=>e.stage==='theatre_values').length,0,'per-frame values stay in snapshot, not action history');
 assert.equal(vm.runInContext('theatreFeedback().value_update.value',context),19);
 assert.equal(vm.runInContext('theatreFeedback().visual_quality',context),'not_assessed','loaded and rendered are not visual quality acceptance');
+const saving=vm.runInContext('theatreSave()',context);
+const exporting=messages.at(-1);assert.equal(exporting.type,'export');
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:exporting.request,project:'/project/Bee.acproj',state:nativeState}});
+await saving;
+assert.equal(commands.at(-1).id,'motion.theatre.save');
+assert.equal(commands.at(-1).params.expected_project,'/project/Bee.acproj');
+assert.equal(commands.at(-1).params.state,nativeState,'opaque Theatre curves/keyframes are saved without conversion');
+const mismatch=vm.runInContext('theatreSave()',context);const badExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:badExport.request,project:'/wrong/project.acproj',state:nativeState}});
+await assert.rejects(mismatch,/project mismatch/);
+assert.equal(commands.filter(c=>c.id==='motion.theatre.save').length,1,'mismatched export cannot write another project');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'error',error:'fixture initialization failure'}});
 assert.equal(vm.runInContext('theatreFeedback().availability',context),'error');
 assert.equal(vm.runInContext('theatreFeedback().error',context),'fixture initialization failure');
