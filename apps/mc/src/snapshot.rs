@@ -80,11 +80,13 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
     })
 }
 
-/// Typed events from the activity journal, oldest first, for `project` when given. Selection
-/// changes and clip switches are not journaled by the app, so they never appear here.
+/// Typed events from the journal's history (or its retained rows on an older engine), oldest
+/// first, for `project` when given. selection_changed / clip_switched appear once the page
+/// reports `{stage:"selection_changed", part}` / `{stage:"clip_switched", clip}` events.
 pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
     let mut out = Vec::new();
-    for e in activity["events"].as_array().into_iter().flatten() {
+    let rows = activity["history"].as_array().or(activity["events"].as_array());
+    for e in rows.into_iter().flatten() {
         if project.is_some_and(|p| e["project"].as_str() != Some(p)) {
             continue;
         }
@@ -93,6 +95,8 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
         let failed = matches!(stage, "engine_error" | "handler_error");
         let kinds: &[&str] = match (command, stage) {
             (_, "saved_state") => &["saved"],
+            (_, "selection_changed") => &["selection_changed"],
+            (_, "clip_switched") => &["clip_switched"],
             ("image.generate", "dispatch_running") => &["generation_started"],
             ("image.generate", "engine_success" | "engine_needs_work") => &["generation_finished"],
             ("image.generate", _) if failed => &["generation_finished", "error"],
@@ -113,6 +117,8 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
                 "client": e["client_label"],
                 "request_id": e["request_id"],
                 "project": e["project"],
+                "part": e["part"],
+                "clip": e["clip"],
             }));
         }
     }
@@ -173,14 +179,20 @@ mod tests {
             {"sequence": 4, "stage": "engine_success", "command": "motion.undo_path"},
             {"sequence": 5, "stage": "saved_state", "command": "project.save"},
             {"sequence": 6, "stage": "engine_success", "command": "center.status"},
-            {"sequence": 7, "stage": "ui_click", "control": "motion-play"}
+            {"sequence": 7, "stage": "ui_click", "control": "motion-play"},
+            {"sequence": 8, "stage": "selection_changed", "part": "wing"},
+            {"sequence": 9, "stage": "clip_switched", "clip": "fly"}
         ]})
     }
 
     #[test]
     fn tail_types_journal_rows_and_skips_untyped_ones() {
         let kinds: Vec<_> = tail(&activity(), None).iter().map(|e| e["type"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "keyframe_added", "keyframe_removed", "saved"]);
+        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "keyframe_added", "keyframe_removed", "saved", "selection_changed", "clip_switched"]);
+        assert_eq!(tail(&activity(), None)[6]["part"], "wing");
+        // The engine's separate history wins over the three-root journal rows.
+        let both = json!({"events": activity()["events"], "history": [{"sequence": 10, "stage": "saved_state"}]});
+        assert_eq!(tail(&both, None).len(), 1);
         let failed = &tail(&activity(), None)[1];
         assert_eq!(failed["ok"], false);
         assert_eq!(failed["error"], "provider down");
