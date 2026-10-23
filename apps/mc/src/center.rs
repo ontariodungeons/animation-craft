@@ -214,6 +214,24 @@ impl Center {
     fn studio_sample(&self)->Option<&crate::telemetry::Sample>{
         self.pulse.as_ref().filter(|p|Some(p.pid)==self.studio_pid() && self.state["ui"]["instance"].as_str()==Some(p.instance.as_str()) && p.at.elapsed()<Duration::from_secs(6))
     }
+    /// Which view the desk is showing, so a restart can come back to it.
+    fn view_name(&self)->&'static str{
+        if self.telemetry_view{"telemetry"}else if self.muppets_view{"muppets"}else if self.control_view||!self.state["project"].is_string(){"workshop"}else{"booth"}
+    }
+    /// Re-exec this desk with the same arguments so a rebuilt binary can take over
+    /// without the human leaving the terminal. The new instance waits a moment so
+    /// the terminal is free before it draws.
+    fn restart(&self){
+        let view=self.view_name();
+        if let Ok(exe)=std::env::current_exe(){
+            let args:Vec<String>=std::env::args().skip(1).collect();
+            let _=std::process::Command::new(exe).args(args)
+                .env("MAGICSTUDIO_RESTART_DELAY_MS","600")
+                .env("MAGICSTUDIO_VIEW",view)
+                .spawn();
+        }
+        std::process::exit(0);
+    }
     /// The agent the gang strip has selected, with its pane and its live state.
     fn selected_agent(&self)->Option<&Value>{
         self.agent_gang.as_array().and_then(|agents|agents.get(self.gang_selected)).filter(|agent|agent["name"].is_string())
@@ -1216,6 +1234,22 @@ fn meter(done: Option<u64>, total: Option<u64>, width: usize) -> (String, Color)
     (bar, colour)
 }
 
+/// A render's progress as a timeline: what is finished, the playhead at the
+/// boundary, and what is still to come. Borrowed from an animation editor's
+/// frame ruler rather than a plain meter, because a render is a sequence.
+fn frame_track(done:Option<u64>,total:Option<u64>,width:usize)->Vec<Span<'static>>{
+    let (Some(done),Some(total))=(done,total) else {
+        return vec![Span::styled("·".repeat(width),Style::default().fg(MUTED))];
+    };
+    if total==0{return vec![Span::styled("·".repeat(width),Style::default().fg(MUTED))];}
+    let cells=width.max(6);
+    let filled=((done.min(total) as f64/total as f64)*cells as f64).round() as usize;
+    vec![
+        Span::styled("█".repeat(filled),Style::default().fg(GREEN)),
+        Span::styled("▏",Style::default().fg(TEAL)),
+        Span::styled("░".repeat(cells.saturating_sub(filled)),Style::default().fg(MUTED)),
+    ]
+}
 /// One aligned label/value row. The label column is shared, so values line up.
 fn metric_row(label: &str, bar: &str, colour: Color, value: &str) -> Line<'static> {
     Line::from(vec![
@@ -1223,6 +1257,13 @@ fn metric_row(label: &str, bar: &str, colour: Color, value: &str) -> Line<'stati
         Span::styled(bar.to_string(), Style::default().fg(colour)),
         Span::styled(format!("  {value}"), Style::default().fg(DESK_FG)),
     ])
+}
+/// The same row, with a timeline instead of a bar.
+fn track_row(label: &str, track: Vec<Span<'static>>, value: &str) -> Line<'static> {
+    let mut spans = vec![Span::styled(format!("{label:<9}"), Style::default().fg(MUTED))];
+    spans.extend(track);
+    spans.push(Span::styled(format!("  {value}"), Style::default().fg(DESK_FG)));
+    Line::from(spans)
 }
 fn render_worker(f:&mut Frame,value:&Value,area:ratatui::layout::Rect){
     let width=area.width.saturating_sub(2) as usize;
@@ -1236,8 +1277,8 @@ fn render_worker(f:&mut Frame,value:&Value,area:ratatui::layout::Rect){
     }
     // Rows are ordered by what matters first, and the panel shows as many as fit.
     let telemetry=&value["telemetry"];
-    let (frames_bar,frames_colour)=meter(value["frames_completed"].as_u64(),value["frames_total"].as_u64(),16);
     let frames_value=format!("{}/{}",value["frames_completed"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"?".into()),value["frames_total"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"?".into()));
+    let frames_track=frame_track(value["frames_completed"].as_u64(),value["frames_total"].as_u64(),20);
     let limit=telemetry["memory_max_bytes"].as_u64().or_else(||value["limits"]["memory_max_bytes"].as_u64());
     let (ram_bar,ram_colour)=meter(telemetry["memory_current_bytes"].as_u64(),limit,16);
     let mib=|v:&Value|v.as_u64().map(|n|format!("{:.0}MiB",n as f64/1048576.0)).unwrap_or_else(||"?".into());
@@ -1251,7 +1292,7 @@ fn render_worker(f:&mut Frame,value:&Value,area:ratatui::layout::Rect){
     let owner_line=if owner.is_object(){format!("{} · {} · {}",owner["job"].as_str().unwrap_or("?"),owner["project"].as_str().unwrap_or("project unknown"),owner["state"].as_str().unwrap_or("state ?"))}else{format!("Global worker owner: {}",value["worker_owner_status"].as_str().unwrap_or("unavailable"))};
     let mut rows:Vec<Line<'static>>=Vec::new();
     rows.push(styled(if inner>=3{crate::worker::state_line(value)}else{crate::worker::headline(value)},worker_colour(value)));
-    rows.push(metric_row("FRAMES",&frames_bar,frames_colour,&frames_value));
+    rows.push(track_row("FRAMES",frames_track,&frames_value));
     rows.push(metric_row("RAM",&ram_bar,ram_colour,&ram_value));
     rows.push(styled(fit_text(&format!("{:<9}{identity}","JOB"),width),MUTED));
     rows.push(styled(fit_text(&format!("{:<9}{source_row}","SOURCE"),width),MUTED));
@@ -1456,7 +1497,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  }
  if gang_rows>0{render_gang(f,c,chunks[4]);}
  let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BACKSTAGE ● open"}else{"BACKSTAGE ○ off"};
- let keys=if narrow{"F10 F9 D C ^Q"}else{"F10 🩺 · [ / ] stage · , . agent · P poke · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
+ let keys=if narrow{"F10 F9 D C ^Q"}else{"F10 🩺 · [ / ] stage · , . agent · P poke · R restart · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
  let mut footer:Vec<Line>=Vec::new();
  if let Some(poke)=&c.poke{footer.push(styled(format!("POKE {} ({})  ›  {}█   Enter send · Esc cancel",poke.name,poke.target,poke.text),TEAL));}
  footer.extend(if c.message.starts_with("COPIED")||c.message.contains("error"){vec![styled(c.message.clone(),AMBER)]}else{
@@ -1642,6 +1683,16 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("Command Center needs an interactive terminal. Use center --print for inspection or run - for JSONL commands.".into());
     }
+    // A restart waits for the terminal to be released by the instance it replaces.
+    if let Some(delay)=std::env::var("MAGICSTUDIO_RESTART_DELAY_MS").ok().and_then(|v|v.parse::<u64>().ok()){
+        std::thread::sleep(std::time::Duration::from_millis(delay));
+    }
+    match std::env::var("MAGICSTUDIO_VIEW").as_deref(){
+        Ok("telemetry")=>c.telemetry_view=true,
+        Ok("muppets")=>c.muppets_view=true,
+        Ok("workshop")=>c.control_view=true,
+        _=>{}
+    }
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
         let mut refreshed=std::time::Instant::now();
@@ -1696,6 +1747,7 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
                     KeyCode::Char(',')=>c.gang_selected=c.gang_selected.saturating_sub(1),
                     KeyCode::Char('.')=>{let count=c.agent_gang.as_array().map(|a|a.len()).unwrap_or(0);c.gang_selected=if count==0{0}else{(c.gang_selected+1)%count};}
                     KeyCode::Char('p')=>c.begin_poke(),
+                    KeyCode::Char('R')=>c.restart(),
                     KeyCode::Char('P')=>c.quick_poke(),
                     KeyCode::Char('j') if c.control_view=>c.catalog_selected+=1,
                     KeyCode::Char('k') if c.control_view=>c.catalog_selected=c.catalog_selected.saturating_sub(1),
