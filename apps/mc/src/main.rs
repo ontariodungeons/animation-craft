@@ -101,7 +101,7 @@ SUBCOMMANDS
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
-  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
+  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or a screenshot of the live window when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
   mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
                                       register it with your agent as: command `mc`, args [\"mcp\"]
@@ -116,8 +116,7 @@ LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec 
   ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
   ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
   ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
-  ui.vision                           analyze the live stage canvas pixels (no screenshot download needed)
-  ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
+  ui.screenshot [output=...]          save a PNG of the window
   ui.look [region=<id prefix>] [click=<id>] [pad=0] [max_side=1000] [output=...]
                                       one-step look: click (optional), then a PNG of the window or region,
                                       the app state and the ids inside it (MCP: ui_look returns the image)
@@ -730,7 +729,12 @@ fn main() {
         "vision" => {
             let target = a.pos(1);
             let res = match (a.bridge_addr(), target) {
-                (Some(addr), None) => bridge_call(&addr, "ui.vision", json!({})),
+                // The window has no vision command; analyze a screenshot of it instead.
+                (Some(addr), None) => {
+                    let out = std::env::temp_dir().join(format!("mc-vision-{}.png", std::process::id()));
+                    bridge_call(&addr, "ui.screenshot", json!({ "output": out }))
+                        .and_then(|_| bridge_call(&addr, "vision.analyze", json!({ "image": out })))
+                }
                 (bridge_opt, Some(t)) => {
                     let params = if std::path::Path::new(t).exists() {
                         json!({ "image": t })
