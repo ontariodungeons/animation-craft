@@ -122,8 +122,11 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
             ("image.generate", "dispatch_running") => &["generation_started"],
             ("image.generate", "engine_success" | "engine_needs_work") => &["generation_finished"],
             ("image.generate", _) if failed => &["generation_finished", "error"],
-            ("motion.path", "engine_success") => &["keyframe_added"],
-            ("motion.undo_path", "engine_success") => &["keyframe_removed"],
+            // Drawn motion paths are not Theatre keyframes; Theatre reports its own keyframe counts.
+            ("motion.path", "engine_success") => &["motion_path_drawn"],
+            ("motion.undo_path", "engine_success") => &["motion_path_undone"],
+            (_, "theatre_keyframes") if e["count"].as_u64() > e["previous"].as_u64() => &["keyframe_added"],
+            (_, "theatre_keyframes") => &["keyframe_removed"],
             _ if failed => &["error"],
             _ => &[],
         };
@@ -218,14 +221,17 @@ mod tests {
             {"sequence": 7, "stage": "ui_click", "control": "motion-play"},
             {"sequence": 8, "stage": "selection_changed", "part": "wing"},
             {"sequence": 9, "stage": "clip_switched", "clip": "fly"},
-            {"sequence": 10, "stage": "theatre_selection", "objects": [{"sheet": "bee", "part": "antenna-l"}]}
+            {"sequence": 10, "stage": "theatre_selection", "objects": [{"sheet": "bee", "part": "antenna-l"}]},
+            {"sequence": 11, "stage": "theatre_keyframes", "sheet": "bee / fly", "part": "wing", "count": 3, "previous": 2},
+            {"sequence": 12, "stage": "theatre_keyframes", "sheet": "bee / fly", "part": "wing", "count": 1, "previous": 3}
         ]})
     }
 
     #[test]
     fn tail_types_journal_rows_and_skips_untyped_ones() {
         let kinds: Vec<_> = tail(&activity(), None).iter().map(|e| e["type"].as_str().unwrap().to_owned()).collect();
-        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "keyframe_added", "keyframe_removed", "saved", "selection_changed", "clip_switched", "selection_changed"]);
+        assert_eq!(kinds, ["generation_started", "generation_finished", "error", "motion_path_drawn", "motion_path_undone", "saved", "selection_changed", "clip_switched", "selection_changed", "keyframe_added", "keyframe_removed"]);
+        assert_eq!(tail(&activity(), None)[9]["sheet"], "bee / fly");
         assert_eq!(tail(&activity(), None)[8]["part"], "antenna-l");
         assert_eq!(tail(&activity(), None)[6]["part"], "wing");
         // The engine's separate history wins over the three-root journal rows.

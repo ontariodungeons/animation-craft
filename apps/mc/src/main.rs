@@ -91,7 +91,8 @@ SUBCOMMANDS
                                       last_error (null = not observed); the Command Center status line
   exec center.tail [last=20] [project=<file>]
                                       last N typed events: saved, generation_started/finished,
-                                      keyframe_added/removed, selection_changed, clip_switched, error
+                                      keyframe_added/removed (Theatre), motion_path_drawn/undone,
+                                      selection_changed, clip_switched, clip_sheet_*, error
                                       (activity history: last 512, UI clicks never evict them)
   login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
@@ -520,7 +521,8 @@ fn mcp_tools() -> Vec<Value> {
     tools.push(json!({
         "name": "center_tail",
         "description": "Last N typed Magic Studio events (saved, generation_started, generation_finished, \
-            keyframe_added, keyframe_removed, selection_changed, clip_switched, error) from the activity history, oldest first. Read-only.",
+            keyframe_added, keyframe_removed (Theatre keyframes), motion_path_drawn, motion_path_undone, selection_changed, clip_switched, \
+            clip_sheet_started, clip_sheet_converted, clip_sheet_failed, error) from the activity history, oldest first. Read-only.",
         "inputSchema": {
             "type": "object",
             "properties": {

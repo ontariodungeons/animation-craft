@@ -20,6 +20,7 @@ assert.equal(messages.length,0,'unrelated iframe cannot control animation');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'loaded'}});
 await new Promise(setImmediate);
 assert.equal(messages[0].part,'antenna');
+assert.equal(messages[0].sheet,'bee / rest','each clip opens its own "<asset> / <clip>" sheet; no track selected is the rest pose');
 assert.equal(messages[0].state,nativeState,'native saved state loads before the first Theatre context');
 assert.equal(commands[0].params.expected_project,'/project/Bee.acproj');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'seek',time:12}});
@@ -38,6 +39,8 @@ listeners.message({source:frameWindow,data:{magicTheatre:true,type:'selection',o
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'playback',playing:true}});
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'playback',playing:true}});
 assert.equal(events.filter(e=>e.stage==='theatre_playback').length,1,'duplicate playback status does not flood event history');
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'keyframes',sheet:'bee / rest',part:'antenna',count:2,previous:1}});
+assert.deepEqual([events.at(-1).stage,events.at(-1).sheet,events.at(-1).count,events.at(-1).previous],['theatre_keyframes','bee / rest',2,1],'Theatre keyframe count changes reach the activity history');
 for(let i=0;i<20;i++)listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'antenna',rotation:i}});
 assert.equal(events.filter(e=>e.stage==='theatre_values').length,0,'per-frame values stay in snapshot, not action history');
 assert.equal(vm.runInContext('theatreFeedback().value_update.value',context),19);

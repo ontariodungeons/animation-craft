@@ -10,13 +10,17 @@ const projects=new Map();
 const send=(type, detail={})=>parent.postMessage({magicTheatre:true,type,...detail},location.origin);
 // Conservatively protect interactions without inspecting Theatre's private history or
 // polling createContentOfSaveFile(), which itself mutates revision history in 0.7.0.
-let interactionRevision=0;
+let interactionRevision=0,keyframeCount=null;
 const pointers=new Set();
+// Read-only keyframe count of the open part's rotation; reported when an interaction changes it.
+const countKeyframes=()=>sheet&&object?sheet.sequence.__experimental_getKeyframes(object.props.rotation).length:null;
+function reportKeyframes(){const count=countKeyframes();if(count===null||count===keyframeCount)return;if(keyframeCount!==null)send('keyframes',{sheet:sheet.address.sheetId,part:object.address.objectKey,count,previous:keyframeCount});keyframeCount=count;}
 for(const type of ['pointerdown','pointerup','pointercancel','input','keydown','wheel'])window.addEventListener(type,event=>{
  if(!projectPath)return;
  if(type==='pointerdown')pointers.add(event.pointerId);
  if(type==='pointerup'||type==='pointercancel')pointers.delete(event.pointerId);
  send('interaction',{project:projectPath,revision:++interactionRevision,active:pointers.size>0});
+ if(!pointers.size)setTimeout(reportKeyframes,0);
 },{capture:true,passive:true});
 studio.onSelectionChange(selection=>send('selection',{objects:selection.map(item=>({sheet:item.address.sheetId,part:item.address.objectKey||null}))}));
 window.addEventListener('message',async event=>{
@@ -39,6 +43,7 @@ window.addEventListener('message',async event=>{
    stop=object.onValuesChange(value=>send('values',{part:message.part,rotation:value.rotation}));
    stopClock=onChange(sheet.sequence.pointer.position,time=>{if(!synchronizing&&Math.abs(time-mirroredPosition)>1e-7)send('seek',{time});});
    stopPlaying=onChange(sheet.sequence.pointer.playing,playing=>send('playback',{playing}));
+   keyframeCount=countKeyframes();
    send('ready',{part:message.part});
   }else if(message.type==='export'){
    if(!project||message.project!==projectPath)throw new Error('Theatre export project mismatch; reload the intended project');

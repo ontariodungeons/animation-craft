@@ -71,6 +71,7 @@ window.addEventListener('message',event=>{
  if(message.type==='loaded'){magicTheatre.ready=true;theatreContext();}
  if(message.type==='ready'){magicTheatre.availability='ready';magicTheatre.error=null;$('theatre-save').disabled=false;$('theatre-status').textContent=`${message.part} · ${magicTheatre.persistence==='saved'?'saved motion loaded':'Save motion to persist edits'}`;theatreEvent('ready',{part:message.part});}
  if(message.type==='exported'||message.type==='error'&&message.request){const pending=magicTheatre.exports.get(message.request);if(pending){clearTimeout(pending.timer);magicTheatre.exports.delete(message.request);if(message.type==='error'||message.project!==pending.project)pending.reject(new Error(message.error||'Theatre export project mismatch'));else pending.resolve(message);}}
+ if(message.type==='keyframes'){theatreEvent('keyframes',{sheet:message.sheet,part:message.part,count:message.count,previous:message.previous});}
  if(message.type==='selection'){magicTheatre.objects=message.objects;theatreEvent('selection',{objects:message.objects});}
  if(message.type==='playback'){const changed=magicTheatre.playing!==message.playing;magicTheatre.playing=message.playing;if(changed)theatreEvent('playback',{playing:message.playing});}
  if(message.type==='values'&&message.part===magicTheatre.part){magicTheatre.rotation=message.rotation;theatreRender();magicTheatre.valueUpdate={part:message.part,property:'rotation',value:message.rotation,received_unix_ms:Date.now(),render_call_completed:true};}
