@@ -1501,8 +1501,11 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let mut footer:Vec<Line>=Vec::new();
  if let Some(poke)=&c.poke{footer.push(styled(format!("POKE {} ({})  ›  {}█   Enter send · Esc cancel",poke.name,poke.target,poke.text),TEAL));}
  footer.extend(if c.message.starts_with("COPIED")||c.message.contains("error"){vec![styled(c.message.clone(),AMBER)]}else{
-  let mut spans=vec![Span::styled(if narrow{(if booth_open{"● OPEN"}else{"○ OFF"}).to_string()}else{booth_light.to_string()},if booth_open{GREEN}else{AMBER}),Span::raw(if narrow{"  ·  "}else{"  ·  GANG: "})];
-  spans.extend(gang_tally_spans(c,narrow));
+  let mut spans=vec![Span::styled(if narrow{(if booth_open{"● OPEN"}else{"○ OFF"}).to_string()}else{booth_light.to_string()},if booth_open{GREEN}else{AMBER})];
+  if gang_rows==0{
+   spans.push(Span::raw("  ·  "));
+   spans.extend(gang_tally_spans(c,narrow));
+  }
   let mut key_span=Span::styled(format!("  ·  {keys}"),MUTED);
   // Fit the strip to the pane: the tally comes first, the key hints are what gets dropped.
   let width=area.width as usize;
