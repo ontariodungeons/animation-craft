@@ -3,8 +3,15 @@
 //!
 //! A clip is an element with `class="clip"`, `id`, `data-start` and `data-duration`. Per-word
 //! caption elements (`lyric-word-clip`), the root composition and the song audio are not clips.
+//!
+//! The composition's own scripts can narrow a clip's window: a single `alpha('<id>', <expr>)` call whose
+//! expression is a literal opacity, `range(t,a,b)`, `1-range(t,a,b)` or `pulse(t,a,b,c,d)` (directly or
+//! through one binding of that form) gives the clip's real on/off times, provided the id is quoted
+//! nowhere else in the scripts (data tables and loops may set its opacity under a computed id).
+//! Anything else keeps the composition times and is reported as unresolved.
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::path::Path;
 
 fn invalid(message: impl Into<String>) -> EngineError {
@@ -16,6 +23,16 @@ struct Clip {
     start: f64,
     end: f64,
     src: Option<String>,
+    /// Composition `data-start`..`data-start + data-duration`, before any script window.
+    composition: (f64, f64),
+    timing: &'static str,
+}
+
+/// What a script says about when a clip is visible.
+enum Shown {
+    Unresolved,
+    Never,
+    Window(f64, f64),
 }
 
 struct Scene {
@@ -64,8 +81,99 @@ fn read_clips(html: &str) -> Vec<Clip> {
         if !classes.contains(&"clip") || classes.contains(&"lyric-word-clip") { return None; }
         let start: f64 = attr(tag, "data-start")?.parse().ok()?;
         let duration: f64 = attr(tag, "data-duration")?.parse().ok()?;
-        Some(Clip { id: attr(tag, "id")?.to_string(), start, end: start + duration, src: attr(tag, "src").map(str::to_string) })
+        Some(Clip {
+            id: attr(tag, "id")?.to_string(), start, end: start + duration, src: attr(tag, "src").map(str::to_string),
+            composition: (start, start + duration), timing: "unresolved (composition times)",
+        })
     }).collect()
+}
+
+/// Text after `open` up to its matching `)`, or `None` when unbalanced.
+fn until_close(text: &str) -> Option<&str> {
+    let mut depth = 0;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => return Some(&text[..i]),
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Every `alpha('<id>', <expr>)` call in `js`, by id.
+fn alpha_calls(js: &str) -> HashMap<String, Vec<String>> {
+    let mut calls: HashMap<String, Vec<String>> = HashMap::new();
+    for (i, _) in js.match_indices("alpha('") {
+        let rest = &js[i + 7..];
+        let Some(q) = rest.find('\'') else { continue };
+        let Some(expr) = rest[q + 1..].strip_prefix(',').and_then(until_close) else { continue };
+        calls.entry(rest[..q].to_string()).or_default().push(expr.trim().to_string());
+    }
+    calls
+}
+
+/// Right-hand sides of every `name=...` binding in `js` (not `==`, `=>`, or a longer identifier).
+fn bindings<'a>(js: &'a str, name: &str) -> Vec<&'a str> {
+    js.match_indices(&format!("{name}=")).filter_map(|(i, m)| {
+        let before = js[..i].chars().next_back();
+        if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$') { return None; }
+        let rest = &js[i + m.len()..];
+        if rest.starts_with('=') || rest.starts_with('>') { return None; }
+        let mut depth = 0;
+        let end = rest.char_indices().find(|&(_, c)| {
+            match c { '(' | '[' | '{' => depth += 1, ')' | ']' | '}' => depth -= 1, _ => {} }
+            depth < 0 || (depth == 0 && (c == ',' || c == ';' || c == '\n'))
+        }).map_or(rest.len(), |(j, _)| j);
+        Some(rest[..end].trim())
+    }).collect()
+}
+
+/// Whether `id` is quoted in `js` anywhere other than its own `alpha(...)` / `move(...)` calls.
+fn quoted_elsewhere(js: &str, id: &str) -> bool {
+    [format!("'{id}'"), format!("\"{id}\"")].iter().any(|quoted| {
+        js.match_indices(quoted.as_str()).any(|(i, _)| !(js[..i].ends_with("alpha(") || js[..i].ends_with("move(")))
+    })
+}
+
+/// Literal numeric arguments of `name(t,...)` when `expr` is exactly that call.
+fn literal_call(expr: &str, name: &str, arity: usize) -> Option<Vec<f64>> {
+    let args = expr.strip_prefix(name)?.strip_prefix("(t,")?.strip_suffix(')')?;
+    let values: Vec<f64> = args.split(',').map(|a| a.trim().parse().ok()).collect::<Option<_>>()?;
+    (values.len() == arity).then_some(values)
+}
+
+fn shown(expr: &str, js: &str, follow: bool) -> Shown {
+    if let Ok(opacity) = expr.parse::<f64>() {
+        return if opacity > 0.0 { Shown::Window(f64::NEG_INFINITY, f64::INFINITY) } else { Shown::Never };
+    }
+    if let Some(v) = literal_call(expr, "range", 2) { return Shown::Window(v[0], f64::INFINITY); }
+    if let Some(v) = expr.strip_prefix("1-").and_then(|e| literal_call(e, "range", 2)) { return Shown::Window(f64::NEG_INFINITY, v[1]); }
+    if let Some(v) = literal_call(expr, "pulse", 4) { return Shown::Window(v[0], v[3]); }
+    if follow && !expr.is_empty() && expr.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && let [rhs] = bindings(js, expr)[..] {
+        return shown(rhs, js, false);
+    }
+    Shown::Unresolved
+}
+
+/// Narrows clips to the windows their scripts give, where a script states one unambiguously.
+fn apply_script_windows(clips: &mut [Clip], js: &str) {
+    let calls = alpha_calls(js);
+    for c in clips {
+        let Some([expr]) = calls.get(&c.id).map(Vec::as_slice) else { continue };
+        if quoted_elsewhere(js, &c.id) { continue; }
+        match shown(expr, js, true) {
+            Shown::Unresolved => {}
+            Shown::Never => { c.timing = "never shown (script opacity 0)"; c.end = c.start; }
+            Shown::Window(a, b) => {
+                c.start = c.start.max(a);
+                c.end = c.end.min(b).max(c.start);
+                c.timing = if c.start < c.end { "script window" } else { "never shown (script window outside clip)" };
+            }
+        }
+    }
 }
 
 fn read_scenes(timeline: &Value) -> Vec<Scene> {
@@ -111,7 +219,16 @@ fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, V
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(e.into()),
     };
-    Ok((acproj, read_clips(&html), scenes))
+    let mut clips = read_clips(&html);
+    let mut js = String::new();
+    for tag in start_tags(&html).into_iter().filter(|t| t.starts_with("script")) {
+        let Some(src) = attr(tag, "src").filter(|s| !s.contains("://")) else { continue };
+        let path = dir.join("hyperframes").join(src);
+        js += &std::fs::read_to_string(&path).map_err(|e| invalid(format!("composition script {}: {e}", path.display())))?;
+        js.push('\n');
+    }
+    apply_script_windows(&mut clips, &js);
+    Ok((acproj, clips, scenes))
 }
 
 pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
@@ -123,6 +240,7 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
             let mut cues: Vec<Value> = clips.iter().filter(|c| active(c.start, c.end, at)).map(|c| json!({
                 "kind": "clip", "id": c.id, "scene": scene_id,
                 "start": ms(c.start), "end": ms(c.end), "local": ms(at - c.start), "fit": fit(c, &scenes),
+                "timing": c.timing, "composition": [ms(c.composition.0), ms(c.composition.1)],
             })).collect();
             for sc in &scenes {
                 for a in &sc.actions {
@@ -148,7 +266,8 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
                 .filter(|c| c.id == id || (clip.src.is_some() && c.src == clip.src))
                 .map(|c| json!({
                     "id": c.id, "start": ms(c.start), "end": ms(c.end), "fit": fit(c, &scenes),
-                    "scenes": scenes.iter().filter(|sc| sc.start < c.end && c.start < sc.end).map(|sc| sc.id.as_str()).collect::<Vec<_>>(),
+                    "timing": c.timing, "composition": [ms(c.composition.0), ms(c.composition.1)],
+                    "scenes": scenes.iter().filter(|sc| c.start < c.end && sc.start < c.end && c.start < sc.end).map(|sc| sc.id.as_str()).collect::<Vec<_>>(),
                 })).collect();
             Ok(json!({"ok": true, "project": project, "clip": id, "src": clip.src, "uses": uses}))
         }
@@ -170,8 +289,19 @@ mod tests {
             "<div id=\"root\" data-composition-id=\"main\" data-start=\"0\" data-duration=\"20\">",
             "<img id=\"sea\" class=\"clip\" data-start=\"0\" data-duration=\"10\" src=\"sea.png\" aria-label=\"a > b\">",
             "<img id=\"sea-again\" class=\"clip\" data-start=\"12\" data-duration=\"4\" src=\"sea.png\">",
+            "<img id=\"boat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"boat.png\">",
+            "<img id=\"bed\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"bed.png\">",
+            "<img id=\"hat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"hat.png\">",
+            "<img id=\"rug\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"rug.png\">",
+            "<img id=\"cat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"cat.png\">",
+            "<script src=\"film.js\"></script>",
             "<div id=\"word\" class=\"clip lyric-word-clip\" data-start=\"4\" data-duration=\"1\"></div>",
             "<audio id=\"song\" data-start=\"0\" data-duration=\"20\" src=\"song.wav\"></audio></div>",
+        )).unwrap();
+        std::fs::write(dir.join("hyperframes/film.js"), concat!(
+            "const boatOn=pulse(t,2,3,5,6);alpha('boat',boatOn);alpha('bed',0);\n",
+            "alpha('hat',range(t,1,2));alpha('hat',1);alpha('rug',Math.max(a,b));\n",
+            "alpha('cat',range(t,8,9));['cat'].forEach(id=>alpha(id,1));",
         )).unwrap();
         std::fs::write(dir.join("artifacts/action_timeline.json"), r#"{"scenes":[
             {"scene_id":"s01","start_seconds":0,"end_seconds":12,"actions":[{"at_seconds":3,"duration_seconds":2,"character_id":"fish","action":"swim"}]},
@@ -182,9 +312,18 @@ mod tests {
         let at = s.execute("studio.cues", json!({"project": &project, "at": 4.5})).unwrap();
         assert_eq!(at["scene"]["id"], "s01");
         let cues = at["cues"].as_array().unwrap();
-        assert_eq!(cues.len(), 2, "word captions, root and audio are not clips: {cues:?}");
-        assert_eq!((cues[0]["id"].as_str(), cues[0]["local"].as_f64()), (Some("sea"), Some(4.5)));
-        assert_eq!((cues[1]["character"].as_str(), cues[1]["local"].as_f64()), (Some("fish"), Some(1.5)));
+        let ids: Vec<_> = cues.iter().map(|c| c["id"].as_str().or(c["character"].as_str()).unwrap()).collect();
+        // Word captions, root and audio are not clips; bed is never shown.
+        assert_eq!(ids, ["sea", "boat", "hat", "rug", "cat", "fish"]);
+        assert_eq!(cues[0]["local"], json!(4.5));
+        assert_eq!((cues[1]["start"].as_f64(), cues[1]["end"].as_f64(), cues[1]["timing"].as_str()), (Some(2.0), Some(6.0), Some("script window")));
+        assert_eq!(cues[1]["local"], json!(2.5));
+        assert_eq!(cues[2]["timing"], "unresolved (composition times)", "two alpha calls are not guessed");
+        assert_eq!(cues[3]["timing"], "unresolved (composition times)");
+        assert_eq!(cues[4]["timing"], "unresolved (composition times)", "an id also set through a loop is not guessed");
+        assert_eq!(cues[5]["local"], json!(1.5));
+        let at7 = s.execute("studio.cues", json!({"project": &project, "at": 7})).unwrap();
+        assert!(at7["cues"].as_array().unwrap().iter().all(|c| c["id"] != "boat"));
 
         let uses = s.execute("studio.cues", json!({"project": &project, "clip": "sea"})).unwrap();
         assert_eq!(uses["uses"].as_array().unwrap().len(), 2);
