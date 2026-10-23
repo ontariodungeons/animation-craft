@@ -39,10 +39,12 @@ same selection. This loads the saved scene instead of re-evaluating legacy motio
 The UI's subsequent renders use the last successful saved Blender scene. To explicitly
 reimport changed legacy motion, call `blender.start` without `blend`.
 
-Place the completed transparent clip through the existing `video.place_track` command;
-keep the storyboard start, duration and actor transform authoritative. Discover its
-current arguments with `mc commands video.place_track`. Do not place a shortened preview
-as if it covered an entire action.
+Place a completed job with `video.place_track blender_job=JOB_ID id=… start=… duration=… rect=[x,y,w,h]`;
+the storyboard start, duration and actor rect stay authoritative. `rect` frames the original
+canvas (object-fit: contain); placement maps it to the receipt's `world_rect` so the character
+keeps its canvas registration. Placement rejects partial previews, a clip whose `clip_sha256`
+no longer matches, and a duration longer than `clip_seconds / playback_rate`. The placement
+record keeps the provenance frozen at render time; later rig edits do not rewrite it.
 
 ## Process and memory ownership
 
