@@ -182,3 +182,7 @@ await import('./animation-authoring.mjs');
 await import('./inspector-controls.mjs');
 
 await import('./blender-placement.mjs');
+
+await import('./animation-refresh.mjs');
+
+await import('./animation-bridge.mjs');

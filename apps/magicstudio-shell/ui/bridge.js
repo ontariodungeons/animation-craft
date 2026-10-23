@@ -32,7 +32,7 @@ window.acBridge = {
   state() {
     return {
       companions: window.magicCompanions?.snapshot() || null,
-      animation: typeof motion === "undefined" ? null : { character: motion.character, track: motion.track, rest: motion.rest, time: motion.time, playing: motion.playing, selected_layer: motion.selected },
+      animation: typeof animationFeedback === "function" ? animationFeedback() : null,
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
       storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
@@ -89,7 +89,7 @@ window.acBridge = {
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
   async refresh(id, project, revision, result = {}, request_id = null, params = {}) {
     if(project===state.project)window.magicCompanions?.event({command:id,project,view:state.view,request:request_id||result._request_id||`cli-revision-${revision}`,phase:'success',params,result});
-    if (id.startsWith("motion.")) return { refreshed: id };
+    try {
     if (id === "agent.new_chat") {
       await agentLoad(); agent.newChat = !result.session;
       await acFeedback.acknowledge(revision,project);
@@ -105,8 +105,14 @@ window.acBridge = {
     renderTarget();
     renderBlocks();
     renderStoryboard();
-    if (state.view === "animation") await animationRefresh();
+    if (state.view === "animation") {await animationRefresh();motion.refreshError=null;}
     await acFeedback.acknowledge(revision,project);
     return { refreshed: id, ack_engine_revision:revision };
+    }catch(error){
+      const message=String(error);
+      if(typeof motion!=='undefined')motion.refreshError=message;
+      await acFeedback.report(null,null,{stage:'refresh_error',command:id,engine_succeeded:true,error:message});
+      return {refreshed:false,command:id,engine_succeeded:true,refresh_error:message,ack_engine_revision:null};
+    }
   },
 };

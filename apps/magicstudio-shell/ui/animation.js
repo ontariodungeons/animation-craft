@@ -1,5 +1,8 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+function animationFeedback(){
+ return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null};
+}
 function animationReset(){
  theatreRequireSaved();
  blenderDispose();
@@ -89,7 +92,7 @@ async function animationLoad(){
  animationPause();const request=++motion.request;motion.loading=true;
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
-  motion.meta=meta;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
+  motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file);})));if(request!==motion.request)return;
   // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
   const opening=motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
@@ -100,7 +103,7 @@ async function animationLoad(){
 }
 function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
- const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
+ const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
@@ -256,7 +259,28 @@ async function animationSample(){
  $('motion-caption').textContent='Sampling motion…';
  try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;if(typeof timelineRender==='function')timelineRender();motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
-async function animationRefresh(){if(state.view!=='animation')return;if(motion.mode==='composite'){seqRenderInspector();seqDraw();return;}motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
+async function animationRefresh(){
+ if(state.view!=='animation')return;
+ if(motion.mode==='composite'){seqRenderInspector();seqDraw();return;}
+ const project=state.project,request=++motion.request;
+ animationPause();
+ const catalog=await motionCommand('project.list_assets');
+ if(state.project!==project||request!==motion.request)return;
+ motion.assets=catalog.assets||catalog.project_assets||[];
+ const character=motion.assets.some(a=>a.id===motion.character)?motion.character:motion.assets[0]?.id||null;
+ if(!character){Object.assign(motion,{character:null,selected:null,track:'',meta:null,sample:null,images:[]});$('motion-inspector')?.replaceChildren(motionModeSwitch());animationEmpty('Bring in your artwork','Choose an object from the Project view.');if(typeof timelineRender==='function')timelineRender();return;}
+ const changed=character!==motion.character;
+ if(changed)theatreRequireSaved();
+ const meta=await motionCommand('motion.tracks',{character});
+ const images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label||l.id}`));img.src=motionAssetUrl(l.file);}))); 
+ if(state.project!==project||request!==motion.request)return;
+ // Publish metadata and clear its previous sample together; controls can render curves immediately.
+ Object.assign(motion,{character,meta,images,sample:null});
+ if(changed||!meta.layers?.some(l=>l.id===motion.selected))motion.selected=null;
+ if(changed||!meta.tracks?.some(t=>t.id===motion.track)){motion.track=meta.tracks?.[0]?.id||'';motion.time=0;motion.rest=true;}
+ animationControls();await animationSample();await refreshPartDrafts();
+}
+
 function animationPause(){
  if(motion.mode==='composite'){seqPause();return;}
  const wasPlaying=motion.playing;motion.playing=false;motion.playId=(motion.playId||0)+1;
