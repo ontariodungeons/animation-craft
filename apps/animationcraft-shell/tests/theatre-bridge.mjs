@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {theatreProjectId} from '../frontend/project-id.mjs';
+const firstId=await theatreProjectId('/long/project/path/Bumble Bee.acproj');
+assert.ok(firstId.length<=32);
+assert.equal(firstId,await theatreProjectId('/long/project/path/Bumble Bee.acproj'));
+assert.notEqual(firstId,await theatreProjectId('/different/project/Bumble Bee.acproj'));
 const messages=[],listeners={},nodes=new Map();
 const frameWindow={postMessage:message=>messages.push(message)};
 const context=vm.createContext({window:{addEventListener:(type,handler)=>listeners[type]=handler},location:{origin:'tauri://localhost'},
