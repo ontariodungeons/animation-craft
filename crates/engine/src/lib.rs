@@ -77,6 +77,8 @@ pub enum EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+
+
 /// Rejects a parameter whose JSON type differs from the example value in the command's `params`
 /// description (e.g. `"auto_cut": "true"` where the description says `false`). Every caller (CLI, MCP,
 /// app, bridge) goes through `Session::execute`, so a mistyped value fails the same way everywhere

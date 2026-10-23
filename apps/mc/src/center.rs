@@ -63,13 +63,20 @@ impl Center {
             }
         }
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
-        let ui=crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":self.pinned_instance})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+        let observe=|pin:Option<&str>|crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":pin.map(str::to_owned)})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+        let mut ui=observe(self.pinned_instance.as_deref());
+        // Observation is read-only and project-matched, so a Studio that restarted under us is
+        // re-discovered rather than pinned out. Commands still refuse to switch a live Studio.
+        if ui["connection"]!="connected" && self.pinned_instance.is_some(){
+            self.pinned_instance=None;
+            ui=observe(None);
+        }
         // Keep the last project inspection while the engine is busy; read its real journal directly.
-        let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null(){
+        let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null() && self.state["project"].is_string(){
             let mut value=self.state.clone();
-            value["activity"]=self.session.execute("center.events",json!({"project":project,"limit":192})).unwrap_or_else(|e|json!({"error":e.to_string()}));
+            value["activity"]=self.session.execute("backstage.events",json!({"project":project,"limit":192})).unwrap_or_else(|e|json!({"error":e.to_string()}));
             Ok(value)
-        }else{crate::dispatch(&mut self.session,"center.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance}))};
+        }else{crate::dispatch(&mut self.session,"backstage.status",json!({"_origin":"Booth inspection","_expected_instance":self.pinned_instance}))};
         match inspection {
             Ok(mut value)=>{
                 if self.session.project_path.is_some() && ui["engine_unsaved"].is_boolean(){
@@ -776,7 +783,7 @@ fn merge_tail(old:&Value,new:Vec<Value>)->Value{
  events.extend(new.into_iter().filter(|e|e["sequence"].as_u64().is_some_and(|n|n>seen)));let excess=events.len().saturating_sub(50);events.drain(..excess);json!(events)
 }
 fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
- let block=round_panel("EVENTS · live · center.tail",AMBER,false);let rows=block.inner(area).height as usize;
+ let block=round_panel("EVENTS · live · backstage.tail",AMBER,false);let rows=block.inner(area).height as usize;
  let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();let clip=e["sheet"].as_str().or(e["clip"].as_str()).map(|v|format!(" {v}")).unwrap_or_default();styled(format!("{} {} {}{clip}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
  if lines.is_empty(){lines.push(styled("— No saved, generation, keyframe or error events yet.",MUTED));}
  f.render_widget(Paragraph::new(lines).block(block),area);
@@ -848,7 +855,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let reel=snapshot["clip"].as_str().unwrap_or("").trim_start_matches('@').to_uppercase();let reel=if reel.is_empty(){"IDLE".to_string()}else{reel};
  let caption=format!("REEL {reel} · {song} · {}",timecode(playhead,fps));
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ MAGIC STUDIO",&caption)),chunks[0]);
- f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ THE BOOTH","")),chunks[5]);
+ f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ BACKSTAGE","")),chunks[5]);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
  let (saved,_)=saved_observation(ui);let status=if !matched{"? Studio unobserved"}else if ui["ui_ready"]==true{"[OK] Studio rendered"}else{"? Studio receipt pending"};
@@ -861,7 +868,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  if gang_rows>0{render_gang(f,c,chunks[3]);}
- let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BOOTH ● open"}else{"BOOTH ○ off"};
+ let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BACKSTAGE ● open"}else{"BACKSTAGE ○ off"};
  let keys=if narrow{"F10 F9 D C ^Q"}else{"F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
  let footer:Vec<Line>=if c.message.starts_with("COPIED")||c.message.contains("error"){vec![styled(c.message.clone(),AMBER)]}else{
   let mut spans=vec![Span::styled(if narrow{(if booth_open{"● OPEN"}else{"○ OFF"}).to_string()}else{booth_light.to_string()},if booth_open{GREEN}else{AMBER}),Span::raw(if narrow{"  ·  "}else{"  ·  GANG: "})];

@@ -71,8 +71,11 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                     return Err("Matched Studio requires the current guarded-attachment build before commands can run. No fallback writer or project switch was used.".into());
                 }
             }
-            let mut result =
-                animationcraft_engine::studio_sessions::request(Path::new(&path), id, params)?;
+            let mut result = if id=="ui.feedback"||id=="ui.components" {
+                animationcraft_engine::studio_sessions::request(Path::new(&path),id,params)?
+            } else {
+                animationcraft_engine::studio_sessions::request_slow(Path::new(&path),id,params)?
+            };
             if result.is_object() {
                 result["endpoint"] = json!(format!("unix:{path}"));
                 result["instance"] = json!(Path::new(&path).file_name().and_then(|v| v.to_str()));

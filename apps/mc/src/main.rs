@@ -78,20 +78,20 @@ OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
 
 SUBCOMMANDS
-  booth [project=<file>]              interactive The Booth (no automatic Studio launch)
+  backstage [project=<file>]           interactive Backstage (no automatic Studio launch)
                                       F1 GREEN ROOM · F2 ON AIR · F4 ROLL CALL · D details
                                       optional root= name= audio= transcript= captions= audiomap=
                                       --print prints current state without entering terminal UI
-  center                             alias of `booth`
+  booth, center                      aliases of `backstage`
   exec ui.feedback                    discover canonical Studio identity, readiness, unsaved and ack state
   exec ui.components region=#view-project limit=30
                                       bounded actual DOM geometry/style/state; no input values
-  exec booth.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
-  exec booth.snapshot [project=<file>]
+  exec backstage.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
+  exec backstage.snapshot [project=<file>]
                                       one JSON object with stable keys: project, subject, clip,
                                       playhead_sec, selected_part, unsaved_edits, hyperframes, fps,
-                                      last_error (null = not observed); the Booth status line
-  exec booth.tail [last=20] [project=<file>]
+                                      last_error (null = not observed); the Backstage status line
+  exec backstage.tail [last=20] [project=<file>]
                                       last N typed events: saved, generation_started/finished,
                                       keyframe_added/removed (Theatre), motion_path_drawn/undone,
                                       selection_changed, clip_switched, clip_sheet_*, error
@@ -642,12 +642,12 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
  session.execute(id,params).map_err(|e|e.to_string())
 }
 
-/// `center.snapshot` / `center.tail` are mc observations, not engine commands; None for any other id.
+/// `backstage.snapshot` / `backstage.tail` are mc observations, not engine commands; None for any other id.
 fn center_observation(id: &str, params: &Value, bridge: Option<&str>) -> Option<Value> {
     let project = params["project"].as_str();
     match id {
-        "center.snapshot" | "booth.snapshot" => Some(snapshot::collect(project, bridge).0),
-        "center.tail" | "booth.tail" => {
+        "center.snapshot" | "booth.snapshot" | "backstage.snapshot" => Some(snapshot::collect(project, bridge).0),
+        "center.tail" | "booth.tail" | "backstage.tail" => {
             let last = params["last"].as_u64().unwrap_or(20).clamp(1, 192) as usize;
             let (state, activity) = snapshot::collect(project, bridge);
             let events = snapshot::tail(&activity, state["project"].as_str());
@@ -675,7 +675,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -806,8 +806,8 @@ fn main() {
             outln!("{reply}");
             if result["status"].as_str()==Some("running"){outln!("(still running — mc sprocket --log for the reply)");}
         }
-        "booth" | "center" => {
-            if a.bridge_addr().is_some(){usage("The Booth currently uses an explicit headless project; --bridge is reserved for existing live command access");}
+        "backstage" | "booth" | "center" => {
+            if a.bridge_addr().is_some(){usage("Backstage currently uses an explicit headless project; --bridge is reserved for existing live command access");}
             if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),cli_args().iter().cloned().any(|a|a=="--print")){fail(e);}
         }
         "info" => {
