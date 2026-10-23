@@ -51,13 +51,25 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
             if matches!(key.code,KeyCode::F(1)|KeyCode::F(2)|KeyCode::F(3)|KeyCode::F(4)){c.event_open=false;c.event_focus=false;c.details_open=false;}
             if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;c.muppets_view=false;c.telemetry_view=false;return Flow::Continue;}
             if key.code==KeyCode::F(3) && !c.show_form{c.muppets_view=true;c.control_view=false;c.telemetry_view=false;return Flow::Continue;}
-            if key.code==KeyCode::F(2) && !c.show_form{c.control_view=false;c.muppets_view=false;c.telemetry_view=false;return Flow::Continue;}
+            if key.code==KeyCode::F(2) && !c.show_form{if c.view_name()=="workshop"&&workshop::selected(c).is_some(){c.observe_selected();return Flow::Continue;}c.control_view=false;c.muppets_view=false;c.telemetry_view=false;return Flow::Continue;}
             if key.code==KeyCode::F(10){c.check_storyboard();return Flow::Continue;}
             // F4 is the telemetry tab: dials, processes and live log tails, sampled only
             // while it is open. F6 opens the intake form; F4 still closes it.
             if key.code==KeyCode::F(4) && !c.show_form{c.telemetry_view=!c.telemetry_view;c.control_view=false;c.muppets_view=false;c.details_open=false;return Flow::Continue;}
             if key.code==KeyCode::F(4) && c.show_form{c.show_form=false;return Flow::Continue;}
             if key.code==KeyCode::F(6) && !c.show_form{c.show_form=true;return Flow::Continue;}
+            if !c.show_form&&c.view_name()=="workshop"{
+                match key.code{
+                    KeyCode::Left|KeyCode::Char('k')=>{workshop::cycle(c,-1);return Flow::Continue;},
+                    KeyCode::Right|KeyCode::Char('j')|KeyCode::Tab=>{workshop::cycle(c,1);return Flow::Continue;},
+                    KeyCode::Up=>{workshop::cycle(c,-(c.catalog_columns.get() as isize));return Flow::Continue;},
+                    KeyCode::Down=>{workshop::cycle(c,c.catalog_columns.get() as isize);return Flow::Continue;},
+                    KeyCode::Char('i')=>{workshop::toggle(c);return Flow::Continue;},
+                    KeyCode::Enter=>{c.observe_selected();return Flow::Continue;},
+                    KeyCode::Esc if c.details_open=>{c.details_open=false;c.scroll=0;return Flow::Continue;},
+                    _=>{}
+                }
+            }
             if !c.show_form {
                 match key.code{
                     KeyCode::Char(n @ '1'..='9') if !key.modifiers.contains(KeyModifiers::CONTROL)=>{let index=(n as usize)-('1' as usize);if index<c.copy_commands().len(){c.command_selected=index;}},
@@ -144,7 +156,7 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
  let previous_message=c.message.clone();
  for field in ["index","sequence"]{if p.get(field).is_some()&&!p[field].is_u64(){return Err(format!("{field}= must be a nonnegative integer"));}}
  if p.get("append").is_some()&&!p["append"].is_boolean(){return Err("append= must be true or false".into());}
- if c.show_form&&matches!(name,"view"|"agent"|"project"|"event"|"events"){return Err("Intake is open. Use key key=F4 to close it before changing views.".into());}
+ if c.show_form&&matches!(name,"view"|"agent"|"project"|"project.select"|"project.open-selected"|"project.inactive"|"event"|"events"){return Err("Intake is open. Use key key=F4 to close it before changing views.".into());}
  if c.poke.is_some()&&matches!(name,"chat"|"chat.send"){return Err("A note composer is open; finish or cancel that note first".into());}
  if c.chat_editing&&name=="note"{return Err("Project chat is open; finish or cancel it before composing an agent note".into());}
  if !matches!(name,"look"|"read"|"status"|"controls"|"key"|"text"|"note"|"note.send"|"note.cancel"|"chat"|"chat.send"|"cancel"|"submit"|"scroll")&&(c.poke.is_some()||c.chat_editing){return Err("A composer is open. Finish or cancel it before changing views.".into());}
@@ -171,13 +183,17 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
   "agent.previous"=>{c.cycle_agent(-1);c.refresh();},
   "events"=>{if !c.event_focus{flow=press(c,KeyCode::Char('e'));}},
   "remind"=>{if p["pane"].is_string()||p["name"].is_string(){select_agent(c,p)?;}c.quick_poke();if !c.message.starts_with("Submitted"){return Err(c.message.clone());}},
-  "project"=>{
+  "project.inactive"=>{if p.get("show").is_some()&&!p["show"].is_boolean(){return Err("show= must be true or false".into());}if let Some(show)=p["show"].as_bool(){if workshop::expanded(c)!=show{workshop::toggle(c);}}else{workshop::toggle(c);}},
+  "project.open-selected"=>{if workshop::selected(c).is_none(){return Err("No project selected".into());}c.details_open=false;c.observe_selected();},
+  "project"|"project.select"=>{
    let projects=c.state["catalog"]["projects"].as_array().ok_or("Project catalog unavailable")?;
    let index=if let Some(index)=p["index"].as_u64(){index as usize}else{
     let path=required(p,"path")?;projects.iter().position(|v|v["path"].as_str()==Some(path)).ok_or("Project is not in the observed catalog; use input field=project value=<path> then project.open")?
    };
    let selected=projects.get(index).and_then(|v|v["path"].as_str()).ok_or("Project index is out of range")?.to_owned();
-   c.catalog_selected=index;c.observe_selected();
+   workshop::select(c,index)?;
+   if name=="project.select"{c.control_view=true;c.muppets_view=false;c.telemetry_view=false;c.event_open=false;c.event_focus=false;return Ok(Flow::Continue);}
+   c.observe_selected();
    if c.session.project_path.as_ref().map(|v|v.to_string_lossy().into_owned()).as_deref()!=Some(selected.as_str()){return Err("Project attachment failed; no Studio was switched".into());}
   },
   "stage"=>{
@@ -275,6 +291,7 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
   "agents":agents,"agent_detail":{"pane":c.selected_agent().map(|a|a["pane_id"].clone()),"output":c.spy,"age_ms":c.spy_at.map(|t|t.elapsed().as_millis())},
   "projects":c.state["catalog"]["projects"],"catalog_scope":"existing recent-project catalog","stages":c.state["prerequisites"],"worker":c.state["animation_worker"],"events":c.state["tail"],"event_detail":c.event_detail,
   "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"logs":c.logs,"usage":c.usage,
+  "workshop":{"discovery":{"observed_at_ms":c.studios["observed_at_ms"],"pending":c.studios_receiver.is_some(),"error":c.studios["observation_error"],"errors":c.studios["errors"]},"cards":workshop::observations(c),"selected_project":workshop::selected(c),"inactive_expanded":workshop::expanded(c),"visible_order":workshop::order(c),"columns":c.catalog_columns.get()},
   "selected":{"agent":c.gang_selected,"project":c.catalog_selected,"stage":c.stage_selected,"event":c.event_index,"command":c.command_selected,"scroll":c.scroll},
   "composers":{"note":c.poke.as_ref().map(|p|json!({"pane":p.target,"name":p.name,"text":p.text,"delivery":"unsent draft"})),"chat":{"open":c.chat_editing,"text":c.chat_draft}},
   "elements":elements,"intake":{"open":c.show_form,"editing":c.editing,"selected":c.selected,"fields":fields},"commands":commands,"controls":controls})

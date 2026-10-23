@@ -41,6 +41,10 @@ multiplexer is reported as a refusal.
 
 Live TUI control uses `mc tui`, which talks to the running terminal instance rather than constructing a separate headless session. `mc tui look` returns the actual rendered rows, selected controls, agent identities/activity, events, project catalog, render-worker receipt, telemetry and input drafts as JSON. Every response follows a completed frame and carries its instance, generation and frame number. `mc tui read` prints only that screen text; `mc tui controls` lists all named controls and keyboard equivalents. Indices are zero-based. The numbered agent cards and MOPS agent tabs are clickable; `G` opens MOPS, `1`–`9`/`0` select its agents and left/right cycle them. `mc tui click id=<id>` follows the same hit target as a mouse click. With several TUIs open, use `mc tui instances` and add `instance=<pid>`; the CLI refuses to guess.
 
+Workshop uses responsive project cards (one to four columns), with observed active projects first and an `I` toggle for inactive projects. Unknown discovery stays `Unknown`; a frame meter appears only for an observed project-matched worker receipt. Arrows or `j`/`k` select without attaching; click selects a card, and Enter/Open or F2 enters its Booth. `D` opens selected-project details, including the full path and copyable CLI commands; `C` copies the selected command without executing it. Repeated names include a short folder label. The Workshop film header reports fleet counts rather than another project's render.
+
+`mc tui project.select index=0` selects without attaching; `mc tui project.open-selected` opens Booth; `mc tui project.inactive show=true` expands inactive projects. `mc tui look section=workshop` returns selected-project data, card observations, visible ordering and column count. Project indices refer to the shared catalog, not their sorted screen positions.
+
 ```bash
 mc tui look
 mc tui look section=worker
