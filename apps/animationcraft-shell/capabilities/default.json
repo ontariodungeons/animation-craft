@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The project view's access to the shell's commands.",
+  "windows": ["main"],
+  "webviews": ["project"],
+  "permissions": ["core:default", "dialog:default"]
+}

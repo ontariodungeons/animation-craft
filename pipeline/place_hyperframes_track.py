@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Insert one already-rendered character track into a local HyperFrames composition."""
+import argparse, hashlib, html, json, math, re, shutil, time
+from pathlib import Path
+
+def place(project,request):
+    root=Path(project)/'hyperframes'; entry=root/'index.html'; source=Path(request['path']).resolve(strict=True)
+    if source.suffix.lower() not in {'.webm','.mp4','.mov'}: raise ValueError('Expected a video track')
+    key=request['id']
+    if not re.fullmatch(r'[a-zA-Z0-9_-]+',key): raise ValueError('id must be a stable filename-safe identifier')
+    start=float(request['start']);duration=float(request['duration']);rect=request['rect']
+    if start<0 or duration<=0 or len(rect)!=4 or not all(math.isfinite(float(v)) for v in [start,duration,*rect]) or rect[2]<=0 or rect[3]<=0: raise ValueError('Invalid timing or placement')
+    text=entry.read_text(); root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
+    if not root_tag: raise ValueError('Composition root missing')
+    digest=hashlib.sha256(source.read_bytes()).hexdigest()[:12]; folder=root/'assets/animation';folder.mkdir(parents=True,exist_ok=True)
+    target=folder/f'{key}-{digest}{source.suffix}';shutil.copy2(source,target)
+    existing=re.compile(r'<video\b(?=[^>]*\bid=["\']'+re.escape(key)+r'["\'])[^>]*>\s*</video>',re.I)
+    text=existing.sub('',text)
+    track=max([int(v) for v in re.findall(r'data-track-index=["\'](\d+)',text)]+[-1])+1
+    x,y,w,h=rect
+    tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-track-index="{track}" data-animationcraft-scene="{request.get("scene", "")}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
+    root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
+    backup=root/'.animationcraft-history';backup.mkdir(exist_ok=True);stamp=time.time_ns();shutil.copy2(entry,backup/f'index-{stamp}.html')
+    text=text[:root_tag.end()]+'\n'+tag+text[root_tag.end():]
+    entry.write_text(text)
+    record=dict(request,ok=True,media=str(target),track_index=track,backup=str(backup/f'index-{stamp}.html'))
+    (folder/f'{key}.json').write_text(json.dumps(record,indent=2));return record
+
+if __name__=='__main__':
+    p=argparse.ArgumentParser();p.add_argument('--project',required=True);p.add_argument('--request',required=True);a=p.parse_args();print(json.dumps(place(a.project,json.loads(a.request))))

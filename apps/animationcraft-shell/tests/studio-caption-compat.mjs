@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
+const calls = [], replies = [];
+const context = {URL, Headers, location: {href:"http://localhost:3061/#project/hyperframes",origin:"http://localhost:3061"},fetch:async(input,init)=>{calls.push({input,init});return replies.shift();}};
+vm.runInNewContext(fs.readFileSync(new URL("../ui/studio-caption-compat.js",import.meta.url),"utf8"),context);
+const url="/api/projects/hyperframes/files/caption-overrides.json";
+const reply=(status,version)=>({status,ok:status<300,headers:new Headers(version?{ETag:version}:{})});
+replies.push(reply(404));await context.fetch(url);
+replies.push(reply(200,'"v1"'));await context.fetch(url,{method:"PUT",body:"saved edit",headers:{"X-Hyperframes-Write-Token":"identity"}});
+assert.equal(calls.at(-1).init.headers.get("If-None-Match"),"*");assert.equal(calls.at(-1).init.body,"saved edit");
+replies.push(reply(409));await context.fetch(url,{method:"PUT",body:"second edit"});assert.equal(calls.at(-1).init.headers.get("If-Match"),'"v1"');
+assert.equal(calls.length,3,"A conflict must not refetch/retry against another editor's current version");
+replies.push(reply(409));await context.fetch(url,{method:"PUT",body:"retry"});assert.equal(calls.at(-1).init.headers.get("If-Match"),'"v1"');
+replies.push(reply(200));const original={method:"PUT",body:"untouched"};await context.fetch("/api/projects/hyperframes/files/index.html",original);assert.equal(calls.at(-1).init,original);
+console.log("PASS native caption conditional create/update, preserved payload/headers, stale conflicts fail closed, unrelated writes untouched");
