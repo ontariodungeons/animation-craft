@@ -125,10 +125,30 @@ def sha256(path):
 def service_metrics(unit):
     properties = ['Description', 'InvocationID', 'ActiveState', 'Result', 'ExecMainStatus',
                   'MemoryCurrent', 'MemoryPeak', 'MemoryMax', 'MemorySwapCurrent',
-                  'MemorySwapMax', 'CPUUsageNSec']
+                  'MemorySwapMax', 'CPUUsageNSec', 'ExecMainStartTimestamp']
     response = subprocess.run(['systemctl', '--user', 'show', unit,
-                               '--property=' + ','.join(properties)], capture_output=True, text=True, check=True)
+                               '--property=' + ','.join(properties), '--timestamp=unix'], capture_output=True, text=True, check=True)
     return dict(line.split('=', 1) for line in response.stdout.splitlines() if '=' in line)
+
+
+def job_metadata(request_path, request, properties):
+    job = request_path.parent
+    path = job/'job.json'
+    metadata = json.loads(path.read_text())
+    if properties.get('Description') != request['job'] or properties.get('InvocationID') != os.environ.get('INVOCATION_ID'):
+        raise RuntimeError('Refusing metadata from another job or invocation')
+    raw_start = properties.get('ExecMainStartTimestamp', '')
+    try:
+        started_at = str(int(float(raw_start[1:])*1000)) if raw_start.startswith('@') and float(raw_start[1:]) > 0 else None
+    except (ValueError, OverflowError):
+        started_at = None
+    marker = job/'cancel-requested'
+    cancellation = json.loads(marker.read_text()) if marker.exists() else {}
+    metadata.update(limits=request.get('limits'), submitted_at=request.get('submitted_at'),
+                    started_at=started_at, cancellation_requested_at=cancellation.get('cancellation_requested_at', cancellation.get('updated_at')),
+                    invocation_id=properties.get('InvocationID'))
+    write_json(path, metadata)
+    return metadata
 
 
 def finalize(request_path):
@@ -138,6 +158,7 @@ def finalize(request_path):
     invocation = os.environ.get('INVOCATION_ID')
     if properties.get('Description') != request['job'] or properties.get('InvocationID') != invocation:
         raise RuntimeError('Refusing telemetry from another job or invocation')
+    metadata = job_metadata(request_path, request, properties)
     result_path = job/'rendered.json'
     result = json.loads(result_path.read_text()) if result_path.exists() else {}
     reason = os.environ.get('SERVICE_RESULT', properties.get('Result'))
@@ -153,7 +174,9 @@ def finalize(request_path):
     progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
     result.update(job=request['job'], job_id=request['job'], project=request['project'],
                   unit=request['unit'], invocation_id=invocation, updated_at=str(time.time_ns()//1_000_000),
-                  state=state, phase=progress.get('state'), frames_completed=progress.get('completed'),
+                  state=state, limits=metadata['limits'], submitted_at=metadata['submitted_at'],
+                  started_at=metadata['started_at'], cancellation_requested_at=metadata['cancellation_requested_at'],
+                  phase=progress.get('state'), frames_completed=progress.get('completed'),
                   frames_total=progress.get('total'), telemetry=metrics, service_result=reason,
                   exec_main_status=int(properties['ExecMainStatus']) if properties.get('ExecMainStatus', '').isdigit() else None,
                   exit_code=os.environ.get('EXIT_CODE'), exit_status=os.environ.get('EXIT_STATUS'),
@@ -181,6 +204,7 @@ def main():
     request = json.loads(request_path.read_text())
     write_json(job/'invocation.json', {'invocation_id': os.environ.get('INVOCATION_ID')})
     try:
+        job_metadata(request_path, request, service_metrics(request['unit']))
         source_blend_sha256 = None
         if request.get('blend'):
             write_json(job/'progress.json', {'state': 'loading'})
