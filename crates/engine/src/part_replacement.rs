@@ -835,6 +835,33 @@ fn installed_craft_binary(name: &str) -> Option<PathBuf> {
     })
 }
 
+/// The PhotoCraft app's desktop entry (`gio launch` runs whatever version it points at).
+fn photocraft_desktop_entry() -> Option<PathBuf> {
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")));
+    let data_dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    data_home
+        .into_iter()
+        .chain(std::env::split_paths(&data_dirs))
+        .map(|dir| dir.join("applications/ai.storyteller.photocraft.desktop"))
+        .find(|path| path.is_file())
+}
+
+/// A project-local copy of `source` for PhotoCraft to edit, so saving there never
+/// bypasses `part.replace_image`. An existing draft is kept: it may hold unsaved work.
+fn edit_draft(root: &Path, history: &Path, part: &str, source: &Path) -> Result<(PathBuf, bool)> {
+    let drafts = history.join("drafts");
+    checked_dir(root, &drafts, true)?;
+    let draft = drafts.join(format!("{}.png", safe_id(part)));
+    check_regular_or_missing(root, &draft)?;
+    if draft.exists() {
+        return Ok((draft, true));
+    }
+    std::fs::copy(source, &draft)?;
+    Ok((draft, false))
+}
+
 /// The earliest retained `before.png` for this part: the image the part had
 /// before its first replacement. Verified against its receipt digest.
 fn original_backup(root: &Path, history: &Path, part: &str) -> Result<Option<PathBuf>> {
@@ -888,7 +915,8 @@ fn original_backup(root: &Path, history: &Path, part: &str) -> Result<Option<Pat
 }
 
 /// Resolve one rig part's PNG (current, or its retained original) and report
-/// what PhotoCraft would open. `spawn: true` launches the PhotoCraft app on it.
+/// what PhotoCraft would open. `spawn: true` launches the PhotoCraft app on an
+/// edit draft of it; the saved draft is the candidate for `part.replace_image`.
 pub fn cmd_part_open_photocraft(s: &mut Session, params: &Value) -> Result<Value> {
     let asset = asset_id(s, params)?;
     let part = params["part"]
@@ -926,16 +954,28 @@ pub fn cmd_part_open_photocraft(s: &mut Session, params: &Value) -> Result<Value
         .into_dimensions()
         .map_err(|e| invalid(format!("Cannot read part image dimensions: {e}")))?;
     let photocraft_cli = installed_craft_binary("photocraft-cli");
+    let mut draft = Value::Null;
     if spawn {
         // photocraft-cli is headless; only the PhotoCraft app opens a window.
-        let app = installed_craft_binary("photocraft").ok_or_else(|| {
-            invalid("PhotoCraft app (`photocraft`) is not installed; set PHOTOCRAFT or CRAFT_CLI_DIR")
-        })?;
-        std::process::Command::new(app).arg(&file).spawn()?;
+        // An explicit `photocraft` binary wins, else the installed desktop entry.
+        let mut launch = match installed_craft_binary("photocraft") {
+            Some(app) => std::process::Command::new(app),
+            None => {
+                let entry = photocraft_desktop_entry().ok_or_else(|| {
+                    invalid("PhotoCraft app is not installed (no `photocraft` binary or ai.storyteller.photocraft.desktop)")
+                })?;
+                let mut gio = std::process::Command::new("gio");
+                gio.arg("launch").arg(entry);
+                gio
+            }
+        };
+        let (path, reused) = edit_draft(&root, &history, part, &file)?;
+        launch.arg(&path).spawn()?;
+        draft = json!({"file":path,"reused":reused});
     }
     Ok(json!({"ok":true,"command":"part.open_photocraft","part":part,"which":which,"file":file,
         "original_file":original,"width":width,"height":height,"sha256":sha(&bytes),
-        "photocraft_cli":photocraft_cli,"spawned":spawn}))
+        "photocraft_cli":photocraft_cli,"spawned":spawn,"draft":draft}))
 }
 
 #[cfg(test)]
@@ -1165,6 +1205,31 @@ mod tests {
                 json!({"asset":"fish","undo":second["undo"]}),
             )
             .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn photocraft_edit_draft_is_a_kept_copy_that_replaces_as_candidate() {
+        let (mut session, root, rig, _, _) = fixture();
+        let source = root.join("fin.png");
+        let before = std::fs::read(&source).unwrap();
+        let history = rig.parent().unwrap().join(".part-image-history/fish");
+        let (draft, reused) = edit_draft(&root, &history, "fin", &source).unwrap();
+        assert!(!reused);
+        assert_eq!(std::fs::read(&draft).unwrap(), before);
+        // PhotoCraft saves an edit into the draft; reopening keeps it.
+        ImageBuffer::from_pixel(3, 2, Rgba::<u8>([200, 10, 10, 255]))
+            .save(&draft)
+            .unwrap();
+        let edited = std::fs::read(&draft).unwrap();
+        let (again, reused) = edit_draft(&root, &history, "fin", &source).unwrap();
+        assert!(reused);
+        assert_eq!((again.clone(), std::fs::read(&again).unwrap()), (draft.clone(), edited));
+        assert_eq!(std::fs::read(&source).unwrap(), before, "live layer untouched");
+        session
+            .execute("part.replace_image", replace_args(&rig, &source, &draft, 0))
+            .unwrap();
+        assert_eq!(sha(&std::fs::read(&source).unwrap()), sha(&std::fs::read(&draft).unwrap()));
         let _ = std::fs::remove_dir_all(root);
     }
 
