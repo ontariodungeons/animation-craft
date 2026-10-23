@@ -93,6 +93,7 @@ const fn is_long_running_id(id: &str) -> bool {
     matches!(
         id.as_bytes(),
         b"project.intake"
+            | b"blender.start"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -191,6 +192,11 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 pub fn build() -> Vec<CommandSpec> {
     vec![
+        cmd!("blender.start", "Build / Render Blender Animation", ["Animation"], None,
+            "{\"character\":\"rig id for initial migration\",\"track\":\"track id\",\"blend\":\"optional saved .blend instead of migration\",\"resolution_percent\":50,\"max_frames\":90,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::blender::cmd_blender_start),
+        query!("blender.status", "Blender Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
+        query!("blender.list", "Saved Blender Jobs", "{}", crate::blender::cmd_blender_list),
+        query!("blender.cancel", "Cancel Blender Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
         query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_attach),
         query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_identity),
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),

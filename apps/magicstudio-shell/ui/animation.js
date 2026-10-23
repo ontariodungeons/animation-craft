@@ -1,6 +1,7 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.backendMode')||'blender', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
+ blenderDispose();
  theatreRequireSaved();
  animationPause();
  Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
@@ -38,6 +39,7 @@ function motionRange(id,label,min,max,step,value,unit,change){
 }
 async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
 async function animationOpen(){
+ if(motion.mode==='blender'){theatreRequireSaved();await blenderAnimationOpen();return;}
  if(motion.mode==='composite'){theatreRequireSaved();const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
  theatreRequireSaved();
@@ -55,11 +57,11 @@ async function animationOpen(){
 function animationEmpty(title,detail){$('motion-stage').replaceChildren(el('div',{class:'motion-empty'},el('strong',{},title),el('p',{class:'muted'},detail),el('button',{class:'start',onclick:()=>setView('project')},'Open Project')));}
 function motionModeSwitch(){
  return el('div',{class:'motion-modes',role:'tablist','aria-label':'Animation mode'},
-  ...['subject','composite'].map(m=>el('button',{
+  ...['blender','subject','composite'].map(m=>el('button',{
    class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,role:'tab','data-mode':m,
-   'aria-selected':String(motion.mode===m),title:m==='subject'?'A subject: its rig, parts and action tracks':'A composite: images arranged in time',
-   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
-  },m==='subject'?'Subject':'Composite')));
+   'aria-selected':String(motion.mode===m),title:m==='blender'?'Blender animation and rendered previews':m==='subject'?'Legacy rig and Theatre editor':'Images arranged in time',
+   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;blenderDispose();motion.mode=m;localStorage.setItem('animation.backendMode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
+  },m==='blender'?'Blender':m==='subject'?'Legacy':'Composite')));
 }
 function animationShell(){
  theatreRequireSaved();
@@ -255,7 +257,7 @@ async function animationSample(){
  $('motion-caption').textContent='Sampling motion…';
  try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;if(typeof timelineRender==='function')timelineRender();motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
-async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
+async function animationRefresh(){if(state.view!=='animation')return;if(motion.mode==='blender'){await blenderAnimationOpen();return;}motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
 function animationPause(){
  if(motion.mode==='composite'){seqPause();return;}
  const wasPlaying=motion.playing;motion.playing=false;motion.playId=(motion.playId||0)+1;
