@@ -100,6 +100,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"synfig.start"
             | b"motion.pose.export"
             | b"motion.export_track"
+            | b"animation.source.render"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -203,6 +204,10 @@ pub fn build() -> Vec<CommandSpec> {
         query!("synfig.discover", "Discover Synfig Native Renderer", "{}", crate::synfig::discover),
         cmd!("synfig.start", "Render Saved Synfig Scene", ["Animation"], None,
             "{\"source\":\"saved .sif/.sifz\",\"bundle\":\"self-contained source directory\",\"first_frame\":0,\"last_frame\":23,\"fps\":24,\"width\":512,\"height\":512,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::synfig::start),
+        query!("animation.sources", "Registered native animation sources", "{\"expected_project\":\"optional project identity\"}", crate::animation_links::sources),
+        cmd!("animation.source.set", "Register editable native source", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"stable source id\",\"backend\":\"blender|synfig|opentoonz|mlt\",\"source\":\"editable native file; MLT assembly JSON\",\"bundle\":\"optional dependency root\",\"character\":\"optional paired rig ID\",\"track\":\"optional paired action ID\",\"expected_revision\":0}", always, crate::animation_links::set),
+        cmd!("animation.source.render", "Render registered native source", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"source id\",\"expected_revision\":1,\"options\":{}}", always, crate::animation_links::render),
+        cmd!("animation.source.accept", "Accept completed native result", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"source id\",\"expected_revision\":1,\"job\":\"completed full job id\"}", always, crate::animation_links::accept),
         query!("animation.status", "Native Animation Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
         query!("animation.list", "Native Animation Jobs and Global Owner", "{}", crate::blender::cmd_blender_list),
         query!("animation.cancel", "Cancel Native Animation Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),

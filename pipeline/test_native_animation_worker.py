@@ -60,6 +60,14 @@ class NativeWorkerTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError,'Absolute/escaping'):
                             worker.validate_native_references(path)
 
+    def test_native_tiostream_literal_ampersands_are_not_xml_entities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'scene.tnz'
+            original='<tnz><property name="Compression Type" value="Lempel-Ziv & Welch encoding"/><path>"$scenefolder/art/A & B.png"</path></tnz>'
+            path.write_text(original)
+            worker.validate_native_references(path)
+            self.assertEqual(path.read_text(),original)
+
     def test_native_xml_rejects_entity_definitions(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'scene.tnz'

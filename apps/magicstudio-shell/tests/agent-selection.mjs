@@ -101,9 +101,11 @@ console.log("PASS: shared Sproket drawer is outside tab-specific containers");
 // Run real mode-switch, selection-label and Gaffer handlers; only native transport is synthetic.
 const artworkNodes = new Map(), artworkCalls = [];
 function artworkElement(tag, attrs = {}, ...children) {
-  const n = { tag, ...attrs, _value:attrs.value, children: children.flat(), style: {}, dataset: {}, events:{}, textContent: children.filter(c => typeof c === 'string').join(''),
+  const n = { tag, ...attrs, _value:attrs.value, children: [], parentElement:null, style: {}, dataset: {}, events:{}, textContent: children.filter(c => typeof c === 'string').join(''),
     classList: { add() {} }, addEventListener(type,fn) {this.events[type]=fn;}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, replaceWith() {}, showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},remove(){},
-    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    append(...items) { for(const item of items.flat()){if(item&&typeof item==='object'){if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}item.parentElement=this;}this.children.push(item);} },
+    replaceChildren(...items) { for(const child of this.children)if(child&&typeof child==='object')child.parentElement=null;this.children=[];this.append(...items); },
+    insertBefore(item,reference) { if(reference!==null&&!this.children.includes(reference))throw new DOMException('Reference is not a child','NotFoundError');if(item===reference)return item;if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}this.children.splice(reference===null?this.children.length:this.children.indexOf(reference),0,item);item.parentElement=this;return item; },
     querySelector(selector) {
       const cls = selector.split(' ').at(-1).slice(1);
       const find = node => node && typeof node === 'object' && ((node.class || '').split(' ').includes(cls) ? node : node.children?.map(find).find(Boolean));
@@ -113,8 +115,17 @@ function artworkElement(tag, attrs = {}, ...children) {
     get selectedOptions() { return this.options.filter(o => o.value === this.value); },
     get value() { return this._value ?? this.options[0]?.value ?? ''; }, set value(v) { this._value = v; },
   };
+  n.append(...children.flat());
   if (attrs.id) artworkNodes.set(attrs.id, n);
   return n;
+}
+// DOM insertion moves an existing node, preserves parent links, and rejects a foreign reference.
+{
+ const a=artworkElement('a'),b=artworkElement('b'),parent=artworkElement('div',{},a,b),other=artworkElement('div');
+ assert.equal(parent.insertBefore(b,a),b);assert.deepEqual(parent.children,[b,a]);assert.equal(b.parentElement,parent);
+ other.insertBefore(b,null);assert.deepEqual(parent.children,[a]);assert.equal(b.parentElement,other);
+ assert.throws(()=>parent.insertBefore(b,b),{name:'NotFoundError'});
+ parent.replaceChildren(b);assert.equal(a.parentElement,null);assert.equal(b.parentElement,parent);assert.equal(other.children.length,0);
 }
 for (const id of ['view-animation', 'magic-target-image', 'magic-target-parts']) artworkElement('div', { id });
 const artworkContext = vm.createContext({

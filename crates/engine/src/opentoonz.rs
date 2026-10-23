@@ -190,7 +190,7 @@ fn scene_info(scene: &Path) -> Result<Value> {
 // ---------- source bundle ----------
 
 /// The project root holds the folders `+drawings` etc. resolve against.
-fn project_root(scene: &Path) -> Option<PathBuf> {
+pub(crate) fn project_root(scene: &Path) -> Option<PathBuf> {
     scene.ancestors().skip(1).find(|dir| fs::read_dir(dir).ok().is_some_and(|mut entries| entries.any(|e| {
         e.ok().and_then(|e| e.file_name().into_string().ok()).is_some_and(|n| n.ends_with("_otprj.xml") || n == "scenes.xml")
     }))).map(Path::to_path_buf)
@@ -214,7 +214,7 @@ fn level_files(path: &Path) -> Vec<PathBuf> {
 // backslashes. Resolve that value, not the enclosing serialization syntax.
 fn native_path_text(raw: &str) -> Result<String> {
     let raw = raw.trim();
-    let Some(quoted) = raw.strip_prefix('"') else { return Ok(raw.to_owned()) };
+    let Some(quoted) = raw.strip_prefix('"') else { return Ok(raw.replace('\\', "/")) };
     let quoted = quoted.strip_suffix('"').ok_or_else(||invalid("Unterminated native level path"))?;
     let mut chars = quoted.chars().peekable();
     let mut path = String::new();
@@ -223,7 +223,7 @@ fn native_path_text(raw: &str) -> Result<String> {
             if let Some(next) = chars.next() { path.push(next); }
         } else { path.push(c); }
     }
-    Ok(path)
+    Ok(path.replace('\\', "/"))
 }
 
 /// Every level the scene references, resolved and hashed. Missing files fail the job.
@@ -242,7 +242,9 @@ fn dependencies(scene: &Path, xml: &str) -> Result<(Option<PathBuf>, Vec<Value>)
     for raw in paths.into_iter().map(str::trim).filter(|p| !p.is_empty()) {
         let decoded = native_path_text(raw)?;
         let raw = decoded.as_str();
-        let resolved = if let Some(aliased) = raw.strip_prefix('+') {
+        let resolved = if let Some(tail) = raw.strip_prefix("$scenefolder/") {
+            scene.parent().ok_or_else(||invalid("Scene has no parent directory"))?.join(tail)
+        } else if let Some(aliased) = raw.strip_prefix('+') {
             let (alias, tail) = aliased.split_once('/').unwrap_or((aliased, ""));
             match (&root, ALIASES.contains(&alias)) {
                 (Some(root), true) => root.join(alias).join(tail),
@@ -555,6 +557,17 @@ mod tests {
         let spaced = quoted.replace("A.png", "A B.png");
         let (_, files) = dependencies(&scene, &spaced).expect("quoted filename preserves spaces");
         assert_eq!(files[0]["path"], json!(root.join("drawings/A B.png")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dependencies_resolve_scenefolder_and_native_separators() {
+        let native = SCENE.replace("+drawings/A.png", r#""$scenefolder\\art\\A.png""#);
+        let (root, scene) = project("scenefolder-path", &native);
+        fs::create_dir_all(root.join("scenes/art")).unwrap();
+        fs::rename(root.join("drawings/A.png"),root.join("scenes/art/A.png")).unwrap();
+        let (_, files) = dependencies(&scene, &native).expect("portable native scene-folder alias resolves");
+        assert_eq!(files[0]["path"],json!(root.join("scenes/art/A.png")));
         fs::remove_dir_all(root).unwrap();
     }
 

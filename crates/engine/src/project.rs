@@ -28,6 +28,7 @@ pub fn write_project_file(s: &Session) -> Result<()> {
     let mut doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": assets,
         "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target, "video_project": s.video_project_path}});
     if let Some(state) = &s.theatre_state { doc["theatre"] = state.clone(); }
+    if !s.animation_sources.is_empty() { doc["animation_sources"] = json!(s.animation_sources); }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -186,6 +187,8 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let assets: Vec<crate::ProjectAsset> =
         serde_json::from_value(doc.get("assets").cloned().unwrap_or_else(|| json!([])))
             .map_err(|e| EngineError::InvalidParams(format!("invalid project assets: {e}")))?;
+    let animation_sources = serde_json::from_value(doc.get("animation_sources").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!({})))
+        .map_err(|e|EngineError::InvalidParams(format!("invalid animation sources: {e}")))?;
     // Report connections whose source files have moved instead of dropping them.
     let missing: Vec<&str> = assets
         .iter()
@@ -196,6 +199,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     reset_for_project(s, path.clone(), assets);
     if let Some(owner)=owner{s.project_owner=Some(owner);}
     s.theatre_state = doc.get("theatre").filter(|state| !state.is_null()).cloned();
+    s.animation_sources = animation_sources;
     s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
@@ -208,6 +212,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
 
 /// Save the open project (or save-as when `path` is given).
 pub fn cmd_project_save(s: &mut Session, params: &Value) -> Result<Value> {
+    if params.get("expected_project").is_some(){crate::motion_authoring::project_guard(s,params)?;}
     if params.get("path").is_some() {
         s.project_path = Some(project_file_path(s, params)?);
     }

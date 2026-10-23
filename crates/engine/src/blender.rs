@@ -135,6 +135,8 @@ fn job_details(dir: &Path) -> Result<Value> {
         "submitted_at",
         "started_at",
         "cancellation_requested_at",
+        "source_id",
+        "source_revision",
     ] {
         if details.get(key).is_none() {
             details[key] = Value::Null;
@@ -155,6 +157,8 @@ fn add_job_details(value: &mut Value, details: &Value) {
         "submitted_at",
         "started_at",
         "cancellation_requested_at",
+        "source_id",
+        "source_revision",
     ] {
         if value.get(key).is_none() {
             value[key] = details[key].clone();
@@ -239,7 +243,7 @@ fn root(s: &Session) -> Result<PathBuf> {
         .map(|p| p.join("animation/blender-jobs"))
         .ok_or_else(|| invalid("Open a .magic project first"))
 }
-fn job(s: &Session, p: &Value) -> Result<(String, PathBuf)> {
+pub(crate) fn job(s: &Session, p: &Value) -> Result<(String, PathBuf)> {
     let id = p["job"]
         .as_str()
         .ok_or_else(|| invalid("job is required"))?;
@@ -483,6 +487,8 @@ pub(crate) fn submit(s: &Session, p: &Value, mut request: Value, backend: &str) 
     request["unit"] = json!(UNIT);
     request["project"] = json!(s.project_path);
     request["backend"] = json!(backend);
+    request["source_id"] = p["source_id"].clone();
+    request["source_revision"] = p["source_revision"].clone();
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| invalid(e.to_string()))?
@@ -503,7 +509,7 @@ pub(crate) fn submit(s: &Session, p: &Value, mut request: Value, backend: &str) 
     write_json(
         &dir.join("job.json"),
         &json!({"job":id,"job_id":id,"unit":UNIT,"project":s.project_path,
-        "backend":backend,"created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"],
+        "backend":backend,"source_id":p["source_id"],"source_revision":p["source_revision"],"created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"],
         "limits":request["limits"],"submitted_at":request["submitted_at"],"started_at":Value::Null,"cancellation_requested_at":Value::Null}),
     )?;
     write_json(

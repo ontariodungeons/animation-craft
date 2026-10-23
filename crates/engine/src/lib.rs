@@ -20,6 +20,7 @@
 
 pub mod agent;
 pub mod blender;
+pub mod animation_links;
 pub mod opentoonz;
 pub mod synfig;
 pub(crate) mod audio_trace;

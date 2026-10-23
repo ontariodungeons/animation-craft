@@ -143,3 +143,11 @@ Native dependency discovery decodes the quoted filename strings written by
 OpenToonz (`"+drawings/A B.png"`, including native quote/backslash escapes) before
 resolving and hashing them. Source bytes remain unchanged. This metadata support
 does not constitute successful native-render acceptance.
+
+
+Portable native scenes may use `$scenefolder` and backslash separators; both are
+resolved against the frozen scene directory. OpenToonz TIStream strings permit
+literal ampersands, including stock compression labels. The worker escapes those
+only in its XML-parser view; it never rewrites the native source bytes. External
+entity/DOCTYPE declarations remain refused. The official `opentoonz_sample`
+`tga_paint.tnz` is the nonempty source used for the bounded native acceptance check.

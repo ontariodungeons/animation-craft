@@ -245,7 +245,10 @@ def validate_native_references(path):
     content=path.read_bytes()
     if len(content)>64*1024*1024 or b'<!DOCTYPE' in content.upper() or b'<!ENTITY' in content.upper():
         raise ValueError('Oversized or externally defined native XML is unsupported')
-    root=ET.fromstring(content)
+    # OpenToonz TIStream is XML-like: strings contain literal ampersands (even
+    # in its own stock format options). Escape only in the parser view so XML
+    # syntax can be inspected without interpreting native filename text as entities.
+    root=ET.fromstring(content.replace(b'&',b'&amp;'))
     for node in root.iter():
         for value in [node.text or '', *node.attrib.values()]:
             value=value.strip()

@@ -26,6 +26,8 @@ pub struct Session {
     pub video_project_path: Option<PathBuf>,
     /// Opaque native Theatre save-file state; absent on projects that have never saved Theatre edits.
     pub theatre_state: Option<Value>,
+    /// Editable native sources and explicitly accepted immutable render receipts.
+    pub animation_sources: BTreeMap<String, Value>,
     /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
     pub record_user_state: bool,
     /// Active chat selection belongs to this engine/window, never to project serialization.
@@ -66,6 +68,7 @@ impl Default for Session {
             project_path: None,
             video_project_path: None,
             theatre_state: None,
+            animation_sources: BTreeMap::new(),
             record_user_state: false,
             agent_selection: None,
             project_owner: None,
@@ -93,6 +96,7 @@ impl Clone for Session {
             project_path: self.project_path.clone(),
             video_project_path: self.video_project_path.clone(),
             theatre_state: self.theatre_state.clone(),
+            animation_sources: self.animation_sources.clone(),
             record_user_state: self.record_user_state,
             agent_selection: self.agent_selection.clone(),
             project_owner: self.project_owner.clone(),
