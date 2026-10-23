@@ -74,10 +74,11 @@ async function nativeAnimationOpen(selection={}){
    if(selection.source&&linkId.input.value===suggestedId){let candidate=suggestedId,index=2;while(sources.some(row=>row.id===candidate))candidate=`${suggestedId}-${index++}`;linkId.input.value=candidate;}
    linkState.textContent=selection.source?'Registration draft from saved scene · Register explicitly. Existing sources remain unchanged.':unsaved?'Source links changed in memory · Save project explicitly.':'Select or register an editable source.';cli();
   }
+  return row||null;
  }
- reload.onclick=async()=>{if(rendering||mutating)return;try{await loadSources();}catch(error){if(current())linkState.textContent=String(error);}};
+ reload.onclick=async()=>{if(rendering||mutating)return;try{const row=await loadSources();if(row)await restoreAccepted(row);}catch(error){if(current())linkState.textContent=String(error);}};
  links.onchange=async()=>{
-  if(rendering||mutating)return;const row=sources.find(row=>row.id===links.value);backend.value=row?.backend||backend.value;await backend.onchange();if(current())showRow(row||null);
+  if(rendering||mutating)return;const row=sources.find(row=>row.id===links.value);backend.value=row?.backend||backend.value;await backend.onchange();if(current()){showRow(row||null);if(row)await restoreAccepted(row);}
  };
  async function mutateSource(id,params){
   if(rendering||mutating)return;const token=revision;mutating=true;busy(rendering);linkCommand.textContent=echo(id,params);
@@ -104,6 +105,23 @@ async function nativeAnimationOpen(selection={}){
   }catch(error){if(selected()){const active=!['completed','cancelled','failed'].includes(lastReceipt?.state);busy(active);cancel.disabled=!active||lastReceipt?.state==='cancelling';report(`${error}${active?' · Retrying status…':''}`,true);if(active)session.timer=setTimeout(poll,1000);}}
  }
  async function list(){const choice=backend.value,value=await motionCommand('animation.list');if(!current()||choice!==backend.value)return;const native=(value.jobs||[]).filter(j=>j.backend===choice).slice(0,100);jobs.replaceChildren(el('option',{value:''},`Choose a saved ${names[backend.value]} job…`),...native.map(j=>el('option',{value:j.job},`${j.state||'saved'} · ${j.job}`)));}
+ async function restoreAccepted(row){
+  clearTimeout(session.timer);const token=++revision;activeJob=null;lastReceipt=null;cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();
+  if(typeof blenderMediaUrl!=='undefined'&&blenderMediaUrl){URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;}placement.refresh();busy(false);
+  const accepted=row.accepted;if(!accepted?.job){linkState.textContent=unsaved?'Source links changed in memory · Save project explicitly.':'Editable source selected. No accepted result is attached.';return;}
+  const selected=()=>current()&&revision===token&&linked?.id===row.id&&links.value===row.id;
+  linkState.textContent='Checking saved accepted-result receipt…';
+  try{
+   const receiptValue=await motionCommand('animation.status',{job:accepted.job});if(!selected())return;
+   const valid=receiptValue.job===accepted.job&&receiptValue.project===project&&receiptValue.backend===row.backend&&receiptValue.source_id===row.id&&receiptValue.source_revision===row.revision-1&&receiptValue.state==='completed'&&receiptValue.partial===false&&receiptValue.clip===accepted.clip&&receiptValue.clip_sha256===accepted.clip_sha256;
+   if(!valid){linkState.textContent='Accepted result unavailable: its actual terminal receipt is missing, stale or mismatched. The editable source remains available.';linkReadback.textContent=JSON.stringify({source:row,receipt:receiptValue},null,2);return;}
+   lastReceipt=receiptValue;receipt.textContent=JSON.stringify(receiptValue,null,2);placement.refresh();
+   const savedJob=jobs.options.find(option=>option.value===accepted.job);if(savedJob){savedJob.textContent=`completed · ${accepted.job} · Accepted result`;jobs.value=accepted.job;}
+   try{await blenderLoadPreview(video,accepted.clip,selected);if(!selected())return;linkState.textContent='Accepted full result restored from its actual terminal receipt. The editable native source remains separate.';}
+   catch(error){if(selected())linkState.textContent=`Accepted result verified; video preview unavailable: ${error}. The editable source remains available.`;}
+   linkReadback.textContent=JSON.stringify({source:row,accepted:accepted,receipt:receiptValue},null,2);busy(false);
+  }catch(error){if(selected()){lastReceipt=null;placement.refresh();linkState.textContent=`Accepted result unavailable: terminal receipt could not be read (${error}). The editable source remains available.`;linkReadback.textContent=JSON.stringify({source:row,accepted:accepted,receipt_error:String(error)},null,2);busy(false);}}
+ }
  jobs.onchange=async()=>{clearTimeout(session.timer);revision++;activeJob=jobs.value||null;lastReceipt=null;placement.refresh();busy(false);if(activeJob)await poll();};
  start.onclick=async()=>{if(rendering||mutating)return;let params;try{params=renderRequest();}catch(error){report(String(error),true);return;}revision++;clearTimeout(session.timer);busy(true);cancel.disabled=true;cli();report(`Submitting ${names[backend.value]}…`);try{const result=await motionCommand('animation.source.render',params);if(!current())return;if(!result.job)throw Error('Start returned no job identity');activeJob=result.job;lastReceipt=null;placement.refresh();await poll();}catch(error){if(current()){busy(false);report(String(error),true);}}};
  cancel.onclick=async()=>{cancel.disabled=true;try{await motionCommand('animation.cancel',{job:activeJob});if(current()){clearTimeout(session.timer);await poll();}}catch(error){report(String(error),true);}};
