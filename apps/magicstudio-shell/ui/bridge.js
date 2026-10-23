@@ -58,6 +58,37 @@ window.acBridge = {
         rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] };
     });
   },
+  // Every clickable control that is not inside a panel the registry knows:
+  // a control with no data-box-id ancestor (or one the registry never saw) is
+  // reported as unconfigured instead of being silently ignored.
+  unconfigured() {
+    const registry = window.companionBoxes;
+    const known = (node) => {
+      const host = node.closest("[data-box-id]");
+      const boxId = host && host.getAttribute("data-box-id");
+      return !!(boxId && registry && typeof registry.get === "function" && registry.get(boxId));
+    };
+    const rows = [];
+    const nodes = [...document.querySelectorAll(CLICKABLE)];
+    nodes.forEach((node, i) => {
+      if (!visible(node) || known(node)) return;
+      const tag = node.tagName.toLowerCase();
+      const label = (node.title || node.getAttribute("aria-label") || node.textContent || "").trim().slice(0, 80);
+      rows.push({ id: node.id || `${tag}-${i + 1}`, tag, label: label || null });
+    });
+    return rows.slice(0, 64);
+  },
+  // The generic flag setter: `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>`.
+  // The panel's own handler does the work; a flag it does not accept is refused.
+  panel(id, flag, value) {
+    const registry = window.companionBoxes;
+    const record = registry && typeof registry.get === "function" ? registry.get(id) : null;
+    if (!record) throw new Error(`panel ${id} is not registered`);
+    const handler = record.on && record.on[flag];
+    if (typeof handler !== "function") throw new Error(`panel ${id} does not accept ${flag}`);
+    handler(!!value);
+    return { panel: id, flag, value: !!value };
+  },
   click(target) {
     const node = find(target);
     node.scrollIntoView({ block: "nearest" });
