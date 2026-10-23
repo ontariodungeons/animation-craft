@@ -1,0 +1,28 @@
+// Local integration evaluation. Theatre Studio 0.7.0 is AGPL-3.0-only;
+// release packaging requires a license review. No copied editor implementation.
+import {getProject, types, onChange} from '@theatre/core';
+import studio from '@theatre/studio';
+
+studio.initialize({usePersistentStorage:false});
+let sheet, object, stop, stopClock, synchronizing=false;
+const send=(type, detail={})=>parent.postMessage({magicTheatre:true,type,...detail},location.origin);
+window.addEventListener('message',async event=>{
+ if(event.source!==parent||!event.data?.magicTheatre)return;
+ try{
+  const message=event.data;
+  if(message.type==='context'){
+   stop?.();stopClock?.();
+   const project=getProject(`Magic Studio ${message.project}`);
+   sheet=project.sheet(message.character);
+   object=sheet.object(message.part,{rotation:types.number(0,{range:[-45,45]})});
+   await project.ready;
+   studio.setSelection([object]);
+   stop=object.onValuesChange(value=>send('values',{part:message.part,rotation:value.rotation}));
+   stopClock=onChange(sheet.sequence.pointer.position,time=>{if(!synchronizing)send('seek',{time});});
+   send('ready',{part:message.part});
+  }else if(message.type==='seek'&&sheet){
+   synchronizing=true;sheet.sequence.position=message.time;synchronizing=false;
+  }
+ }catch(error){send('error',{error:String(error)});}
+});
+send('loaded');
