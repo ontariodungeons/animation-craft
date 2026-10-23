@@ -1,9 +1,9 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
  theatreRequireSaved();
  animationPause();
- Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
+ Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
  $('view-animation').replaceChildren();
 }
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
@@ -88,9 +88,9 @@ async function animationLoad(){
  animationPause();const request=++motion.request;motion.loading=true;
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
-  motion.meta=meta;if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
+  motion.meta=meta;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file);})));if(request!==motion.request)return;
-  animationControls();await animationSample();
+  animationControls();await animationSample();refreshPartDrafts();
  }catch(e){animationEmpty('Artwork needs preparation',String(e));}finally{motion.loading=false;}
 }
 function animationControls(){
@@ -113,13 +113,13 @@ function animationControls(){
  }
  const section=motionSection('Layers',layers,true);section.id='motion-layers';
  const selected=meta.layers.find(part=>part.id===motion.selected);
- const candidate=selected&&typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,selected.id):null;
+ const candidate=selected?partCandidate(selected.id):null;
  const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file),alt:''}),el('span',{},part.id))));
  const compare=selected?el('div',{class:'magic-part-compare',id:'magic-part-compare'},
   el('div',{class:'magic-compare-title'},`${selected.label||selected.id} · ${selected.id}`),
   el('div',{class:'magic-compare-grid'},
    el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${selected.label||selected.id}`}),el('figcaption',{},'Original')),
-   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:convertFileSrc(candidate.image),alt:`Candidate for ${selected.label||selected.id}` }):el('div',{class:'magic-compare-empty'},'Generate a candidate for this selected part.'),el('figcaption',{},candidate?'Candidate · needs review':'Candidate'))
+   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${selected.label||selected.id}` }):el('div',{class:'magic-compare-empty'},'Generate a candidate, or save an edit in PhotoCraft.'),el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'} · needs review`:'Candidate'))
   ),
   partsStrip,
   el('div',{class:'magic-part-actions'},
@@ -203,7 +203,7 @@ function partsDrawer(compare,assetsSection){
  const meta=motion.meta;
  const cards=(meta.layers||[]).map(part=>{
   const shown=part.state?.visible!==false;
-  const candidate=typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,part.id):null;
+  const candidate=partCandidate(part.id);
   const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
   return el('article',{class:`magic-part-card${motion.selected===part.id?' active':''}`,id:`magic-part-card-${part.id}`},
    el('button',{class:'magic-part-card-pick',title:`Select ${part.label||part.id} (${part.id})`,'aria-pressed':String(motion.selected===part.id),onclick:select},
@@ -212,7 +212,7 @@ function partsDrawer(compare,assetsSection){
     el('span',{class:'muted'},part.id)),
    el('div',{class:'magic-part-pills'},
     el('button',{class:`pill ${shown?'ok':'off'}`,title:`${shown?'Hide':'Show'} ${part.label||part.id}`,'aria-pressed':String(shown),onclick:async()=>{await motionCommand('part.set_state',{part:part.id,visible:!shown});await animationRefresh();}},shown?'Visible':'Hidden'),
-    candidate?el('span',{class:'pill warn',title:'A generated candidate awaits review'},'Candidate'):null,
+    candidate?el('span',{class:'pill warn',title:candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'},'Candidate'):null,
     motion.selected===part.id?el('span',{class:'pill accent'},'Selected'):null),
    el('button',{class:'ghost magic-part-card-open',id:`part-open-photocraft-${part.id}`,title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${part.label||part.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'Open in PhotoCraft'));
  });
@@ -225,16 +225,38 @@ function partsDrawer(compare,assetsSection){
 async function openPartInPhotoCraft(part){
  try{
   const result=await motionCommand('part.open_photocraft',{asset:motion.character,part:part.id,spawn:true});
-  toast(`PhotoCraft: ${(result.draft?.file||result.file).split('/').pop()} · keep it ${result.width}×${result.height}`);
+  toast(`PhotoCraft: ${(result.draft?.file||result.file).split('/').pop()} · keep it ${result.width}×${result.height} · save to make it the candidate`);
+  await refreshPartDrafts();
  }catch(error){toast(String(error));}
 }
+// A saved PhotoCraft draft that differs from the part's current image is that part's candidate.
+function photoDraftCandidate(partId){
+ const draft=motion.photoDrafts[partId];
+ if(!draft||draft.matches_current)return null;
+ return {assetId:motion.character,partId,image:draft.file,result:{width:draft.width,height:draft.height,sha256:draft.sha256},rigSha256:motion.meta?.rig_sha256,partSha256:draft.current_sha256,revision:motion.meta?.image_revision,source:'photocraft'};
+}
+const partCandidate=partId=>(typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,partId):null)||photoDraftCandidate(partId);
+const candidateUrl=candidate=>{const url=String(convertFileSrc(candidate.image));return `${url}${url.includes('?')?'&':'?'}v=${candidate.result?.sha256||''}`;};
+// Drafts live on disk (.part-image-history/<asset>/drafts); re-read them after loads and on focus.
+async function refreshPartDrafts(){
+ const character=motion.character,found={};
+ for(const part of motion.meta?.layers||[]){
+  let result;
+  // Rigs without one PNG per part are read-only: they have no drafts to offer.
+  try{result=await motionCommand('part.open_photocraft',{asset:character,part:part.id});}catch{break;}
+  if(result.draft)found[part.id]={...result.draft,current_sha256:result.sha256};
+ }
+ if(motion.character!==character||JSON.stringify(found)===JSON.stringify(motion.photoDrafts))return;
+ motion.photoDrafts=found;animationControls();
+}
+window.addEventListener('focus',()=>{if(state.view==='animation'&&motion.mode!=='composite'&&motion.meta)refreshPartDrafts();});
 async function animationSample(){
  if(!motion.meta?.tracks?.length)return;
  const request=++motion.request;animationPause();
  $('motion-caption').textContent='Sampling motion…';
  try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
-async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();}
+async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
 function animationPause(){
  if(motion.mode==='composite'){seqPause();return;}motion.playing=false;if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}}
 async function animationPlay(){

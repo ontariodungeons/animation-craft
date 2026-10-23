@@ -850,10 +850,20 @@ fn photocraft_desktop_entry() -> Option<PathBuf> {
 
 /// A project-local copy of `source` for PhotoCraft to edit, so saving there never
 /// bypasses `part.replace_image`. An existing draft is kept: it may hold unsaved work.
+fn draft_path(history: &Path, part: &str) -> PathBuf {
+    history.join("drafts").join(format!("{}.png", safe_id(part)))
+}
+
+fn png_size(bytes: &[u8]) -> Result<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_dimensions()
+        .map_err(|e| invalid(format!("Cannot read part image dimensions: {e}")))
+}
+
 fn edit_draft(root: &Path, history: &Path, part: &str, source: &Path) -> Result<(PathBuf, bool)> {
-    let drafts = history.join("drafts");
-    checked_dir(root, &drafts, true)?;
-    let draft = drafts.join(format!("{}.png", safe_id(part)));
+    checked_dir(root, &history.join("drafts"), true)?;
+    let draft = draft_path(history, part);
     check_regular_or_missing(root, &draft)?;
     if draft.exists() {
         return Ok((draft, true));
@@ -944,17 +954,15 @@ pub fn cmd_part_open_photocraft(s: &mut Session, params: &Value) -> Result<Value
         .join(".part-image-history")
         .join(safe_id(&asset));
     let original = original_backup(&root, &history, part)?;
+    let current_sha = sha(&std::fs::read(&current)?);
     let file = match (which, &original) {
         ("original", Some(backup)) => backup.clone(),
         _ => current,
     };
     let bytes = std::fs::read(&file)?;
-    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
-        .with_guessed_format()?
-        .into_dimensions()
-        .map_err(|e| invalid(format!("Cannot read part image dimensions: {e}")))?;
+    let (width, height) = png_size(&bytes)?;
     let photocraft_cli = installed_craft_binary("photocraft-cli");
-    let mut draft = Value::Null;
+    let mut reused = true;
     if spawn {
         // photocraft-cli is headless; only the PhotoCraft app opens a window.
         // An explicit `photocraft` binary wins, else the installed desktop entry.
@@ -969,10 +977,22 @@ pub fn cmd_part_open_photocraft(s: &mut Session, params: &Value) -> Result<Value
                 gio
             }
         };
-        let (path, reused) = edit_draft(&root, &history, part, &file)?;
+        let (path, existed) = edit_draft(&root, &history, part, &file)?;
         launch.arg(&path).spawn()?;
-        draft = json!({"file":path,"reused":reused});
+        reused = existed;
     }
+    // A draft saved in PhotoCraft is the part's candidate until it matches the current image.
+    let draft_file = draft_path(&history, part);
+    let draft = if draft_file.exists() {
+        check_regular_or_missing(&root, &draft_file)?;
+        let bytes = std::fs::read(&draft_file)?;
+        let (width, height) = png_size(&bytes)?;
+        let digest = sha(&bytes);
+        json!({"file":draft_file,"reused":reused,"width":width,"height":height,
+            "matches_current":digest == current_sha,"sha256":digest})
+    } else {
+        Value::Null
+    };
     Ok(json!({"ok":true,"command":"part.open_photocraft","part":part,"which":which,"file":file,
         "original_file":original,"width":width,"height":height,"sha256":sha(&bytes),
         "photocraft_cli":photocraft_cli,"spawned":spawn,"draft":draft}))
@@ -1205,6 +1225,32 @@ mod tests {
                 json!({"asset":"fish","undo":second["undo"]}),
             )
             .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn open_photocraft_reports_an_existing_draft_without_spawning() {
+        let (mut session, root, rig, _, _) = fixture();
+        let source = root.join("fin.png");
+        let open = |session: &mut Session| {
+            session
+                .execute("part.open_photocraft", json!({"asset":"fish","part":"fin"}))
+                .unwrap()
+        };
+        assert!(open(&mut session)["draft"].is_null(), "no draft until PhotoCraft opens one");
+        let history = rig.parent().unwrap().join(".part-image-history/fish");
+        let (draft, _) = edit_draft(&root, &history, "fin", &source).unwrap();
+        let fresh = open(&mut session);
+        assert_eq!(fresh["draft"]["file"], json!(draft));
+        assert_eq!(fresh["draft"]["matches_current"], true, "an unedited draft is no candidate");
+        ImageBuffer::from_pixel(3, 2, Rgba::<u8>([200, 10, 10, 255]))
+            .save(&draft)
+            .unwrap();
+        let edited = open(&mut session);
+        assert_eq!(edited["draft"]["matches_current"], false);
+        assert_eq!(edited["draft"]["sha256"], sha(&std::fs::read(&draft).unwrap()));
+        assert_eq!((edited["draft"]["width"].as_u64(), edited["draft"]["height"].as_u64()), (Some(3), Some(2)));
+        assert_eq!(edited["sha256"], sha(&std::fs::read(&source).unwrap()), "current part digest for the replace guard");
         let _ = std::fs::remove_dir_all(root);
     }
 

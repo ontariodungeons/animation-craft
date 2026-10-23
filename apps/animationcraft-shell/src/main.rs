@@ -79,7 +79,8 @@ async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value
     }
     // Exports, renders and agent runs take minutes. They work on a snapshot of the session so the
     // window keeps answering (clicks, look, other engine commands); their changes merge back after.
-    let mut session = { app.state::<Engine>().0.lock().map_err(|e| e.to_string())?.clone() };
+    let base = { app.state::<Engine>().0.lock().map_err(|e| e.to_string())?.clone() };
+    let mut session = base.clone();
     let (finished, result) = tauri::async_runtime::spawn_blocking(move || {
         let result = session.execute(&id, params).map_err(|e| e.to_string());
         (session, result)
@@ -89,17 +90,33 @@ async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value
     {
         let engine = app.state::<Engine>();
         let mut shared = engine.0.lock().map_err(|e| e.to_string())?;
-        shared.assets = finished.assets;
-        shared.project_assets = finished.project_assets;
-        shared.project_path = finished.project_path;
-        shared.active_asset = finished.active_asset;
-        shared.last_result = finished.last_result;
-        shared.draft_approved = finished.draft_approved;
-        shared.video_target = finished.video_target;
-        shared.video_project_path = finished.video_project_path;
-        shared.song_audio = finished.song_audio;
+        merge_back(&mut shared, &base, &finished);
     }
     result
+}
+
+/// Writes back only what a background command changed relative to `base`, the copy it started
+/// from, so edits the window made meanwhile survive. Assets and project assets merge by id.
+fn merge_back(shared: &mut Session, base: &Session, finished: &Session) {
+    macro_rules! differ { ($a:expr, $b:expr) => { serde_json::to_value($a).ok() != serde_json::to_value($b).ok() }; }
+    for (id, asset) in &finished.assets {
+        if base.assets.get(id).is_none_or(|old| differ!(old, asset)) { shared.assets.insert(id.clone(), asset.clone()); }
+    }
+    for id in base.assets.keys().filter(|id| !finished.assets.contains_key(*id)) { shared.assets.remove(id); }
+    for asset in &finished.project_assets {
+        if base.project_assets.iter().find(|old| old.id == asset.id).is_none_or(|old| differ!(old, asset)) {
+            match shared.project_assets.iter_mut().find(|slot| slot.id == asset.id) {
+                Some(slot) => *slot = asset.clone(),
+                None => shared.project_assets.push(asset.clone()),
+            }
+        }
+    }
+    shared.project_assets.retain(|asset| {
+        !base.project_assets.iter().any(|old| old.id == asset.id) || finished.project_assets.iter().any(|new| new.id == asset.id)
+    });
+    macro_rules! scalar { ($($field:ident),*) => { $(if finished.$field != base.$field { shared.$field = finished.$field.clone(); })* }; }
+    scalar!(project_path, active_asset, draft_approved, video_target, video_project_path, song_audio);
+    shared.last_result = finished.last_result.clone();
 }
 
 #[tauri::command]
@@ -163,12 +180,17 @@ async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:Strin
 /// Starts (`on`) or stops the project's studio server with the engine's own commands
 /// (`video.server_start` / `video.server_stop`), then returns the project's fresh state.
 /// Nothing starts a server on its own: quick one-off work costs no memory.
+/// Starting a server can take seconds, so it runs off the window's main thread.
 #[tauri::command]
-fn studio_server(engine: tauri::State<Engine>, path: String, on: bool) -> Result<Value, String> {
-    engine.with(Some(&path), |s| {
-        s.execute(if on { "video.server_start" } else { "video.server_stop" }, json!({})).map_err(|e| e.to_string())?;
-        state_of(s)
+async fn studio_server(app: tauri::AppHandle, path: String, on: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Engine>().with(Some(&path), |s| {
+            s.execute(if on { "video.server_start" } else { "video.server_stop" }, json!({})).map_err(|e| e.to_string())?;
+            state_of(s)
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The project folder of a `.acproj` path.
@@ -547,4 +569,42 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("AnimationCraft shell failed to start")
         .run(|app,event|{if matches!(event,tauri::RunEvent::Exit){#[cfg(unix)] bridge::cleanup(app);}});
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use animationcraft_engine::session::{Asset, ProjectAsset};
+
+    fn connection(id: &str, name: &str) -> ProjectAsset {
+        serde_json::from_value(json!({"id":id,"name":name,"preset":null,"path":null,"kind":"image"})).unwrap()
+    }
+
+    #[test]
+    fn background_merge_keeps_edits_made_while_it_ran() {
+        let mut shared = Session::default();
+        shared.assets.insert("fish".into(), Asset { id: "fish".into(), ..Asset::default() });
+        shared.project_assets = vec![connection("fish", "Fish"), connection("crab", "Crab")];
+        shared.video_target = "hyperframes".into();
+        let base = shared.clone();
+
+        // The window renames the crab and adds a bee while the command runs...
+        shared.project_assets[1] = connection("crab", "Hermit crab");
+        shared.project_assets.push(connection("bee", "Bee"));
+        shared.active_asset = Some("bee".into());
+        // ...and the command adds an eel, removes the fish and sets the video project.
+        let mut finished = base.clone();
+        finished.assets.clear();
+        finished.assets.insert("eel".into(), Asset { id: "eel".into(), ..Asset::default() });
+        finished.project_assets = vec![connection("crab", "Crab"), connection("eel", "Eel")];
+        finished.video_project_path = Some("/song/hyperframes".into());
+
+        merge_back(&mut shared, &base, &finished);
+        let names: Vec<_> = shared.project_assets.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Hermit crab", "Bee", "Eel"]);
+        assert_eq!(shared.assets.keys().collect::<Vec<_>>(), ["eel"]);
+        assert_eq!(shared.active_asset.as_deref(), Some("bee"), "untouched by the command");
+        assert_eq!(shared.video_target, "hyperframes");
+        assert_eq!(shared.video_project_path.as_deref(), Some(std::path::Path::new("/song/hyperframes")));
+    }
 }
