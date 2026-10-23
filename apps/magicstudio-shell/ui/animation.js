@@ -1,7 +1,7 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
 function animationFeedback(){
- return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
+ return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,layer_order:motion.meta?.layer_order||null,selected_layer_depth:motion.meta?.layers?.find(l=>l.id===motion.selected)?.depth??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
 }
 // UI view preferences are project-scoped; rig/Theatre persistence remains owned by the engine.
 function animationRemember(){
@@ -135,7 +135,7 @@ function animationControls(){
   row.append(el('img',{src:motionAssetUrl(l.file),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:l.id,visible:!shown});await animationRefresh();}));
   row.lastChild.setAttribute('aria-pressed',String(shown));if(!shown)row.classList.add('hidden-layer');layers.append(row);
  }
- const section=motionSection('Layers',layers,true);section.id='motion-layers';
+ const section=motionSection('Layers',authoring.layers,true);section.id='motion-layers';
  const selected=meta.layers.find(part=>part.id===motion.selected);
  const candidate=selected?partCandidate(selected.id):null;
  const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file),alt:''}),el('span',{},part.id))));
@@ -174,7 +174,7 @@ function animationControls(){
  }
  const assetsGrid=(motion.assets||[]).length?el('div',{class:'magic-assets-grid'},motion.assets.map(asset=>magicAssetTile(asset,{active:asset.id===motion.character,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}}))):el('p',{class:'why'},'No project assets are available yet.');
  const partsSlot=$('magic-parts-slot');
- if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsGrid));else box.append(section);
+ if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsGrid));else authoring.layers.append(layers);box.append(section);
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));
@@ -262,7 +262,7 @@ async function animationSample(){
  if(!motion.meta?.tracks?.length)return;
  const request=++motion.request;animationPause();
  $('motion-caption').textContent='Sampling motion…';
- try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;if(typeof timelineRender==='function')timelineRender();motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
+ try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;if(sample.layer_ids&&(sample.layer_ids.length!==motion.meta.layers.length||sample.layer_ids.some((id,i)=>id!==motion.meta.layers[i].id)))throw Error('Layer order changed during sampling; refresh the object before playback.');motion.sample=sample;if(typeof timelineRender==='function')timelineRender();motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
 async function animationRefresh(){
  if(state.view!=='animation')return;
