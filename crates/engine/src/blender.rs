@@ -529,6 +529,9 @@ pub(crate) fn submit(s: &Session, p: &Value, mut request: Value, backend: &str) 
             request_path.to_string_lossy().into_owned(),
         ]
     } else {
+        if backend == "mlt" {
+            fs::write(dir.join("mlt_worker.py"), include_str!("../../../pipeline/mlt_animation_worker.py"))?;
+        }
         let native = dir.join("native_worker.py");
         fs::write(
             &native,

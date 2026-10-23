@@ -287,6 +287,9 @@ def main(request_path):
         job_metadata(request_path, request, service_metrics(request['unit']))
         if request['backend']=='synfig': result=render_synfig(request,job)
         elif request['backend']=='opentoonz': result=render_opentoonz(request,request_path)
+        elif request['backend']=='mlt':
+            from mlt_worker import render
+            result=render(request,job)
         else: raise ValueError('Unsupported native backend')
         result['worker_peak_rss_kib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         write_json(job/'rendered.json',result)

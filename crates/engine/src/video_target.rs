@@ -669,7 +669,7 @@ fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>
         if receipt[key].is_string(){request[key]=receipt[key].clone();}
     }
     let mut frozen=json!({"receipt":jobs.join("result.json"),"relationship":"provenance frozen when this clip was rendered; later source edits do not change it"});
-    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect","source_bundle","tool","selected_range","authored_range","range_note","partial","frame_mapping","alpha_evidence"]{
+    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect","source_bundle","tool","selected_range","authored_range","range_note","partial","frame_mapping","alpha_evidence","native_project","native_project_sha256","audio_mode","fps_fraction"]{
         if let Some(value)=receipt.get(key){frozen[key]=value.clone();}
     }
     request["rendered_source"]=frozen;

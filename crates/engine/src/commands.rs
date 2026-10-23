@@ -94,6 +94,7 @@ const fn is_long_running_id(id: &str) -> bool {
         id.as_bytes(),
         b"project.intake"
             | b"blender.start"
+            | b"mlt.start"
             | b"opentoonz.start"
             | b"opentoonz.render"
             | b"synfig.start"
@@ -209,6 +210,9 @@ pub fn build() -> Vec<CommandSpec> {
         query!("blender.status", "Blender Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
         query!("blender.list", "Saved Blender Jobs", "{}", crate::blender::cmd_blender_list),
         query!("blender.cancel", "Cancel Blender Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
+        query!("mlt.discover", "Discover MLT assembly runtime", "{}", crate::mlt::discover),
+        cmd!("mlt.start", "Assemble clips and audio with MLT", ["Video"], None,
+            "{\"timeline\":\"generic timeline JSON path\",\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::mlt::start),
         cmd!("opentoonz.start", "Render OpenToonz through shared worker", ["Animation"], None,
             "{\"scene\":\"saved .tnz\",\"bundle\":\"optional self-contained project root\",\"first\":1,\"last\":24,\"step\":1,\"shrink\":1,\"nthreads\":2,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::opentoonz::cmd_opentoonz_start),
         query!("opentoonz.discover", "OpenToonz Availability and Render Plan", "{\"scene\":\"optional .tnz path; plans without rendering\",\"first\":\"optional one-based\",\"last\":\"optional one-based\"}", crate::opentoonz::cmd_opentoonz_discover),
