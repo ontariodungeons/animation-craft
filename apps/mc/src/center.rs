@@ -492,8 +492,16 @@ fn wrapped_rows(lines: &[Line<'_>], width: u16) -> u16 {
 fn round_panel(title: impl Into<String>, accent: Color, active: bool) -> Block<'static> {
     Block::default().borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(if active{accent}else{DESK_LINE}))
-        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(if active{accent}else{MUTED})))
+        .border_style(Style::default().fg(accent).add_modifier(if active{Modifier::BOLD}else{Modifier::empty()}))
+        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(accent).add_modifier(if active{Modifier::BOLD}else{Modifier::empty()})))
+}
+/// A 35mm film edge: sprocket holes with a centred title card.
+fn film_band(width: usize, label: &str) -> Line<'static> {
+    let label=format!(" {} ",label);let label_width=label.chars().count();
+    if width<=label_width{return styled(label,AMBER);}
+    let sprockets=|count:usize|{let mut out=String::new();while out.chars().count()<count{out.push_str("▪▪▪▪  ");}out.chars().take(count).collect::<String>()};
+    let spare=width-label_width;let left=sprockets(spare/2);let right=sprockets(spare-spare/2);
+    Line::from(vec![Span::styled(left,AMBER),Span::styled(label,TEAL),Span::styled(right,AMBER)])
 }
 fn root_actions(c: &Center) -> Vec<&Value> {
     c.state["activity"]["actions"].as_array().into_iter().flatten().rev().filter(|a|stages(a).iter().any(|e|matches!(e["stage"].as_str(),Some("dispatch_running"|"ui_click")))).take(3).collect()
@@ -651,7 +659,7 @@ fn render_actions(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, compac
         if i > 0 && !compact { lines.push(Line::raw("")); }
         lines.extend(action_lines(c, action, compact));
     }
-    let block = round_panel("Last actions · newest first · Pg scroll", MUTED, false);
+    let block = round_panel("Last actions · newest first · Pg scroll", BLUE, false);
     let inner = block.inner(area);
     let max_scroll = wrapped_rows(&lines, inner.width).saturating_sub(inner.height);
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((c.scroll.min(max_scroll), 0)).block(block), area);
@@ -731,12 +739,12 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  lines.push(styled(format!("{} words · {} groups · {}s audio · {}/{} assets",observed("timed_words"),observed("lyric_groups"),m["recording_duration_sec"].as_f64().map(|v|format!("{v:.2}")).unwrap_or_else(||"?".into()),observed("available_assets"),observed("registered_assets")),MUTED));
  if let Some(r)=c.state["chat"]["request"].as_object().filter(|r|r.get("status").is_some_and(|v|v=="running")){let elapsed=r.get("sent_at").and_then(Value::as_u64).map(|ms|std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_secs().saturating_sub(ms/1000)).unwrap_or(0));lines.push(styled(format!("● agent.send working · {} · {}s elapsed",c.state["chat"]["selection"]["model"].as_str().unwrap_or("model unknown"),elapsed.map(|v|v.to_string()).unwrap_or_else(||"?".into())),GREEN));}
  if c.details_open{lines.push(styled(format!("Project: {}",c.state["project"].as_str().unwrap_or("unknown")),MUTED));lines.push(styled(format!("Session: {} · request {} · engine/ack {}/{} · DOM {}ms",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["request"]["request_id"].as_str().unwrap_or("none"),revision(&c.state["ui"]["engine_revision"]),revision(&c.state["ui"]["ack_engine_revision"]),c.state["ui"]["frontend_report_age_ms"]),MUTED));}
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==STORYBOARD_STAGE{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),MUTED,false)),area);
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==STORYBOARD_STAGE{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),BLUE,false)),area);
 }
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
  if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=t["text"].as_str().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");if lines.len()>1{lines.push(Line::raw(""));}lines.push(styled(format!("{}: {text}",if t["role"]=="user"{"You"}else{"Agent"}),DESK_FG));}}
- let block=round_panel("PROJECT AGENT · same session as Studio",MUTED,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);
+ let block=round_panel("PROJECT AGENT · same session as Studio",GREEN,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);
  if inner.height<5{let reply=c.state["chat_turns"].as_array().into_iter().flatten().rev().find(|t|t["role"]=="assistant").and_then(|t|t["text"].as_str()).unwrap_or("No reply received");f.render_widget(Paragraph::new(vec![styled(reply,DESK_FG),styled(if c.chat_editing{format!("> {}_",c.chat_draft)}else{"F9 compose".into()},MUTED)]).wrap(Wrap{trim:false}),inner);return;}
  let parts=Layout::vertical([Constraint::Min(1),Constraint::Length(2)]).split(inner);
  let skip=wrapped_rows(&lines,parts[0].width).saturating_sub(parts[0].height);f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((skip,0)),parts[0]);
@@ -748,7 +756,7 @@ fn merge_tail(old:&Value,new:Vec<Value>)->Value{
  events.extend(new.into_iter().filter(|e|e["sequence"].as_u64().is_some_and(|n|n>seen)));let excess=events.len().saturating_sub(50);events.drain(..excess);json!(events)
 }
 fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
- let block=round_panel("EVENTS · live · center.tail",MUTED,false);let rows=block.inner(area).height as usize;
+ let block=round_panel("EVENTS · live · center.tail",AMBER,false);let rows=block.inner(area).height as usize;
  let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();let clip=e["sheet"].as_str().or(e["clip"].as_str()).map(|v|format!(" {v}")).unwrap_or_default();styled(format!("{} {} {}{clip}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
  if lines.is_empty(){lines.push(styled("— No saved, generation, keyframe or error events yet.",MUTED));}
  f.render_widget(Paragraph::new(lines).block(block),area);
@@ -757,25 +765,27 @@ fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let commands=c.copy_commands();let Some((effect,literal))=commands.get(c.command_selected%commands.len().max(1))else{return;};
  let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["label"].as_str()==Some(*effect)).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
  let lines=vec![styled(format!("> {effect}"),DESK_FG),styled(reason,MUTED),styled(literal.clone(),BLUE)];
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel("NEXT STEP · C copies literal · Pg scroll",MUTED,true)),area);
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel("NEXT STEP · C copies literal · Pg scroll",TEAL,true)),area);
 }
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
- let chunks=Layout::vertical([Constraint::Length(6),Constraint::Min(1),Constraint::Length(1)]).split(area);
+ let chunks=Layout::vertical([Constraint::Length(1),Constraint::Length(6),Constraint::Min(1),Constraint::Length(1),Constraint::Length(1)]).split(area);
+ f.render_widget(Paragraph::new(film_band(area.width as usize,"◉ MAGIC STUDIO")),chunks[0]);
+ f.render_widget(Paragraph::new(film_band(area.width as usize,"◉ BACKSTAGE BOOTH")),chunks[4]);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
  let (saved,_)=saved_observation(ui);let status=if !matched{"? Studio unobserved"}else if ui["ui_ready"]==true{"[OK] Studio rendered"}else{"? Studio receipt pending"};
  let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED),styled(crate::snapshot::status_line(&c.state["snapshot"]),TEAL)];
- f.render_widget(Paragraph::new(header).block(round_panel(if control{"F1 CONTROL | F2 BOOTH | F4 INTAKE"}else{"F1 CONTROL | F2 BOOTH | F4 INTAKE · D details"},MUTED,false)),chunks[0]);
- if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[1]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
- let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
- if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
- else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
+ f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 CONTROL | F2 BOOTH | F4 INTAKE"}else{"🎬 F1 CONTROL | F2 BOOTH | F4 INTAKE · D details"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
+ if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[2]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
+ let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
+ if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
+ else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|{let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?");let task=g["terminal_title_stripped"].as_str().unwrap_or("");let cwd=g["cwd"].as_str().or(g["foreground_cwd"].as_str()).unwrap_or("");let proj=cwd.split('/').last().unwrap_or(cwd);format!("{}:{}{} {} @{}",name,g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"},task,proj)}).collect::<Vec<_>>().join("  |  ")).unwrap_or_default();
  let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BOOTH ● open"}else{"BOOTH ○ off"};
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("{}  ·  GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",booth_light,if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
+ let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("{}  ·  GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",booth_light,if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[3]);
 }
 
 fn render(f: &mut Frame,c: &Center) {
