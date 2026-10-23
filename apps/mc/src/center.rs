@@ -312,6 +312,130 @@ impl Center {
         text.push_str("\nREAD THE MANUAL\nmc commands workshop.import_transcript\ncrates/engine/src/workshop.rs\n~/.agents/skills/media-use/audio/references/transcribe.md\n\nF7 invokes the existing native DeckCraft storyboard.init command.\n\nThis monitor does not initiate production. Explicit project.intake can run configured audio analysis when valid timing is missing; supplied valid timing is reused. Missing prerequisites remain visible.\n");
         text
     }
+    /// The same evidence as the desk, as plain text with nothing abbreviated. The panes
+    /// truncate to fit their column; this is where a long path can still be read in full.
+    fn cli_text(&mut self) -> String {
+        let mut out = String::new();
+        out.push_str("WORKER SLOT (machine-global)\n");
+        match self.session.execute("blender.list", json!({})) {
+            Ok(value) => {
+                let owner = &value["worker_owner"];
+                if owner.is_object() {
+                    out.push_str(&format!(
+                        "  owner job: {}\n  owner project: {}\n  owner unit: {}\n  owner invocation: {}\n  owner state: {} · service {}\n",
+                        owner["job"].as_str().unwrap_or("?"),
+                        owner["project"].as_str().unwrap_or("?"),
+                        owner["unit"].as_str().unwrap_or("?"),
+                        owner["invocation_id"].as_str().unwrap_or("?"),
+                        owner["state"].as_str().unwrap_or("?"),
+                        owner["service_state"].as_str().unwrap_or("?")
+                    ));
+                    out.push_str(&format!("  owner limits: {}\n", limits_text(&owner["limits"])));
+                    out.push_str(&format!(
+                        "  owner submitted_at: {} · started_at: {} · cancellation_requested_at: {}\n",
+                        stamp_text(&owner["submitted_at"]),
+                        stamp_text(&owner["started_at"]),
+                        stamp_text(&owner["cancellation_requested_at"])
+                    ));
+                } else {
+                    out.push_str("  owner: none observed\n");
+                }
+                out.push_str(&format!(
+                    "  slot status: {}\n",
+                    value["worker_owner_status"].as_str().unwrap_or("not reported by this engine build")
+                ));
+                if let Some(error) = value["worker_owner_error"].as_str() {
+                    out.push_str(&format!("  slot error: {error}\n"));
+                }
+            }
+            Err(error) => out.push_str(&format!("  slot: not reported by this engine build ({error})\n")),
+        }
+        if let Some(project) = self.state["project"].as_str() {
+            let observation = crate::worker::observe(project);
+            out.push_str("\nSELECTED PROJECT WORKER\n");
+            if let Some(error) = observation["observation_error"].as_str() {
+                out.push_str(&format!("  observation: {error}\n"));
+            }
+            out.push_str(&format!(
+                "  job: {} · state: {} · phase: {}\n",
+                observation["job"].as_str().unwrap_or("?"),
+                observation["state"].as_str().unwrap_or("?"),
+                observation["phase"].as_str().unwrap_or("?")
+            ));
+            out.push_str(&format!(
+                "  frames: {}/{} · updated_at: {}\n",
+                observation["frames_completed"].as_u64().map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
+                observation["frames_total"].as_u64().map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
+                stamp_text(&observation["updated_at"])
+            ));
+            out.push_str(&format!("  limits: {}\n", limits_text(&observation["limits"])));
+            out.push_str(&format!(
+                "  submitted_at: {} · started_at: {} · cancellation_requested_at: {}\n",
+                stamp_text(&observation["submitted_at"]),
+                stamp_text(&observation["started_at"]),
+                stamp_text(&observation["cancellation_requested_at"])
+            ));
+            out.push_str(&format!("  telemetry: {}\n", crate::worker::resource_line(&observation)));
+            if let Some(error) = observation["worker_owner_error"].as_str() {
+                out.push_str(&format!("  owner error: {error}\n"));
+            }
+        }
+        out.push_str("\nALL PROJECTS\n");
+        match self.state["catalog"]["projects"].as_array() {
+            Some(projects) => {
+                for project in projects {
+                    out.push_str(&format!(
+                        "  {} ({})\n",
+                        project["name"].as_str().unwrap_or("unnamed"),
+                        project["path"].as_str().unwrap_or("path unavailable")
+                    ));
+                    if let Some(next) = project["readiness"]["next_step"].as_str() {
+                        out.push_str(&format!("    next step: {next}\n"));
+                    }
+                    for problem in project["readiness"]["problems"].as_array().into_iter().flatten() {
+                        out.push_str(&format!("    problem: {problem}\n"));
+                    }
+                }
+            }
+            None => out.push_str("  — catalog unavailable\n"),
+        }
+        if let Some(error) = self.state["catalog"]["error"].as_str() {
+            out.push_str(&format!("  catalog error: {error}\n"));
+        }
+        if let Some(sample) = self.studio_sample() {
+            out.push_str(&format!(
+                "\nSTUDIO PROCESS (/proc)\n  pid {} · {} procs · cpu {} · rss sum {:.0}MiB · sampled {:.1}s ago\n",
+                sample.pid,
+                sample.procs.len(),
+                sample.cpu_pct.map(|v| format!("{v:.0}%")).unwrap_or_else(|| "?".into()),
+                crate::telemetry::rss_mb(&sample.procs),
+                sample.at.elapsed().as_secs_f32()
+            ));
+        }
+        out.push_str("\nNEXT STEP (literal, unabbreviated)\n");
+        for (effect, literal) in self.copy_commands() {
+            out.push_str(&format!("  {effect}\n    {literal}\n"));
+        }
+        out
+    }
+}
+/// The requested limits as recorded, or an honest "not recorded" for older jobs.
+fn limits_text(limits: &Value) -> String {
+    if !limits.is_object() {
+        return "not recorded".into();
+    }
+    let mib = |value: &Value| value.as_u64().map(|v| format!("{:.0}MiB", v as f64 / 1048576.0)).unwrap_or_else(|| "?".into());
+    format!(
+        "memory {} · swap {} · cpu {}% · timeout {}",
+        mib(&limits["memory_max_bytes"]),
+        mib(&limits["swap_max_bytes"]),
+        limits["cpu_quota_percent"].as_u64().map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
+        limits["timeout_seconds"].as_u64().map(|v| format!("{v}s")).unwrap_or_else(|| "?".into())
+    )
+}
+/// A timestamp field exactly as recorded: decimal epoch-ms string, or null.
+fn stamp_text(value: &Value) -> String {
+    value.as_str().map(str::to_owned).unwrap_or_else(|| "null".into())
 }
 fn render_form(f: &mut Frame, c: &Center) {
     let area = f.area();
@@ -544,6 +668,51 @@ fn padded(text: &str, width: usize) -> String {
     let text = fit_text(text, width);
     format!("{text}{}", " ".repeat(width.saturating_sub(Line::raw(&text).width())))
 }
+
+/// Abbreviate a literal command for the panel: a long absolute path keeps its last
+/// segments so the file stays identifiable, and the tail is marked as abbreviated.
+/// The unabbreviated literal is what C copies and what the CLI prints.
+fn abbreviate_literal(text: &str, width: usize) -> String {
+    let mut shortened = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '/' {
+            // A path can sit inside a quoted JSON argument, so scan to the path's own end
+            // rather than to a space: quotes and whitespace close it.
+            let start = index;
+            while index < chars.len() && !chars[index].is_whitespace() && chars[index] != '\'' && chars[index] != '"' {
+                index += 1;
+            }
+            let path: String = chars[start..index].iter().collect();
+            shortened.push_str(&compact_path_token(&path));
+        } else {
+            shortened.push(chars[index]);
+            index += 1;
+        }
+    }
+    fit_text(&shortened, width)
+}
+
+/// Keep a path identifiable when it must be shortened: the last two segments survive.
+fn compact_path_token(path: &str) -> String {
+    if Line::raw(path).width() <= 28 {
+        return path.into();
+    }
+    let trailing: String = path
+        .chars()
+        .rev()
+        .take_while(|c| !c.is_alphanumeric() && *c != '_' && *c != '-' && *c != '.')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let core = &path[..path.len() - trailing.len()];
+    let segments: Vec<&str> = core.split('/').filter(|s| !s.is_empty()).collect();
+    let mut last: Vec<&str> = segments.iter().rev().take(2).copied().collect();
+    last.reverse();
+    format!("…/{}{}", last.join("/"), trailing)
+}
 fn wrapped_rows(lines: &[Line<'_>], width: u16) -> u16 {
     lines.iter().map(|line| line.width().max(1).div_ceil(usize::from(width.max(1))) as u16).sum()
 }
@@ -565,29 +734,44 @@ fn letterbox(width: usize, label: &str, caption: &str) -> Line<'static> {
 fn top_bar(c:&Center,width:usize,control:bool)->Line<'static>{
     let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|p|p.to_str()).unwrap_or("BACKSTAGE");
     let view=if c.muppets_view{"MOPPETS"}else if control{"WORKSHOP"}else{"BOOTH"};
-    let side=(width/3).min(36);
-    let title=fit_text(&format!("{name} · {view}"),width.saturating_sub(side*2));
+    let title=fit_text(&format!("{name} · {view}"),width);
     let title_width=Line::raw(&title).width();
-    let start=width.saturating_sub(title_width)/2;
-    let room=start.saturating_sub(1);
+    // The metrics lane is reserved before the title is measured, so a long title can
+    // never squeeze the side metrics out of the bar.
     let metrics=match c.studio_sample(){
         Some(sample)=>format!("Studio CPU {} · RSS {:.0}MiB",sample.cpu_pct.map(|v|format!("{v:.0}%")).unwrap_or("?".into()),crate::telemetry::rss_mb(&sample.procs)),
         None=>"Studio CPU ? · RSS ?".into(),
     };
-    let left=fit_text(&metrics,room);
+    let metrics_short=metrics.strip_prefix("Studio ").unwrap_or(&metrics).to_string();
+    let keep_metrics=width>=40;
+    let reserved=if keep_metrics{Line::raw(&metrics_short).width()}else{0};
+    let title_max=width.saturating_sub(2*(reserved+2));
+    let title=if title_width>title_max{fit_text(&format!("{name} · {view}"),title_max)}else{title};
+    let title_width=Line::raw(&title).width();
+    // The title stays centred in the whole bar. The two side lanes get the rest and
+    // never collide with it: each lane is measured, then given a shorter honest form
+    // before it is ever clipped mid-word.
+    let start=width.saturating_sub(title_width)/2;
+    let left_room=start.saturating_sub(2);
+    let right_room=width.saturating_sub(start+title_width).saturating_sub(2);
+    let left=if !keep_metrics{String::new()}
+        else if Line::raw(&metrics).width()<=left_room{metrics}
+        else if Line::raw(&metrics_short).width()<=left_room{metrics_short}
+        else{fit_text(&metrics_short,left_room)};
     let ui=&c.state["ui"];
     let matched=ui["connection"]=="connected" && c.state["project"].is_string() && ui["active_project"]==c.state["project"];
-    let (status,colour)=if !control && let Some(worker)=worker_observation(c).filter(|v|v["state"]!="not_started"){
-        (crate::worker::headline(worker),worker_colour(worker))
+    let (status,status_short,colour)=if !control && let Some(worker)=worker_observation(c).filter(|v|v["state"]!="not_started"){
+        (crate::worker::headline(worker),crate::worker::short_headline(worker),worker_colour(worker))
     }else if c.state["snapshot"]["last_error"].as_str().is_some_and(|s|!s.is_empty()){
-        ("! ERROR · D PULSE".into(),RED)
+        ("! ERROR · D PULSE".into(),"! ERROR".into(),RED)
     }else if matched{
         let snap=&c.state["snapshot"];
         let position=match snap["playhead_sec"].as_f64(){Some(seconds)=>timecode(seconds,snap["fps"].as_f64().unwrap_or(24.0)),None=>"position ?".into()};
-        (format!("LIVE · {position}"),GREEN)
-    }else{("NOT CONNECTED".into(),AMBER)};
-    let right_room=width.saturating_sub(start+title_width+1);
-    let right=fit_text(&status,right_room);
+        (format!("LIVE · {position}"),"LIVE".into(),GREEN)
+    }else{("NOT CONNECTED".into(),"NOT CONNECTED".into(),AMBER)};
+    let right=if Line::raw(&status).width()<=right_room{status}
+        else if Line::raw(&status_short).width()<=right_room{status_short}
+        else{fit_text(&status_short,right_room)};
     let mut spans=vec![Span::styled(left.clone(),MUTED),Span::raw(" ".repeat(start.saturating_sub(Line::raw(&left).width())))];
     spans.extend(crate::logo::compact_title(&title).spans);
     spans.push(Span::raw(" ".repeat(width.saturating_sub(start+title_width+Line::raw(&right).width()))));
@@ -730,7 +914,7 @@ fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narro
     let selected = c.command_selected % commands.len();
     let compact_commands = narrow && inner.height < 20;
     let (effect, literal) = &commands[selected];
-    let payload = vec![styled(format!("LITERAL PAYLOAD · {} bytes · C copies full text", literal.len()), MUTED), styled(literal.clone(), BLUE)];
+    let payload = vec![styled(format!("LITERAL PAYLOAD · {} bytes · C copies full text", literal.len()), MUTED), styled(abbreviate_literal(literal, inner.width.saturating_sub(2) as usize), BLUE)];
     let payload_height = wrapped_rows(&payload, inner.width).min(if narrow { 4 } else { 6 }).min(inner.height.saturating_sub(3));
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(payload_height)]).split(inner);
     let mut lines = Vec::new();
@@ -744,12 +928,12 @@ fn render_commands(f: &mut Frame, c: &Center, area: ratatui::layout::Rect, narro
     if compact_commands {
         lines.push(styled(format!("{}  ·  ↑↓ choose", (0..commands.len()).map(|i|format!("{}[{}]", if i == selected { ">" } else { " " }, i + 1)).collect::<Vec<_>>().join(" ")), BLUE));
         lines.push(styled(format!("> [{}] {effect}", selected + 1), BLUE));
-        lines.push(styled(format!("    {}", command_preview(literal)), MUTED));
+        lines.push(styled(abbreviate_literal(&format!("    {}", command_preview(literal)), inner.width.saturating_sub(2) as usize), MUTED));
     } else {
         for (i,(effect,command)) in commands.iter().enumerate() {
             if i == selected { selected_row = wrapped_rows(&lines, parts[0].width); }
             lines.push(styled(format!("{} [{}] {}", if i == selected { ">" } else { " " }, i + 1, effect), if i == selected { TEAL } else { DESK_FG }).style(Style::default().fg(if i==selected {TEAL}else{DESK_FG}).add_modifier(if i==selected {Modifier::BOLD}else{Modifier::empty()})));
-            lines.push(styled(format!("       {}", command_preview(command)), BLUE));
+            lines.push(styled(abbreviate_literal(&format!("       {}", command_preview(command)), inner.width.saturating_sub(2) as usize), BLUE));
             lines.push(Line::raw(""));
         }
     }
@@ -818,7 +1002,7 @@ fn chat_outcome(state:&Value)->String{let r=&state["chat"]["request"];let (mark,
 fn selected_reason(c:&Center)->String{stage_evidence(c,c.stage_selected).and_then(|v|v["reason"].as_str()).unwrap_or("No separate CLI observation for this input. Transcript text does not establish official artist lyrics or liner notes.").into()}
 fn stage_lines(c:&Center,stacked:bool)->Vec<Line<'static>>{
  let mut lines:Vec<Line<'static>>=Vec::new();for(i,(label,_))in PROJECT_STAGES.iter().enumerate(){let (mark,color)=state_badge(stage_evidence(c,i).and_then(|v|v["state"].as_str()));let line=Line::from(vec![Span::styled(if i==c.stage_selected{"> "}else{"  "},Style::default().fg(DESK_FG)),Span::styled(format!("{label}: {mark}"),Style::default().fg(color))]);
- if stacked&&i%2==1{let mut previous=lines.pop().unwrap_or_default();previous.spans.push(Span::raw("   "));previous.spans.extend(line.spans);lines.push(previous);}else{lines.push(line);}}
+ if stacked&&i%2==1{let mut previous=lines.pop().unwrap_or_default();previous.spans.push(Span::styled("  │  ",MUTED));previous.spans.extend(line.spans);lines.push(previous);}else{lines.push(line);}}
  lines
 }
 fn doctor_badge(c:&Center)->(&'static str,Color){
@@ -860,30 +1044,69 @@ fn worker_colour(value:&Value)->Color{
     else if crate::worker::stale(value) || matches!(value["state"].as_str(),Some("running"|"cancelling")){AMBER}
     else if value["state"]=="completed"{GREEN}else{MUTED}
 }
+/// A btop-style meter: filled cells with a severity colour. Unknown is drawn as
+/// middle dots, never as an empty bar — missing is not zero.
+fn meter(done: Option<u64>, total: Option<u64>, width: usize) -> (String, Color) {
+    if width == 0 {
+        return (String::new(), MUTED);
+    }
+    let (Some(done), Some(total)) = (done, total) else {
+        return ("·".repeat(width), MUTED);
+    };
+    if total == 0 {
+        return ("·".repeat(width), MUTED);
+    }
+    let ratio = (done.min(total) as f64 / total as f64).clamp(0.0, 1.0);
+    let filled = (ratio * width as f64).round() as usize;
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(width.saturating_sub(filled)));
+    let colour = if ratio < 0.5 { GREEN } else if ratio < 0.8 { AMBER } else { RED };
+    (bar, colour)
+}
+
+/// One aligned label/value row. The label column is shared, so values line up.
+fn metric_row(label: &str, bar: &str, colour: Color, value: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<9}"), Style::default().fg(MUTED)),
+        Span::styled(bar.to_string(), Style::default().fg(colour)),
+        Span::styled(format!("  {value}"), Style::default().fg(DESK_FG)),
+    ])
+}
 fn render_worker(f:&mut Frame,value:&Value,area:ratatui::layout::Rect){
-    let mut lines=vec![styled(crate::worker::headline(value),worker_colour(value))];
+    let width=area.width.saturating_sub(2) as usize;
+    let inner=area.height.saturating_sub(2) as usize;
     if value["state"]=="not_started"{
-        lines.push(styled("Waiting for a render submission · Backstage never starts one by polling",MUTED));
-        if let Some(owner)=value["worker_owner"]["job"].as_str(){lines.push(styled(format!("Global worker busy: {owner}"),AMBER));}
+        let mut lines=vec![styled(crate::worker::state_line(value),MUTED)];
+        lines.push(styled(fit_text("Waiting for a render submission · Backstage never starts one by polling",width),MUTED));
+        if let Some(owner)=value["worker_owner"]["job"].as_str(){lines.push(styled(fit_text(&format!("Global worker busy: {owner}"),width),AMBER));}
         f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel("ARTWORK IN MOTION",TEAL,false)),area);
         return;
     }
+    // Rows are ordered by what matters first, and the panel shows as many as fit.
+    let telemetry=&value["telemetry"];
+    let (frames_bar,frames_colour)=meter(value["frames_completed"].as_u64(),value["frames_total"].as_u64(),16);
+    let frames_value=format!("{}/{}",value["frames_completed"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"?".into()),value["frames_total"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"?".into()));
+    let limit=telemetry["memory_max_bytes"].as_u64().or_else(||value["limits"]["memory_max_bytes"].as_u64());
+    let (ram_bar,ram_colour)=meter(telemetry["memory_current_bytes"].as_u64(),limit,16);
+    let mib=|v:&Value|v.as_u64().map(|n|format!("{:.0}MiB",n as f64/1048576.0)).unwrap_or_else(||"?".into());
+    let ram_value=format!("{} / {} · peak {} · swap {} / {}",mib(&telemetry["memory_current_bytes"]),mib(&telemetry["memory_max_bytes"]),mib(&telemetry["memory_peak_bytes"]),mib(&telemetry["swap_current_bytes"]),mib(&telemetry["swap_max_bytes"]));
     let selection=&value["selection"];
     let identity=format!("{} · {} · {}",selection["character"].as_str().unwrap_or("character ?"),selection["track"].as_str().unwrap_or("action ?"),value["job"].as_str().unwrap_or("job ?"));
-    lines.push(styled(fit_text(&identity,area.width.saturating_sub(2) as usize),DESK_FG));
+    let source=if value["telemetry_source"]=="terminal_receipt" || matches!(value["state"].as_str(),Some("completed"|"cancelled"|"failed")){"saved receipt"}else{"worker service"};
+    let age=crate::worker::age_ms(value,"updated_at").map(|ms|format!("{:.1}s",ms as f64/1000.0)).unwrap_or_else(||"?".into());
+    let source_row=format!("{source} · recorded {age} ago{}",if crate::worker::stale(value){" · STALE"}else{""});
+    let owner=&value["worker_owner"];
+    let owner_line=if owner.is_object(){format!("{} · {} · {}",owner["job"].as_str().unwrap_or("?"),owner["project"].as_str().unwrap_or("project unknown"),owner["state"].as_str().unwrap_or("state ?"))}else{format!("Global worker owner: {}",value["worker_owner_status"].as_str().unwrap_or("unavailable"))};
+    let mut rows:Vec<Line<'static>>=Vec::new();
+    rows.push(styled(if inner>=3{crate::worker::state_line(value)}else{crate::worker::headline(value)},worker_colour(value)));
+    rows.push(metric_row("FRAMES",&frames_bar,frames_colour,&frames_value));
+    rows.push(metric_row("RAM",&ram_bar,ram_colour,&ram_value));
+    rows.push(styled(fit_text(&format!("{:<9}{identity}","JOB"),width),MUTED));
+    rows.push(styled(fit_text(&format!("{:<9}{source_row}","SOURCE"),width),MUTED));
+    rows.push(styled(fit_text(&format!("{:<9}{owner_line}","SLOT"),width),MUTED));
     if let Some(error)=value["observation_error"].as_str().or(value["error"].as_str()).or(value["detail"].as_str()){
-        lines.push(styled(fit_text(error,area.width.saturating_sub(2) as usize),RED));
-    }else{lines.push(styled(fit_text(&crate::worker::resource_line(value),area.width.saturating_sub(2) as usize),MUTED));}
-    if area.height>=6{
-        let source=if value["telemetry_source"]=="terminal_receipt" || matches!(value["state"].as_str(),Some("completed"|"cancelled"|"failed")){"saved receipt"}else{"worker service"};
-        let age=crate::worker::age_ms(value,"updated_at").map(|ms|format!("{:.1}s",ms as f64/1000.0)).unwrap_or_else(||"?".into());
-        lines.push(styled(format!("{source} · recorded {age} ago{} · D PULSE details",if crate::worker::stale(value){" · STALE"}else{""}),MUTED));
+        rows.push(styled(fit_text(error,width),RED));
     }
-    if area.height>=7{
-        let owner=&value["worker_owner"];
-        let owner_line=if owner.is_object(){format!("Global worker: {} · {}",owner["job"].as_str().unwrap_or("?"),owner["project"].as_str().unwrap_or("project unknown"))}else{format!("Global worker owner: {}",value["worker_owner_status"].as_str().unwrap_or("unavailable"))};
-        lines.push(styled(fit_text(&owner_line,area.width.saturating_sub(2) as usize),MUTED));
-    }
+    let lines:Vec<Line<'static>>=rows.into_iter().take(inner.max(1)).collect();
     f.render_widget(Paragraph::new(lines).block(round_panel("ARTWORK IN MOTION",worker_colour(value),false)),area);
 }
 fn conversation_text(text:&str)->&str{
@@ -906,16 +1129,16 @@ fn merge_tail(old:&Value,new:Vec<Value>)->Value{
  events.extend(new.into_iter().filter(|e|e["sequence"].as_u64().is_some_and(|n|n>seen)));let excess=events.len().saturating_sub(50);events.drain(..excess);json!(events)
 }
 fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
- let block=round_panel("EVENTS · live · backstage.tail",AMBER,false);let rows=block.inner(area).height as usize;
- let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();let clip=e["sheet"].as_str().or(e["clip"].as_str()).map(|v|format!(" {v}")).unwrap_or_default();styled(format!("{} {} {}{clip}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
- if lines.is_empty(){lines.push(styled("— No saved, generation, keyframe or error events yet.",MUTED));}
+ let block=round_panel("EVENTS · live · backstage.tail",AMBER,false);let inner=block.inner(area);let rows=inner.height as usize;let width=inner.width.saturating_sub(2) as usize;
+ let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();let clip=e["sheet"].as_str().or(e["clip"].as_str()).map(|v|format!(" {v}")).unwrap_or_default();styled(fit_text(&format!("{} {} {}{clip}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),width),if e["ok"]==false{RED}else{DESK_FG})}).collect();
+ if lines.is_empty(){lines.push(styled(fit_text("— No saved, generation, keyframe or error events yet.",width),MUTED));}
  f.render_widget(Paragraph::new(lines).block(block),area);
 }
 fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let commands=c.copy_commands();let Some((effect,literal))=commands.get(c.command_selected%commands.len().max(1))else{return;};
  let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["label"].as_str()==Some(*effect)).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
   let blocker=worker_observation(c).filter(|v|v["state"]=="failed" || v["observation_error"].is_string());
-  let mut lines=vec![styled(format!("> {effect}"),DESK_FG),styled(reason,MUTED),styled(literal.clone(),BLUE)];
+  let mut lines=vec![styled(format!("> {effect}"),DESK_FG),styled(fit_text(reason,area.width.saturating_sub(4) as usize),MUTED),styled(abbreviate_literal(literal,area.width.saturating_sub(4) as usize),BLUE)];
   if let Some(worker)=blocker{lines.insert(0,styled(format!("{} · D opens PULSE",crate::worker::headline(worker)),RED));}
   f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel(if blocker.is_some(){"ATTENTION · D PULSE · C copies inspection"}else{"NEXT STEP · C copies literal · Pg scroll"},if blocker.is_some(){RED}else{TEAL},true)),area);
 }
@@ -1106,12 +1329,14 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
         c.refresh();
     }
     if print {
+        let text = c.cli_text();
         println!(
-            "MAGIC STUDIO / COMMAND CENTER\nProject: {}\nStatus: {}\nTranscript valid: {}\n{}\n{}",
+            "MAGIC STUDIO / COMMAND CENTER\nProject: {}\nStatus: {}\nTranscript valid: {}\n{}\n{}\n{}",
             c.state["project"],
             crate::snapshot::status_line(&c.state["snapshot"]),
             c.state["transcript"]["valid"],
             c.message,
+            text,
             c.details()
         );
         return Ok(());
@@ -1402,6 +1627,28 @@ mod feedback_tests {
         let b=terminal.backend().buffer();
         let first_body=(0..90).map(|x|b[(x,5)].symbol()).collect::<String>();
         assert!(first_body.contains("ALL PROJECTS"),"catalog must start immediately below header: {first_body}");
+    }
+    /// Design review aid: print the rendered desk as plain text so alignment and
+    /// truncation can be judged without a live terminal. Run with --ignored --nocapture.
+    #[test]
+    #[ignore = "screen dump for design review"]
+    fn dump_screen_for_design_review(){
+        let mut c=fixture();
+        c.state["project"]=json!("/run/media/jesse/Speedy/media/animation-studies/scooter-gaffer-ui-23/study.magic");
+        c.state["ui"]["active_project"]=c.state["project"].clone();
+        c.state["catalog"]=json!({"projects":[
+            {"path":"/run/media/jesse/Speedy/media/animation-studies/scooter-gaffer-ui-23/study.magic","name":"study","readiness":{"next_step":"Choose existing song audio","problems":["Storyboard requires valid timed words/captions"]}},
+            {"path":"/run/media/jesse/Speedy/media/hey-ho-little-fish/project/Hey Ho Little Fish.magic","name":"Hey Ho Little Fish","readiness":{"next_step":"Review project; editor setup or server is still required","problems":[]}},
+            {"path":"/run/media/jesse/Speedy/media/merriweather/bumble-bee/Bumble Bee.magic","name":"Bumble Bee","readiness":{"next_step":"Review project; editor setup or server is still required","problems":[]}}],"error":null});
+        c.state["animation_worker"]=json!({"project":c.state["project"].clone(),"job":"magicstudio-blender-test","state":"running","phase":"rendering","frames_completed":42,"frames_total":180,"telemetry":{"memory_current_bytes":419430400,"memory_max_bytes":4294967296u64}});
+        for (w,h) in [(140,44),(90,38)]{
+            let backend=ratatui::backend::TestBackend::new(w,h);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f|render_desk(f,&c,false)).unwrap();
+            let b=terminal.backend().buffer();
+            println!("=== {w}x{h} ===");
+            for y in 0..h{println!("{:>3}|{}",y,(0..w).map(|x|b[(x,y)].symbol()).collect::<String>());}
+        }
     }
     #[test]
     fn both_views_show_the_shared_status_line_and_booth_follows_the_tail(){

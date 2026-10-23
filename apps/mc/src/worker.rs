@@ -99,6 +99,60 @@ pub fn headline(value: &Value) -> String {
     }
 }
 
+/// One vocabulary for the worker state, shared by the top bar, the panels and the
+/// CLI, so the screen and the terminal never use different words for one fact.
+pub fn state_word(value: &Value) -> &'static str {
+    if value["observation_error"].is_string() {
+        return "UNAVAILABLE";
+    }
+    match value["state"].as_str() {
+        Some("running") => {
+            if stale(value) {
+                "STALE"
+            } else {
+                "RUNNING"
+            }
+        }
+        Some("cancelling") => "CANCELLING",
+        Some("completed") => {
+            if value["partial"] == true {
+                "PREVIEW DONE"
+            } else {
+                "COMPLETE"
+            }
+        }
+        Some("cancelled") => "CANCELLED",
+        Some("failed") => "BLOCKED",
+        Some("not_started") => "NO JOB",
+        _ => "UNKNOWN",
+    }
+}
+
+/// The state sentence for a panel: what is happening, without the counters that
+/// already have their own row.
+pub fn state_line(value: &Value) -> String {
+    let word = state_word(value);
+    match value["state"].as_str() {
+        Some("running") => format!("{word} · {}", value["phase"].as_str().unwrap_or("phase unknown")),
+        Some("failed") => format!("{word} · {}", value["termination_reason"].as_str().unwrap_or("failure reason unknown")),
+        Some("completed") if value["partial"] == true => format!("{word} · shortened preview"),
+        Some("cancelled") => "CANCELLED · worker exited".into(),
+        Some("cancelling") => "CANCELLING · waiting for worker exit".into(),
+        Some("not_started") => "No render job observed for this project".into(),
+        _ => "Worker state unknown".into(),
+    }
+}
+
+/// A short, honest form of the headline for the top bar's right lane: the same
+/// evidence, fewer words. Never a different claim than `headline`.
+pub fn short_headline(value: &Value) -> String {
+    let frames = match (value["frames_completed"].as_u64(), value["frames_total"].as_u64()) {
+        (Some(done), Some(total)) if total > 0 && done <= total => format!(" {done}/{total}"),
+        _ => String::new(),
+    };
+    format!("{}{frames}", state_word(value))
+}
+
 pub fn mib(value: &Value) -> String {
     value.as_u64().map(|n|format!("{:.0}MiB",n as f64/1048576.0)).unwrap_or_else(||"?".into())
 }
