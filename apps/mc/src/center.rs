@@ -123,7 +123,7 @@ impl Center {
     }
     fn check_storyboard(&mut self){
         if self.doctor_receiver.is_some(){return;}
-        self.stage_selected=5;self.details_open=true;self.doctor_error=None;
+        self.stage_selected=STORYBOARD_STAGE;self.details_open=true;self.doctor_error=None;
         let (Some(endpoint),Some(project),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.state["project"].as_str(),self.pinned_instance.as_deref())else{self.doctor_error=Some("No matched Studio project; F8 reattach before checking".into());return;};
         if self.state["ui"]["active_project"].as_str()!=Some(project){self.doctor_error=Some("Studio project differs; no check launched".into());return;}
         let Ok(exe)=std::env::current_exe()else{self.doctor_error=Some("Current CLI executable unavailable".into());return;};
@@ -660,7 +660,9 @@ fn saved_observation(ui:&Value)->(&'static str,Color){
  match ui["engine_unsaved"].as_bool(){Some(true)=>("! Engine differs from saved project",AMBER),Some(false)=>("[OK] Saved project matches",DESK_FG),None=>("? Saved state unknown; engine busy/unreadable",AMBER)}
 }
 // These are views of CLI-owned evidence, never an independent readiness evaluator.
-const PROJECT_STAGES:[(&str,&str);8]=[("Audio","song"),("Transcript","transcript"),("Official lyrics","official_lyrics"),("Liner notes","liner_notes"),("Reference art","assets"),("Storyboard","deckcraft"),("Animation","animate"),("Video / captions","hyperframes")];
+// The engine reports lyrics and notes as one "lyrics" item; official artist lyrics are not assessed.
+const PROJECT_STAGES:[(&str,&str);7]=[("Audio","song"),("Transcript","transcript"),("Lyrics & notes","lyrics"),("Reference art","assets"),("Storyboard","deckcraft"),("Animation","animate"),("Video / captions","hyperframes")];
+const STORYBOARD_STAGE:usize=4;
 fn stage_evidence(c:&Center,index:usize)->Option<&Value>{let id=PROJECT_STAGES[index%PROJECT_STAGES.len()].1;c.state["prerequisites"].as_array()?.iter().find(|v|v["id"]==id)}
 fn state_badge(state:Option<&str>)->(&'static str,Color){match state{Some("ready"|"replied")=>("[OK]",DESK_FG),Some("running"|"working")=>("● working",GREEN),Some("blocked"|"error"|"failed")=>("● failed",RED),Some("stalled")=>("● stalled",AMBER),Some("missing")=>("● missing",BLUE),_=>("? unknown",MUTED)}}
 fn chat_outcome(state:&Value)->String{let r=&state["chat"]["request"];let (mark,_)=state_badge(r["status"].as_str());format!("Chat {mark} · {}",r["request_id"].as_str().unwrap_or("not started"))}
@@ -676,7 +678,7 @@ fn doctor_badge(c:&Center)->(&'static str,Color){
 }
 fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines=if area.height<4{vec![styled(activity_wave(c),MUTED)]}else{vec![styled(selected_reason(c),DESK_FG),styled(activity_wave(c),MUTED)]};
- if c.stage_selected==5{
+ if c.stage_selected==STORYBOARD_STAGE{
     let(mark,color)=doctor_badge(c);lines.insert(0,styled(format!("F10 🩺 [+] Storyboard Doctor · {mark}"),color));
     let d=&c.state["storyboard_doctor"];
     if let Some(error)=&c.doctor_error{lines.push(styled(error,RED));}
@@ -697,7 +699,7 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  lines.push(styled(format!("{} words · {} groups · {}s audio · {}/{} assets",observed("timed_words"),observed("lyric_groups"),m["recording_duration_sec"].as_f64().map(|v|format!("{v:.2}")).unwrap_or_else(||"?".into()),observed("available_assets"),observed("registered_assets")),MUTED));
  if let Some(r)=c.state["chat"]["request"].as_object().filter(|r|r.get("status").is_some_and(|v|v=="running")){let elapsed=r.get("sent_at").and_then(Value::as_u64).map(|ms|std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_secs().saturating_sub(ms/1000)).unwrap_or(0));lines.push(styled(format!("● agent.send working · {} · {}s elapsed",c.state["chat"]["selection"]["model"].as_str().unwrap_or("model unknown"),elapsed.map(|v|v.to_string()).unwrap_or_else(||"?".into())),GREEN));}
  if c.details_open{lines.push(styled(format!("Project: {}",c.state["project"].as_str().unwrap_or("unknown")),MUTED));lines.push(styled(format!("Session: {} · request {} · engine/ack {}/{} · DOM {}ms",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["request"]["request_id"].as_str().unwrap_or("none"),revision(&c.state["ui"]["engine_revision"]),revision(&c.state["ui"]["ack_engine_revision"]),c.state["ui"]["frontend_report_age_ms"]),MUTED));}
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==5{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),MUTED,false)),area);
+ f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==STORYBOARD_STAGE{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),MUTED,false)),area);
 }
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
@@ -928,8 +930,9 @@ mod feedback_tests {
     #[test]
     fn approved_booth_uses_shared_stage_evidence_and_replied_state_at_both_sizes(){
         let mut c=fixture();c.message="Chat running · old request".into();c.state["chat"]=json!({"session":"sessionA","selection":{"provider":"opencode","model":"free"},"request":{"status":"replied","request_id":"replyA"}});c.state["chat_turns"]=json!([{"role":"assistant","text":"ACTUAL_REPLY"}]);
-        assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"transcript cannot establish official artist lyrics");
-        for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Official lyrics","Liner notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
+        assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"no prerequisites in the fixture");
+        let mut lyrics=c.state.clone();lyrics["prerequisites"]=json!([{"id":"lyrics","state":"ready"}]);let mut l=fixture();l.state=lyrics;assert_eq!(stage_evidence(&l,2).and_then(|v|v["state"].as_str()),Some("ready"),"the lyrics light reads the engine's lyrics item");assert_eq!(PROJECT_STAGES[STORYBOARD_STAGE].0,"Storyboard");
+        for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Lyrics & notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
     }
     #[test]
     fn both_views_show_the_shared_status_line_and_booth_follows_the_tail(){
