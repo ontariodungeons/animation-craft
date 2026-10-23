@@ -39,7 +39,7 @@ async function blenderAnimationOpen(){
  video.style.cssText='width:100%;height:100%;object-fit:contain';
  stage.append(video);
  let latest=null,job=null,selectionRevision=0;
- const report=message=>{if(current())status.textContent=message;};
+ const report=(message,detail=message)=>{if(current()){status.textContent=message;status.title=detail;}};
  try{
   const result=await motionCommand('project.list_assets');if(!current())return;
   const assets=result.assets||result.project_assets||[];
@@ -91,7 +91,7 @@ async function blenderAnimationOpen(){
      details.textContent='Editable Blender scene saved';details.title=value.blend;
      report(value.partial?'Preview ready · shortened clip':'Preview ready');
     }else{
-     const failure=value.state==='cancelled'?'Render cancelled':`Render failed · ${value.error||value.detail||'inspect the worker log'}`;
+     const failure=value.state==='cancelled'?'Render cancelled':'Render failed';
      if(!latest&&(value.state==='failed'||value.state==='cancelled')){
       const saved=await motionCommand('blender.list');if(!selected())return;
       const matching=saved.jobs.filter(j=>j.character===motion.character&&j.track===tracks.value);
@@ -106,7 +106,8 @@ async function blenderAnimationOpen(){
        }
       }
      }
-     report(`${failure}${latest?.blend?' · previous saved scene available':''}`);
+     report(`${failure}${latest?.blend?' · previous saved scene available':''}`,
+      value.state==='cancelled'?failure:`${failure} · ${value.error||value.detail||'Inspect the worker log'}`);
     }
    }catch(error){if(!selected())return;busy(false);report(String(error));}
   }
