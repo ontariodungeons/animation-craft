@@ -62,6 +62,15 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
         .or_else(|| {
             ui["error"].as_str().or(live["page"]["error"].as_str()).map(|m| error("connection", &Value::Null, &json!(m), &Value::Null))
         });
+    // A clip is converting between its clip_sheet_started and its converted/failed event.
+    let mut converting: Vec<Value> = Vec::new();
+    for e in project.map(|p| tail(activity, Some(p))).unwrap_or_default() {
+        match e["type"].as_str() {
+            Some("clip_sheet_started") => converting.push(e["clip"].clone()),
+            Some("clip_sheet_converted" | "clip_sheet_failed") => converting.retain(|c| *c != e["clip"]),
+            _ => {}
+        }
+    }
     json!({
         "schema": SNAPSHOT_SCHEMA,
         "observed_unix_ms": now_ms(),
@@ -76,6 +85,9 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
         "hyperframes": hyperframes,
         "fps": if animation.is_null() { Value::Null } else { live["fps"].clone() },
         "last_error": last_error,
+        // Theatre's active sheet, as the page reports it (one sheet per clip: "<asset> / <clip>").
+        "sheet": if animation.is_null() { Value::Null } else { ui["theatre"]["selected_objects"][0]["sheet"].clone() },
+        "converting": converting.last().cloned().unwrap_or(Value::Null),
     })
 }
 
@@ -98,6 +110,9 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
             (_, "theatre_error") => &["error"],
             (_, "selection_changed") => &["selection_changed"],
             (_, "clip_switched") => &["clip_switched"],
+            (_, "clip_sheet_started") => &["clip_sheet_started"],
+            (_, "clip_sheet_converted") => &["clip_sheet_converted"],
+            (_, "clip_sheet_failed") => &["clip_sheet_failed"],
             ("image.generate", "dispatch_running") => &["generation_started"],
             ("image.generate", "engine_success" | "engine_needs_work") => &["generation_finished"],
             ("image.generate", _) if failed => &["generation_finished", "error"],
@@ -121,6 +136,7 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
                 // Theatre reports its selection as [{sheet, part}]; the first object is the part.
                 "part": if e["part"].is_null() { e["objects"][0]["part"].clone() } else { e["part"].clone() },
                 "clip": e["clip"],
+                "sheet": e["sheet"],
             }));
         }
     }
@@ -140,8 +156,10 @@ pub fn status_line(s: &Value) -> String {
     let hyperframes = match s["hyperframes"].as_bool() { Some(true) => "on", Some(false) => "off", None => "?" };
     let fps = s["fps"].as_f64().map(|f| format!("{f}")).unwrap_or_else(|| "?".into());
     let error = s["last_error"]["message"].as_str().map(|m| format!(" · err {m}")).unwrap_or_default();
+    let sheet = s["sheet"].as_str().map(|v| format!(" · sheet {v}")).unwrap_or_default();
+    let converting = s["converting"].as_str().map(|v| format!(" · converting {v}")).unwrap_or_default();
     format!(
-        "{project} · subject {} · clip {} · ▶ {playhead} · part {} · unsaved {unsaved} · HF {hyperframes} · {fps}fps{error}",
+        "{project} · subject {} · clip {}{sheet} · ▶ {playhead} · part {} · unsaved {unsaved} · HF {hyperframes} · {fps}fps{converting}{error}",
         text("subject"),
         text("clip"),
         text("selected_part")
@@ -215,7 +233,7 @@ mod tests {
     #[test]
     fn snapshot_keeps_stable_keys_and_null_when_unobserved() {
         let s = build(None, &json!({"connection": "not_observed_open"}), &json!({}), &json!({}));
-        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "unsaved_reasons", "hyperframes", "fps", "last_error"] {
+        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "unsaved_reasons", "hyperframes", "fps", "last_error", "sheet", "converting"] {
             assert!(s.get(key).is_some(), "missing {key}");
         }
         assert!(s["subject"].is_null() && s["unsaved_edits"].is_null() && s["fps"].is_null() && s["hyperframes"].is_null());
@@ -241,6 +259,17 @@ mod tests {
         assert!(status_line(&s).starts_with("song · subject bee · clip fly · ▶ 1.250s · part wing · unsaved 2 · HF on · 24fps"));
         // Another project's journal error is not this project's last error.
         assert!(build(None, &ui, &page, &activity())["last_error"].is_null());
+        // The active Theatre sheet and an unfinished conversion are reported; finished ones are not.
+        let mut ui_sheet = ui.clone();
+        ui_sheet["theatre"] = json!({"selected_objects": [{"sheet": "bee / fly", "part": "wing"}]});
+        let mut converting = journal.clone();
+        for (n, (stage, clip)) in [("clip_sheet_started", "@run"), ("clip_sheet_started", "@walk"), ("clip_sheet_converted", "@run")].into_iter().enumerate() {
+            converting["events"].as_array_mut().unwrap().push(json!({"sequence": 20 + n, "stage": stage, "clip": clip, "sheet": format!("bee / {}", &clip[1..]), "project": path}));
+        }
+        let s = build(None, &ui_sheet, &page, &converting);
+        assert_eq!((s["sheet"].as_str(), s["converting"].as_str()), (Some("bee / fly"), Some("@walk")));
+        assert!(status_line(&s).contains("clip fly · sheet bee / fly") && status_line(&s).contains("converting @walk"));
+        assert_eq!(tail(&converting, None).last().unwrap()["sheet"], "bee / run");
         // A page showing another project is not reported as this project's state.
         let stale = json!({"page": {"project": "/other.acproj", "animation": {"character": "bee"}}, "fps": 24});
         assert!(build(None, &ui, &stale, &json!({}))["subject"].is_null());

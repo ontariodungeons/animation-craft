@@ -24,7 +24,9 @@ function theatreMount(container){
 async function theatreContext(){
  if(!magicTheatre.ready||!motion.meta)return;
  const part=motion.selected||motion.meta.layers[0]?.id;if(!part)return;
- const key=JSON.stringify([state.project,motion.character,part]);if(key===magicTheatre.key)return;
+ // One Theatre sheet per clip, the same "<asset> / <clip>" id the engine's motion.clips uses.
+ const sheet=`${motion.character} / ${(motion.rest?'@rest':motion.track||'@rest').replace(/^@/,'')}`;
+ const key=JSON.stringify([state.project,motion.character,part,sheet]);if(key===magicTheatre.key)return;
  magicTheatre.key=key;magicTheatre.part=part;magicTheatre.rotation=0;
  const project=state.project,character=motion.character,frame=magicTheatre.frame;
  try{
@@ -32,7 +34,7 @@ async function theatreContext(){
   const loaded=await magicTheatre.load;
   if(frame!==magicTheatre.frame||key!==magicTheatre.key||project!==state.project)return;
   magicTheatre.persistence=loaded.status;
-  frame.contentWindow.postMessage({magicTheatre:true,type:'context',project,character,part,state:loaded.state},location.origin);
+  frame.contentWindow.postMessage({magicTheatre:true,type:'context',project,character,sheet,part,state:loaded.state},location.origin);
  }catch(error){magicTheatre.availability='error';magicTheatre.error=String(error);$('theatre-status').textContent=`Theatre load failed: ${error}`;theatreEvent('error',{error:String(error)});}
 }
 async function theatreSave(){

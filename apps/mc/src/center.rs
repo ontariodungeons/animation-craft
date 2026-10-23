@@ -715,7 +715,7 @@ fn merge_tail(old:&Value,new:Vec<Value>)->Value{
 }
 fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let block=round_panel("EVENTS · live · center.tail",MUTED,false);let rows=block.inner(area).height as usize;
- let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();styled(format!("{} {} {}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
+ let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();let clip=e["sheet"].as_str().or(e["clip"].as_str()).map(|v|format!(" {v}")).unwrap_or_default();styled(format!("{} {} {}{clip}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
  if lines.is_empty(){lines.push(styled("— No saved, generation, keyframe or error events yet.",MUTED));}
  f.render_widget(Paragraph::new(lines).block(block),area);
 }

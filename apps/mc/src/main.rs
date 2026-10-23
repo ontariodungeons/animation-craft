@@ -101,6 +101,9 @@ SUBCOMMANDS
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
+  clips [character=<id>] [project=<file>] [--convert]
+                                      each clip's Theatre sheet, duration and conversion status
+                                      (motion.clips; --convert runs motion.clips.convert first)
   vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or a screenshot of the live window when --bridge is used)
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
   mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
@@ -775,6 +778,31 @@ fn main() {
             let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.edit",params).unwrap_or_else(|e|fail(e));
             if is_payload_error(&result){fail(format!("storyboard.edit: {result}"));}
             outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
+        }
+        "clips" => {
+            let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));
+            params["_origin"]=json!("CLI");
+            let bridge = a.bridge_addr();
+            let mut s = Session::user_session();
+            // Headless reads need the project attached; dispatch then follows a Studio that has it open.
+            if bridge.is_none() {
+                if let Some(project) = params["project"].as_str() {
+                    s.execute("project.attach", json!({"path": project})).unwrap_or_else(|e| fail(format!("clips: {e}")));
+                }
+            }
+            let mut run = |id: &str| match &bridge { Some(addr) => bridge_call(addr, id, params.clone()), None => dispatch(&mut s, id, params.clone()) };
+            if std::env::args().any(|v| v == "--convert") {
+                run("motion.clips.convert").unwrap_or_else(|e| fail(format!("motion.clips.convert: {e}")));
+            }
+            let v = run("motion.clips").unwrap_or_else(|e| fail(format!("motion.clips: {e}")));
+            outln!("{:<30} {:<36} {:>8}  STATUS", "CLIP", "SHEET", "SECONDS");
+            for c in v["clips"].as_array().into_iter().flatten() {
+                let seconds = c["duration"].as_f64().map(|d| format!("{d:.2}")).unwrap_or_else(|| "-".into());
+                outln!("{:<30} {:<36} {:>8}  {}", c["clip"].as_str().unwrap_or("?"), c["sheet"].as_str().unwrap_or("?"), seconds, c["status"].as_str().unwrap_or("?"));
+            }
+            if let Some(legacy) = v["legacy_sheet"].as_str() {
+                outln!("legacy per-character sheet kept: {legacy}");
+            }
         }
         "exec" => {
             let id = a

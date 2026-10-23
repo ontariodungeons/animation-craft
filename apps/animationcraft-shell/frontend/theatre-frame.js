@@ -30,7 +30,7 @@ window.addEventListener('message',async event=>{
    project=projects.get(id);
    if(!project){project=getProject(id,message.state?{state:message.state}:undefined);projects.set(id,project);}
    projectId=id;projectPath=message.project;
-   sheet=project.sheet(message.character);
+   sheet=project.sheet(message.sheet||message.character);
    object=sheet.object(message.part,{rotation:types.number(0,{range:[-45,45]})});
    await project.ready;
    if(revision!==contextRevision)return;
