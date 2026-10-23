@@ -582,7 +582,9 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let dir=project_dir(s)?;
     if s.video_target!="hyperframes"{return Err(EngineError::InvalidParams("Select HyperFrames before placing this track".into()));}
     let mut request=params.clone();
-    if params.get("character").is_some() || params.get("track").is_some(){
+    if let Some(job)=params.get("blender_job"){
+        request=blender_job_request(s,params,job)?;
+    } else if params.get("character").is_some() || params.get("track").is_some(){
         let character=params["character"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
         let track=params["track"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
         // Inspect the saved rig without loading it into the live selection or rewriting project metadata.
@@ -600,4 +602,57 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let script=crate::workspace::workspace_root(s).join("pipeline/place_hyperframes_track.py");
     let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--project".into(),dir.to_string_lossy().into_owned(),"--request".into(),request.to_string()])?;
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
+}
+
+/// Resolve a completed project-local Blender receipt: verified clip, canvas rect mapped to the
+/// rendered world frame, and the provenance frozen at render time (the current rig is not rehashed).
+fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
+    let invalid=|m:String|EngineError::InvalidParams(m);
+    if params.get("path").is_some(){return Err(invalid("Pass blender_job or path, not both".into()));}
+    let receipt=crate::blender::cmd_blender_status(s,&json!({"job":job}))?;
+    if receipt["state"]!="completed"{return Err(invalid(format!("Blender job is {}, not completed",receipt["state"])));}
+    if receipt["partial"]!=false{return Err(invalid("Blender job is a shortened preview; render the full track before placing it".into()));}
+    let jobs=s.project_path.as_ref().and_then(|p|p.parent())
+        .map(|p|p.join("animation/blender-jobs").join(receipt["job"].as_str().unwrap_or_default()))
+        .ok_or_else(||invalid("Open a .magic project first".into()))?;
+    let clip=PathBuf::from(receipt["clip"].as_str().ok_or_else(||invalid("Receipt has no clip".into()))?);
+    if clip.parent()!=Some(jobs.as_path()){return Err(invalid("Receipt clip is outside its job folder".into()));}
+    if receipt["clip_sha256"].as_str()!=Some(format!("{:x}",Sha256::digest(std::fs::read(&clip)?)).as_str()){
+        return Err(invalid("Clip does not match its receipt clip_sha256".into()));
+    }
+    for key in ["character","track"]{
+        if let Some(v)=params.get(key) && *v!=receipt[key]{return Err(invalid(format!("{key} does not match the rendered job ({})",receipt[key])));}
+    }
+    let number=|v:&Value,what:&str|v.as_f64().filter(|n|n.is_finite()).ok_or_else(||invalid(format!("{what} is missing or invalid")));
+    let rate=params.get("playback_rate").map_or(Ok(1.0),|v|number(v,"playback_rate"))?;
+    let duration=number(&params["duration"],"duration")?;
+    let seconds=number(&receipt["clip_seconds"],"Receipt clip_seconds")?;
+    if rate>0.0 && duration>seconds/rate+1e-6{
+        return Err(invalid(format!("Clip covers {:.3}s at playback_rate {rate}; requested duration is {duration}s",seconds/rate)));
+    }
+    // rect frames the original canvas with object-fit: contain; the clip itself shows world_rect.
+    let values=|v:&Value,n:usize,what:&str|->Result<Vec<f64>>{
+        let a=v.as_array().filter(|a|a.len()==n).ok_or_else(||invalid(format!("{what} must have {n} numbers")))?;
+        a.iter().map(|x|number(x,what)).collect()
+    };
+    let (c,world,rect)=(values(&receipt["canvas"],2,"Receipt canvas")?,values(&receipt["world_rect"],4,"Receipt world_rect")?,values(&params["rect"],4,"rect")?);
+    let (width,height)=(number(&receipt["width"],"Receipt width")?,number(&receipt["height"],"Receipt height")?);
+    let (ww,wh)=(world[2]-world[0],world[3]-world[1]);
+    if !(c[0]>0.0&&c[1]>0.0&&ww>0.0&&wh>0.0&&rect[2]>0.0&&rect[3]>0.0) || (ww/wh*height-width).abs()>1.0{
+        return Err(invalid("rect, canvas or world_rect is invalid, or world_rect does not match the clip aspect".into()));
+    }
+    let scale=(rect[2]/c[0]).min(rect[3]/c[1]);
+    let (x,y)=(rect[0]+(rect[2]-c[0]*scale)/2.0,rect[1]+(rect[3]-c[1]*scale)/2.0);
+    let mut request=params.clone();
+    request["path"]=json!(clip);
+    request["canvas_rect"]=params["rect"].clone();
+    request["rect"]=json!([x+world[0]*scale,y+world[1]*scale,ww*scale,wh*scale]);
+    request["character"]=receipt["character"].clone();
+    request["track"]=receipt["track"].clone();
+    let mut frozen=json!({"receipt":jobs.join("result.json"),"relationship":"provenance frozen when this clip was rendered; later source edits do not change it"});
+    for key in ["job","source_job","character","track","spec","rig_sha256","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect"]{
+        frozen[key]=receipt[key].clone();
+    }
+    request["rendered_source"]=frozen;
+    Ok(request)
 }

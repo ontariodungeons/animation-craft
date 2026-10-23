@@ -46,6 +46,14 @@ Generated PNGs and request receipts live in the selected project's `assets/gener
 
 Reference-driven action sheets use the same native command: `image.generate reference_asset=<registered PNG id> poses='["three-quarter","front"]' character=<rig id> scene=2 animation=turn-around prompt="Preserve this character"`. The receipt retains the source artwork, pose order and storyboard context. `video.place_track generation_receipt=<generation.json>` carries that provenance into a rendered clip placement. See [reference → animation → video](docs/workflows/reference-to-animation-video.md) for the full workflow and its current manual steps.
 
+## Blender animation
+
+The Animation tab's Blender mode renders in a separate, resource-limited worker. `blender.start`,
+`blender.status`, `blender.cancel` and `blender.list` expose the same workflow to CLI/MCP.
+Existing layered tracks can be migrated into packed editable `.blend` scenes; subsequent
+renders load that scene. See [Blender animation](docs/workflows/blender-animation.md) for
+limits, preview/video handoff and the staged replacement of the legacy editor.
+
 ## Existing material intake
 
 Discover contracts from `mc commands workshop` and `commands project`. `workshop.set_audio` references original audio. `workshop.import_transcript` accepts JSON with optional original SRT via `captions`; preserve every word/timestamp and distinguish raw transcription from corrections. Shared `project.intake` reuses valid supplied/imported timing without ASR, otherwise runs the existing `audio.analyze` pipeline for linked audio, imports its native output and initializes a native DeckCraft document. Invalid supplied timing stops for correction instead of silently retranscribing. Pipeline/document failures keep the project openable with `intake_ready=false`, failed steps and `next_commands`; linking audio alone is not readiness. Direct audio analysis/transcription commands remain available for explicit retries. Existing imported or generated files are not proof of approval.
