@@ -599,6 +599,7 @@ fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
         let mut hz_list = Vec::new();
         let mut has_follow = false;
         let mut has_keys = false;
+        let mut key_times = serde_json::Map::new();
         for (prop_name, terms_val) in props_obj {
             properties.push(prop_name.clone());
             if let Some(terms) = terms_val.as_array() {
@@ -613,7 +614,12 @@ fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
                             }
                         }
                         "follow" => has_follow = true,
-                        "keys" | "ellipse" => has_keys = true,
+                        "keys" | "ellipse" => {
+                            has_keys = true;
+                            // Key times per property let a timeline mark where each curve's keys sit.
+                            let times = key_times.entry(prop_name.clone()).or_insert_with(|| json!([]));
+                            times.as_array_mut().into_iter().for_each(|list| list.extend(term["keys"].as_array().into_iter().flatten().filter_map(|key| key.get(0).cloned())));
+                        }
                         _ => {}
                     }
                 }
@@ -634,10 +640,17 @@ fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
         } else {
             parts.join(" + ")
         };
+        for times in key_times.values_mut() {
+            let mut list: Vec<f64> = times.as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+            list.sort_by(f64::total_cmp);
+            list.dedup();
+            *times = json!(list);
+        }
         out.push(json!({
             "layer": layer,
             "properties": properties,
             "summary": summary,
+            "keys": key_times,
             "rotation_bound": props_obj.contains_key("rotation"),
         }));
     }
@@ -1259,6 +1272,18 @@ mod tests {
 
     fn part(id: &str, size: [u32; 2], pivot: [f32; 2]) -> CutoutRigPart {
         CutoutRigPart { id: id.into(), label: id.into(), crop_size: size, pivot, ..CutoutRigPart::default() }
+    }
+
+    #[test]
+    fn channel_summary_lists_key_times_once_in_order() {
+        let motion = json!({"body":{"position":[{"kind":"keys","keys":[[2.0,[0,0]],[0.5,[1,1]]]},{"kind":"oscillate","hz":1.0}],
+            "scale":[{"kind":"keys","keys":[[0.5,[0,0]]]}]},"fin":{"rotation":[{"kind":"oscillate","hz":2.5}]}});
+        let summary = summarize_track_channels(&motion);
+        let body = summary.iter().find(|c| c["layer"] == "body").unwrap();
+        assert_eq!(body["keys"], json!({"position":[0.5, 2.0],"scale":[0.5]}));
+        assert_eq!(body["summary"], "keys + 1 Hz");
+        let fin = summary.iter().find(|c| c["layer"] == "fin").unwrap();
+        assert_eq!((fin["keys"].clone(), fin["summary"].as_str()), (json!({}), Some("2.5 Hz")));
     }
 
     #[test]

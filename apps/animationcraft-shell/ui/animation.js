@@ -253,7 +253,7 @@ async function animationSample(){
  if(!motion.meta?.tracks?.length)return;
  const request=++motion.request;animationPause();
  $('motion-caption').textContent='Sampling motion…';
- try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
+ try{const sample=await motionCommand('motion.sample',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,rest:motion.rest,amount:motion.amount});if(request!==motion.request)return;motion.sample=sample;if(typeof timelineRender==='function')timelineRender();motion.time=Math.min(motion.time,sample.duration);$('motion-scrub').max=sample.duration;animationDraw();}catch(e){toast(String(e));}
 }
 async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
 function animationPause(){
@@ -290,6 +290,7 @@ function animationDraw(){
  $('motion-time').textContent=`${Math.floor(motion.time/60)}:${(motion.time%60).toFixed(3).padStart(6,'0')}`;$('motion-scrub').value=motion.time;
  if($('motion-part-angle')&&document.activeElement!==$('motion-part-angle')){const deg=Math.round((magicTheatre.rotation||0)*10)/10;$('motion-part-angle').value=String(deg);if($('motion-part-angle-out'))$('motion-part-angle-out').textContent=`${deg}°`;}
  if(!motion.playing||magicTheatre.interactionRevision>magicTheatre.savedRevision)theatreSeek(motion.time);
+ if(typeof timelineSeek==='function')timelineSeek(motion.time);
 }
 
 function pathControls(){

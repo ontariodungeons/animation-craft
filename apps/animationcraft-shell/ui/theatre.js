@@ -20,8 +20,24 @@ function theatreMount(container){
  const frame=el('iframe',{id:'theatre-timeline',title:'Theatre motion timeline',src:'theatre-frame.html'});
  Object.assign(magicTheatre,{frame,key:null,sheet:null,ready:false,rotation:0,rotations:{},sequenced:{},availability:'loading',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,stateSentProject:null,load:null,savedAt:null,persistence:'not_loaded',interactionRevision:0,savedRevision:0,gestureActive:false});
  const save=el('button',{id:'theatre-save',class:'ghost',disabled:true,title:'Save native Theatre keyframes and curves into the current project',onclick:()=>theatreSave().catch(error=>toast(String(error)))},'Save motion');
- container.append(el('div',{class:'theatre-heading'},el('strong',{},'Theatre'),clips,el('div',{class:'theatre-actions'},status,save)),frame);
+ // Curves draws the clip's channels natively; Keys shows Theatre's own keyframe editor. The
+ // Theatre frame stays mounted under both so its saves and unsaved-edit guards keep working.
+ let view='curves';try{view=localStorage.getItem('theatre.view')==='keys'?'keys':'curves';}catch{}
+ const views=el('div',{class:'theatre-views',role:'tablist','aria-label':'Theatre view'},...[['keys','Keys','Edit keyframes in Theatre'],['curves','Curves','Every animated channel of this clip over time']].map(([key,label,title])=>
+  el('button',{class:`theatre-view${view===key?' active':''}`,id:`theatre-view-${key}`,role:'tab','aria-selected':String(view===key),title,onclick:()=>theatreSetView(key)},label)));
+ const icon=el('span',{class:'theatre-icon','aria-hidden':'true',html:'<svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg>'});
+ const curves=el('div',{class:'theatre-curves',id:'theatre-curves','aria-label':'Animated channels'});
+ if(container.dataset)container.dataset.view=view;
+ container.append(el('div',{class:'theatre-heading'},icon,el('strong',{},'Theatre'),views,el('span',{id:'theatre-info',class:'theatre-info muted'}),el('div',{class:'theatre-actions'},status,save)),
+  el('div',{class:'theatre-cliprow'},el('span',{class:'theatre-label'},'Clips'),clips),
+  el('div',{class:'theatre-body'},frame,curves));
  theatreSyncClips();
+}
+function theatreSetView(view){
+ const section=$('theatre-curves')?.closest?.('.motion-theatre');if(!section)return;
+ section.dataset.view=view;try{localStorage.setItem('theatre.view',view);}catch{}
+ for(const key of ['keys','curves']){const tab=$(`theatre-view-${key}`);tab?.classList.toggle('active',key===view);tab?.setAttribute('aria-selected',String(key===view));}
+ if(view==='curves'&&typeof timelineRender==='function')timelineRender();
 }
 function theatreSyncClips(){
  const bar=$('theatre-clips');if(!bar||typeof bar.replaceChildren!=='function'||!motion.meta?.tracks)return;
@@ -34,6 +50,7 @@ function theatreSyncClips(){
  });
  pills.push(el('button',{class:`theatre-clip-pill${motion.rest?' active':''}`,title:'Open rest pose sheet','aria-pressed':String(Boolean(motion.rest)),onclick:async()=>{if(!theatreCanLeave())return;motion.rest=true;motion.time=0;if(typeof acFeedback!=='undefined')acFeedback.report(null,null,{stage:'clip_switched',clip:'@rest'});if(typeof animationControls==='function')animationControls();if(typeof animationSample==='function')await animationSample();}},'Rest'));
  bar.replaceChildren(...pills);
+ if(typeof timelineRender==='function')timelineRender();
 }
 async function theatreContext(){
  if(!magicTheatre.ready||!motion.meta)return;
