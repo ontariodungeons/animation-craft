@@ -1,21 +1,9 @@
-//! The Magic Studio title card.
-//!
-//! Drawn with `bit` (Terminal ANSI Logo Designer) in the `dogica` face, then baked in as
-//! plain glyphs so the app carries no runtime dependency and no escape codes. The colour
-//! ramp is the same teal-to-gold gradient `bit` renders, interpolated per column.
+//! Compact title styling, retaining the teal-to-gold ramp from the original `bit` mark.
 
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
 };
-
-/// The studio mark: four rows of glyphs, straight from `bit -font dogica`.
-pub const TITLE_CARD: [&str; 4] = [
-    "█    █  ▄▀▀▀▄  ▄▀▀▀▀  ▀█▀  ▄▀▀▀▄     ▄▀▀▀▄ ▀▀█▀▀  █   █  ▀█▀▀▀▄  ▀█▀  ▄▀▀▀▄",
-    "█▀▄▄▀█  █   █  █  ▄▄   █   █         ▀▄▄▄    █    █   █   █   █   █   █   █",
-    "█    █  █▀▀▀█  █   █   █   █   ▄     ▄   █   █    █   █   █   █   █   █   █",
-    "▀    ▀  ▀   ▀   ▀▀▀▀  ▀▀▀   ▀▀▀       ▀▀▀    ▀     ▀▀▀    ▀▀▀▀   ▀▀▀   ▀▀▀ ",
-];
 
 /// Interpolate the studio gradient across `width` columns.
 fn ramp(width: usize) -> Vec<Color> {
@@ -33,50 +21,11 @@ fn ramp(width: usize) -> Vec<Color> {
         .collect()
 }
 
-/// The mark as styled lines, coloured with the studio gradient.
-pub fn title_card() -> Vec<Line<'static>> {
-    let width = TITLE_CARD[0].chars().count();
-    let colours = ramp(width);
-    TITLE_CARD
-        .iter()
-        .map(|row| {
-            Line::from(
-                row.chars()
-                    .enumerate()
-                    .map(|(index, ch)| Span::styled(ch.to_string(), Style::default().fg(colours[index.min(colours.len() - 1)])))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect()
-}
-
-/// The mark, fitted to `width` columns by cropping. Empty when it will not fit.
-pub fn title_card_fitted(width: usize) -> Vec<Line<'static>> {
-    if width < 40 {
-        return Vec::new();
-    }
-    let mut lines = title_card();
-    for line in &mut lines {
-        let mut spans = line.spans.clone();
-        let mut used = 0usize;
-        let mut cut = spans.len();
-        for (index, span) in spans.iter().enumerate() {
-            used += span.content.chars().count();
-            if used > width {
-                cut = index;
-                break;
-            }
-        }
-        if cut < spans.len() {
-            let mut last = spans[cut - 1].clone();
-            let keep: String = last.content.chars().take(width.saturating_sub(used - last.content.chars().count())).collect();
-            last.content = keep.into();
-            spans.truncate(cut - 1);
-            spans.push(last);
-        }
-        *line = Line::from(spans);
-    }
-    lines
+pub fn compact_title(text: &str) -> Line<'static> {
+    let colours = ramp(text.chars().count());
+    Line::from(text.chars().zip(colours).map(|(ch, colour)| {
+        Span::styled(ch.to_string(), Style::default().fg(colour).add_modifier(ratatui::style::Modifier::BOLD))
+    }).collect::<Vec<_>>())
 }
 
 #[cfg(test)]
@@ -84,12 +33,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_card_has_four_rows_of_equal_width() {
-        assert_eq!(TITLE_CARD.len(), 4);
-        let width = TITLE_CARD[0].chars().count();
-        for row in TITLE_CARD {
-            assert_eq!(row.chars().count(), width);
-        }
+    fn compact_title_preserves_text_and_terminal_width() {
+        assert_eq!(compact_title("Movie · BOOTH").to_string(), "Movie · BOOTH");
+        assert_eq!(compact_title("映画").width(), 4);
+        assert_eq!(compact_title("").width(), 0);
     }
 
     #[test]
@@ -99,8 +46,4 @@ mod tests {
         assert_eq!(colours.last(), Some(&Color::Rgb(240, 190, 112)));
     }
 
-    #[test]
-    fn a_narrow_booth_gets_no_card() {
-        assert!(title_card_fitted(20).is_empty());
-    }
 }

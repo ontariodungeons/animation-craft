@@ -36,7 +36,7 @@ struct Center {
     catalog_selected: usize,
     spy: Option<String>,
     spy_at: Option<std::time::Instant>,
-    pulse: Option<(f64, f64, Vec<crate::telemetry::Proc>)>,
+    pulse: Option<crate::telemetry::Sample>,
     pulse_at: Option<std::time::Instant>,
     scroll: u16,
     show_form: bool,
@@ -131,20 +131,31 @@ impl Center {
                     }
                     self.spy_at=Some(std::time::Instant::now());
                 }
-                if self.pulse_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true){
-                    if let Some(pid)=crate::telemetry::studio_pid(){
-                        let tree=crate::telemetry::tree(pid);
-                        let previous=self.pulse.as_ref().map(|(cpu,_,_)|*cpu).unwrap_or(0.0);
-                        let cpu=crate::telemetry::cpu_since(previous,&tree);
-                        self.pulse=Some((cpu,crate::telemetry::rss_mb(&tree),tree));
-                        self.pulse_at=Some(std::time::Instant::now());
-                    }
-                }
+                self.sample_studio();
                 if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
                 self.observe_chat_delivery();
 
             },Err(error)=>{self.message=error.clone();self.state["ui"]=json!({"connection":"stale_or_unavailable","ui_ready":false,"error":error,"recovery":"F8 explicitly reattaches the same project; Studio is never switched."});},
         }
+    }
+    fn studio_pid(&self)->Option<u32>{
+        let ui=&self.state["ui"];
+        if ui["connection"]!="connected" || !self.state["project"].is_string() || ui["active_project"]!=self.state["project"] {return None;}
+        let instance=ui["instance"].as_str()?;
+        if self.pinned_instance.as_deref().is_some_and(|pin|pin!=instance){return None;}
+        crate::telemetry::pid_from_socket(std::path::Path::new(instance))
+    }
+    fn sample_studio(&mut self){
+        let Some(pid)=self.studio_pid() else {self.pulse=None;self.pulse_at=None;return;};
+        let instance=self.state["ui"]["instance"].as_str().unwrap_or_default();
+        let changed=self.pulse.as_ref().is_none_or(|p|p.pid!=pid || p.instance!=instance);
+        if changed || self.pulse_at.is_none_or(|t|t.elapsed()>=Duration::from_secs(2)){
+            self.pulse=crate::telemetry::Sample::capture(instance,self.pulse.as_ref());
+            self.pulse_at=Some(std::time::Instant::now());
+        }
+    }
+    fn studio_sample(&self)->Option<&crate::telemetry::Sample>{
+        self.pulse.as_ref().filter(|p|Some(p.pid)==self.studio_pid() && self.state["ui"]["instance"].as_str()==Some(p.instance.as_str()) && p.at.elapsed()<Duration::from_secs(6))
     }
     /// Attach the project chosen in the workshop and watch it from the booth.
     fn observe_selected(&mut self){
@@ -545,6 +556,36 @@ fn letterbox(width: usize, label: &str, caption: &str) -> Line<'static> {
     if !caption.is_empty(){spans.push(Span::styled(format!(" {caption} "),DIM));}
     Line::from(spans)
 }
+fn top_bar(c:&Center,width:usize,control:bool)->Line<'static>{
+    let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|p|p.to_str()).unwrap_or("BACKSTAGE");
+    let view=if c.muppets_view{"MOPPETS"}else if control{"WORKSHOP"}else{"BOOTH"};
+    let side=(width/3).min(36);
+    let title=fit_text(&format!("{name} · {view}"),width.saturating_sub(side*2));
+    let title_width=Line::raw(&title).width();
+    let start=width.saturating_sub(title_width)/2;
+    let room=start.saturating_sub(1);
+    let metrics=match c.studio_sample(){
+        Some(sample)=>format!("Studio CPU {} · RSS {:.0}MiB",sample.cpu_pct.map(|v|format!("{v:.0}%")).unwrap_or("?".into()),crate::telemetry::rss_mb(&sample.procs)),
+        None=>"Studio CPU ? · RSS ?".into(),
+    };
+    let left=fit_text(&metrics,room);
+    let ui=&c.state["ui"];
+    let matched=ui["connection"]=="connected" && c.state["project"].is_string() && ui["active_project"]==c.state["project"];
+    let (status,colour)=if c.state["snapshot"]["last_error"].as_str().is_some_and(|s|!s.is_empty()){
+        ("! ERROR · D PULSE".into(),RED)
+    }else if matched{
+        let snap=&c.state["snapshot"];
+        let position=match snap["playhead_sec"].as_f64(){Some(seconds)=>timecode(seconds,snap["fps"].as_f64().unwrap_or(24.0)),None=>"position ?".into()};
+        (format!("LIVE · {position}"),GREEN)
+    }else{("NOT CONNECTED".into(),AMBER)};
+    let right_room=width.saturating_sub(start+title_width+1);
+    let right=fit_text(&status,right_room);
+    let mut spans=vec![Span::styled(left.clone(),MUTED),Span::raw(" ".repeat(start.saturating_sub(Line::raw(&left).width())))];
+    spans.extend(crate::logo::compact_title(&title).spans);
+    spans.push(Span::raw(" ".repeat(width.saturating_sub(start+title_width+Line::raw(&right).width()))));
+    spans.push(Span::styled(right,colour));
+    Line::from(spans)
+}
 /// SMPTE-style timecode from a playhead position.
 fn timecode(seconds: f64, fps: f64) -> String {
     let fps=if fps.is_finite()&&fps>=1.0{fps.round()}else{24.0};
@@ -882,9 +923,12 @@ fn gang_tally_spans(c: &Center, compact: bool)->Vec<Span<'static>>{
 /// PULSE: the Studio's own health — memory, CPU and the recent error tail, from `/proc`.
 fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines:Vec<Line<'static>>=Vec::new();
- match &c.pulse{
-  Some((cpu,rss,procs))=>{
-   lines.push(styled(format!("studio · {} · cpu {:.0}% · mem {:.0}M",procs.len(),cpu,rss),DESK_FG));
+  match c.studio_sample(){
+   Some(sample)=>{
+    let procs=&sample.procs;
+    let cpu=sample.cpu_pct.map(|v|format!("{v:.0}%")).unwrap_or_else(||"? (sampling)".into());
+    lines.push(styled(format!("Studio PID {} · {} procs · CPU {cpu} · RSS sum {:.0}MiB",sample.pid,procs.len(),crate::telemetry::rss_mb(procs)),DESK_FG));
+    lines.push(styled(format!("/proc · {:.1}s ago · one core = 100% · shared RSS may be counted twice",sample.at.elapsed().as_secs_f64()),MUTED));
    let room=area.width.saturating_sub(4) as usize;
    for p in procs.iter().take(6){
     let name=fit_text(&p.name,room.saturating_sub(9).max(6));
@@ -894,7 +938,7 @@ fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
     lines.push(styled(row,MUTED));
    }
   }
-  None=>lines.push(styled("Studio process not observed",AMBER)),
+   None=>lines.push(styled("Selected Studio metrics unavailable or stale · no other instance substituted",AMBER)),
  }
  let errors=c.state["activity"]["actions"].as_array().into_iter().flatten().flat_map(|a|a["events"].as_array().into_iter().flatten().filter(|e|e["stage"]=="engine_error"||e["ok"]==false)).collect::<Vec<_>>();
  let errors=errors.iter().rev().take(5).collect::<Vec<_>>();
@@ -936,13 +980,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
  let gang_rows=if narrow{0}else{5};
  let chunks=Layout::vertical([Constraint::Length(1),Constraint::Length(4),Constraint::Min(1),Constraint::Length(gang_rows),Constraint::Length(1),Constraint::Length(1)]).split(area);
- let snapshot=&c.state["snapshot"];
- let song=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("NO PROJECT").to_uppercase();
- let playhead=snapshot["playhead_sec"].as_f64().unwrap_or(0.0);
- let fps=snapshot["fps"].as_f64().unwrap_or(24.0);
- let reel=snapshot["clip"].as_str().unwrap_or("").trim_start_matches('@').to_uppercase();let reel=if reel.is_empty(){"IDLE".to_string()}else{reel};
- let caption=format!("REEL {reel} · {song} · {}",timecode(playhead,fps));
- f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ MAGIC STUDIO: BACKSTAGE",&caption)),chunks[0]);
+  f.render_widget(Paragraph::new(top_bar(c,area.width as usize,control)),chunks[0]);
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ BACKSTAGE","")),chunks[5]);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
@@ -953,16 +991,8 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  ];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS"}else{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS · D PULSE"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
  if c.muppets_view{render_muppets(f,c,chunks[2]);}
- else if control{let p=Layout::vertical([Constraint::Length(5),Constraint::Min(5),Constraint::Length(11)]).split(chunks[2]);
-  let card=crate::logo::title_card_fitted(p[0].width as usize);
-  if card.is_empty(){f.render_widget(Paragraph::new(styled("MAGIC STUDIO",TEAL)).block(round_panel("WORKSHOP · the studio",TEAL,false)),p[0]);}
-  else{
-   let card_width=crate::logo::TITLE_CARD[0].chars().count().min(p[0].width as usize);
-   let pad=((p[0].width as usize).saturating_sub(card_width))/2;
-   let lines:Vec<Line<'static>>=card.into_iter().map(|l|{let mut spans=vec![Span::raw(" ".repeat(pad))];spans.extend(l.spans);Line::from(spans)}).collect();
-   f.render_widget(Paragraph::new(lines),p[0]);
-  }
-  render_catalog(f,c,p[1]);render_commands(f,c,p[2],true);}else{
+  else if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(11)]).split(chunks[2]);
+   render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);if c.details_open{render_pulse(f,c,p[2]);}else{render_conversation(f,c,p[2]);}}
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));if c.details_open{render_pulse(f,c,conversation);}else{render_conversation(f,c,conversation);}}
@@ -1179,6 +1209,69 @@ mod feedback_tests {
         assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"no prerequisites in the fixture");
         let mut lyrics=c.state.clone();lyrics["prerequisites"]=json!([{"id":"lyrics","state":"ready"}]);let mut l=fixture();l.state=lyrics;assert_eq!(stage_evidence(&l,2).and_then(|v|v["state"].as_str()),Some("ready"),"the lyrics light reads the engine's lyrics item");assert_eq!(PROJECT_STAGES[STORYBOARD_STAGE].0,"Storyboard");
         for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Lyrics & notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
+    }
+    #[test]
+    fn top_bar_centres_project_and_keeps_unknown_metrics_explicit(){
+        let c=fixture();
+        for (w,h) in [(60,32),(90,38),(140,44),(240,50)] {
+            let backend=ratatui::backend::TestBackend::new(w,h);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f|render_desk(f,&c,false)).unwrap();
+            let b=terminal.backend().buffer();
+            let row=(0..w).map(|x|b[(x,0)].symbol()).collect::<String>();
+            assert!(row.contains("CPU ?"),"{w}: {row}");
+            assert!(row.contains("RSS ?"),"{w}: {row}");
+            let byte=row.find("fixture").expect("project title must survive narrowing");
+            let start=row[..byte].chars().count();
+            assert!((start as isize-((w as usize-"fixture · BOOTH".chars().count())/2) as isize).abs()<=1,"{w}: title not centred: {row}");
+            assert!(!row.contains("REEL IDLE"),"unobserved production is not idle evidence");
+        }
+    }
+    #[test]
+    fn metrics_are_selected_instance_only_fresh_and_preserve_zero(){
+        let mut c=fixture();
+        let pid=std::process::id();
+        let instance=format!("{pid}-test.sock");
+        c.state["ui"]["instance"]=json!(instance);
+        c.pinned_instance=Some(instance);
+        c.pulse=crate::telemetry::Sample::capture(c.pinned_instance.as_deref().unwrap(),None);
+        c.pulse.as_mut().unwrap().cpu_pct=Some(0.0);
+        assert!(top_bar(&c,140,false).to_string().contains("CPU 0%"));
+        c.pulse.as_mut().unwrap().at=std::time::Instant::now()-Duration::from_secs(7);
+        assert!(top_bar(&c,140,false).to_string().contains("CPU ? · RSS ?"));
+        c.pulse.as_mut().unwrap().at=std::time::Instant::now();
+        c.state["ui"]["instance"]=json!(format!("{}-other.sock",pid+1));
+        assert!(c.studio_sample().is_none(),"replacement instance must not inherit metrics");
+        let replacement=format!("{pid}-replacement.sock");
+        c.state["ui"]["instance"]=json!(replacement);
+        c.pinned_instance=Some(replacement);
+        assert!(c.studio_sample().is_none(),"same PID with a new instance nonce must not inherit metrics");
+        c.state["ui"]["instance"]=json!(format!("{pid}-test.sock"));
+        c.pinned_instance=Some(format!("{pid}-test.sock"));
+        c.state["ui"]["active_project"]=json!("/other.magic");
+        assert!(c.studio_sample().is_none(),"different project must not inherit metrics");
+        c.sample_studio();
+        assert!(c.pulse.is_none(),"disconnect clears the previous sample");
+    }
+    #[test]
+    fn long_unicode_titles_fit_without_overwriting_side_metrics(){
+        let mut c=fixture();
+        c.state["project"]=json!("/映画映画映画映画映画映画映画映画映画映画.magic");
+        for width in [0,1,20,60,90,140,240]{
+            let line=top_bar(&c,width,false);
+            assert!(line.width()<=width,"{width}: {}",line.to_string());
+            if width>=60{assert!(line.to_string().contains("CPU ?"));}
+        }
+    }
+    #[test]
+    fn workshop_reclaims_the_oversized_logo_rows(){
+        let c=fixture();
+        let backend=ratatui::backend::TestBackend::new(90,38);
+        let mut terminal=ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|f|render_desk(f,&c,true)).unwrap();
+        let b=terminal.backend().buffer();
+        let first_body=(0..90).map(|x|b[(x,5)].symbol()).collect::<String>();
+        assert!(first_body.contains("ALL PROJECTS"),"catalog must start immediately below header: {first_body}");
     }
     #[test]
     fn both_views_show_the_shared_status_line_and_booth_follows_the_tail(){
