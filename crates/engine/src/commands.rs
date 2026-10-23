@@ -194,6 +194,8 @@ pub fn build() -> Vec<CommandSpec> {
     vec![
         cmd!("blender.start", "Build / Render Blender Animation", ["Animation"], None,
             "{\"character\":\"rig id for initial migration\",\"track\":\"track id\",\"blend\":\"optional saved .blend instead of migration\",\"resolution_percent\":50,\"max_frames\":90,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::blender::cmd_blender_start),
+        query!("blender.actions", "Saved Blender Migration Actions", "{\"character\":\"rig id\"}", crate::blender::cmd_blender_actions),
+        query!("blender.prepare", "Headless Bounded Migration Preparation", "{\"request\":\"worker request.json\"}", crate::blender::cmd_blender_prepare),
         query!("blender.status", "Blender Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
         query!("blender.list", "Saved Blender Jobs", "{}", crate::blender::cmd_blender_list),
         query!("blender.cancel", "Cancel Blender Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),

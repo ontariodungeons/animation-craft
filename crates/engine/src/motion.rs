@@ -899,6 +899,10 @@ fn validate_local_png(path: std::path::PathBuf, root: Option<&std::path::Path>) 
     Some(path.to_string_lossy().into_owned())
 }
 
+fn effective_parent<'a>(part: &'a crate::session::CutoutRigPart, names: Option<&Vec<Value>>) -> Option<&'a str> {
+    part.parent.as_deref().filter(|parent| names.is_none_or(|ns| ns.is_empty() || ns.iter().any(|name| name.as_str()==Some(*parent))))
+}
+
 // Compose canvas-space parent transforms; opacity is deliberately independent of ancestors.
 fn matrix(
     rig: &LoadedCutoutRigPlan,
@@ -934,9 +938,7 @@ fn matrix(
             n[0] * m[4] + n[2] * m[5] + n[4],
             n[1] * m[4] + n[3] * m[5] + n[5],
         ];
-        current = part.parent.as_deref().filter(|p| {
-            names.is_none_or(|ns| ns.is_empty() || ns.iter().any(|n| n.as_str() == Some(*p)))
-        });
+        current = effective_parent(part, names);
     }
     m
 }
@@ -1023,7 +1025,7 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         ];
     }
     Ok(
-        json!({"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
+        json!({"effective_parents":rig.parts.iter().map(|part| effective_parent(part,track["layers"].as_array())).collect::<Vec<_>>(),"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
     )
 }
 
