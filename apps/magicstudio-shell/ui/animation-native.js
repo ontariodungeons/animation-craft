@@ -116,7 +116,7 @@ async function nativeAnimationOpen(selection={}){
    const valid=receiptValue.job===accepted.job&&receiptValue.project===project&&receiptValue.backend===row.backend&&receiptValue.source_id===row.id&&receiptValue.source_revision===row.revision-1&&receiptValue.state==='completed'&&receiptValue.partial===false&&receiptValue.clip===accepted.clip&&receiptValue.clip_sha256===accepted.clip_sha256;
    if(!valid){linkState.textContent='Accepted result unavailable: its actual terminal receipt is missing, stale or mismatched. The editable source remains available.';linkReadback.textContent=JSON.stringify({source:row,receipt:receiptValue},null,2);return;}
    lastReceipt=receiptValue;receipt.textContent=JSON.stringify(receiptValue,null,2);placement.refresh();
-   const savedJob=jobs.options.find(option=>option.value===accepted.job);if(savedJob){savedJob.textContent=`completed · ${accepted.job} · Accepted result`;jobs.value=accepted.job;}
+   const savedJob=Array.from(jobs.options).find(option=>option.value===accepted.job);if(savedJob){savedJob.textContent=`completed · ${accepted.job} · Accepted result`;jobs.value=accepted.job;}
    try{await blenderLoadPreview(video,accepted.clip,selected);if(!selected())return;linkState.textContent='Accepted full result restored from its actual terminal receipt. The editable native source remains separate.';}
    catch(error){if(selected())linkState.textContent=`Accepted result verified; video preview unavailable: ${error}. The editable source remains available.`;}
    linkReadback.textContent=JSON.stringify({source:row,accepted:accepted,receipt:receiptValue},null,2);busy(false);
