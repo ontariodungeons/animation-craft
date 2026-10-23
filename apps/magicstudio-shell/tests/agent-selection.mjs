@@ -131,11 +131,12 @@ const artworkContext = vm.createContext({
     if (args.id === 'project.list_assets') return { assets: [{ id: 'paper-puppet', kind: 'cutout_rig', name: 'Paper puppet' }] };
     if (args.id === 'blender.actions') return { character: 'paper-puppet', tracks: [{ id: 'wave', duration: 1, standard: false }], layers: [], canvas: [64, 64], spec: '/fixture/rig.json' };
     if (args.id === 'blender.list') return { jobs: [] };
+    if (args.id === 'storyboard.toc') return { chapters: [] };
     if (args.id === 'image.generate') throw Error('Native generation disabled in fixture');
     throw Error(`Unexpected fixture command ${args.id}`);
   },
 });
-for (const file of ['animation.js', 'blender.js', 'image-prompt.js']) {
+for (const file of ['animation.js', 'blender-placement.js', 'blender.js', 'image-prompt.js']) {
   vm.runInContext(readFileSync(new URL(`../ui/${file}`, import.meta.url), 'utf8'), artworkContext);
 }
 const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
@@ -179,3 +180,5 @@ await import('./companions.mjs');
 await import('./animation-authoring.mjs');
 
 await import('./inspector-controls.mjs');
+
+await import('./blender-placement.mjs');

@@ -72,9 +72,11 @@ async function blenderAnimationOpen(selection={}){
    const tooltip=()=>{input.title=input.selectedOptions[0]?.textContent||'';};
    input.addEventListener('change',tooltip);tooltip();
   }
-  const busy=value=>{render.disabled=value;cancel.disabled=!value;for(const input of [picker,tracks,source,range,resolution])input.disabled=value;};
+  const placement=blenderPlacementControls({project,getJob:()=>latest,current});
+  const busy=value=>{placement.setBusy(value);render.disabled=value;cancel.disabled=!value;for(const input of [picker,tracks,source,range,resolution])input.disabled=value;};
   controls.append(el('label',{},'Action',tracks),el('label',{},'Source',source),
-   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,details);
+   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,details,placement.node);
+  placement.load();
   async function poll(){
    if(!current()||!job)return;
    const requestedJob=job,selectedRevision=selectionRevision;
@@ -88,7 +90,7 @@ async function blenderAnimationOpen(selection={}){
     }
     busy(false);
     if(value.state==='completed'){
-     latest=value;source.options[0].disabled=false;source.value='saved';source.dispatchEvent(new Event('change'));await blenderLoadPreview(video,value.clip,selected);if(!selected())return;
+     latest=value;placement.refresh();source.options[0].disabled=false;source.value='saved';source.dispatchEvent(new Event('change'));await blenderLoadPreview(video,value.clip,selected);if(!selected())return;
      details.textContent='Editable Blender scene saved';details.title=value.blend;
      report(value.partial?'Preview ready · shortened clip':'Preview ready');
     }else{
@@ -100,7 +102,7 @@ async function blenderAnimationOpen(selection={}){
       for(const previous of index<0?[]:matching.slice(index+1)){
        const result=await motionCommand('blender.status',{job:previous.job});if(!selected())return;
        if(result.state==='completed'&&result.blend){
-        latest=result;source.options[0].disabled=false;source.value='saved';source.dispatchEvent(new Event('change'));
+        latest=result;placement.refresh();source.options[0].disabled=false;source.value='saved';source.dispatchEvent(new Event('change'));
         details.textContent='Earlier successful Blender scene available';details.title=result.blend;
         await blenderLoadPreview(video,result.clip,selected);if(!selected())return;
         break;
@@ -116,7 +118,7 @@ async function blenderAnimationOpen(selection={}){
    clearTimeout(blenderPollTimer);const requestedSelection=++selectionRevision;
    blenderMediaFetch?.abort();
    if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
-   job=null;latest=null;busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();choice.track=tracks.value;
+   job=null;latest=null;placement.refresh();busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();choice.track=tracks.value;
    const selected=tracks.value;
    const saved=await motionCommand('blender.list');if(!current()||requestedSelection!==selectionRevision)return;
    job=saved.jobs.find(j=>j.character===choice.character&&j.track===selected)?.job;

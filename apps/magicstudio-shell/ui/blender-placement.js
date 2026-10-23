@@ -1,6 +1,6 @@
 // Place only a completed full receipt. The backend verifies media and maps the canvas rectangle.
 function blenderPlacementControls({project,getJob,current}){
- let scene=null,placing=false,renderBusy=false,lastJob=null,defaultId='',sceneRevision=0;
+ let scene=null,placing=false,renderBusy=false,lastJob=null,defaultId='',sceneRevision=0,validationError=false;
  const field=(name,label,value,type='number')=>{
   const input=el('input',{id:`blender-place-${name}`,type,value:String(value),step:'any','aria-label':label,style:'width:100%;min-width:0;box-sizing:border-box'});
   return {input,node:el('label',{},label,input)};
@@ -39,7 +39,8 @@ function blenderPlacementControls({project,getJob,current}){
    const params=request();
    command.textContent=`mc exec video.place_track ${quote(`project=${project}`)} ${Object.entries(params).map(([key,value])=>quote(`${key}=${Array.isArray(value)?JSON.stringify(value):value}`)).join(' ')}`;
    place.disabled=copy.disabled=placing;
-  }catch(error){place.disabled=copy.disabled=true;command.textContent='';if(!placing)message(String(error),true);}
+   if(validationError){validationError=false;message('Ready to place. Start uses absolute project time.');}
+  }catch(error){place.disabled=copy.disabled=true;command.textContent='';if(!placing){validationError=true;message(String(error),true);}}
  }
  function sceneId(){
   if(!scene)return;
@@ -90,7 +91,7 @@ function blenderPlacementControls({project,getJob,current}){
    if(!current()||getJob()?.job!==params.blender_job)return;
    readback.textContent=JSON.stringify(result,null,2);
    if(result.ok!==true)throw Error(result.error||'Placement command did not confirm success.');
-   if(result.id!==params.id||result.blender_job!==params.blender_job||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
+   if(result.id!==params.id||result.blender_job!==params.blender_job||result.scene!==params.scene||result.start!==params.start||result.duration!==params.duration||result.playback_rate!==params.playback_rate||JSON.stringify(result.canvas_rect)!==JSON.stringify(params.rect)||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
    message(`Placed ${result.id} · scene ${params.scene} · track ${result.track_index}.`);
   }catch(error){if(current()&&getJob()?.job===params.blender_job)message(String(error),true);}
   finally{placing=false;if(current())update();}
