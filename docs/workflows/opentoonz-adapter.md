@@ -60,3 +60,46 @@ included. Every file is hashed; any missing level fails before rendering.
 
 As of 2026-10-23 neither `opentoonz` nor `tcomposer` is installed on the build machine,
 so the adapter reports `available: false` with that reason; no render has run here.
+
+## Shared start / frozen-source clip completion (#23)
+
+`opentoonz.start {scene,bundle?,first?,last?,step?,shrink?,nthreads?,memory_mb?,timeout_seconds?}`
+submits to the same `magicstudio-animation-worker.service` as Blender and Synfig.
+Use `animation.list/status/cancel`; busy rejects and cancelling remains busy until
+exit. `opentoonz.render request=<request.json>` is worker-only; direct unbounded
+render invocation is now refused. No fps/width/height override is exposed by start.
+
+Discovery separates executable `available` from `render_capable`/`render_reason`
+(tool and stuff resources required). This is configured capability, not a claim
+that this machine has passed a native render. As of this slice tcomposer and the
+OpenToonz package are absent: install OpenToonz's tcomposer and stuff resources,
+or configure OPENTOONZ_TCOMPOSER and OPENTOONZ_STUFF. FFmpeg/libvpx and Python Pillow
+are also required by the shared encoder. No install was attempted.
+
+Start defaults bundle to the detected native project root (else scene directory).
+The bounded worker copies a self-contained bundle (<=1GiB/4096files, no symlinks),
+retaining the native project layout, then copies stuff resources into job-local
+storage and forces offscreen Qt. Absolute/escaping resource links are refused;
+prepared dependency paths must remain in the frozen bundle. The source bundle is
+checked unchanged after rendering. Arbitrary plugins, custom external project
+aliases/fonts or scene portability are not claimed. Native validation is pending
+installation; failures retain logs, never a completed clip.
+
+The helper's ordered frame manifest is fully decoded as RGBA before shared VP9
+encoding; the encoded clip is decoded again for exact frame count and retained
+alpha. `step>1` holds each rendered frame through the skipped scene frames (last
+hold clipped to requested last), preserving original FPS and requested duration.
+`frame_mapping` records held source scene frames. `partial` is true when range
+omits any of the saved scene timeline. Size/shrink comes from native output.
+
+Completed receipts use backend/job/state/clip/clip_sha256/clip_seconds/fps,
+first_frame/last_frame, canvas/world_rect (output pixel units), source_bundle with
+frozen path/hash/dependency manifest and runtime-stuff inputs, tool identity,
+selected_range, alpha_evidence, and shared final telemetry. No fake character or
+action IDs are required. `video.place_track animation_job=<id>` uses the existing
+hash/ffprobe/full-range/frame-aspect checks and frozen provenance; partial clips
+are refused. HyperFrames remains the compositor.
+
+Rerender from `source_bundle.path`, passing its frozen bundle directory as `bundle`;
+choose the scene's desired range again. Original input paths are retained only as
+provenance. This does not overwrite old jobs or original native files.

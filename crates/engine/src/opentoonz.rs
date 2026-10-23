@@ -266,7 +266,7 @@ fn collect(plan: &Value) -> Result<Value> {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned();
         let number = name.strip_prefix("frame").and_then(|r| r.strip_suffix(".png")).and_then(|r| r.strip_prefix(['.', '_']))
             .filter(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())).and_then(|d| d.parse::<u64>().ok());
-        match number { Some(n) if expected.contains(&n) => { by_frame.insert(n, path); }, _ if name == "tcomposer.log" => {}, _ => unexpected.push(name) }
+        match number { Some(n) if expected.contains(&n) => { if by_frame.insert(n, path).is_some() { return Err(invalid("Duplicate native frame number")); } }, _ if name == "tcomposer.log" => {}, _ => unexpected.push(name) }
     }
     let missing: Vec<u64> = expected.iter().copied().filter(|n| !by_frame.contains_key(n)).collect();
     if !missing.is_empty() || !unexpected.is_empty() {
@@ -291,10 +291,25 @@ fn collect(plan: &Value) -> Result<Value> {
         "alpha":{"channel_present":alpha,"measured_transparency":false}}))
 }
 
+/// Public submission only: the existing worker owns validation/snapshot/render/encode.
+pub fn cmd_opentoonz_start(s: &mut Session, p: &Value) -> Result<Value> {
+    let tool=tcomposer()?;
+    let stuff=stuff_dir().ok_or_else(||invalid("OpenToonz stuff directory unavailable; install OpenToonz resources or set OPENTOONZ_STUFF"))?.canonicalize()?;
+    let scene=crate::workspace::resolve_workspace_path(s,p["scene"].as_str().ok_or_else(||invalid("scene is required"))?).canonicalize()?;
+    if scene.extension().is_none_or(|e|e!="tnz") {return Err(invalid("scene must be .tnz"));}
+    let bundle=p["bundle"].as_str().map(|v|crate::workspace::resolve_workspace_path(s,v)).or_else(||project_root(&scene)).or_else(||scene.parent().map(Path::to_path_buf)).ok_or_else(||invalid("bundle required"))?.canonicalize()?;
+    if !scene.starts_with(&bundle){return Err(invalid("scene must be inside bundle"));}
+    if ["fps","width","height"].iter().any(|k|p.get(*k).is_some()){return Err(invalid("Use saved scene fps/size; overrides unsupported"));}
+    let mc=std::env::current_exe()?.with_file_name("mc");if !mc.is_file(){return Err(invalid("Install adjacent mc for bounded OpenToonz helper"));}
+    let mut request=p.clone();request["scene"]=json!(scene);request["bundle"]=json!(bundle);request["stuff"]=json!(stuff);request["tcomposer"]=json!(tool);request["mc"]=json!(mc);request["ffmpeg"]=json!("ffmpeg");
+    crate::blender::submit(s,p,request,"opentoonz")
+}
+
 /// `opentoonz.discover`: tool availability and, given a scene, what would render. No rendering.
 pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer();
-    let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"tcomposer":tool.as_ref().ok(),
+    let render_reason=tool.as_ref().err().map(|e|e.to_string()).or_else(||stuff_dir().is_none().then(||"OpenToonz stuff directory required (OPENTOONZ_STUFF)".to_string()));
+    let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"tcomposer":tool.as_ref().ok(),
         "tcomposer_sha256":match &tool { Ok(path) => json!(sha256_file(path)?), Err(_) => Value::Null },
         "version":Value::Null,"version_note":"tcomposer has no version flag; record the package or build version at deployment",
         "stuff":stuff_dir(),"reason":tool.as_ref().err().map(|e| e.to_string()),
@@ -313,18 +328,18 @@ pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
 /// With `request` (a job's request.json) it runs only inside that job's worker invocation,
 /// renders into `<job>/frames` and writes `<job>/opentoonz-manifest.json`.
 pub fn cmd_opentoonz_render(s: &mut Session, p: &Value) -> Result<Value> {
-    let Some(path) = p["request"].as_str() else { return render(s, p) };
+    let path = p["request"].as_str().ok_or_else(||invalid("Use opentoonz.start; render is a bounded-worker-only helper"))?;
     if s.project_path.is_some() { return Err(invalid("Worker rendering requires a separate headless worker session")); }
     let path = PathBuf::from(path);
     let request: Value = serde_json::from_slice(&fs::read(&path)?).map_err(|e| invalid(e.to_string()))?;
     crate::blender::require_worker_invocation(&request)?;
     let job = path.parent().ok_or_else(|| invalid("request has no job folder"))?;
     let mut params = json!({"out":job.join("frames")});
-    for key in ["scene", "first", "last", "step", "shrink", "nthreads", "fps", "width", "height"] { params[key] = request[key].clone(); }
+    for key in ["scene", "bundle", "first", "last", "step", "shrink", "nthreads", "fps", "width", "height"] { params[key] = request[key].clone(); }
     let mut result = render(s, &params)?;
     let manifest = json!({"backend":"opentoonz","job":request["job"],"frames":result["frames"],"frame_mapping":result["frame_mapping"],
         "first_frame":result["first_frame"],"last_frame":result["last_frame"],"fps":result["fps"],"width":result["width"],
-        "height":result["height"],"alpha":result["alpha"],"source_bundle":result["source_bundle"],"tool":result["tool"],"range":result["range"]});
+        "height":result["height"],"scene_frame_count":result["scene_frame_count"],"alpha":result["alpha"],"source_bundle":result["source_bundle"],"tool":result["tool"],"range":result["range"]});
     let target = job.join("opentoonz-manifest.json");
     let temporary = target.with_extension("tmp");
     fs::write(&temporary, serde_json::to_vec_pretty(&manifest).map_err(|e| invalid(e.to_string()))?)?;
@@ -336,6 +351,21 @@ pub fn cmd_opentoonz_render(s: &mut Session, p: &Value) -> Result<Value> {
 fn render(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer()?;
     let plan = plan(s, p)?;
+    let size=plan["declared_camera_resolution"].as_array().filter(|v|v.len()==2).ok_or_else(||invalid("One declared camera resolution is required for bounded rendering"))?;
+    let shrink=plan["shrink"].as_u64().unwrap_or(1);
+    let width=size[0].as_u64().unwrap_or(0)/shrink;
+    let height=size[1].as_u64().unwrap_or(0)/shrink;
+    let count=plan["range"]["last"].as_u64().unwrap_or(0)-plan["range"]["first"].as_u64().unwrap_or(0)+1;
+    if !(1..=4096).contains(&width) || !(1..=4096).contains(&height) || count>18000 || width*height*count>256*1024*1024 {
+        return Err(invalid("Native scene exceeds bounded frame/pixel budget"));
+    }
+    if let Some(bundle)=p["bundle"].as_str() {
+        let bundle=Path::new(bundle).canonicalize()?;
+        for dependency in plan["source_bundle"]["dependencies"].as_array().into_iter().flatten() {
+            let path=Path::new(dependency["path"].as_str().ok_or_else(||invalid("Invalid dependency path"))?).canonicalize()?;
+            if !path.starts_with(&bundle){return Err(invalid("Native dependency escapes frozen bundle"));}
+        }
+    }
     let dir = PathBuf::from(plan["frames_dir"].as_str().unwrap_or_default());
     if dir.exists() && fs::read_dir(&dir)?.next().is_some() { return Err(invalid("out must be a new or empty folder so no stale frame can count")); }
     fs::create_dir_all(&dir)?;
@@ -352,7 +382,7 @@ fn render(s: &mut Session, p: &Value) -> Result<Value> {
     let frames = collect(&plan)?;
     let mut result = json!({"ok":true,"state":"completed","backend":"opentoonz",
         "tool":{"path":tool,"sha256":sha256_file(&tool)?,"version":Value::Null},
-        "source_bundle":plan["source_bundle"],"range":plan["range"],"fps":plan["fps"],"shrink":plan["shrink"],
+        "source_bundle":plan["source_bundle"],"scene_frame_count":plan["scene"]["frame_count"],"range":plan["range"],"fps":plan["fps"],"shrink":plan["shrink"],
         "argv":plan["argv"],"log":dir.join("tcomposer.log")});
     for (key, value) in frames.as_object().into_iter().flatten() { result[key] = value.clone(); }
     Ok(result)

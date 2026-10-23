@@ -2,6 +2,10 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import sys
+import importlib
+sys.path.insert(0,str(Path(__file__).parent))
+sys.modules["worker"]=importlib.import_module("blender_animation_worker")
 import unittest
 from PIL import Image
 
@@ -44,5 +48,18 @@ class NativeWorkerTests(unittest.TestCase):
             (frames/'frame.0001.png').write_bytes(b'not PNG')
             with self.assertRaises(Exception):
                 worker.collect_frames(frames,3,16,12)
+
+    def test_ordered_native_manifest_encodes_real_alpha_without_renderer(self):
+        self.assertTrue(hasattr(worker, 'encode_frames'), 'Shared native encoding boundary is absent')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); frames=root/'frames'; frames.mkdir()
+            paths=[]
+            for i, colour in enumerate([(255,0,0,255),(0,255,0,128)]):
+                path=frames/f'frame.{i+1:04}.png'
+                picture=Image.new('RGBA',(16,16),(0,0,0,0)); picture.paste(colour,(4,4,12,12));picture.save(path);paths.append(path)
+            result=worker.encode_frames({'ffmpeg':'ffmpeg'},root,paths,12,16,16)
+            self.assertEqual(result['alpha_evidence']['decoded_frames'],2)
+            self.assertEqual(result['alpha_evidence']['clip_min'],0)
+            self.assertTrue(Path(result['clip']).is_file())
 
 if __name__ == '__main__': unittest.main()

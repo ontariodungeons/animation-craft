@@ -127,6 +127,50 @@ def collect_frames(directory, count, width, height):
     return {'frames':manifest, 'alpha_evidence':{'mode':'RGBA', 'min':minimum, 'max':maximum, 'decoded_frames':count}}
 
 
+def encode_frames(request, job, paths, fps, width, height):
+    from PIL import Image
+    from worker import write_json
+    count=len(paths)
+    if not math.isfinite(fps) or not 0 < fps <= 120 or not 1 <= count <= 18000 or not 1 <= width <= 4096 or not 1 <= height <= 4096 or width*height*count > 256*1024*1024:
+        raise ValueError('Native encoding exceeds frame/pixel/rate bounds')
+    minimum, maximum = 255, 0
+    for path in paths:
+        with Image.open(path) as picture:
+            picture.load()
+            if picture.mode != 'RGBA' or picture.size != (width,height):
+                raise ValueError('Expected fully decoded RGBA PNG at declared size')
+            low,high=picture.getchannel('A').getextrema();minimum=min(minimum,low);maximum=max(maximum,high)
+    result={'alpha_evidence':{'mode':'RGBA','min':minimum,'max':maximum,'decoded_frames':count}}
+    # Use our own sequential links only after verifying the native sequence.
+    sequence = job/'encode-frames'; sequence.mkdir()
+    for i,path in enumerate(paths):
+        os.link(path,sequence/f'{i:06d}.png')
+    write_json(job/'progress.json', {'state':'encoding','completed':count,'total':count})
+    clip = job/'preview.webm'
+    subprocess.run([request['ffmpeg'],'-v','error','-nostdin','-framerate',str(fps),
+                    '-i',str(sequence/'%06d.png'),'-frames:v',str(count),
+                    '-c:v','libvpx-vp9','-pix_fmt','yuva420p','-threads','2','-b:v','0','-crf','24',
+                    '-auto-alt-ref','0',str(clip)], check=True)
+    # Force the alpha-capable decoder and count actual decoded RGBA frames.
+    decoded = job/'decoded.rgba'
+    with decoded.open('wb') as output:
+        subprocess.run([request['ffmpeg'],'-v','error','-nostdin','-c:v','libvpx-vp9','-i',str(clip),
+                        '-f','rawvideo','-pix_fmt','rgba','-threads','2','-'], stdout=output, check=True)
+    frame_bytes = width*height*4
+    if decoded.stat().st_size != frame_bytes*(count):
+        raise ValueError('Encoded clip decoded frame count/dimensions mismatch')
+    low, high = 255,0
+    with decoded.open('rb') as stream:
+        while data := stream.read(frame_bytes):
+            alpha = data[3::4]; low=min(low,min(alpha)); high=max(high,max(alpha))
+    decoded.unlink()
+    if result['alpha_evidence']['min'] < 255 and low == 255:
+        raise ValueError('Encoded clip lost source transparency')
+    result['alpha_evidence']['clip_min'] = low
+    result['alpha_evidence']['clip_max'] = high
+    return dict(clip=str(clip), clip_sha256=sha256(clip), alpha_evidence=result['alpha_evidence'])
+
+
 def render_synfig(request, job):
     from worker import write_json
     frozen = snapshot_synfig(request, job)
@@ -160,34 +204,9 @@ def render_synfig(request, job):
     write_json(job/'progress.json', {'state':'rendering','completed':0,'total':last-first+1})
     subprocess.run(argv, cwd=Path(frozen['path']).parent, check=True)
     result = collect_frames(frames,last-first+1,width,height)
-    # Use our own sequential links only after verifying the native sequence.
-    sequence = job/'encode-frames'; sequence.mkdir()
-    for i, item in enumerate(result['frames']):
-        os.link(item['path'], sequence/f'{i:06d}.png')
-        item['source_frame'] = first+i
-    write_json(job/'progress.json', {'state':'encoding','completed':last-first+1,'total':last-first+1})
-    clip = job/'preview.webm'
-    subprocess.run([request['ffmpeg'],'-v','error','-nostdin','-framerate',str(fps),
-                    '-i',str(sequence/'%06d.png'),'-frames:v',str(last-first+1),
-                    '-c:v','libvpx-vp9','-pix_fmt','yuva420p','-threads','2','-b:v','0','-crf','24',
-                    '-auto-alt-ref','0',str(clip)], check=True)
-    # Force the alpha-capable decoder and count actual decoded RGBA frames.
-    decoded = job/'decoded.rgba'
-    with decoded.open('wb') as output:
-        subprocess.run([request['ffmpeg'],'-v','error','-nostdin','-c:v','libvpx-vp9','-i',str(clip),
-                        '-f','rawvideo','-pix_fmt','rgba','-threads','2','-'], stdout=output, check=True)
-    frame_bytes = width*height*4
-    if decoded.stat().st_size != frame_bytes*(last-first+1):
-        raise ValueError('Encoded clip decoded frame count/dimensions mismatch')
-    low, high = 255,0
-    with decoded.open('rb') as stream:
-        while data := stream.read(frame_bytes):
-            alpha = data[3::4]; low=min(low,min(alpha)); high=max(high,max(alpha))
-    decoded.unlink()
-    if result['alpha_evidence']['min'] < 255 and low == 255:
-        raise ValueError('Encoded clip lost source transparency')
-    result['alpha_evidence']['clip_min'] = low
-    result['alpha_evidence']['clip_max'] = high
+    for i,item in enumerate(result['frames']): item['source_frame']=first+i
+    encoded=encode_frames(request,job,[Path(v['path']) for v in result['frames']],fps,width,height)
+    clip=Path(encoded['clip']);result['alpha_evidence']=encoded['alpha_evidence']
     return dict(backend='synfig', state='completed', source_job=request['job'],
                 character=request.get('character'), track=request.get('track'), source_bundle=frozen, tool=tool_receipt,
                 frames=str(frames), frame_mapping=result['frames'], alpha_evidence=result['alpha_evidence'],
@@ -199,6 +218,66 @@ def render_synfig(request, job):
                 range_note='partial compares selected range with the saved root canvas timeline')
 
 
+def snapshot_tree(source, target):
+    source=Path(source).resolve()
+    if not source.is_dir() or target.resolve().is_relative_to(source):
+        raise ValueError('Bundle must be a directory outside job output')
+    target.mkdir(parents=True)
+    manifest=[];size=0
+    for path in sorted(source.rglob('*')):
+        if path.is_symlink(): raise ValueError('Bundle symlinks unsupported')
+        if path.is_dir(): continue
+        if not path.is_file(): raise ValueError('Bundle contains non-regular file')
+        size+=path.stat().st_size
+        if size>1024**3 or len(manifest)>=4096: raise ValueError('Bundle exceeds 1 GiB/4096 files')
+        out=target/path.relative_to(source);out.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(path,out);digest=sha256(out)
+        if sha256(path)!=digest: raise ValueError('Source changed while snapshotting')
+        manifest.append({'path':str(out.relative_to(target)),'sha256':digest})
+    return manifest
+
+
+def render_opentoonz(request, request_path):
+    from worker import write_json
+    job=request_path.parent
+    original=Path(request['scene']).resolve();root=Path(request['bundle']).resolve()
+    if not original.is_relative_to(root): raise ValueError('Scene outside bundle')
+    snapshot=job/'source-bundle';manifest=snapshot_tree(root,snapshot)
+    frozen=snapshot/original.relative_to(root)
+    # Native project aliases must not resolve outside the frozen bundle.
+    for path in [frozen,*snapshot.glob('*_otprj.xml')]:
+        content=path.read_text()
+        if re.search(r'(?:>|")\s*(?:/|[A-Za-z]:[\\/]|\.\.[\\/])',content):
+            raise ValueError('Absolute/escaping native resource references unsupported; make bundle self-contained')
+    stuff=job/'toonz-stuff';stuff_manifest=snapshot_tree(Path(request['stuff']),stuff)
+    prepared=dict(request,scene=str(frozen),bundle=str(snapshot))
+    helper_request=job/'opentoonz-request.json';write_json(helper_request,prepared)
+    env=dict(os.environ,OPENTOONZ_TCOMPOSER=request['tcomposer'],OPENTOONZ_STUFF=str(stuff),QT_QPA_PLATFORM='offscreen')
+    write_json(job/'progress.json',{'state':'rendering'})
+    subprocess.run([request['mc'],'exec','opentoonz.render','request='+str(helper_request)],env=env,check=True)
+    native=json.loads((job/'opentoonz-manifest.json').read_text())
+    if any(sha256(snapshot/v['path'])!=v['sha256'] for v in manifest):
+        raise ValueError('Frozen source bundle changed during native rendering')
+    first,last,step=(int(native['range'][k]) for k in ('first','last','step'))
+    if not 1<=last-first+1<=18000: raise ValueError('Requested timeline exceeds 18000 output frames')
+    expected=list(range(first,last+1,step));paths=[Path(p).resolve() for p in native['frames']]
+    if len(paths)!=len(expected) or any(p.parent!=job/'frames' for p in paths): raise ValueError('Invalid native frame manifest')
+    expanded=[];mapping=[]
+    for source_frame,path in zip(expected,paths):
+        for frame in range(source_frame,min(last+1,source_frame+step)):
+            expanded.append(path);mapping.append({'frame':frame,'scene_frame':source_frame,'path':str(path),'sha256':sha256(path)})
+    width,height=int(native['width']),int(native['height']);fps=float(native['fps'])
+    encoded=encode_frames(request,job,expanded,fps,width,height)
+    bundle={'path':str(frozen),'original_path':str(original),'sha256':sha256(frozen),'dependencies':manifest,
+            'bundle_sha256':hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest(),
+            'runtime_stuff':{'path':str(stuff),'dependencies':stuff_manifest}}
+    return dict(encoded,backend='opentoonz',state='completed',frames=str(job/'frames'),frame_mapping=mapping,
+                source_bundle=bundle,tool=native['tool'],first_frame=first,last_frame=last,fps=fps,
+                clip_seconds=len(expanded)/fps,width=width,height=height,canvas=[width,height],world_rect=[0,0,width,height],
+                selected_range=native['range'],partial=first!=1 or last!=native['scene_frame_count'],
+                source_job=request['job'],sampling='step frames held to preserve scene timing')
+
+
 def main(request_path):
     from worker import write_json, job_metadata, service_metrics
     request_path = request_path.resolve(); job=request_path.parent
@@ -206,9 +285,9 @@ def main(request_path):
     write_json(job/'invocation.json', {'invocation_id':os.environ.get('INVOCATION_ID')})
     try:
         job_metadata(request_path, request, service_metrics(request['unit']))
-        if request['backend'] != 'synfig':
-            raise ValueError('Unsupported native backend')
-        result=render_synfig(request,job)
+        if request['backend']=='synfig': result=render_synfig(request,job)
+        elif request['backend']=='opentoonz': result=render_opentoonz(request,request_path)
+        else: raise ValueError('Unsupported native backend')
         result['worker_peak_rss_kib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         write_json(job/'rendered.json',result)
     except Exception as error:
