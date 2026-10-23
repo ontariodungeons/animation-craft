@@ -19,7 +19,7 @@ pub(super) fn overview(c:&Center)->Value{
   "target":c.state["target"].as_str().map(str::to_owned).or_else(||(c.state["snapshot"]["hyperframes"]==true).then(||"HyperFrames".into())),
   "audio_state":stage_evidence(c,0).and_then(|v|v["state"].as_str()),"audio_seconds":metrics["recording_duration_sec"],"words":metrics["timed_words"],"assets_available":metrics["available_assets"],"assets_registered":metrics["registered_assets"],
   "selected_stage":{"name":PROJECT_STAGES[c.stage_selected%PROJECT_STAGES.len()].0,"state":stage_evidence(c,c.stage_selected).and_then(|v|v["state"].as_str())},
-  "problem":c.state["problems"].as_array().and_then(|p|p.first()),"chat_available":matched&&c.pinned_instance.is_some()&&ui["endpoint"].is_string()})
+  "problem":c.state["problems"].as_array().and_then(|p|p.first()),"chat_send_granted":c.scope.as_ref().is_none_or(|s|s.permits("agent.send")),"chat_available":matched&&c.pinned_instance.is_some()&&ui["endpoint"].is_string()&&c.scope.as_ref().is_none_or(|s|s.permits("agent.send"))})
 }
 fn row(label:&str,value:impl Into<String>,width:usize)->Line<'static>{
  bounded_line(Line::from(vec![Span::styled(format!("{label:<10}"),MUTED),Span::styled(value.into(),DESK_FG)]),width)
@@ -68,14 +68,15 @@ pub(super) fn render_chat(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let inner=block.inner(area);f.render_widget(block,area);if inner.height<2{return;}
  let data=overview(c);let connected=data["chat_available"]==true;
  let mut lines=vec![row("Project",data["name"].as_str().unwrap_or("Unknown"),inner.width as usize),
-  Line::from(vec![Span::styled(if connected{"● "}else{"○ "},if connected{GREEN}else{AMBER}),Span::styled(if connected{"Connected to this project's Studio".into()}else{format!("Chat unavailable · {}",if data["studio"]=="Offline"{"Studio offline"}else{"control unavailable"})},DESK_FG)])];
+  Line::from(vec![Span::styled(if connected{"● "}else{"○ "},if connected{GREEN}else{AMBER}),Span::styled(if connected{"Connected to this project's Studio".into()}else{format!("Chat unavailable · {}",if data["chat_send_granted"]==false{"send not granted"}else if data["studio"]=="Offline"{"Studio offline"}else{"control unavailable"})},DESK_FG)])];
  if c.message.starts_with("Chat "){lines.push(styled(c.message.clone(),if c.message.starts_with("Chat blocked")||c.message.starts_with("Chat error"){AMBER}else{MUTED}));}
  let request=&c.state["chat"]["request"];
  if let Some(status)=request["status"].as_str(){lines.push(styled(format!("Reply  {status}"),MUTED));}
  for turn in c.state["chat_turns"].as_array().into_iter().flatten().rev().take(6).collect::<Vec<_>>().into_iter().rev(){
   lines.push(Line::raw(""));lines.push(styled(format!("{}: {}",if turn["role"]=="user"{"You"}else{"Sproket"},conversation_text(turn["text"].as_str().unwrap_or(""))),DESK_FG));
  }
- let draft_lines=vec![styled("Message · Enter sends · F9/Esc keeps draft",MUTED),styled(format!("> {}▏",c.chat_draft),DESK_FG)];
+ let readonly=data["chat_send_granted"]==false;
+ let draft_lines=if readonly{vec![styled("Read-only · Sproket send is not granted · F9/Esc close",MUTED)]}else{vec![styled("Message · Enter sends · F9/Esc keeps draft",MUTED),styled(format!("> {}▏",c.chat_draft),DESK_FG)]};
  let draft_height=wrapped_rows(&draft_lines,inner.width).max(2).min(inner.height.saturating_sub(1));
  let heading:Vec<_>=lines.drain(..2).collect();
  let parts=Layout::vertical([Constraint::Length(2),Constraint::Min(1),Constraint::Length(draft_height)]).split(inner);

@@ -2,7 +2,7 @@
 use serde_json::{Value,json};
 use std::{fs,io::{BufRead,BufReader,Read,Write},os::unix::{fs::{FileTypeExt,MetadataExt,PermissionsExt},net::{UnixListener,UnixStream}},path::PathBuf,time::Duration};
 
-fn directory()->Result<PathBuf,String>{
+fn root_directory()->Result<PathBuf,String>{
  let uid=fs::metadata("/proc/self").map_err(|e|e.to_string())?.uid();
  let root=std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(||std::env::temp_dir().join(format!("magicstudio-{uid}")));
  let dir=root.join("magicstudio-tui");
@@ -11,6 +11,20 @@ fn directory()->Result<PathBuf,String>{
  if meta.file_type().is_symlink()||!meta.is_dir()||meta.uid()!=uid{return Err("TUI runtime directory must be an owned directory, not a symlink".into());}
  fs::set_permissions(&dir,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;
  Ok(dir)
+}
+
+fn private_directory(path:PathBuf)->Result<PathBuf,String>{
+ match fs::create_dir(&path){Ok(())=>{},Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>{},Err(e)=>return Err(e.to_string())}
+ let meta=fs::symlink_metadata(&path).map_err(|e|e.to_string())?;let uid=fs::metadata("/proc/self").map_err(|e|e.to_string())?.uid();
+ if !meta.is_dir()||meta.file_type().is_symlink()||meta.uid()!=uid{return Err("TUI scope directory must be owned and not a symlink".into());}
+ fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;Ok(path)
+}
+fn directory()->Result<PathBuf,String>{
+ let root=root_directory()?;if let Some(scope)=crate::scope::current()?{let booths=private_directory(root.join("booths"))?;private_directory(booths.join(scope.key()))}else{Ok(root)}
+}
+fn sockets(directory:&std::path::Path)->Vec<PathBuf>{
+ fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="sock"))
+ .filter(|p|p.file_stem().and_then(|v|v.to_str()).and_then(|v|v.parse::<u32>().ok()).is_some_and(|pid|std::path::Path::new(&format!("/proc/{pid}")).exists())).collect()
 }
 
 pub struct Server{listener:UnixListener,path:PathBuf,pub generation:u128}
@@ -56,20 +70,22 @@ fn request(path:&std::path::Path,action:&str,params:&Value)->Result<Value,String
 pub fn call(action:&str,params:&Value)->Result<Value,String>{
  if params.get("section").is_some()&&!matches!(action,"look"|"read"|"status"|"controls"){return Err("section= filters observations only; read the resulting frame with tui look".into());}
  let dir=directory()?;
- let mut endpoints:Vec<_>=fs::read_dir(&dir).map_err(|e|e.to_string())?.filter_map(Result::ok)
-  .map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="sock"))
-  .filter(|p|p.file_stem().and_then(|v|v.to_str()).and_then(|v|v.parse::<u32>().ok()).is_some_and(|pid|std::path::Path::new(&format!("/proc/{pid}")).exists())).collect();
+ let mut endpoints=sockets(&dir);
+ if crate::scope::current()?.is_none(){
+  let booths=dir.join("booths");
+  for entry in fs::read_dir(booths).into_iter().flatten().filter_map(Result::ok){if entry.file_type().is_ok_and(|t|t.is_dir()){endpoints.extend(sockets(&entry.path()));}}
+ }
  endpoints.sort();
  if action=="instances"{
-  let values:Vec<_>=endpoints.iter().map(|path|match request(path,"look",&json!({})){Ok(v)=>json!({"instance":v["instance"],"view":v["view"],"project":v["project"],"endpoint":path}),Err(e)=>json!({"endpoint":path,"error":e})}).collect();
+  let values:Vec<_>=endpoints.iter().map(|path|match request(path,"look",&json!({})){Ok(v)=>json!({"instance":v["instance"],"view":v["view"],"project":v["project"],"role":v["access"]["role"],"endpoint":path}),Err(e)=>json!({"endpoint":path,"error":e})}).collect();
   return Ok(json!({"ok":true,"instances":values}));
  }
  let selected=params["instance"].as_u64().map(|v|v.to_string()).or_else(||params["instance"].as_str().map(str::to_owned));
  if params.get("instance").is_some()&&selected.is_none(){return Err("instance= must be a TUI process ID".into());}
  let path=if let Some(pid)=selected{
   if pid.parse::<u32>().is_err(){return Err("instance must be a TUI process ID".into());}
-  let path=dir.join(format!("{pid}.sock"));if !endpoints.contains(&path){return Err(format!("TUI {pid} is not running; use mc tui instances"));}path
- }else{match endpoints.as_slice(){[one]=>one.clone(),[]=>return Err("No controllable TUI is running. Start the updated mc booth in your terminal.".into()),_=>return Err("Several TUIs are running. Use mc tui instances, then instance=<pid>. Nothing was changed.".into())}};
+  endpoints.iter().find(|p|p.file_stem().and_then(|s|s.to_str())==Some(pid.as_str())).cloned().ok_or_else(||format!("TUI {pid} is outside this context or not running; use mc tui instances"))?
+ }else{let masters:Vec<_>=endpoints.iter().filter(|p|p.parent()==Some(dir.as_path())).cloned().collect();let choices=if masters.is_empty(){&endpoints}else{&masters};match choices.as_slice(){[one]=>one.clone(),[]=>return Err("No controllable TUI is running. Start the updated mc booth in your terminal.".into()),_=>return Err("Several TUIs are running. Use mc tui instances, then instance=<pid>. Nothing was changed.".into())}};
  let mut value=request(&path,action,params)?;
  if action=="reload"&&value["ok"]==true{
   let old=value["generation"].clone();
@@ -93,8 +109,9 @@ pub fn call(action:&str,params:&Value)->Result<Value,String>{
 pub const CONTROLS:&[(&str,&str)]=&[
  ("look","Rendered terminal text, structured state and this control list"),
  ("click id=<visible control id>","Click a visible button using the same hit target as the mouse; look section=elements lists IDs and rectangles"),
- ("view name=workshop|booth|mops|telemetry","F1/F2/F3/F4"),
+ ("view name=workshop|booth|mops|animal","F1/F2/F3/F4"),
  ("agent pane=<id> | name=<name> | index=<n>","Select an agent and show MOPS; G opens MOPS, 1–9/0 select, left/right cycle"),
+ ("booth.prepare [project=<file>] [pane=<id> name=<name> task=<text>] [allow=<command IDs>]","Master only: prepare an assignment and onboarding command (B in Workshop); never launches or messages an agent"),
  ("project.select path=<file> | index=<n>","Select a Workshop card without attaching; arrows/j/k move, Enter/Open enters Booth"),
  ("project.open-selected","Open the selected Workshop project in Booth; does not switch a Studio"),
  ("project.inactive [show=true|false]","Show/hide inactive project cards (I)"),

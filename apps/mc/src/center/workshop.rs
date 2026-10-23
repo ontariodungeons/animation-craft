@@ -112,13 +112,14 @@ pub(super) fn render(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let title=if c.state["catalog"]["projects"].is_array(){format!(" PROJECTS · {} · {inactive} Other · Recent catalog",activity_label(c))}else{" PROJECTS · Catalog unavailable".into()};
  f.render_widget(Paragraph::new(fit_text(&title,area.width as usize)).style(Style::default().fg(TEAL)),ratatui::layout::Rect::new(area.x,area.y,area.width,1));
  let preview=ratatui::layout::Rect::new(area.x,area.y+1,area.width,1);
- let controls="[ Open ↵ ] [ Details D ]";let controls_width=Line::raw(controls).width().min(area.width as usize) as u16;
+ let controls=if area.width>=65{"[ Open ↵ ] [ Details D ] [ Agent B ]"}else{"[ Open ↵ ] [ Details D ]"};let controls_width=Line::raw(controls).width().min(area.width as usize) as u16;
  let name=selected(c).map(|p|display_name(c,p)).unwrap_or("No selection".into());
  f.render_widget(Paragraph::new(fit_text(&format!(" › {name}"),area.width.saturating_sub(controls_width+1) as usize)).style(Style::default().fg(DESK_FG).bg(DESK_SELECTED)),preview);
  let buttons=ratatui::layout::Rect::new(area.right()-controls_width,preview.y,controls_width,1);
  f.render_widget(Paragraph::new(controls).style(Style::default().fg(TEAL).bg(DESK_SELECTED)),buttons);
  if selected(c).is_some(){button(c,"project-open","Open selected project in Booth",ratatui::layout::Rect::new(buttons.x,buttons.y,10.min(buttons.width),1),"project.open-selected",json!({}));}
- button(c,"project-details","Selected project details",ratatui::layout::Rect::new(buttons.x+10.min(buttons.width),buttons.y,buttons.width.saturating_sub(10),1),"details",json!({}));
+ button(c,"project-details","Selected project details",ratatui::layout::Rect::new(buttons.x+11.min(buttons.width),buttons.y,buttons.width.saturating_sub(11).min(13),1),"details",json!({}));
+ if area.width>=65{button(c,"project-agent-booth","Prepare a project-locked agent Booth",ratatui::layout::Rect::new(buttons.x+25,buttons.y,11,1),"booth.prepare",json!({}));}
  let mut grid=ratatui::layout::Rect::new(area.x,area.y+2,area.width,area.height.saturating_sub(2));
  if c.details_open{
   let parts=if area.width>=110{Layout::horizontal([Constraint::Percentage(60),Constraint::Percentage(40)]).spacing(1).split(grid)}else{Layout::vertical([Constraint::Min(5),Constraint::Length(grid.height.saturating_sub(5).min(12))]).split(grid)};

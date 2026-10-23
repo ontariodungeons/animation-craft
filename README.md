@@ -43,6 +43,19 @@ Live TUI control uses `mc tui`, which talks to the running terminal instance rat
 
 Booth aligns stage labels and status lights in fixed columns. Its middle panel shows project/Studio/save/selection/media facts from cached observations. `F9` or the Sproket title button opens project chat; F9/Escape closes it while retaining the draft. Drafts stay bound to their originating project; selecting another project cannot redirect them. Enter sends only from that window. Offline or mismatched Studio connections stay unavailable and retain drafts; the TUI does not launch an app to send. CLI equivalents are `mc tui chat`, `mc tui chat text=...`, `mc tui chat.send`, and `mc tui chat.close`. `mc tui look section=project_overview` exposes the same facts. Artwork borders animate at most four times per second only while a fresh worker observation says running; completed, stale and unavailable observations remain static. Green is limited to status lights in that panel; its frame and low-memory bars use blue.
 
+Jesse and Gonzo use the master **WORKSHOP** (`mc workshop`, or F1). **ANIMAL** is the F4 telemetry view; `view name=telemetry` remains an alias for `animal`. The master shows host dials and all projects. An assigned agent sees only BOOTH, project MOPS, and project ANIMAL.
+
+Select a Workshop card and press **B / Agent B** to prepare an assignment without launching or messaging an agent. To explicitly assign one teammate and its task, use:
+
+```bash
+mc tui booth.prepare project=/absolute/song.magic pane=<pane-id> name=<agent-name> task='The assigned task'
+# Optional explicit additional project commands: allow=project.save,motion.sample
+```
+
+The response contains `onboarding.assignment`, `onboarding.launch`, and `onboarding.environment`. Put `MAGICSTUDIO_ASSIGNMENT=<that assignment file>` in the **agent process environment**, including its MCP configuration; each child `mc` command then inherits the scope. To inspect its Booth manually, run the returned launch command. Do not give it a master TUI instance ID. By default the scope permits project inspection and notes to explicitly assigned teammates; additional engine commands require a master grant. Sproket history can be read, while sending requires `allow=agent.send`. Reprepare the same project to add a teammate or replace grants, then reload its Booth/MCP session.
+
+This context filters CLI/MCP command discovery, validates project identity before dispatch, prevents save-as into another project, and keeps native TUI endpoints in a project-specific namespace. Project MOPS uses Workshop assignment tasks and project receipts; it never reads a teammate's unrelated terminal history. Project ANIMAL excludes host processes, host logs and other projects' worker ownership. These are workflow permissions under the shared Linux account, not an OS/filesystem sandbox; the assigned environment must stay configured.
+
 Workshop uses responsive project cards (one to four columns), with observed active projects first and an `I` toggle for inactive projects. Unknown discovery stays `Unknown`; a frame meter appears only for an observed project-matched worker receipt. Arrows or `j`/`k` select without attaching; click selects a card, and Enter/Open or F2 enters its Booth. `D` opens selected-project details, including the full path and copyable CLI commands; `C` copies the selected command without executing it. Repeated names include a short folder label. The Workshop film header reports fleet counts rather than another project's render.
 
 `mc tui project.select index=0` selects without attaching; `mc tui project.open-selected` opens Booth; `mc tui project.inactive show=true` expands inactive projects. `mc tui look section=workshop` returns selected-project data, card observations, visible ordering and column count. Project indices refer to the shared catalog, not their sorted screen positions.

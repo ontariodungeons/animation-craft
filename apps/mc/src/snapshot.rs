@@ -9,6 +9,7 @@ pub const TAIL_SCHEMA: &str = "mc.center.tail/1";
 /// Page state and rig fps from the matched Studio window; empty when no window is connected.
 /// `previous` is the last snapshot, so fps is re-read only when the subject changes.
 pub fn live(ui: &Value, previous: &Value) -> Value {
+    if crate::scope::current().ok().flatten().is_some_and(|s|!s.permits("ui.state")){return json!({});}
     let Some(endpoint) = ui["endpoint"].as_str().filter(|_| ui["connection"] == "connected") else {
         return json!({});
     };

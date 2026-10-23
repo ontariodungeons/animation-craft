@@ -3,6 +3,10 @@ use crossterm::event::KeyEvent;
 #[derive(Clone,Copy,PartialEq,Eq)]
 pub(super) enum Flow{Continue,Quit,Reload}
 pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
+            if let Some(error)=roles::key_error(c,key){c.message=error;return Flow::Continue;}
+            if c.onboarding.is_some(){match key.code{KeyCode::Esc=>c.onboarding=None,KeyCode::Char('c')=>c.copy_command(),KeyCode::PageUp=>c.scroll=c.scroll.saturating_sub(4),KeyCode::PageDown=>c.scroll=c.scroll.saturating_add(4),KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL)=>return Flow::Quit,_=>{}}return Flow::Continue;}
+            if !c.show_form&&!c.chat_editing&&c.poke.is_none()&&c.view_name()=="workshop"&&key.code==KeyCode::Char('b'){if let Err(error)=roles::prepare(c,&json!({})){c.message=error;}return Flow::Continue;}
+
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
                 if c.poke.is_some()||!c.chat_draft.is_empty(){c.message="Resolve or cancel the draft before closing the TUI.".into();return Flow::Continue;}
                 return Flow::Quit;
@@ -172,6 +176,7 @@ fn open_chat(c:&mut Center)->Result<(),String>{
 }
 pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
  let previous_message=c.message.clone();
+ if let Some(error)=roles::action_error(c,name,p){return Err(error);}
  for field in ["index","sequence"]{if p.get(field).is_some()&&!p[field].is_u64(){return Err(format!("{field}= must be a nonnegative integer"));}}
  if p.get("append").is_some()&&!p["append"].is_boolean(){return Err("append= must be true or false".into());}
  if c.show_form&&matches!(name,"view"|"agent"|"project"|"project.select"|"project.open-selected"|"project.inactive"|"chat"|"chat.send"|"event"|"events"){return Err("Intake is open. Use key key=F4 to close it before changing views.".into());}
@@ -181,6 +186,7 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
  let mut flow=Flow::Continue;
  match name{
   "look"|"read"|"status"|"controls"=>{},
+  "booth.prepare"=>{roles::prepare(c,p)?;},
   "click"=>{
    let id=required(p,"id")?;
    let hit=c.hits.borrow().iter().find(|h|h.id==id).cloned().ok_or("Control is not visible; use look section=elements")?;
@@ -188,12 +194,13 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
    return mouse(c,hit.area.x+hit.area.width/2,hit.area.y+hit.area.height/2);
   },
   "view"=>{
+   c.onboarding=None;
    let view=required(p,"name")?;
-   let target=match view{"workshop"=>1,"booth"=>2,"mops"|"moppets"|"muppets"=>3,"telemetry"=>4,_=>return Err("Unknown view: choose workshop, booth, mops or telemetry".into())};
+   let (target,canonical)=match view{"workshop"=>(1,"workshop"),"booth"=>(2,"booth"),"mops"|"moppets"|"muppets"=>(3,"mops"),"animal"|"telemetry"=>(4,"animal"),_=>return Err("Unknown view: choose workshop, booth, mops or animal".into())};
    if c.event_open{press(c,KeyCode::Esc);}
    if c.event_focus{press(c,KeyCode::Esc);}
    if c.details_open{press(c,KeyCode::Char('d'));}
-   if c.view_name()!=view{flow=press(c,KeyCode::F(target));}
+   if c.view_name()!=canonical{flow=press(c,KeyCode::F(target));}
    if c.telemetry_view{c.refresh();}
   },
   "agent"=>{select_agent(c,p)?;c.details_open=false;flow=press(c,KeyCode::F(3));c.refresh();},
@@ -264,7 +271,7 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
    let text=input_text(p,"text")?;
    if let Some(poke)=&mut c.poke{poke.text.push_str(&text);}else if c.chat_editing{c.chat_draft.push_str(&text);}else if c.show_form&&c.editing{c.fields[c.selected].push_str(&text);}else{return Err("No input has focus; open a note, chat or intake field first".into());}
   },
-  "key"=>{flow=key(c,parse_key(&input_text(p,"key")?)?);},
+  "key"=>{let key_event=parse_key(&input_text(p,"key")?)?;if let Some(error)=roles::key_error(c,key_event){return Err(error);}flow=key(c,key_event);},
   "reload"|"quit"=>{
    if c.poke.is_some()||!c.chat_draft.is_empty()||c.show_form{return Err("Resolve draft/intake fields before reloading or closing the TUI".into());}
    flow=if name=="reload"{Flow::Reload}else{Flow::Quit};
@@ -272,7 +279,7 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
   _=>return Err(format!("Unknown TUI action {name}; use mc tui controls")),
  }
  let executed=matches!(name,"intake.create"|"intake.resume"|"project.open"|"project.save"|"storyboard.open");
- if (executed||c.message!=previous_message)&&["BLOCKED:","Not sent:","Chat error:","Project observation failed:"].iter().any(|prefix|c.message.starts_with(prefix)){return Err(c.message.clone());}
+ if (executed||c.message!=previous_message)&&["Restricted:","BLOCKED:","Not sent:","Chat error:","Project observation failed:"].iter().any(|prefix|c.message.starts_with(prefix)){return Err(c.message.clone());}
  Ok(flow)
 }
 fn parse_key(value:&str)->Result<KeyEvent,String>{
@@ -295,22 +302,24 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
  let tiles=gang_tiles(c);
  let agents:Vec<_>=tiles.iter().enumerate().map(|(i,(name,identity,status,word))|{
   let agent=&c.state["agent_gang"][i];
-  json!({"index":i,"name":name,"icon":moppet_icon(name),"colour":colour(*identity),"status_colour":colour(*status),"status":word,"pane":agent["pane_id"],"provider":agent["agent"],"task":agent["terminal_title_stripped"],"task_source":"terminal title; not an assignment record","selected":i==c.gang_selected})
+  json!({"index":i,"name":name,"icon":moppet_icon(name),"colour":colour(*identity),"status_colour":colour(*status),"status":word,"pane":agent["pane_id"],"provider":agent["agent"],"task":agent["terminal_title_stripped"],"task_source":agent["task_source"].as_str().unwrap_or("terminal title; not an assignment record"),"selected":i==c.gang_selected})
  }).collect();
- let host=c.dials.as_ref().map(|h|json!({"cpu_percent":h.cpu_pct,"cores":h.cores,"memory_used_kb":h.mem_used_kb,"memory_total_kb":h.mem_total_kb,"swap_used_kb":h.swap_used_kb,"swap_total_kb":h.swap_total_kb,"load":h.load,"age_ms":h.at.elapsed().as_millis()}));
- let processes:Vec<_>=c.procs.iter().map(|p|json!({"pid":p.pid,"name":p.name,"cpu_percent":p.cpu_pct,"rss_kb":p.rss_kb})).collect();
+ let host=c.dials.as_ref().filter(|_|c.scope.is_none()).map(|h|json!({"cpu_percent":h.cpu_pct,"cores":h.cores,"memory_used_kb":h.mem_used_kb,"memory_total_kb":h.mem_total_kb,"swap_used_kb":h.swap_used_kb,"swap_total_kb":h.swap_total_kb,"load":h.load,"age_ms":h.at.elapsed().as_millis()}));
+ let processes:Vec<_>=c.procs.iter().filter(|_|c.scope.is_none()).map(|p|json!({"pid":p.pid,"name":p.name,"cpu_percent":p.cpu_pct,"rss_kb":p.rss_kb})).collect();
  let fields:serde_json::Map<String,Value>=["project","root","name","audio","transcript","captions","audiomap","materials"].iter().enumerate().map(|(i,name)|(name.to_string(),json!(c.fields[i]))).collect();
  let commands:Vec<_>=c.copy_commands().iter().enumerate().map(|(i,(label,literal))|json!({"index":i,"label":label,"literal":literal,"selected":i==c.command_selected})).collect();
  let elements:Vec<_>=c.hits.borrow().iter().map(|h|json!({"id":h.id,"label":h.label,"enabled":h.enabled,"rect":{"x":h.area.x,"y":h.area.y,"width":h.area.width,"height":h.area.height},"action":h.action,"params":h.params})).collect();
- let controls:Vec<_>=crate::tui::CONTROLS.iter().map(|(action,description)|json!({"action":action,"description":description})).collect();
+ let controls=roles::controls(c);
  json!({"schema":"mc.tui/1","instance":std::process::id(),"endpoint":endpoint,"frame":frame,"rendered_unix_ms":crate::worker::now_ms(),"acknowledgement":"actual frame rendered",
-  "view":if c.show_form{"intake"}else if c.poke.is_some(){"note"}else if c.chat_editing{"chat"}else if c.event_open{"event"}else{c.view_name()},"tab":c.view_name(),"project":c.state["project"],"message":c.message,
+  "access":{"role":if c.scope.is_some(){"project"}else{"master"},"project":c.scope.as_ref().map(|s|s.project.clone()),"members":c.scope.as_ref().map(|s|s.members.clone()),"allowed_commands":c.scope.as_ref().map(|s|s.commands("")["commands"].clone())},"onboarding":c.onboarding,
+  "view":if c.onboarding.is_some(){"onboarding"}else if c.show_form{"intake"}else if c.poke.is_some(){"note"}else if c.chat_editing{"chat"}else if c.event_open{"event"}else{c.view_name()},"tab":c.view_name(),"project":c.state["project"],"message":c.message,
   "project_overview":booth::overview(c),"artwork_motion":worker_observation(c).is_some_and(booth::motion_active),
   "status_line":crate::snapshot::status_strip(&c.state["snapshot"]),"timecode":c.state["snapshot"]["playhead_sec"].as_f64().zip(c.state["snapshot"]["fps"].as_f64()).map(|(seconds,fps)|timecode(seconds,fps)),
   "screen":{"columns":area.width,"rows":area.height,"lines":lines},"studio":c.state["ui"],"snapshot":c.state["snapshot"],
   "agents":agents,"agent_detail":{"pane":c.selected_agent().map(|a|a["pane_id"].clone()),"output":c.spy,"age_ms":c.spy_at.map(|t|t.elapsed().as_millis())},
-  "projects":c.state["catalog"]["projects"],"catalog_scope":"existing recent-project catalog","stages":c.state["prerequisites"],"worker":c.state["animation_worker"],"events":c.state["tail"],"event_detail":c.event_detail,
-  "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"logs":c.logs,"usage":c.usage,
+  "projects":c.state["catalog"]["projects"],"catalog_scope":if c.scope.is_some(){"assigned project only"}else{"existing recent-project catalog"},"stages":c.state["prerequisites"],"worker":c.state["animation_worker"],"events":c.state["tail"],"event_detail":c.event_detail,
+  "animal":{"scope":if c.scope.is_some(){"project"}else{"system"},"worker":c.state["animation_worker"],"beat":activity_wave(c),"host":host.clone(),"processes":processes.clone()},
+  "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"logs":if c.scope.is_some(){json!({"studio":c.state["tail"]})}else{c.logs.clone()},"usage":if c.scope.is_some(){json!([])}else{json!(c.usage)},
   "workshop":{"discovery":{"observed_at_ms":c.studios["observed_at_ms"],"pending":c.studios_receiver.is_some(),"error":c.studios["observation_error"],"errors":c.studios["errors"]},"cards":workshop::observations(c),"selected_project":workshop::selected(c),"inactive_expanded":workshop::expanded(c),"visible_order":workshop::order(c),"columns":c.catalog_columns.get()},
   "selected":{"agent":c.gang_selected,"project":c.catalog_selected,"stage":c.stage_selected,"event":c.event_index,"command":c.command_selected,"scroll":c.scroll},
   "composers":{"note":c.poke.as_ref().map(|p|json!({"pane":p.target,"name":p.name,"text":p.text,"delivery":"unsent draft"})),"chat":{"open":c.chat_editing,"text":c.chat_draft,"project":c.chat_draft_project}},
@@ -324,6 +333,7 @@ pub(super) fn reload(c:&Center)->Result<(),String>{
  let mut command=std::process::Command::new(executable);
  command.arg("booth");
  if let Some(project)=c.session.project_path.as_ref(){command.arg(format!("project={}",project.display()));}
+ if let Some(scope)=&c.scope{scope.inherit(&mut command);}
  command.env("MAGICSTUDIO_VIEW",c.view_name());
  Err(command.exec().to_string())
 }

@@ -22,6 +22,7 @@ mod local_ui;
 mod snapshot;
 mod telemetry;
 mod tui;
+mod scope;
 mod worker;
 
 use magicstudio_engine::Session;
@@ -178,6 +179,15 @@ fn bridge_timeout(id: &str) -> std::time::Duration {
 }
 
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
+    if let Some(scope)=scope::current()?{
+        let params=scope.params(id,params)?;
+        if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
+        if addr!="auto"{let live=magicstudio_engine::studio_sessions::for_project(&scope.project)?.ok_or("Restricted: assigned project's Studio is unavailable")?;if live["endpoint"].as_str()!=Some(addr){return Err("Restricted: bridge does not belong to the assigned project".into());}}
+        return bridge_call_unscoped(addr,id,params).map(|v|scope.redact(v));
+    }
+    bridge_call_unscoped(addr,id,params)
+}
+fn bridge_call_unscoped(addr: &str, id: &str, params: Value) -> Result<Value, String> {
     if addr=="auto"||addr.starts_with("unix:"){return local_ui::call(addr,id,params);}
     use std::io::{BufRead, BufReader};
     use std::net::{TcpStream, ToSocketAddrs};
@@ -420,7 +430,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         "name": "mc",
                         "version": env!("CARGO_PKG_VERSION")
                     },
-                    "instructions": MCP_INSTRUCTIONS
+                    "instructions": if scope::current().ok().flatten().is_some(){"Project-assigned Booth. Only the granted project tools are available. Project identity is fixed; Workshop and global controls belong to Jesse and Gonzo."}else{MCP_INSTRUCTIONS}
                 }
             }),
             "tools/list" => {
@@ -443,6 +453,9 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
                 let mut args = params.get("arguments").cloned().unwrap_or(json!({}));args["_origin"]=json!("MCP");
+                if let Some(scope)=scope::current().unwrap_or_else(|e|fail(e)){
+                    match scope.params(cmd_id,args.clone()){Ok(bound)=>args=bound,Err(error)=>{outln!("{}",json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":error}}));continue;}}
+                }
                 if let Some(v) = center_observation(&raw_name.replace('_', "."), &args, bridge.as_deref()) {
                     outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default()}]}}));
                     continue;
@@ -567,6 +580,7 @@ fn mcp_tools() -> Vec<Value> {
             "additionalProperties": false
         }
     }));
+    if let Ok(Some(scope))=scope::current(){tools.retain(|tool|{let name=tool["name"].as_str().unwrap_or("");let id=magicstudio_engine::command_specs().iter().find(|s|s.id.replace('.',"_")==name).map(|s|s.id).unwrap_or("");scope.permits(if name=="center_snapshot"{"center.snapshot"}else if name=="center_tail"{"center.tail"}else{id})});}
     tools
 }
 
@@ -633,7 +647,17 @@ fn base64(bytes: &[u8]) -> String {
 }
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
-pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Value,String>{
+pub(crate) fn dispatch(session:&mut Session,id:&str,params:Value)->Result<Value,String>{
+ if let Some(scope)=scope::current()?{
+  let params=scope.params(id,params)?;
+  if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
+  if session.project_path.as_ref().is_some_and(|p|p!=&scope.project){return Err("Restricted: session belongs to another project".into());}
+  if session.project_path.is_none(){session.execute("project.attach",json!({"path":scope.project})).map_err(|e|e.to_string())?;}
+  return dispatch_unscoped(session,id,params).map(|v|scope.redact(v));
+ }
+ dispatch_unscoped(session,id,params)
+}
+fn dispatch_unscoped(session:&mut Session,id:&str,mut params:Value)->Result<Value,String>{
  if id=="image.generate" && params["project"].is_string(){
   let target=params["project"].as_str().ok_or("Missing image project")?;
   let identity=session.execute("project.identity",json!({"path":target})).map_err(|e|e.to_string())?;
@@ -660,8 +684,11 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
 
 /// `backstage.snapshot` / `backstage.tail` are mc observations, not engine commands; None for any other id.
 fn center_observation(id: &str, params: &Value, bridge: Option<&str>) -> Option<Value> {
+    if !matches!(id,"center.snapshot"|"booth.snapshot"|"backstage.snapshot"|"center.tail"|"booth.tail"|"backstage.tail"){return None;}
+    let scoped=match scope::current(){Ok(Some(scope))=>match scope.params(id,params.clone()){Ok(params)=>Some((scope,params)),Err(error)=>return Some(json!({"ok":false,"error":error}))},Ok(None)=>None,Err(error)=>return Some(json!({"ok":false,"error":error}))};
+    let params=scoped.as_ref().map(|(_,p)|p).unwrap_or(params);
     let project = params["project"].as_str();
-    match id {
+    let result=match id {
         "center.snapshot" | "booth.snapshot" | "backstage.snapshot" => Some(snapshot::collect(project, bridge).0),
         "center.tail" | "booth.tail" | "backstage.tail" => {
             let last = params["last"].as_u64().unwrap_or(20).clamp(1, 192) as usize;
@@ -672,7 +699,8 @@ fn center_observation(id: &str, params: &Value, bridge: Option<&str>) -> Option<
                 "next_cursor": activity["next_cursor"], "error": activity["error"]}))
         }
         _ => None,
-    }
+    };
+    result.map(|value|if let Some((scope,_))=&scoped{scope.redact(value)}else{value})
 }
 
 fn call_app_quit(bridge: Option<&str>, mut args: Value) -> Result<Value, String> {
@@ -691,7 +719,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -754,6 +782,8 @@ fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String>
 
 fn main() {
     let a = args::Args::parse(cli_args().iter().cloned().skip(1));
+    let assignment=scope::current().unwrap_or_else(|e|fail(e));
+    if assignment.is_some()&&a.help{outln!("Project Booth: mc booth | tui | commands | exec <granted command> | run | mcp. Views: BOOTH / MOPS / ANIMAL. Workshop and global controls belong to Jesse and Gonzo.");return;}
     if a.help {
         outln!("{HELP}");
         return;
@@ -765,6 +795,10 @@ fn main() {
     let Some(cmd) = a.pos(0) else {
         usage("missing subcommand")
     };
+    if let Some(scope)=assignment{
+        if matches!(cmd,"help"|"-h"|"commands"|"info"){outln!("{}",scope.commands(a.pos(1).unwrap_or("")));return;}
+        if !matches!(cmd,"version"|"tui"|"booth"|"backstage"|"center"|"exec"|"run"|"mcp"){fail("Restricted: this shortcut is outside the assigned Booth; use commands for granted operations");}
+    }
     match cmd {
         "help" | "-h" => outln!("{HELP}"),
         "tui"=>{
@@ -863,7 +897,7 @@ fn main() {
             outln!("{reply}");
             if result["status"].as_str()==Some("running"){outln!("(still running — mc sprocket --log for the reply)");}
         }
-        "backstage" | "booth" | "center" => {
+        "workshop" | "backstage" | "booth" | "center" => {
             if a.bridge_addr().is_some(){usage("Backstage currently uses an explicit headless project; --bridge is reserved for existing live command access");}
             if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),cli_args().iter().cloned().any(|a|a=="--print")){fail(e);}
         }
@@ -981,6 +1015,7 @@ fn main() {
             }
             if let Some(v) = center_observation(id, &params, a.bridge_addr().as_deref()) {
                 outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                if v["ok"]==false{std::process::exit(1);}
                 return;
             }
             let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
