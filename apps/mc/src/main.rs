@@ -21,6 +21,7 @@ mod logo;
 mod local_ui;
 mod snapshot;
 mod telemetry;
+mod tui;
 mod worker;
 
 use magicstudio_engine::Session;
@@ -82,8 +83,19 @@ OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `magicstudio-shell --control <port>` GUI window
 
 SUBCOMMANDS
+  tui look [instance=<pid>]            actual live TUI frame, state and all controls as JSON
+  tui read [instance=<pid>]            the actual rendered terminal text
+  tui instances                       list controllable TUIs; multiple instances require selection
+  tui controls                        discover named actions and equivalent keys
+  tui view name=booth|workshop|mops|telemetry
+  tui agent name=gonzo                 select an agent (pane=<id> disambiguates names)
+  tui click id=<control-id>            click a visible button; look section=elements lists IDs
+  tui event index=0                    inspect an event; sequence=<id> selects a stable receipt
+  tui note text='details'              draft a note; note.send explicitly submits it
+  tui key key=F4                      every keyboard control uses the same live handler
+  tui reload                          reload the same foreground TUI after an update
   backstage [project=<file>]           interactive Backstage (no automatic Studio launch)
-                                      F1 WORKSHOP · F2 BOOTH · F3 MOPPETS · D PULSE
+                                      F1 WORKSHOP · F2 BOOTH · F3 MOPS · D PULSE
                                       optional root= name= audio= transcript= captions= audiomap=
                                       --print prints current state without entering terminal UI
   booth, center                      aliases of `backstage`
@@ -755,6 +767,16 @@ fn main() {
     };
     match cmd {
         "help" | "-h" => outln!("{HELP}"),
+        "tui"=>{
+            let action=a.pos(1).unwrap_or("look");
+            let params=a.params_from(2).unwrap_or_else(|e|usage(e));
+            let value=tui::call(if action=="read"{"look"}else{action},&params).unwrap_or_else(|error|{outln!("{}",json!({"ok":false,"error":error}));std::process::exit(1)});
+            if action=="read"||params["format"]=="text"{
+                for line in value["screen"]["lines"].as_array().into_iter().flatten(){outln!("{}",line.as_str().unwrap_or(""));}
+                if let Some(error)=value["error"].as_str(){outln!("ERROR: {error}");}
+            }else{outln!("{}",serde_json::to_string_pretty(&value).unwrap_or_default());}
+            if value["ok"]==false{std::process::exit(1);}
+        }
         "version" => outln!("mc {}", env!("CARGO_PKG_VERSION")),
         "login" => {
             use std::io::IsTerminal;

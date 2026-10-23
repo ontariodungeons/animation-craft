@@ -139,6 +139,7 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
                 "ok": !failed,
                 "error": e["error"],
                 "origin": e["origin"],
+                "pane_id": e["pane_id"],
                 "client": e["client_label"],
                 "request_id": e["request_id"],
                 "project": e["project"],

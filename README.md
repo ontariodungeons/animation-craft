@@ -39,6 +39,26 @@ stalled agent with a status request and `p` opens the composer to write your
 own message. A working agent is never interrupted, and a refusal from the
 multiplexer is reported as a refusal.
 
+Live TUI control uses `mc tui`, which talks to the running terminal instance rather than constructing a separate headless session. `mc tui look` returns the actual rendered rows, selected controls, agent identities/activity, events, project catalog, render-worker receipt, telemetry and input drafts as JSON. Every response follows a completed frame and carries its instance, generation and frame number. `mc tui read` prints only that screen text; `mc tui controls` lists all named controls and keyboard equivalents. Indices are zero-based. The numbered agent cards and MOPS agent tabs are clickable; `G` opens MOPS, `1`–`9`/`0` select its agents and left/right cycle them. `mc tui click id=<id>` follows the same hit target as a mouse click. With several TUIs open, use `mc tui instances` and add `instance=<pid>`; the CLI refuses to guess.
+
+```bash
+mc tui look
+mc tui look section=worker
+mc tui view name=mops
+mc tui agent name=gonzo           # use pane=<id> when names repeat
+mc tui look section=elements      # visible button IDs and terminal-cell rectangles
+mc tui click id=agent-card-wG:p7
+mc tui event index=0
+mc tui note text='Additional details for the selected agent'
+mc tui note.send                  # explicit submission; working/unavailable recipients refuse
+mc tui view name=telemetry
+mc tui look section=telemetry
+mc tui key key=F8                 # same handler as the keyboard, including all form controls
+mc tui reload                    # same foreground process; waits for a fresh generation/frame
+```
+
+Reading never submits a note or project chat. Composing and sending are separate actions; refused submissions retain the note draft. `task_source` distinguishes a terminal title from a recorded assignment. Telemetry reports its sampling state and age; unavailable values remain null. `mc tui input field=audio value=/path/song.wav` edits the intake form; `intake.create`, `intake.resume`, `project.open`, `project.save`, `storyboard.open` and `doctor` invoke the same guarded operations as their keys. `mc tui key` and `mc tui text` expose every remaining keyboard and text-input control without synthetic input into another terminal pane. Full CLI parity does not imply an automatic agent follow-up queue or a complete filesystem project inventory.
+
 Scripted clients use the same `project.intake` and `center.status` engine commands. UI and CLI share the production root `/run/media/jesse/Speedy/media`, stored as `projects_root` in `$XDG_CONFIG_HOME/magicstudio/settings.json` (or `~/.config/magicstudio/settings.json`). Inspect it with `mc exec project.root`; persist it with `mc exec project.root root=/run/media/jesse/Speedy/media`. `project.intake name=...` resolves `<root>/<song-slug>/project/<Name>.magic`. Explicit `root=...` or `path=...` choices apply only to that request, appear in the intake receipt, and never change the production setting. Recent history never determines the root. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
 
 `center.status trace=true` emits a timestamped shared prerequisite/metric observation and records started/result/completed evidence in `center.events`; ordinary polling returns observation IDs without filling the last-three action history. Studio and Booth consume the same prerequisite states. Missing data remains unknown/missing, and Studio rendering acknowledgement is separate from engine readiness.
