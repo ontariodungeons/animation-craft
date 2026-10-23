@@ -145,7 +145,7 @@ pub(crate) fn brief_header(dir: &Path) -> String {
         ),
     };
     format!(
-        "{intent}Project folder: {project}\nWorkshop state: mc exec workshop.status (run project.open path=<the .acproj> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
+        "{intent}Project folder: {project}\nWorkshop state: mc exec workshop.status (run project.open path=<the .magic> first)\nStoryboard (read it first): {project}/{STORYBOARD_DIR}/{STORYBOARD_PDF} — pdfcraft-cli text <pdf> --page N\n"
     )
 }
 
@@ -272,7 +272,7 @@ pub(crate) fn workshop_asset_files(dir: &Path) -> Vec<PathBuf> {
                 p.is_dir()
                     && p.file_name()
                         .and_then(|n| n.to_str())
-                        .is_some_and(|n| n.starts_with("animationcraft-"))
+                        .is_some_and(|n| n.starts_with("magicstudio-"))
             })
             .collect();
         subdirs.sort();
@@ -1878,7 +1878,7 @@ mod tests {
             image::Rgba([150, 160, 210, if inside { 255 } else { 0 }])
         });
         let file = std::env::temp_dir().join(format!(
-            "animationcraft_arm_{clipped_hand}_{}_{:?}.png",
+            "magicstudio_arm_{clipped_hand}_{}_{:?}.png",
             std::process::id(),
             std::thread::current().id()
         ));

@@ -5,14 +5,14 @@ use crate::{EngineError, Result, Session};
 
 fn invalid(message: impl Into<String>) -> EngineError { EngineError::InvalidParams(message.into()) }
 fn selected_project(s: &Session, params: &Value, required: bool) -> Result<PathBuf> {
-    let selected=s.project_path.as_deref().ok_or_else(||invalid("No project is selected; open the intended .acproj before saving Theatre state"))?;
-    let selected=std::fs::canonicalize(selected).map_err(|e|invalid(format!("Selected project is unavailable: {e}; reopen the intended .acproj before retrying")))?;
+    let selected=s.project_path.as_deref().ok_or_else(||invalid("No project is selected; open the intended .magic before saving Theatre state"))?;
+    let selected=std::fs::canonicalize(selected).map_err(|e|invalid(format!("Selected project is unavailable: {e}; reopen the intended .magic before retrying")))?;
     let expected=params.get("expected_project");
     if required || expected.is_some() {
         let expected=expected.and_then(Value::as_str).filter(|v|!v.trim().is_empty())
-            .ok_or_else(||invalid("motion.theatre.save requires expected_project=<selected .acproj>; no state was saved"))?;
+            .ok_or_else(||invalid("motion.theatre.save requires expected_project=<selected .magic>; no state was saved"))?;
         let expected=crate::project::project_file_path(s,&json!({"path":expected}))?;
-        let expected=std::fs::canonicalize(expected).map_err(|e|invalid(format!("expected_project is unavailable: {e}; select the existing intended .acproj")))?;
+        let expected=std::fs::canonicalize(expected).map_err(|e|invalid(format!("expected_project is unavailable: {e}; select the existing intended .magic")))?;
         if selected!=expected { return Err(invalid("expected_project differs from the selected project; refresh the project identity and save the matching Theatre state")); }
     }
     Ok(selected)
@@ -33,7 +33,7 @@ fn receipt(s: &Session, project: PathBuf, state: &Value, reused: bool) -> Value 
 }
 
 pub fn read(s: &mut Session, params: &Value) -> Result<Value> {
-    if s.project_path.is_none() { return Ok(json!({"ok":true,"available":false,"saved":false,"status":"unavailable","state":null,"reason":"No project selected; open the intended .acproj"})); }
+    if s.project_path.is_none() { return Ok(json!({"ok":true,"available":false,"saved":false,"status":"unavailable","state":null,"reason":"No project selected; open the intended .magic"})); }
     let project=selected_project(s,params,false)?;
     match &s.theatre_state {
         None=>Ok(json!({"ok":true,"available":true,"saved":false,"status":"no_saved_state","project":project,"state":null})),

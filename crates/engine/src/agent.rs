@@ -11,7 +11,7 @@ pub fn settings() -> Result<Value> {
     let base=std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
         .or_else(||std::env::var_os("HOME").map(|h|std::path::PathBuf::from(h).join(".config")));
     let stored=if let Some(base)=base {
-        match fs::read_to_string(base.join("animationcraft/agent.json")) {
+        match fs::read_to_string(base.join("magicstudio/agent.json")) {
             Ok(text)=>serde_json::from_str::<Value>(&text).map_err(|_|invalid("Invalid Magic Studio agent.json; repair existing settings without changing credentials"))?,
             Err(e) if e.kind()==std::io::ErrorKind::NotFound=>json!({}),
             Err(_)=>return Err(invalid("Cannot read Magic Studio chat settings; no fallback agent selected")),
@@ -40,7 +40,7 @@ fn persist_selection(selection:&Value)->Result<Value>{
     let base=std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
         .or_else(||std::env::var_os("HOME").map(|h|std::path::PathBuf::from(h).join(".config")))
         .ok_or_else(||invalid("Cannot locate the app settings directory; selection not persisted"))?;
-    let path=base.join("animationcraft/agent.json");
+    let path=base.join("magicstudio/agent.json");
     let mut stored=fs::read_to_string(&path).ok().and_then(|t|serde_json::from_str::<Value>(&t).ok()).unwrap_or_else(||json!({}));
     if !stored.is_object(){stored=json!({});}
     for key in ["agent","provider","model","thinking"]{
@@ -52,6 +52,51 @@ fn persist_selection(selection:&Value)->Result<Value>{
     Ok(stored)
 }
 
+/// A local runtime (Ollama, LM Studio) needs no account, no quota and no network.
+fn is_local_provider(provider:&str)->bool{
+    matches!(provider,"ollama"|"lmstudio"|"llamacpp"|"local")
+}
+fn model_is_free(model:&Value)->bool{
+    if model["local"]==true{return true;}
+    fn zero(v:&Value)->bool{v.as_f64()==Some(0.0)||v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
+    model["cost"].as_array().filter(|a|!a.is_empty()).map(|c|c.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"]))).unwrap_or(false)
+}
+/// Sprocket's catalog: local first, then free, then paid. The order is the recommendation.
+pub fn cmd_sprocket_models(s:&mut Session,_p:&Value)->Result<Value>{
+    let selection=cmd_agent_config(s,&json!({}))?;
+    if selection["agent"]!="opencode"{return Ok(json!({"agent":selection["agent"],"models":[],"reason":"Catalog discovery is supported by the existing OpenCode API route"}));}
+    let catalog=models(&crate::workshop::project_dir(s)?)?;
+    let current=selection["model"].as_str().unwrap_or_default().to_string();
+    let mut ranked:Vec<Value>=catalog.iter().filter(|m|m["enabled"]==true).cloned().collect();
+    ranked.sort_by_key(|m|{
+        let local=m["local"]==true;let free=model_is_free(m);
+        (if local{0}else if free{1}else{2}, m["providerID"].as_str().unwrap_or_default().to_string(), m["id"].as_str().unwrap_or_default().to_string())
+    });
+    let list:Vec<Value>=ranked.iter().map(|m|json!({"provider":m["providerID"],"model":m["id"],"name":m["name"],"local":m["local"],"free":model_is_free(m),"current":m["id"].as_str()==Some(current.as_str())&&m["providerID"].as_str()==selection["provider"].as_str()})).collect();
+    let recommended=list.iter().find(|m|m["current"]==true).or_else(||list.iter().find(|m|m["local"]==true)).or_else(||list.iter().find(|m|m["free"]==true)).or_else(||list.first());
+    Ok(json!({"agent":"opencode","models":list,"recommended":recommended,"current":{"provider":selection["provider"],"model":selection["model"]},"note":"Local models run on this machine with no quota; free models need no account credit."}))
+}
+/// Persist the active selection to the shared settings file. Explicit and separate from the
+/// per-session selection: the engine never writes shared defaults on its own.
+pub fn cmd_agent_persist(s:&mut Session,_p:&Value)->Result<Value>{
+    let selection=cmd_agent_config(s,&json!({}))?;
+    let stored=persist_selection(&selection)?;
+    Ok(json!({"ok":true,"persisted":true,"selection":{"agent":selection["agent"],"provider":selection["provider"],"model":selection["model"]},"path":stored}))
+}
+
+/// Switch Sprocket's model, verified against the catalog and persisted for the app and the CLI.
+pub fn cmd_sprocket_use(s:&mut Session,p:&Value)->Result<Value>{
+    let wanted=p["model"].as_str().map(str::to_owned).or_else(||p["id"].as_str().map(str::to_owned)).ok_or_else(||invalid("Give model=<provider/id>, e.g. ollama/llama3.2:latest"))?;
+    let (provider,id)=wanted.split_once('/').ok_or_else(||invalid("Give model=<provider/id>, e.g. ollama/llama3.2:latest"))?;
+    let catalog=models(&crate::workshop::project_dir(s)?)?;
+    let found=catalog.iter().find(|m|m["providerID"]==provider&&m["id"]==id&&m["enabled"]==true)
+        .ok_or_else(||invalid(format!("{provider}/{id} is not an enabled model; read sprocket.models for the catalog")))?;
+    let previous=cmd_agent_config(s,&json!({}))?;
+    let selection=json!({"agent":"opencode","provider":provider,"model":id});
+    cmd_agent_config(s,&json!({"selection":selection.clone()}))?;
+    persist_selection(&selection)?;
+    Ok(json!({"ok":true,"selection":selection,"local":found["local"],"free":model_is_free(found),"persisted":true,"previous":{"provider":previous["provider"],"model":previous["model"]}}))
+}
 pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
     let mut value=match &s.agent_selection{Some(v)=>v.clone(),None=>settings()?};
     if let Some(error)=value["selection_error"].as_str(){return Err(invalid(error));}
@@ -63,7 +108,8 @@ pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
             value[key]=v.clone();
         }
     }
-    s.agent_selection=Some(value.clone());value["scope"]=json!("active engine/window; shared defaults read only at initialization");Ok(value)
+    s.agent_selection=Some(value.clone());
+    value["scope"]=json!("active engine/window; shared defaults read only at initialization");Ok(value)
 }
 
 
@@ -132,7 +178,7 @@ fn data(value:&Value)->&Value { value.get("data").unwrap_or(value) }
 fn models(dir:&Path)->Result<Vec<Value>> {
     let response=api(dir,"model.list",None,None)?;
     let list=data(&response).as_array().ok_or_else(||invalid("OpenCode model.list did not return a model array; no inference attempted"))?;
-    Ok(list.iter().map(|m|json!({"providerID":m["providerID"],"id":m["id"],"name":m["name"],"enabled":m["enabled"],"capabilities":m["capabilities"],"cost":m["cost"]})).collect())
+    Ok(list.iter().map(|m|json!({"providerID":m["providerID"],"id":m["id"],"name":m["name"],"enabled":m["enabled"],"capabilities":m["capabilities"],"cost":m["cost"],"local":is_local_provider(m["providerID"].as_str().unwrap_or_default())})).collect())
 }
 /// Sprocket: the app's own in-app agent, reachable from the CLI and the booth.
 /// A stale (disabled) model selection is repaired in the shared app selection and the
@@ -148,7 +194,9 @@ pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
         if !live {
             fn zero(v:&Value)->bool{v.as_f64()==Some(0.0)||v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
             let free=|m:&Value|->bool{m["cost"].as_array().filter(|a|!a.is_empty()).map(|c|c.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"]))).unwrap_or(false)};
-            let pick=catalog.iter().find(|m|m["enabled"]==true&&free(m)).or_else(||catalog.iter().find(|m|m["enabled"]==true));
+            let pick=catalog.iter().find(|m|m["enabled"]==true&&m["local"]==true)
+                .or_else(||catalog.iter().find(|m|m["enabled"]==true&&free(m)))
+                .or_else(||catalog.iter().find(|m|m["enabled"]==true));
             if let Some(m)=pick{
                 cmd_agent_config(s,&json!({"selection":{"agent":"opencode","provider":m["providerID"],"model":m["id"]}}))?;
                 // Persisting is best-effort: the app may hold the settings file locked. The
@@ -186,6 +234,8 @@ fn model_ref(dir:&Path,selection:&Value,free_only:bool)->Result<Value> {
         .ok_or_else(||invalid("Selected provider/model is absent or disabled in agent.models; choose an available model in the app. No fallback attempted"))?;
     if free_only {
         fn zero(v:&Value)->bool {v.as_f64()==Some(0.0) || v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
+        // A local model runs on this machine: it cannot be billed, so it is free by definition.
+        if found["local"]==true {return Ok(wanted);}
         let costs=found["cost"].as_array().filter(|a|!a.is_empty()).ok_or_else(||invalid("Selected model cost is unknown; free-only request refused before inference"))?;
         if !costs.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"])) {
             return Err(invalid("Selected model has nonzero or unknown cost; free-only request refused before inference"));
@@ -197,7 +247,7 @@ fn state_dir(s:&Session)->Result<std::path::PathBuf> {Ok(crate::workshop::projec
 fn chat_identity(s:&Session)->Result<Value>{
  let path=s.project_path.as_ref().ok_or_else(||invalid("Open the target project before chat"))?;
  let dir=crate::workshop::project_dir(s)?;
- let files=fs::read_dir(&dir).map_err(|e|invalid(format!("Cannot read the project directory for chat: {e}")))?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("acproj"))).count();
+ let files=fs::read_dir(&dir).map_err(|e|invalid(format!("Cannot read the project directory for chat: {e}")))?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("magic"))).count();
  if files>1{return Err(invalid("Multiple project files share this chat directory; chat blocked to prevent cross-project messages. Give each project its own directory; history was preserved"));}
  let project=fs::canonicalize(path).unwrap_or_else(|_|path.clone());
  let owner=state_dir(s)?.join("chat-project.json");
@@ -346,7 +396,7 @@ pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
     let mut said=params["message"].as_str().unwrap_or_default().trim().to_string();
     for path in params["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {said.push_str(&format!("\n[Magic Studio picture: {path}]"));}
     if said.is_empty(){return Err(invalid("message is empty"));}
-    let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/animationcraft-shell/agent.md")).unwrap_or_default();
+    let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/magicstudio-shell/agent.md")).unwrap_or_default();
     let fresh=params["new_chat"].as_bool().unwrap_or(true);
     if fresh && params["session"].is_string(){return Err(invalid("An expected session requires new_chat=false; no chat created or message sent"));}
     let task=if params["image_task"]==true {format!("You are Sproket. This is one bounded image repair task. Native permissions allow reading images, skills and ONLY these shell commands: `{0} commands image.generate` and `{0} exec image.generate ...`. Use this exact installed CLI, not a relative executable. Do not call yourself, chat, OpenCode, subagents, scripts, or another harness. Inspect original references with native read; use existing image.generate with references and transparent_background=true, default model gpt-6-luna. After one job, inspect the returned draft image with native read, report observed defects, and STOP for review. Do not replace the original or regenerate a background.\n",image_task_cli()?.display())}else{String::new()};

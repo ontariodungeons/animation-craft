@@ -20,7 +20,7 @@ pub struct Session {
     pub assets: HashMap<String, Asset>,
     /// Ordered connections in this project, separate from decoded/cached assets.
     pub project_assets: Vec<ProjectAsset>,
-    /// The open `.acproj` file; `None` until `project.new` or `project.open`.
+    /// The open `.magic` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
     /// Where the final video project lives (HyperFrames/Remotion/FilmCraft). Single source of truth.
     pub video_project_path: Option<PathBuf>,

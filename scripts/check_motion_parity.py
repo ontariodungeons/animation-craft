@@ -1,5 +1,5 @@
 """Compare the engine samples to the exporter's authoritative channels on a supplied project.
-Usage: python3 scripts/check_motion_parity.py <project.acproj> <spec.json> <character>
+Usage: python3 scripts/check_motion_parity.py <project.magic> <spec.json> <character>
 """
 import json,sys,subprocess
 from pathlib import Path

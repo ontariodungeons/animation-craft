@@ -18,7 +18,7 @@ const context = vm.createContext({
   acFeedback: { acknowledge: async (revision, project) => calls.push({id:"render_revision",revision,project}), report: async (phase, ack, event) => calls.push({id:"render_receipt",event}) },
   el: (tag, attrs, text) => ({ tag, ...attrs, text }),
   document: { addEventListener() {} }, window: { addEventListener() {} },
-  state: { project: "/synthetic/Test.acproj", view: "project", page: 0 }, motion: {},
+  state: { project: "/synthetic/Test.magic", view: "project", page: 0 }, motion: {},
   invoke: async (id, { patch } = {}) => { if (id === "agent_session") throw Error("Obsolete agent_session command is not registered"); calls.push({ id, patch }); return { ...config, ...patch }; },
   motionCommand: async (id, params) => {
     calls.push({ id, params });
@@ -65,7 +65,7 @@ console.log("PASS: actual drawer catalog, saved selection, New Chat, fresh send,
 
 // A reply acknowledgement requires the matching project and an actually displayed assistant node.
 node("agent-log").querySelectorAll = () => [{textContent:"Visible reply",getBoundingClientRect:()=>({width:300,height:20})}];
-await vm.runInContext(`agent.open=true; agent.turns=[{role:"assistant",text:"Visible reply",project:"/other.acproj",request_id:"other",session:"B"}]; acknowledgeAgentReply(10)`,context);
+await vm.runInContext(`agent.open=true; agent.turns=[{role:"assistant",text:"Visible reply",project:"/other.magic",request_id:"other",session:"B"}]; acknowledgeAgentReply(10)`,context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"other project cannot acknowledge");
 await vm.runInContext(`agent.turns=[{role:"assistant",text:"Not rendered",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"unrendered text cannot acknowledge");

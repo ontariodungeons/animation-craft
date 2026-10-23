@@ -60,8 +60,8 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             }
             let is_ac = matches!(
                 exe_name,
-                "animationcraft"
-                    | "animationcraft-shell"
+                "magicstudio"
+                    | "magicstudio-shell"
                     | "mc"
                     | "photocraft-cli"
                     | "effectcraft-cli"
@@ -77,7 +77,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
                 .and_then(|w| w[1].parse::<u16>().ok());
             let bridge_alive = control_port.map(port_open);
             let is_mcp = args.iter().any(|a| a == "mcp");
-            let is_gui = matches!(exe_name, "animationcraft" | "animationcraft-shell");
+            let is_gui = matches!(exe_name, "magicstudio" | "magicstudio-shell");
             let kind = if is_gui {
                 "gui"
             } else if is_mcp {

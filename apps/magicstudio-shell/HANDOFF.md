@@ -5,7 +5,7 @@ shell migration. Use [README](../../README.md), [AGENTS.md](../../AGENTS.md), an
 for active architecture, commands, ownership and validation. Old pane assignments, completion claims
 and port observations below do not grant ownership or identify a current running window.
 
-The current application is the Tauri shell in `apps/animationcraft-shell`; `mc` is its CLI/MCP
+The current application is the Tauri shell in `apps/magicstudio-shell`; `mc` is its CLI/MCP
 entrypoint. The older egui application directories have been retired from this checkout. Their
 historical source can be consulted through Git; do not launch a removed application package.
 
@@ -16,9 +16,9 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
 
 ## Read these skills first (in this order)
 
-0. **`.agents/skills/animationcraft-shell-ui/SKILL.md` (repo): the shell's design system. Study it first; every screen follows it.**
+0. **`.agents/skills/magicstudio-shell-ui/SKILL.md` (repo): the shell's design system. Study it first; every screen follows it.**
 1. `~/.agents/skills/artcraft-suite/SKILL.md`: the *craft apps and when to use each one.
-2. `~/.agents/skills/animationcraft/SKILL.md`: engine commands, CLI, MCP, the workflow.
+2. `~/.agents/skills/magicstudio/SKILL.md`: engine commands, CLI, MCP, the workflow.
 3. `.agents/skills/storyboard/SKILL.md` (repo): the storyboard PDF and scene loop.
 4. `.agents/skills/layered-motion/SKILL.md` (repo): the motion spec (layers, pivots, parents, tracks with
    `keys`/`oscillate`/`ellipse`/`follow`); `pipeline/layered_motion.py` is its exporter.
@@ -59,12 +59,12 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
 - `src/main.rs`: Tauri 2.12 with the `unstable` multi-webview feature. The **project** webview (`ui/`) is
   stacked with the **studio** webview (the video target's studio) in one GTK box. `pack()`/`layout()` give each one
   an explicit height; positions are ignored on Linux.
-- One `Engine` (`Mutex<animationcraft_engine::Session>`) per window. Page commands and the bridge share it, and
-  the engine writes the `.acproj` itself.
+- One `Engine` (`Mutex<magicstudio_engine::Session>`) per window. Page commands and the bridge share it, and
+  the engine writes the `.magic` itself.
 - `src/bridge.rs` + `ui/bridge.js`: `--control <port>` uses the same JSON-lines protocol as the older app.
   Use it to see and drive the app:
   ```
-  ./target/debug/animationcraft-shell --control <port> [<project.acproj>] [--open animate|agent] [--view studio]
+  ./target/debug/magicstudio-shell --control <port> [<project.magic>] [--open animate|agent] [--view studio]
   mc --bridge <selected-endpoint> exec ui.look [region=<dom id or css>] [click=<id|label>] output=<png>
   mc --bridge <selected-endpoint> exec ui.state | ui.elements | ui.click id=… | ui.set id=… value=… | ui.eval js='return …'
   mc --bridge <selected-endpoint> exec <any engine command> …   # runs on the window's session; the page refreshes
@@ -73,12 +73,12 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
 - `ui/`: `app.js` (Project view: blocks Song, Lyrics & notes, Transcription, Animate, plus the storyboard
   pages), `home.js` (Home: New song, Open, recent cards), `agent.js` (agent drawer: opencode session or Herdr
   agent, permissions, questions, model, Point, paste or drop pictures), `bridge.js`, `style.css` (tokens on `:root`).
-- Build: `cargo build -p animationcraft-shell` (the `ui/` folder is embedded at build time, so rebuild after UI edits).
+- Build: `cargo build -p magicstudio-shell` (the `ui/` folder is embedded at build time, so rebuild after UI edits).
   The pre-commit hook runs `cargo check` and the tests.
 
 ## Next: the Animation view (top bar: Home · Project | Animation | Studio; Split only while the server is on)
 
-- **Gate first:** do the research in `.agents/skills/animationcraft-shell-ui/` (`research.md`), present the
+- **Gate first:** do the research in `.agents/skills/magicstudio-shell-ui/` (`research.md`), present the
   proposed Animation view to the user, and build only after they approve it.
 - **Engine evaluates, page draws. Move the evaluator, don't write a new one.** The older stage already
   evaluates this spec in Rust: `evaluate_layered_motion_spec` and `eval_oscillate_term` in
@@ -92,7 +92,7 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
   play/scrub, timing against the song.
 - Clicking an object opens its **layer panel**: stack order, thumbnails, show/hide, states (eyes open/closed),
   per-layer fix actions.
-- The bee: `/run/media/jesse/Speedy/media/merriweather/bumble-bee/Bumble Bee.acproj`. Its rig spec is
+- The bee: `/run/media/jesse/Speedy/media/merriweather/bumble-bee/Bumble Bee.magic`. Its rig spec is
   `assets/characters/bee/bee_motion_spec.json`. The mouth is baked into `eyes-open.png`/`eyes-closed.png`.
   The kit in `merriweather-videos/remotion-composer/public/track06/layers/` has `eyes-open-no-mouth.png`,
   `mouth-smile.png` and `mouth-open.png`.
@@ -107,9 +107,9 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
   Confirm current client configuration and the selected Studio endpoint before relying on it; this
   handoff does not establish today's installed command, authorization, reload or restart state.
   Coordinate with the inner agent through the session API, not its composer.
-- Design proposal and all 76 review acceptance criteria: `.agents/skills/animationcraft-shell-ui/research.md`.
+- Design proposal and all 76 review acceptance criteria: `.agents/skills/magicstudio-shell-ui/research.md`.
   User requires the animation inspector on the left and useful artwork after import. Full Animation
-  frame approved on 2026-10-21; implementation is in progress. Permanent app knowledge is `apps/animationcraft-shell/agent.md`; keep
+  frame approved on 2026-10-21; implementation is in progress. Permanent app knowledge is `apps/magicstudio-shell/agent.md`; keep
   earlier-app/migration instructions here and in coordinator messages, never in that permanent file.
 
 - A project with no storyboard shows a broken image. It needs an empty state with the next step.
@@ -189,7 +189,7 @@ a manual screen, or part of the rig/matting CLI chain? Don't decide it yourself.
 **Tools and MCP (last step)**
 - ✅ `--control` bridge in the shell (same protocol)
 - ◻ `mc` help, MCP instructions, `ui_look`/`app_quit` errors and AGENTS.md/README/skills:
-  point to `animationcraft-shell --control <port>` and remove references to the older app
+  point to `magicstudio-shell --control <port>` and remove references to the older app
 - ◻ After the user confirms: delete `crates/ui-egui` and `apps/animationcraft`, plus their workspace entries and references
 
 ## The agent inside, and cua-style integration (core product, not a side panel)
@@ -223,7 +223,7 @@ techniques. The in-app agent validates operations and CLI configuration; coordin
 
 ## Nelly import and native layout checkpoint (2026-10-21)
 
-- Nelly live project: `/run/media/jesse/Speedy/media/merriweather/nelly/Nelly.acproj`.
+- Nelly live project: `/run/media/jesse/Speedy/media/merriweather/nelly/Nelly.magic`.
   Imported the existing full HyperFrames composition with dereferenced local media from
   `merriweather-videos/projects/kathy-cd-track-01/hyperframes`; server is managed on 3058.
   The registered front reference image is connected and visible in Animation (one image, not yet an articulated rig).

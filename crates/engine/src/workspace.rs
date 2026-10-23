@@ -13,7 +13,7 @@ use crate::{EngineError, Result};
 
 /// Return the canonical current Tauri/engine workspace, independent of the caller working directory.
 pub fn workspace_root(s: &crate::Session) -> PathBuf {
-    let current_root = |root:&Path| root.join("Cargo.toml").is_file() && root.join("apps/animationcraft-shell/Cargo.toml").is_file();
+    let current_root = |root:&Path| root.join("Cargo.toml").is_file() && root.join("apps/magicstudio-shell/Cargo.toml").is_file();
     if current_root(&s.cwd) {
         return s.cwd.clone();
     }
@@ -260,7 +260,7 @@ mod tests {
     fn caller_directory_does_not_hide_the_current_pipeline() {
         let s=crate::Session{cwd:std::env::temp_dir(),..crate::Session::default()};
         let root=workspace_root(&s);
-        assert!(root.join("apps/animationcraft-shell/Cargo.toml").is_file());
+        assert!(root.join("apps/magicstudio-shell/Cargo.toml").is_file());
         assert!(root.join("pipeline/storyboard_skeleton.py").is_file());
     }
 

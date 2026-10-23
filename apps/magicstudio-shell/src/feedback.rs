@@ -12,7 +12,7 @@ pub fn ui_report(app: tauri::AppHandle, report: Value) -> Result<(), String> {
         event["project"] = report["project"].clone();
         event["origin"] = json!("UI interaction");
         event["client_label"] = json!("Studio user (unverified label)");
-        animationcraft_engine::activity::append(event);
+        magicstudio_engine::activity::append(event);
     }
     let state = app.state::<Feedback>();
     let mut v = state.0.lock().map_err(|e| e.to_string())?;
@@ -39,7 +39,7 @@ pub fn ui_report(app: tauri::AppHandle, report: Value) -> Result<(), String> {
         last["ui_ack"] = json!("DOM_applied; visual review separate");
     }
     if valid && requested > previous {
-        animationcraft_engine::activity::append(
+        magicstudio_engine::activity::append(
             json!({"stage":"frontend_ack","project":report["project"],"command":expected.map(|e|e["id"].clone()),"engine_revision":requested,"request_id":expected.map(|e|e["request_id"].clone()),"origin":"UI render report","ui_ack":"DOM applied; visual review separate"}),
         );
     }
@@ -226,7 +226,7 @@ pub fn reuse_open(app: &tauri::AppHandle, params: &Value) -> Result<Option<Value
     let Some(raw) = params["path"].as_str() else {
         return Ok(None);
     };
-    let target = animationcraft_engine::studio_sessions::canonical(std::path::Path::new(raw))?;
+    let target = magicstudio_engine::studio_sessions::canonical(std::path::Path::new(raw))?;
     let active = app
         .state::<Engine>()
         .with(None, |s| Ok(s.project_path.clone()))?;
@@ -243,14 +243,14 @@ pub fn reuse_open(app: &tauri::AppHandle, params: &Value) -> Result<Option<Value
             .ok_or("Studio window unavailable")?
             .set_focus()
             .map_err(|e| e.to_string())?;
-        animationcraft_engine::activity::append(
+        magicstudio_engine::activity::append(
             json!({"stage":"session_focused","command":"project.open","project":target,"request_id":params["_request_id"],"origin":params["_origin"]}),
         );
         return Ok(Some(
             json!({"ok":true,"project":target,"reused_session":true,"focused":true}),
         ));
     }
-    if let Some(live) = animationcraft_engine::studio_sessions::for_project(&target)? {
+    if let Some(live) = magicstudio_engine::studio_sessions::for_project(&target)? {
         // This engine has opened the file but its frontend has not applied it yet. Returning
         // "focused existing session" here used to skip the actual document/name render.
         if live["identity"]["pid"].as_u64()==Some(std::process::id() as u64){return Ok(None);}
@@ -260,7 +260,7 @@ pub fn reuse_open(app: &tauri::AppHandle, params: &Value) -> Result<Option<Value
                 .as_str()
                 .ok_or("Existing Studio endpoint unavailable")?
                 .trim_start_matches("unix:");
-            animationcraft_engine::studio_sessions::request(
+            magicstudio_engine::studio_sessions::request(
                 std::path::Path::new(endpoint),
                 "ui.focus",
                 json!({"_expected_project":target,"_expected_instance":live["instance"]}),

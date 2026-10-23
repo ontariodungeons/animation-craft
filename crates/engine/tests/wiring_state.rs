@@ -1,4 +1,4 @@
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 #[cfg(unix)]
 fn runtime(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
@@ -13,7 +13,7 @@ fn runtime(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
 fn video_project_path_persists_across_reopen() {
     let dir = std::env::temp_dir().join(format!("ac-wiring-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let project = dir.join("Fixture.acproj");
+    let project = dir.join("Fixture.magic");
     let mut s = Session::default();
     s.execute("project.new", json!({"path": project})).unwrap();
     s.video_target = "hyperframes".into();

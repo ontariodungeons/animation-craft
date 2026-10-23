@@ -1,7 +1,7 @@
 //! `studio.cues` runs the Bun window sampler as a child process. It lives in its own test binary
 //! because a child spawned beside the lib tests' concurrent project-lease claims can hold their
 //! lock descriptors and fail those tests.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 
 #[test]
@@ -9,7 +9,7 @@ fn cues_at_time_and_clip_uses_read_composition_and_timeline() {
     let dir = std::env::temp_dir().join(format!("ac-studio-cues-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("hyperframes")).unwrap();
     std::fs::create_dir_all(dir.join("artifacts")).unwrap();
-    std::fs::write(dir.join("Song.acproj"), "{\"assets\":[]}").unwrap();
+    std::fs::write(dir.join("Song.magic"), "{\"assets\":[]}").unwrap();
     std::fs::write(dir.join("hyperframes/index.html"), concat!(
         "<div id=\"root\" data-composition-id=\"main\" data-start=\"0\" data-duration=\"20\">",
         "<img id=\"sea\" class=\"clip\" data-start=\"0\" data-duration=\"10\" src=\"sea.png\" aria-label=\"a > b\">",
@@ -32,7 +32,7 @@ fn cues_at_time_and_clip_uses_read_composition_and_timeline() {
         {"scene_id":"s01","start_seconds":0,"end_seconds":12,"actions":[{"at_seconds":3,"duration_seconds":2,"character_id":"fish","action":"swim"}]},
         {"scene_id":"s02","start_seconds":12,"end_seconds":20,"actions":[]}]}"#).unwrap();
     let mut s = Session::default();
-    let project = dir.join("Song.acproj");
+    let project = dir.join("Song.magic");
 
     let at = s.execute("studio.cues", json!({"project": &project, "at": 4.5})).unwrap();
     assert_eq!(at["scene"]["id"], "s01");

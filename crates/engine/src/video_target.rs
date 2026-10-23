@@ -205,7 +205,7 @@ fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>, replace_scaf
         let target=dest.join(&relative);
         if target.is_file() {
             if std::fs::read(&target)?==std::fs::read(stage.join(&relative))?{continue;}
-            let backup=dest.join(".animationcraft-history").join(format!("init-{stamp}")).join(&relative);
+            let backup=dest.join(".magicstudio-history").join(format!("init-{stamp}")).join(&relative);
             std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Backup has no parent".into()))?)?;std::fs::copy(&target,backup)?;
         }
         std::fs::create_dir_all(target.parent().ok_or_else(||EngineError::InvalidParams("Generated file has no parent".into()))?)?;
@@ -325,7 +325,7 @@ fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
         let problems=crate::workshop::transcript_problems(&input);if !problems.is_empty(){return Err(EngineError::InvalidParams(problems.join("; ")));}
     }
     let digest=format!("{:x}",Sha256::digest(serde_json::to_vec(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?));
-    let dest=hf.join("compositions/captions.html");let receipt=hf.join(".animationcraft-captions.json");let entry=hf.join("index.html");
+    let dest=hf.join("compositions/captions.html");let receipt=hf.join(".magicstudio-captions.json");let entry=hf.join("index.html");
     let mut host=std::fs::read_to_string(&entry)?;
     if host.contains("data-track-kind=\"captions\"") && !host.contains("data-composition-src=\"compositions/captions.html\"") {return Ok(json!({"ready":true,"preserved_existing_caption_track":true,"word_count":words.len()}));}
     let duration=probe_audio_duration(s.song_audio.as_deref()).max(words.iter().filter_map(|w|w["end"].as_f64()).fold(0.0,f64::max));
@@ -382,7 +382,7 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         let validate=skill.join("scripts/validate-plan.mjs");let assemble=skill.join("scripts/assemble-index.mjs");
         let validation=run_tool_in(&hf,"node",&[arg(&validate),"--storyboard".into(),arg(&plan),"--audiomap".into(),arg(&hf.join("audiomap.json")),"--templates".into(),arg(&skill.join("references/templates"))])?;
         // Preserve the previous composition before the owning workflow's deterministic assembler writes it.
-        let backup=hf.join(".animationcraft-history/assembled-before.html");
+        let backup=hf.join(".magicstudio-history/assembled-before.html");
         if hf.join("index.html").is_file()&&!backup.exists(){std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Assembly backup has no parent".into()))?)?;std::fs::copy(hf.join("index.html"),&backup)?;}
         let result=run_tool_in(&hf,"node",&[arg(&assemble),"--storyboard".into(),arg(&plan),"--hyperframes".into(),arg(&hf),"--audiomap".into(),arg(&hf.join("audiomap.json"))])?;
         if result.contains("anomalies") {return Err(EngineError::InvalidParams(format!("Music-to-video assembler reported incomplete inputs: {result}")));}

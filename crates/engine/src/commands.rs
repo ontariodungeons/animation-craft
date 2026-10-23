@@ -10,7 +10,7 @@
 //!   - `exports` — EffectCraft/Three.js/React/Blender/FilmCraft/cutout MP4/layered motion/validate
 //!   - `image_cmds` — break apart / puppet warp / color to alpha / content-aware fill
 //!   - `vision` — in-memory pixel analysis
-//!   - `project` — .acproj lifecycle + connect/load/remove/update assets
+//!   - `project` — .magic lifecycle + connect/load/remove/update assets
 //!   - `workshop` — workshop/storyboard/video/assets/audio + search
 //!
 //! This file keeps only the `CommandSpec` registry, `command_specs()`, `find()`,
@@ -191,8 +191,8 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 pub fn build() -> Vec<CommandSpec> {
     vec![
-        query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .acproj path\"}", crate::project::cmd_project_attach),
-        query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .acproj path\"}", crate::project::cmd_project_identity),
+        query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_attach),
+        query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_identity),
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
         cmd!("project.root", "Inspect / Set Production Project Root", ["File"], None, "{\"root\":\"optional absolute production root; omitted to inspect\"}", always, crate::project_settings::command),
         query!("backstage.events", "Recent Activity Receipts", "{\"after\":0,\"limit\":20,\"project\":\"optional absolute project filter\"}", crate::activity::events),
@@ -203,13 +203,16 @@ pub fn build() -> Vec<CommandSpec> {
         query!("ui.feedback", "Live Studio Feedback", "{\"project\":\"optional canonical project path\"}", crate::command_center::requires_ui),
         query!("ui.components", "Rendered Studio Components", "{\"region\":\"#view-project\",\"filter\":\"optional ID filter\",\"limit\":30}", crate::command_center::requires_ui),
         query!("center.status", "Backstage (alias of backstage.status)", "{\"trace\":false}", crate::command_center::status),
-        query!("studio.cues", "Cues at a Song Time / Uses of a Clip (read-only)", "{\"project\":\"existing .acproj path\",\"at\":43.2,\"clip\":\"clip id; give at or clip\"}", crate::studio_cues::cues),
-        cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .acproj override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false,\"hyperframes_cli\":\"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::command_center::intake),
+        query!("studio.cues", "Cues at a Song Time / Uses of a Clip (read-only)", "{\"project\":\"existing .magic path\",\"at\":43.2,\"clip\":\"clip id; give at or clip\"}", crate::studio_cues::cues),
+        cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .magic override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false,\"hyperframes_cli\":\"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::command_center::intake),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
         query!("agent.session", "Current Chat Session", "{}", cmd_agent_session),
         cmd!("sprocket.send", "Send a message to Sprocket (the app's in-app agent)", ["Agent"], None, "{\"message\":\"text\",\"new_chat\":true,\"session\":\"optional expected existing session; requires new_chat=false\",\"wait\":300,\"free_only\":true}", always, crate::agent::cmd_sprocket_send),
         query!("sprocket.status", "Sprocket Session Status", "{}", cmd_agent_session),
+        cmd!("agent.persist", "Persist the Active Chat Selection to Shared Settings", ["Agent"], None, "{}", always, crate::agent::cmd_agent_persist),
+        query!("sprocket.models", "Sprocket Model Catalog (local first, then free)", "{}", crate::agent::cmd_sprocket_models),
+        cmd!("sprocket.use", "Switch Sprocket's Model", ["Agent"], None, "{\"model\":\"provider/id, e.g. ollama/llama3.2:latest\"}", always, crate::agent::cmd_sprocket_use),
         query!("sprocket.log", "Sprocket Transcript / Reply Retrieval", "{\"refresh\":false}", cmd_agent_log),
         query!("agent.config", "Current Window Chat Selection", "{\"selection\":{\"model\":\"optional active model; shared defaults unchanged\"}}", cmd_agent_config),
         query!("agent.models", "Available Chat Models", "{\"agent\":\"optional catalog adapter: opencode\"}", cmd_agent_models),
@@ -217,10 +220,10 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
-        query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .acproj identity\"}", crate::theatre::read),
+        query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),
         query!("motion.clips", "List clips and their Theatre sheets", "{\"character\":\"asset id\"}", crate::theatre::list),
         cmd!("motion.clips.convert", "Give every clip its own Theatre sheet", [], None, "{\"character\":\"asset id\"}", always, crate::theatre::convert),
-        cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .acproj identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
+        cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .magic identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
         query!(
             "project.list_assets",
             "List Project Assets",
@@ -232,7 +235,7 @@ pub fn build() -> Vec<CommandSpec> {
             "New Project",
             ["File"],
             Some("Cmd+N"),
-            "{\"path\":\"folder/name.acproj\",\"audio\":\"optional song audio\",\"overwrite\":false}",
+            "{\"path\":\"folder/name.magic\",\"audio\":\"optional song audio\",\"overwrite\":false}",
             always,
             cmd_project_new
         ),
@@ -241,7 +244,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Open Project",
             ["File"],
             Some("Cmd+O"),
-            "{\"path\":\"folder/name.acproj\"}",
+            "{\"path\":\"folder/name.magic\"}",
             always,
             cmd_project_open
         ),
@@ -250,7 +253,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Save Project",
             ["File"],
             Some("Cmd+S"),
-            "{\"path\":\"optional_save_as.acproj\"}",
+            "{\"path\":\"optional_save_as.magic\"}",
             always,
             cmd_project_save
         ),
@@ -412,7 +415,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("agent.log", "Agent Transcript / Reply Retrieval", "{\"refresh\":false}", cmd_agent_log),
         cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":true,\"session\":\"optional expected existing session; requires new_chat=false\",\"wait\":300,\"free_only\":false,\"image_task\":false}", always, cmd_agent_send),
         cmd!("image.generate", "Generate Image (Codex)", ["Project Assets"], None,
-            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"reference_asset\":\"optional registered reference PNG asset ID\",\"references\":[\"project-relative or absolute project PNG; max 5 including reference_asset\"],\"poses\":[\"optional 2 to 8 ordered pose descriptions; requires a reference\"],\"character\":\"optional registered source character ID\",\"scene\":1,\"animation\":\"optional intended action name\",\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .acproj for CLI targeting\"}",
+            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"reference_asset\":\"optional registered reference PNG asset ID\",\"references\":[\"project-relative or absolute project PNG; max 5 including reference_asset\"],\"poses\":[\"optional 2 to 8 ordered pose descriptions; requires a reference\"],\"character\":\"optional registered source character ID\",\"scene\":1,\"animation\":\"optional intended action name\",\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .magic for CLI targeting\"}",
             always, crate::image_generation::generate),
         cmd!("assets.agent_sheets", "Draw Asset Sheets (agent)", ["Rig & Matting"], None, "{\"character\":\"optional id\",\"kinds\":[\"turnaround\",\"skeleton\",\"poses\"],\"agent\":\"codex|omp|claude\",\"run\":true,\"check\":false,\"timeout_s\":1800,\"note\":\"optional\"}", always, cmd_assets_agent_sheets),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
@@ -699,7 +702,7 @@ mod tests {
     fn check_param_types_rejects_wrong_json_type() {
         let mut s = Session::default();
         let err = s
-            .execute("project.new", json!({"path": "x.acproj", "overwrite": "yes"}))
+            .execute("project.new", json!({"path": "x.magic", "overwrite": "yes"}))
             .unwrap_err();
         assert!(matches!(err, EngineError::InvalidParams(_)));
     }

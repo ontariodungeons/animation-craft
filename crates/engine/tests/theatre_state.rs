@@ -1,4 +1,4 @@
-use animationcraft_engine::{ProjectAsset, Session};
+use magicstudio_engine::{ProjectAsset, Session};
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf};
 
@@ -7,7 +7,7 @@ impl Fixture {
     fn new() -> Self {
         let root=std::env::temp_dir().join(format!("theatre-state-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         fs::create_dir_all(&root).unwrap();
-        let project=root.join("Bee.acproj");let rig=root.join("original-rig.json");
+        let project=root.join("Bee.magic");let rig=root.join("original-rig.json");
         fs::write(&rig,b"{\"original\":\"rig and source coordinates stay unchanged\"}").unwrap();
         let mut session=Session::default();session.cwd=root.clone();
         session.execute("project.new",json!({"path":project})).unwrap();
@@ -15,7 +15,7 @@ impl Fixture {
         session.execute("project.save",json!({})).unwrap();
         Self{root,project,rig,session}
     }
-    fn save(&mut self,state:Value)->animationcraft_engine::Result<Value>{self.session.execute("motion.theatre.save",json!({"expected_project":self.project,"state":state}))}
+    fn save(&mut self,state:Value)->magicstudio_engine::Result<Value>{self.session.execute("motion.theatre.save",json!({"expected_project":self.project,"state":state}))}
 }
 impl Drop for Fixture {fn drop(&mut self){let _=fs::remove_dir_all(&self.root);}}
 fn native_state()->Value {json!({"definitionVersion":"0.4.0","revisionHistory":["native-revision"],"sheetsById":{"bee":{"sequence":{"type":"PositionalSequence","length":10,"subUnitsPerUnit":30,"tracksByObject":{"antenna-l":{"trackData":{"native-track":{"type":"BasicKeyframedTrack","keyframes":[{"id":"native-key","type":"bezier","position":1.25,"value":12.125,"handles":[0.5,1,0.5,0],"connectedRight":true}]}},"trackIdByPropPath":{"[\"rotation\"]":"native-track"}}}},"staticOverrides":{"byObject":{}},"futureNativeSheetField":{"preserve":[true,null,123]}}},"futureNativeRootField":{"opaque":"retain me"}})}
@@ -43,8 +43,8 @@ fn invalid_missing_or_wrong_project_state_does_not_change_memory_or_disk(){
     for state in [Value::Null,json!({}),json!({"definitionVersion":"future","revisionHistory":[],"sheetsById":{"bee":{}}}),json!({"definitionVersion":"0.4.0","revisionHistory":"wrong","sheetsById":{"bee":{}}}),json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{}}),bad_sheet]{
         assert!(f.save(state).is_err());assert_eq!(f.session.theatre_state,prior);assert_eq!(fs::read(&f.project).unwrap(),original);
     }
-    for params in [json!({"state":native_state()}),json!({"expected_project":f.project}),json!({"expected_project":f.root.join("Missing.acproj"),"state":native_state()})]{assert!(f.session.execute("motion.theatre.save",params).is_err());}
-    let other=f.root.join("Other.acproj");fs::write(&other,&original).unwrap();
+    for params in [json!({"state":native_state()}),json!({"expected_project":f.project}),json!({"expected_project":f.root.join("Missing.magic"),"state":native_state()})]{assert!(f.session.execute("motion.theatre.save",params).is_err());}
+    let other=f.root.join("Other.magic");fs::write(&other,&original).unwrap();
     assert!(f.session.execute("motion.theatre.save",json!({"expected_project":other,"state":native_state()})).unwrap_err().to_string().contains("differs"));
     assert!(f.session.execute("motion.theatre.read",json!({"expected_project":other})).is_err());
     assert_eq!(f.session.theatre_state,prior);assert_eq!(fs::read(&f.project).unwrap(),original);assert_eq!(fs::read(&other).unwrap(),original);
@@ -56,7 +56,7 @@ fn invalid_missing_or_wrong_project_state_does_not_change_memory_or_disk(){
 fn unavailable_destination_preserves_session_state_and_existing_lease(){
     let mut f=Fixture::new();f.save(native_state()).unwrap();let prior=f.session.theatre_state.clone();let original=fs::read(&f.project).unwrap();
     // A path replaced by a directory is deterministically unwritable, even under privileged tests.
-    let moved=f.root.join("original.acproj");fs::rename(&f.project,&moved).unwrap();fs::create_dir(&f.project).unwrap();
+    let moved=f.root.join("original.magic");fs::rename(&f.project,&moved).unwrap();fs::create_dir(&f.project).unwrap();
     let mut changed=native_state();changed["revisionHistory"]=json!(["different-revision"]);
     assert!(f.save(changed).is_err());assert_eq!(f.session.theatre_state,prior);assert_eq!(fs::read(&moved).unwrap(),original);
     fs::remove_dir(&f.project).unwrap();fs::rename(&moved,&f.project).unwrap();

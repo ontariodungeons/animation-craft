@@ -19,7 +19,7 @@ mod center;
 mod local_ui;
 mod snapshot;
 
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -75,7 +75,7 @@ USAGE
   mc [--bridge <port|host:port>] <SUBCOMMAND> [ARGS]
 
 OPTIONS
-  --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
+  --bridge <port|host:port|auto|unix:path>  send commands to a running `magicstudio-shell --control <port>` GUI window
 
 SUBCOMMANDS
   backstage [project=<file>]           interactive Backstage (no automatic Studio launch)
@@ -105,10 +105,10 @@ SUBCOMMANDS
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
   <project> <subcommand | command id> [ARGS]
-                                      run against one project: an .acproj, or a folder with exactly
+                                      run against one project: an .magic, or a folder with exactly
                                       one (a song's hyperframes/ or remotion/ folder finds its song);
                                       same as project=<file> _expected_project=<file>, e.g.
-                                      mc \"Bumble Bee.acproj\" center.snapshot
+                                      mc \"Bumble Bee.magic\" center.snapshot
   clips [character=<id>] [project=<file>] [--convert]
                                       each clip's Theatre sheet, duration and conversion status
                                       (motion.clips; --convert runs motion.clips.convert first)
@@ -141,7 +141,7 @@ VALUES
   key=value parses value as JSON when it can (3.5, true, [1,2], {\"a\":1}), else as a string.
 
 AGENT GUIDE
-  ~/.agents/skills/animationcraft/SKILL.md  workflow, tools and gotchas (the `animationcraft` skill)
+  ~/.agents/skills/magicstudio/SKILL.md  workflow, tools and gotchas (the `magicstudio` skill)
 
 EXIT STATUS
   0 success · 1 a command failed · 2 usage error
@@ -157,7 +157,7 @@ fn bridge_timeout(id: &str) -> std::time::Duration {
     {
         return std::time::Duration::from_millis(ms.max(50));
     }
-    let long = animationcraft_engine::find_command(id).is_some_and(|c| c.long_running);
+    let long = magicstudio_engine::find_command(id).is_some_and(|c| c.long_running);
     std::time::Duration::from_secs(if long { 3600 } else { 30 })
 }
 
@@ -345,7 +345,7 @@ fn command_input_schema(id: &str) -> Value {
 /// Typed MCP schema from a command's `params` description: example values give the JSON type
 /// (`false` -> boolean, `25` -> number), so MCP clients send the same types the engine checks.
 fn schema_from_description(id: &str) -> Value {
-    let described = animationcraft_engine::command_specs()
+    let described = magicstudio_engine::command_specs()
         .iter()
         .find(|s| s.id == id)
         .and_then(|s| serde_json::from_str::<Value>(s.params).ok());
@@ -372,8 +372,8 @@ workshop_status (song, transcript, storyboard, assets) or project_list_assets. A
 project_add_asset {path, character: <name>} copies an outside image to assets/characters/<name>/parts/, \
 {background: <name>} to assets/backgrounds/<name>/; a rig spec connects with kind: cutout_rig. Without --bridge \
 these tools run a headless engine; to drive the user's open window start the server as \
-`mc --bridge <port> mcp` (the app runs with `animationcraft-shell --control <port>`). Full guide: the \
-animationcraft skill (~/.agents/skills/animationcraft/SKILL.md); CLI: `mc help`.";
+`mc --bridge <port> mcp` (the app runs with `magicstudio-shell --control <port>`). Full guide: the \
+Magic Studio skill (~/.agents/skills/magicstudio/SKILL.md); CLI: `mc help`.";
 
 fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
@@ -421,7 +421,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let cmd_id = animationcraft_engine::command_specs()
+                let cmd_id = magicstudio_engine::command_specs()
                     .iter()
                     .find(|s| s.id == raw_name || s.id.replace('.', "_") == raw_name)
                     .map(|s| s.id)
@@ -488,7 +488,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
 
 /// The MCP tool list: every engine command plus the live-window lifecycle tool.
 fn mcp_tools() -> Vec<Value> {
-    let mut tools: Vec<Value> = animationcraft_engine::command_specs()
+    let mut tools: Vec<Value> = magicstudio_engine::command_specs()
         .iter()
         .map(|spec| {
             json!({
@@ -522,7 +522,7 @@ fn mcp_tools() -> Vec<Value> {
             Read-only; uses the open Studio for `project` (or the only one open).",
         "inputSchema": {
             "type": "object",
-            "properties": {"project": {"type": "string", "description": "canonical .acproj path; default the only open Studio"}},
+            "properties": {"project": {"type": "string", "description": "canonical .magic path; default the only open Studio"}},
             "additionalProperties": false
         }
     }));
@@ -535,7 +535,7 @@ fn mcp_tools() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "last": {"type": "integer", "minimum": 1, "maximum": 192, "description": "default 20"},
-                "project": {"type": "string", "description": "canonical .acproj path; default the only open Studio"}
+                "project": {"type": "string", "description": "canonical .magic path; default the only open Studio"}
             },
             "additionalProperties": false
         }
@@ -567,10 +567,10 @@ fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<
         let mut session = Session::user_session();
         let target = params["project"].as_str().map(std::path::PathBuf::from)
             .unwrap_or(std::env::current_dir().map_err(|e|e.to_string())?);
-        let project = if target.extension().is_some_and(|e|e=="acproj") { target } else {
-            let files: Vec<_> = std::fs::read_dir(&target).map_err(|_|"Project directory unavailable; pass project=<existing .acproj>")?
-                .filter_map(Result::ok).map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="acproj")).collect();
-            if files.len()!=1 { return Err("Pass project=<existing .acproj>; no unique project found and no bootstrap project was created".into()); }
+        let project = if target.extension().is_some_and(|e|e=="magic") { target } else {
+            let files: Vec<_> = std::fs::read_dir(&target).map_err(|_|"Project directory unavailable; pass project=<existing .magic>")?
+                .filter_map(Result::ok).map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="magic")).collect();
+            if files.len()!=1 { return Err("Pass project=<existing .magic>; no unique project found and no bootstrap project was created".into()); }
             files[0].clone()
         };
         session.execute("project.attach", json!({"path":project})).map_err(|e|e.to_string())?;
@@ -582,7 +582,7 @@ fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<
     }
     else if verb=="session" { outln!("{}",result["session"].as_str().ok_or("No recorded provider session; inspect agent.config and start a fresh chat")?); }
     else { outln!("{}",result); }
-    if result["ok"]==false { return Err(format!("Agent needs attention in session {}; inspect agent read project=<same .acproj> before retrying",result["session"])); }
+    if result["ok"]==false { return Err(format!("Agent needs attention in session {}; inspect agent read project=<same .magic> before retrying",result["session"])); }
     Ok(())
 }
 
@@ -590,9 +590,9 @@ fn agent_command(verb: &str, text: Option<&str>, params: &Value, bridge: Option<
 fn ui_look(bridge: Option<&str>, mut args: Value) -> Value {
     let error = |e: String| json!({"content": [{"type": "text", "text": e}], "isError": true});
     let Some(addr) = bridge else {
-        return error("ui_look needs the native window: start `animationcraft-shell --control <port>` and run this MCP server with `--bridge <port>`".into());
+        return error("ui_look needs the native window: start `magicstudio-shell --control <port>` and run this MCP server with `--bridge <port>`".into());
     };
-    let out = std::env::temp_dir().join(format!("animationcraft-look-{}.png", std::process::id()));
+    let out = std::env::temp_dir().join(format!("magicstudio-look-{}.png", std::process::id()));
     args["output"] = json!(out);
     match bridge_call(addr, "ui.look", args).and_then(|v| std::fs::read(&out).map(|png| (v, png)).map_err(|e| e.to_string())) {
         Ok((state, png)) => json!({"content": [
@@ -628,10 +628,10 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
 
  let requested=if id=="project.open" || (id=="project.intake" && params["path"].as_str().is_some_and(|p|std::path::Path::new(p).is_file())){Some(session.execute("project.identity",params.clone()).map_err(|e|e.to_string())?["project"].as_str().ok_or("No canonical project")?.to_string())}else if id=="project.intake"{None}else{session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned())};
  if let Some(project)=requested{
-  if let Some(live)=animationcraft_engine::studio_sessions::for_project(std::path::Path::new(&project))?{
+  if let Some(live)=magicstudio_engine::studio_sessions::for_project(std::path::Path::new(&project))?{
    if let Some(pin)=params["_expected_instance"].as_str(){if Some(pin)!=live["instance"].as_str(){return Err("Pinned Studio instance changed; explicitly reload this project attachment before further commands".into());}}
    params["_expected_project"]=json!(project);params["_expected_instance"]=live["instance"].clone();
-   if live["project_guard_version"]!=1 && animationcraft_engine::find_command(id).is_some_and(|c|!c.journal){let mut value=session.execute(id,params).map_err(|e|e.to_string())?;if value.is_object(){value["state_source"]=json!("disk snapshot; matched Studio requires current guarded-attachment build");}return Ok(value);}
+   if live["project_guard_version"]!=1 && magicstudio_engine::find_command(id).is_some_and(|c|!c.journal){let mut value=session.execute(id,params).map_err(|e|e.to_string())?;if value.is_object(){value["state_source"]=json!("disk snapshot; matched Studio requires current guarded-attachment build");}return Ok(value);}
    let endpoint=live["endpoint"].as_str().ok_or("Matched Studio has no endpoint")?;
    let value=local_ui::call(endpoint,id,params.clone())?;
    if id=="project.open"{session.execute("project.attach",json!({"path":project})).map_err(|e|e.to_string())?;}
@@ -692,7 +692,7 @@ fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
         i += if raw[i] == "--bridge" { 2 } else { 1 };
     }
     let Some(token) = raw.get(i).cloned() else { return Ok(raw) };
-    if SUBCOMMANDS.contains(&token.as_str()) || !(token.contains('/') || token.ends_with(".acproj")) {
+    if SUBCOMMANDS.contains(&token.as_str()) || !(token.contains('/') || token.ends_with(".magic")) {
         return Ok(raw);
     }
     let project = resolve_project(std::path::Path::new(&token))?;
@@ -705,14 +705,14 @@ fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
     Ok(raw)
 }
 
-/// An .acproj file, or the one .acproj in a folder. A song project's video-target folder
+/// An .magic file, or the one .magic in a folder. A song project's video-target folder
 /// (hyperframes/, remotion/, filmcraft/, or one level inside it) resolves to that song project.
 fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     if path.is_file() {
-        if path.extension().is_some_and(|e| e == "acproj") {
+        if path.extension().is_some_and(|e| e == "magic") {
             return std::fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()));
         }
-        return Err(format!("{} is not an .acproj project file", path.display()));
+        return Err(format!("{} is not an .magic project file", path.display()));
     }
     if !path.is_dir() {
         return Err(format!("{}: no such project file or folder", path.display()));
@@ -720,20 +720,20 @@ fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String>
     for dir in path.ancestors().take(3) {
         // Above the given folder, only a song project's video-target folder leads up to it.
         let via_target = path.strip_prefix(dir).ok().and_then(|rest| rest.components().next())
-            .and_then(|c| c.as_os_str().to_str()).is_some_and(|c| animationcraft_engine::workshop::VIDEO_TARGETS.contains(&c));
+            .and_then(|c| c.as_os_str().to_str()).is_some_and(|c| magicstudio_engine::workshop::VIDEO_TARGETS.contains(&c));
         if dir != path && !via_target {
             continue;
         }
         let found: Vec<_> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?
             .filter_map(Result::ok).map(|e| e.path())
-            .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "acproj")).collect();
+            .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "magic")).collect();
         match found.as_slice() {
             [] => continue,
             [one] => return std::fs::canonicalize(one).map_err(|e| e.to_string()),
-            many => return Err(format!("{} has {} .acproj files; pass the one you mean", dir.display(), many.len())),
+            many => return Err(format!("{} has {} .magic files; pass the one you mean", dir.display(), many.len())),
         }
     }
-    Err(format!("no .acproj in {} (or above it, from a hyperframes/remotion/filmcraft folder); pass the project file", path.display()))
+    Err(format!("no .magic in {} (or above it, from a hyperframes/remotion/filmcraft folder); pass the project file", path.display()))
 }
 
 fn main() {
@@ -762,7 +762,7 @@ fn main() {
             {
                 fail("Login requires your interactive terminal");
             }
-            let program = animationcraft_engine::agent::opencode_program().unwrap_or_else(|e| fail(e));
+            let program = magicstudio_engine::agent::opencode_program().unwrap_or_else(|e| fail(e));
             diag(format_args!("Using OpenCode: {}", program.display()));
             let mut command = std::process::Command::new(program);
             command.args(["auth", "login"]);
@@ -777,6 +777,37 @@ fn main() {
             let mut params=a.params_from(1).unwrap_or_else(|e|usage(e));
             params["_origin"]=json!("CLI");
             let read_only=wants("--status")||wants("--log");
+            if wants("--models"){
+                let result=if let Some(addr)=a.bridge_addr(){bridge_call(&addr,"sprocket.models",params)}else{
+                    let mut s=Session::user_session();
+                    if let Some(project)=params["project"].as_str(){s.execute("project.attach",json!({"path":project})).unwrap_or_else(|e|fail(format!("sprocket.models: {e}")));}
+                    dispatch(&mut s,"sprocket.models",params)
+                };
+                let result=result.unwrap_or_else(|e|fail(e));
+                let list=result["models"].as_array().cloned().unwrap_or_default();
+                for m in list.iter().take(40){
+                    let mark=if m["current"]==true{"*"}else if m["local"]==true{"L"}else if m["free"]==true{"F"}else{" "};
+                    outln!("{mark} {}/{}  {}",m["provider"].as_str().unwrap_or("?"),m["model"].as_str().unwrap_or("?"),m["name"].as_str().unwrap_or(""));
+                }
+                if let Some(rec)=result["recommended"].as_object(){
+                    outln!("recommended: {}/{}",rec["provider"].as_str().unwrap_or("?"),rec["model"].as_str().unwrap_or("?"));
+                }
+                outln!("(L local · F free · * current — switch with: mc sprocket --use <provider/id>)");
+                std::process::exit(0);
+            }
+            if wants("--use"){
+                let model=raw.iter().skip(1).find(|v|!v.starts_with("--")&&!v.contains('=')).cloned().unwrap_or_default();
+                if model.is_empty(){usage("mc sprocket --use <provider/id>   e.g. ollama/llama3.2:latest");}
+                params["model"]=json!(model);
+                let result=if let Some(addr)=a.bridge_addr(){bridge_call(&addr,"sprocket.use",params)}else{
+                    let mut s=Session::user_session();
+                    if let Some(project)=params["project"].as_str(){s.execute("project.attach",json!({"path":project})).unwrap_or_else(|e|fail(format!("sprocket.use: {e}")));}
+                    dispatch(&mut s,"sprocket.use",params)
+                };
+                let result=result.unwrap_or_else(|e|fail(e));
+                outln!("Sprocket now uses {}/{} ({}).",result["selection"]["provider"].as_str().unwrap_or("?"),result["selection"]["model"].as_str().unwrap_or("?"),if result["local"]==true{"local"}else if result["free"]==true{"free"}else{"paid"});
+                std::process::exit(0);
+            }
             if !read_only{
                 if message.is_empty(){usage("mc sprocket <message...>   talk to Sprocket, the app's own agent\n       mc sprocket --status    show the Sprocket session\n       mc sprocket --log       show the Sprocket transcript\n       mc sprocket --continue  keep the current Sprocket chat instead of starting a new one");}
                 params["message"]=json!(message);
@@ -811,7 +842,7 @@ fn main() {
             if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),cli_args().iter().cloned().any(|a|a=="--print")){fail(e);}
         }
         "info" => {
-            let specs = animationcraft_engine::command_specs();
+            let specs = magicstudio_engine::command_specs();
             outln!("Magic Studio engine v{}", env!("CARGO_PKG_VERSION"));
             outln!("Registered commands: {}", specs.len());
             for spec in specs {
@@ -820,8 +851,8 @@ fn main() {
         }
         "commands" => {
             let f = a.pos(1).map(str::to_ascii_lowercase).unwrap_or_default();
-            let specs = animationcraft_engine::command_specs();
-            let hit = |spec: &&animationcraft_engine::CommandSpec| {
+            let specs = magicstudio_engine::command_specs();
+            let hit = |spec: &&magicstudio_engine::CommandSpec| {
                 let id = spec.id.to_ascii_lowercase();
                 let label = spec.label.to_ascii_lowercase();
                 f.is_empty() || id.contains(&f) || label.contains(&f)
@@ -1072,7 +1103,7 @@ mod tests {
             .collect();
         assert_eq!(quit.len(), 1, "app_quit must appear exactly once");
         assert_eq!(quit[0]["inputSchema"]["additionalProperties"], json!(false));
-        assert!(tools.len() >= animationcraft_engine::command_specs().len());
+        assert!(tools.len() >= magicstudio_engine::command_specs().len());
     }
 
     #[test]
@@ -1095,7 +1126,7 @@ mod tests {
 
     #[test]
     fn engine_has_registered_commands() {
-        let specs = animationcraft_engine::command_specs();
+        let specs = magicstudio_engine::command_specs();
         assert!(!specs.is_empty());
     }
 
@@ -1139,7 +1170,7 @@ mod project_argument_tests {
     #[test]
     fn file_folder_and_video_target_folder_resolve_to_the_one_project() {
         let dir = temp("one");
-        let file = dir.join("Song.acproj");
+        let file = dir.join("Song.magic");
         std::fs::write(&file, "{}").unwrap();
         std::fs::create_dir_all(dir.join("hyperframes/src")).unwrap();
         let canonical = std::fs::canonicalize(&file).unwrap();
@@ -1152,14 +1183,14 @@ mod project_argument_tests {
     #[test]
     fn folders_with_no_or_several_projects_and_other_files_are_refused() {
         let empty = temp("none");
-        assert!(resolve_project(&empty).unwrap_err().contains("no .acproj"));
+        assert!(resolve_project(&empty).unwrap_err().contains("no .magic"));
         let many = temp("many");
-        std::fs::write(many.join("A.acproj"), "{}").unwrap();
-        std::fs::write(many.join("B.acproj"), "{}").unwrap();
-        assert!(resolve_project(&many).unwrap_err().contains("has 2 .acproj files"));
+        std::fs::write(many.join("A.magic"), "{}").unwrap();
+        std::fs::write(many.join("B.magic"), "{}").unwrap();
+        assert!(resolve_project(&many).unwrap_err().contains("has 2 .magic files"));
         std::fs::write(empty.join("notes.txt"), "").unwrap();
-        assert!(resolve_project(&empty.join("notes.txt")).unwrap_err().contains("not an .acproj"));
-        assert!(resolve_project(&empty.join("missing.acproj")).unwrap_err().contains("no such project"));
+        assert!(resolve_project(&empty.join("notes.txt")).unwrap_err().contains("not an .magic"));
+        assert!(resolve_project(&empty.join("missing.magic")).unwrap_err().contains("no such project"));
         std::fs::remove_dir_all(&empty).unwrap();
         std::fs::remove_dir_all(&many).unwrap();
     }
@@ -1167,7 +1198,7 @@ mod project_argument_tests {
     #[test]
     fn a_leading_project_becomes_pinned_params_and_a_bare_id_runs_as_exec() {
         let dir = temp("argv");
-        let file = dir.join("Song.acproj");
+        let file = dir.join("Song.magic");
         std::fs::write(&file, "{}").unwrap();
         let p = std::fs::canonicalize(&file).unwrap().display().to_string();
         let f = file.display().to_string();
@@ -1188,7 +1219,7 @@ mod project_argument_tests {
     fn a_studio_showing_another_project_refuses_the_command() {
         let dir = temp("wrong");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let (mine, other) = (dir.join("Mine.acproj"), dir.join("Other.acproj"));
+        let (mine, other) = (dir.join("Mine.magic"), dir.join("Other.magic"));
         std::fs::write(&mine, "{}").unwrap();
         std::fs::write(&other, "{}").unwrap();
         let socket = dir.join("studio.sock");

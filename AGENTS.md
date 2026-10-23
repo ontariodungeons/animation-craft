@@ -5,13 +5,13 @@ UI, engine, pipeline, and test work from overwriting one another.
 
 ## Canonical application
 
-The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
+The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p magicstudio-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
 
 ## Drive the app: CLI, MCP and skill
 
-- Skill: `~/.agents/skills/animationcraft/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
+- Skill: `~/.agents/skills/magicstudio/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
 - CLI: `mc help`; `mc exec <command> key=value`, or add
-  `--bridge <port>` to drive an open `animationcraft-shell --control <port>` window.
+  `--bridge <port>` to drive an open `magicstudio-shell --control <port>` window.
 - MCP: register command `mc`, args `["mcp"]` (headless engine) or
   `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
 

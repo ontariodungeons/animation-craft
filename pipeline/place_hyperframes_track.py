@@ -11,7 +11,7 @@ def place(project,request):
         receipt=(project_root/request['generation_receipt']).resolve(strict=True)
         if not receipt.is_relative_to(project_root): raise ValueError('generation_receipt must belong to this project')
         data=json.loads(receipt.read_text())
-        if data.get('format')!='animationcraft.image-generation' or data.get('result',{}).get('ok') is not True:
+        if data.get('format')!='magicstudio.image-generation' or data.get('result',{}).get('ok') is not True:
             raise ValueError('generation_receipt is not a successful native image generation')
         if Path(data['project']).resolve().parent!=project_root:
             raise ValueError('generation_receipt belongs to another project folder')
@@ -39,9 +39,9 @@ def place(project,request):
     x,y,w,h=rect
     character=html.escape(str(request.get('character','')),quote=True)
     motion_track=html.escape(str(request.get('track','')),quote=True)
-    tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-playback-rate="{playback_rate}" data-track-index="{track}" data-animationcraft-scene="{request.get("scene", "")}" data-animationcraft-character="{character}" data-animationcraft-track="{motion_track}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
+    tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-playback-rate="{playback_rate}" data-track-index="{track}" data-magicstudio-scene="{request.get("scene", "")}" data-magicstudio-character="{character}" data-magicstudio-track="{motion_track}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
     root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
-    backup=root/'.animationcraft-history';backup.mkdir(exist_ok=True);stamp=time.time_ns();shutil.copy2(entry,backup/f'index-{stamp}.html')
+    backup=root/'.magicstudio-history';backup.mkdir(exist_ok=True);stamp=time.time_ns();shutil.copy2(entry,backup/f'index-{stamp}.html')
     text=text[:root_tag.end()]+'\n'+tag+text[root_tag.end():]
     entry.write_text(text)
     record=dict(request,ok=True,media=str(target),track_index=track,backup=str(backup/f'index-{stamp}.html'))

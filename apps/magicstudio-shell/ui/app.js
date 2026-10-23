@@ -1,4 +1,4 @@
-// Magic Studio shell: the project view. Data comes from animationcraft-engine through the
+// Magic Studio shell: the project view. Data comes from magicstudio-engine through the
 // shell's commands; files open with one click; the studio tab hosts the video target's studio.
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
@@ -305,7 +305,7 @@ function renderBlocks() {
     const picture=/\.(png|jpe?g|webp|gif)$/i.test(a.path||'')?el('img',{src:convertFileSrc(a.path),alt:a.name,draggable:'false'}):el('span',{html:ICONS.animate});
     const card=el('button',{id:`asset-${a.id}`,class:'object',draggable:'true',title:`${a.name} · drag onto a storyboard page or click to animate`,'aria-label':a.name,
       onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
-    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-animationcraft-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
+    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-magicstudio-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
   });
   const animateState = observed("animate")?.state || "unknown";
   const animateBody = assets.length > 0
@@ -400,7 +400,7 @@ function renderStoryboard() {
       page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
       page.addEventListener('drop',async e=>{
         e.preventDefault();page.classList.remove('drop-target');
-        const id=e.dataTransfer.getData('application/x-animationcraft-asset');if(!id)return;
+        const id=e.dataTransfer.getData('application/x-magicstudio-asset');if(!id)return;
         const r=page.getBoundingClientRect();
         try{await designCommand('storyboard.place_asset',{asset:id,page:i+1,x:(e.clientX-r.left)/r.width*size[0]-80,y:(e.clientY-r.top)/r.height*size[1]-80,width:160});}catch(error){toast(String(error));}
       });
@@ -536,7 +536,7 @@ async function applyOpenedProject(opened, start = {}) {
   state.page = 0;
   state.open = start.open && start.open !== "agent" ? start.open : "song";
   document.body.classList.remove("at-home");
-  $("project-name").textContent = path.split("/").pop().replace(/\.acproj$/, "");
+  $("project-name").textContent = path.split("/").pop().replace(/\.magic$/, "");
   document.title = `${$("project-name").textContent} · Magic Studio`;
   renderTarget();
   renderBlocks();

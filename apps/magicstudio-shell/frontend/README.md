@@ -6,7 +6,7 @@ selected part's additional rotation. Both timelines share seconds.
 
 Build the declared dependencies with `bun run build` in this directory before
 building the Tauri app. The generated bundle is embedded with the other UI files.
-Save motion stores the native Theatre snapshot in `.acproj` and restores it on
+Save motion stores the native Theatre snapshot in `.magic` and restores it on
 reopen. Original sampled motion remains intact. Theatre history and native engine
 Undo are still separate. This integration remains a local evaluation.
 

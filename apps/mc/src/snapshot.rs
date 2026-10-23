@@ -190,7 +190,7 @@ pub fn collect(project: Option<&str>, bridge: Option<&str>) -> (Value, Value) {
         .unwrap_or_else(|e| json!({"connection": "error", "error": e}));
     if bridge.is_some() && ui["connection"] == "connected" {
         if let Some(expected) = project {
-            let canonical = |p: &str| animationcraft_engine::studio_sessions::canonical(std::path::Path::new(p));
+            let canonical = |p: &str| magicstudio_engine::studio_sessions::canonical(std::path::Path::new(p));
             if canonical(expected).ok().zip(ui["active_project"].as_str().and_then(|p| canonical(p).ok())).is_none_or(|(a,b)| a != b) {
                 ui = json!({"connection":"error","error":"Selected Studio does not show the requested project; no fallback observation used"});
             }
@@ -198,7 +198,7 @@ pub fn collect(project: Option<&str>, bridge: Option<&str>) -> (Value, Value) {
         if ui["connection"] == "connected" { ui["endpoint"] = json!(target); }
     }
     let project = ui["active_project"].as_str().or(project).map(str::to_owned);
-    let mut session = animationcraft_engine::Session::default();
+    let mut session = magicstudio_engine::Session::default();
     let activity = session
         .execute("center.events", json!({"project": project, "limit": 192}))
         .unwrap_or_else(|e| json!({"error": e.to_string()}));
@@ -256,7 +256,7 @@ mod tests {
     fn snapshot_reads_matched_page_state_and_newest_engine_error() {
         let dir = std::env::temp_dir().join(format!("mc-snapshot-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let project = dir.join("song.acproj");
+        let project = dir.join("song.magic");
         std::fs::write(&project, r#"{"workshop":{"target":"hyperframes"}}"#).unwrap();
         let path = project.to_str().unwrap();
         let ui = json!({"connection": "connected", "active_project": path, "engine_unsaved": true, "unsaved_edits": 2, "dirty_reasons": ["engine state differs", {"draft_field": "x"}]});
@@ -287,7 +287,7 @@ mod tests {
         assert!(status_line(&s).contains("clip fly · sheet bee / fly") && status_line(&s).contains("converting @walk"));
         assert_eq!(tail(&converting, None).last().unwrap()["sheet"], "bee / run");
         // A page showing another project is not reported as this project's state.
-        let stale = json!({"page": {"project": "/other.acproj", "animation": {"character": "bee"}}, "fps": 24});
+        let stale = json!({"page": {"project": "/other.magic", "animation": {"character": "bee"}}, "fps": 24});
         assert!(build(None, &ui, &stale, &json!({}))["subject"].is_null());
         std::fs::remove_file(&project).unwrap();
         std::fs::remove_dir(&dir).unwrap();

@@ -1039,8 +1039,8 @@ mod tests {
         ImageBuffer::from_pixel(2, 2, Rgba::<u8>([45, 55, 65, 255]))
             .save(root.join("body.png"))
             .unwrap();
-        let project = root.join("project.acproj");
-        std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"animationcraft.project","version":1,"name":"Fixture","assets":[
+        let project = root.join("project.magic");
+        std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"magicstudio.project","version":1,"name":"Fixture","assets":[
             {"id":"fish","name":"Fish","preset":null,"path":rig,"kind":"cutout_rig","parts":[]}],"workshop":{}})).unwrap()).unwrap();
         let mut session = Session::default();
         session.cwd = root.clone();
@@ -1428,8 +1428,8 @@ mod tests {
         ImageBuffer::from_pixel(2, 2, Rgba::<u8>([3, 4, 5, 255]))
             .save(&image_path)
             .unwrap();
-        let project = root.join("plain.acproj");
-        std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"animationcraft.project","version":1,"name":"Plain","assets":[
+        let project = root.join("plain.magic");
+        std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"magicstudio.project","version":1,"name":"Plain","assets":[
             {"id":"plain","name":"Plain","preset":null,"path":image_path,"kind":"image","parts":[]}],"workshop":{}})).unwrap()).unwrap();
         let mut plain = Session::default();
         plain.cwd = root.clone();

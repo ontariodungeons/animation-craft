@@ -1,5 +1,5 @@
 //! Run settings tests in a child so config/history never touch the user's files.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::{Value, json};
 use std::{fs, process::Command};
 
@@ -68,7 +68,7 @@ fn project_root_child() {
     assert_eq!(
         test["project"],
         tests
-            .join("test-song/project/Test Song.acproj")
+            .join("test-song/project/Test Song.magic")
             .to_string_lossy()
             .as_ref()
     );
@@ -79,11 +79,11 @@ fn project_root_child() {
     );
     assert_eq!(fs::read(&config).unwrap(), saved);
     // Test/fixture paths under /tmp are never persisted as recent projects.
-    assert!(!animationcraft_engine::project_catalog::list().iter().any(|p| p.contains("explicit-tests")));
+    assert!(!magicstudio_engine::project_catalog::list().iter().any(|p| p.contains("explicit-tests")));
     let created = session
         .execute("project.intake", json!({"name":"Production Song"}))
         .unwrap();
-    let expected = production.join("production-song/project/Production Song.acproj");
+    let expected = production.join("production-song/project/Production Song.magic");
     assert_eq!(created["project"], expected.to_string_lossy().as_ref());
     assert!(expected.is_file());
     assert_eq!(created["location"]["source"], "production root");
@@ -98,7 +98,7 @@ fn project_root_child() {
             .unwrap()["root"],
         configured["root"]
     );
-    let explicit = tests.join("different-location/project/Explicit.acproj");
+    let explicit = tests.join("different-location/project/Explicit.magic");
     let receipt = session
         .execute("project.intake", json!({"path":explicit}))
         .unwrap();

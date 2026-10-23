@@ -49,7 +49,7 @@ needed, user permits Sol6.1 only. No paid model/provider switches made.
 
 ## Live state / outputs
 
-Project `/run/media/jesse/Speedy/media/merriweather/nelly/Nelly.acproj`.
+Project `/run/media/jesse/Speedy/media/merriweather/nelly/Nelly.magic`.
 Shell on19897, Animation view, `mouse`, `@jump`, amount35%, speed2/2.58, paused at end.
 HyperFrames managed server3058. Protected other servers3002/3021–3023 untouched.
 Backlot read-only reference server4750 was started from source repo `.venv/bin/python -m backlot serve`.

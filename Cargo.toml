@@ -12,7 +12,7 @@ repository = "https://github.com/storytold/omhas-animation"
 
 [workspace.dependencies]
 # internal
-animationcraft-engine = { path = "crates/engine" }
+magicstudio-engine = { path = "crates/engine" }
 
 # foundation
 thiserror = "2"

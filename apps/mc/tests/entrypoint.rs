@@ -51,12 +51,12 @@ fn canonical_help_version_and_mcp_discover_same_registry() {
 }
 
 #[test]
-fn existing_acproj_identity_and_asset_bytes_survive_cli_readback() {
+fn existing_magic_identity_and_asset_bytes_survive_cli_readback() {
     let fixture = Fixture::new();
-    let project = fixture.0.join("Existing.acproj");
+    let project = fixture.0.join("Existing.magic");
     let asset = fixture.0.join("retained.svg");
     fs::write(&asset, b"<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'/>").unwrap();
-    let doc = json!({"format":"animationcraft.project","version":1,"name":"Existing",
+    let doc = json!({"format":"magicstudio.project","version":1,"name":"Existing",
         "assets":[{"id":"art","name":"Retained art","path":asset,"kind":"image","preset":null}],
         "workshop":{"audio":null,"draft_approved":false,"target":"hyperframes","video_project":null}});
     fs::write(&project, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();

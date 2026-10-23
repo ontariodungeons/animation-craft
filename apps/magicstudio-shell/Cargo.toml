@@ -1,5 +1,5 @@
 [package]
-name = "animationcraft-shell"
+name = "magicstudio-shell"
 description = "Magic Studio desktop shell: the project view in a webview, with video studios (HyperFrames, Remotion) as tabs"
 version.workspace = true
 edition.workspace = true
@@ -12,7 +12,7 @@ workspace = true
 tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-animationcraft-engine = { workspace = true }
+magicstudio-engine = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2.12", features = ["unstable", "protocol-asset", "devtools"] }
 # The system's own Open / Save / folder dialogs (xdg-desktop-portal on Linux).

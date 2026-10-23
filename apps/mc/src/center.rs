@@ -1,5 +1,5 @@
 //! Terminal presentation only. All project operations execute the shared engine registry.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     Frame,
@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 const LABELS: [&str; 8] = [
-    "Existing project (.acproj)",
+    "Existing project (.magic)",
     "New song root",
     "Song name",
     "Existing audio",
@@ -53,7 +53,7 @@ struct Center {
 impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
-        let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
+        let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
         Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
@@ -1031,7 +1031,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){
@@ -1060,7 +1060,7 @@ mod feedback_tests {
     #[test]
     fn next_command_is_literal_pinned_and_comes_from_shared_recommendation(){
       let mut c=fixture();c.pinned_instance=Some("studioA.sock".into());c.state["ui"]["endpoint"]=json!("unix:/tmp/studioA.sock");c.state["next_commands"]=json!([{"label":"See asset import arguments","command":"command.list","operation":"exec","params":{"filter":"project.add_asset"},"reason":"No reference art is registered; inspect the import command before choosing an asset."}]);
-      let commands=c.copy_commands();assert_eq!(commands[0].0,"See asset import arguments");assert!(commands[0].1.contains("--bridge 'unix:/tmp/studioA.sock' exec 'command.list' 'filter=project.add_asset'"));assert!(commands[0].1.contains("_expected_project=/fixture.acproj"));assert!(commands[0].1.contains("unix:/tmp/studioA.sock"));assert!(!commands[0].1.contains("<mc>"));
+      let commands=c.copy_commands();assert_eq!(commands[0].0,"See asset import arguments");assert!(commands[0].1.contains("--bridge 'unix:/tmp/studioA.sock' exec 'command.list' 'filter=project.add_asset'"));assert!(commands[0].1.contains("_expected_project=/fixture.magic"));assert!(commands[0].1.contains("unix:/tmp/studioA.sock"));assert!(!commands[0].1.contains("<mc>"));
     }
     #[test]
     fn matching_shared_chat_receipt_clears_only_the_submitted_draft(){
@@ -1078,7 +1078,7 @@ mod feedback_tests {
     #[test]
     fn both_views_show_the_shared_status_line_and_booth_follows_the_tail(){
         let mut c=fixture();
-        c.state["snapshot"]=json!({"project":"/fixture.acproj","subject":"bee","clip":"fly","playhead_sec":1.5,"selected_part":"wing","unsaved_edits":1,"hyperframes":false,"fps":24,"last_error":null});
+        c.state["snapshot"]=json!({"project":"/fixture.magic","subject":"bee","clip":"fly","playhead_sec":1.5,"selected_part":"wing","unsaved_edits":1,"hyperframes":false,"fps":24,"last_error":null});
         c.state["tail"]=merge_tail(&json!([]),crate::snapshot::tail(&json!({"events":[{"sequence":9,"stage":"saved_state","command":"project.save"}]}),None));
         assert_eq!(merge_tail(&c.state["tail"],crate::snapshot::tail(&json!({"events":[{"sequence":9,"stage":"saved_state","command":"project.save"}]}),None)).as_array().unwrap().len(),1,"polling the same journal row twice adds it once");
         for control in [false,true]{for(w,h)in [(90,38),(140,44)]{

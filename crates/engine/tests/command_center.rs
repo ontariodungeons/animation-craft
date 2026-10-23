@@ -1,4 +1,4 @@
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 use std::{fs, path::PathBuf};
 fn fixture(name: &str) -> PathBuf {
@@ -11,7 +11,7 @@ fn new_intake_retains_invalid_received_bytes_and_remains_openable() {
     let d = fixture("invalid");
     let input = d.join("broken.json");
     fs::write(&input, b"[broken").unwrap();
-    let project = d.join("case/project/Case.acproj");
+    let project = d.join("case/project/Case.magic");
     let mut s = Session::default();
     let r = s
         .execute("project.intake", json!({"path":project,"transcript":input}))
@@ -46,7 +46,7 @@ fn hyperframes_words_import_without_srt_preserves_occurrences_and_end_tail() {
     let r = s
         .execute(
             "project.intake",
-            json!({"path":d.join("case/project/Case.acproj"),"transcript":raw,"audiomap":map}),
+            json!({"path":d.join("case/project/Case.magic"),"transcript":raw,"audiomap":map}),
         )
         .unwrap();
     assert_eq!(r["intake_ready"], true);
@@ -59,7 +59,7 @@ fn hyperframes_words_import_without_srt_preserves_occurrences_and_end_tail() {
     assert_eq!(imported["words"], words);
     let deck=PathBuf::from(r["storyboard"]["deck"].as_str().unwrap());
     let before=fs::read(&deck).unwrap();
-    let resumed=s.execute("project.intake",json!({"path":d.join("case/project/Case.acproj"),"resume":true})).unwrap();
+    let resumed=s.execute("project.intake",json!({"path":d.join("case/project/Case.magic"),"resume":true})).unwrap();
     assert_eq!(resumed["storyboard_ready"],true);
     assert_eq!(resumed["storyboard"]["reused_existing_document"],true);
     assert!(!resumed["steps"].as_array().unwrap().iter().any(|v|v["command"]=="audio.analyze"));
@@ -78,7 +78,7 @@ fn resumed_intake_requires_explicit_transcript_replacement() {
         json!([{"text":"original","start":0.0,"end":1.0}]).to_string(),
     )
     .unwrap();
-    let p = d.join("case/project/Case.acproj");
+    let p = d.join("case/project/Case.magic");
     let mut s = Session::default();
     s.execute("project.intake", json!({"path":p,"transcript":raw}))
         .unwrap();
@@ -104,7 +104,7 @@ fn audio_only_intake_attempts_existing_pipeline_and_retains_recoverable_failure(
     let d=fixture("bad-audio");
     let audio=d.join("invalid.wav");
     fs::write(&audio,b"not audio").unwrap();
-    let project=d.join("case/project/Case.acproj");
+    let project=d.join("case/project/Case.magic");
     let mut s=Session::default();
     let r=s.execute("project.intake",json!({"path":project,"audio":audio})).unwrap();
     assert_eq!(r["intake_ready"],false);
@@ -125,7 +125,7 @@ fn audio_only_intake_attempts_existing_pipeline_and_retains_recoverable_failure(
 fn shared_observation_does_not_confuse_files_or_saved_receipts_with_readiness() {
     let d = fixture("observed-prerequisites");
     let mut s=Session::default();
-    s.execute("project.new",json!({"path":d.join("Observed.acproj")})).unwrap();
+    s.execute("project.new",json!({"path":d.join("Observed.magic")})).unwrap();
     fs::write(d.join("intake-state.json"),json!({"intake_ready":true,"storyboard_ready":true,"video_ready":true}).to_string()).unwrap();
     let observed=s.execute("center.status",json!({})).unwrap();
     let find=|id:&str|observed["prerequisites"].as_array().unwrap().iter().find(|v|v["id"]==id).unwrap();

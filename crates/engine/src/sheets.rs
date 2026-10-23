@@ -47,13 +47,13 @@ fn available_agents() -> Vec<&'static str> {
         .collect()
 }
 
-/// The agent the app is configured with (`~/.config/animationcraft/agent.json`), else the
+/// The agent the app is configured with (`~/.config/magicstudio/agent.json`), else the
 /// Omarchy system default, else codex.
 fn configured_agent() -> String {
     let settings = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-        .map(|base| base.join("animationcraft").join("agent.json"));
+        .map(|base| base.join("magicstudio").join("agent.json"));
     if let Some(path) = settings
         && let Ok(text) = std::fs::read_to_string(path)
         && let Ok(value) = serde_json::from_str::<Value>(&text)
@@ -416,7 +416,7 @@ pub fn cmd_assets_agent_sheets(s: &mut Session, params: &Value) -> Result<Value>
         EngineError::InvalidParams(
             "no project is open, so there is nowhere to write the sheets. Run it in one session: \
              `mc run` with a script of two lines — \
-             {\"id\":\"project.open\",\"params\":{\"path\":\"<project>.acproj\"}} then \
+             {\"id\":\"project.open\",\"params\":{\"path\":\"<project>.magic\"}} then \
              {\"id\":\"assets.agent_sheets\",\"params\":{\"character\":\"<id>\"}} — or open the \
              project in the app first."
                 .into(),
@@ -460,7 +460,7 @@ pub fn cmd_assets_agent_sheets(s: &mut Session, params: &Value) -> Result<Value>
     let project_path = s
         .project_path
         .clone()
-        .unwrap_or_else(|| dir.join(format!("{character}.acproj")));
+        .unwrap_or_else(|| dir.join(format!("{character}.magic")));
 
     let mut brief = format!(
         "# Asset sheets for `{character}`\n\nReference artwork: `{}`\n\nDraw these sheets, exactly as this contract says:\n\n{}",

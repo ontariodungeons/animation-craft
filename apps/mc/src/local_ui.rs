@@ -10,17 +10,17 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
             .map(str::to_owned);
         let expected = requested
             .as_deref()
-            .map(|p| animationcraft_engine::studio_sessions::canonical(Path::new(p)))
+            .map(|p| magicstudio_engine::studio_sessions::canonical(Path::new(p)))
             .transpose()?;
         let selected = if let Some(path) = target.strip_prefix("unix:") {
-            let feedback = animationcraft_engine::studio_sessions::request(
+            let feedback = magicstudio_engine::studio_sessions::request(
                 Path::new(path),
                 "ui.feedback",
                 json!({}),
             )?;
             Some((path.to_string(), feedback))
         } else if let Some(project) = &expected {
-            animationcraft_engine::studio_sessions::for_project(project)?.map(|v| {
+            magicstudio_engine::studio_sessions::for_project(project)?.map(|v| {
                 (
                     v["endpoint"]
                         .as_str()
@@ -31,7 +31,7 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                 )
             })
         } else {
-            let discovery = animationcraft_engine::studio_sessions::discover();
+            let discovery = magicstudio_engine::studio_sessions::discover();
             let sessions = discovery["sessions"]
                 .as_array()
                 .cloned()
@@ -44,7 +44,7 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                     .as_str()
                     .or(feedback["canonical_project"].as_str())
                     .ok_or("Studio has no project; attachment refused")?;
-                if animationcraft_engine::studio_sessions::canonical(Path::new(active))? != expected
+                if magicstudio_engine::studio_sessions::canonical(Path::new(active))? != expected
                 {
                     return Err(
                         "Pinned Studio changed project; command refused, no automatic reassignment"
@@ -72,9 +72,9 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                 }
             }
             let mut result = if id=="ui.feedback"||id=="ui.components" {
-                animationcraft_engine::studio_sessions::request(Path::new(&path),id,params)?
+                magicstudio_engine::studio_sessions::request(Path::new(&path),id,params)?
             } else {
-                animationcraft_engine::studio_sessions::request_slow(Path::new(&path),id,params)?
+                magicstudio_engine::studio_sessions::request_slow(Path::new(&path),id,params)?
             };
             if result.is_object() {
                 result["endpoint"] = json!(format!("unix:{path}"));

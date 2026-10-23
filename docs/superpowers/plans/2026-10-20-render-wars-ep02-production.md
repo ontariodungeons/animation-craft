@@ -148,7 +148,7 @@
 ### Task 6: Characters and performance
 
 **Files:**
-- Create: `PROJECT/characters/<NAME>/` (cutout rig `.acproj` from Sol's turnarounds), `PROJECT/blender/remy_body.py`
+- Create: `PROJECT/characters/<NAME>/` (cutout rig `.magic` from Sol's turnarounds), `PROJECT/blender/remy_body.py`
 
 **Interfaces:**
 - Consumes: Sol's manifest (turnarounds, transparency flags).

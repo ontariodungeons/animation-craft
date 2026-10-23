@@ -145,10 +145,10 @@ fn fit(c: &Clip, scenes: &[Scene]) -> Value {
 
 fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, Vec<Scene>, Value)> {
     let raw = params.get("project").and_then(Value::as_str).filter(|p| !p.trim().is_empty())
-        .ok_or_else(|| invalid("missing 'project' (.acproj path)"))?;
-    let acproj = crate::workspace::resolve_workspace_path(s, raw);
-    if !acproj.is_file() { return Err(invalid(format!("project not found: {}", acproj.display()))); }
-    let dir = acproj.parent().unwrap_or(Path::new("."));
+        .ok_or_else(|| invalid("missing 'project' (.magic path)"))?;
+    let project_path = crate::workspace::resolve_workspace_path(s, raw);
+    if !project_path.is_file() { return Err(invalid(format!("project not found: {}", project_path.display()))); }
+    let dir = project_path.parent().unwrap_or(Path::new("."));
     let html = std::fs::read_to_string(dir.join("hyperframes/index.html"))
         .map_err(|e| invalid(format!("cannot read {}: {e}", dir.join("hyperframes/index.html").display())))?;
     let timeline_path = dir.join("artifacts/action_timeline.json");
@@ -163,7 +163,7 @@ fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, V
         Ok(v) => json!({"ok": true, "sampler": "pipeline/sample_cutout_windows.mjs", "scripts": v["scripts"]}),
         Err(e) => json!({"ok": false, "sampler": "pipeline/sample_cutout_windows.mjs", "error": e}),
     };
-    Ok((acproj, apply_windows(read_clips(&html), &sampled), scenes, source))
+    Ok((project_path, apply_windows(read_clips(&html), &sampled), scenes, source))
 }
 
 pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {

@@ -154,7 +154,7 @@ fn request_context(s: &Session, root: &Path, p: &Value) -> Result<(Vec<Value>, V
 pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     let (prompt, model, timeout) = validate(p)?;
     let project = s.project_path.clone().ok_or_else(|| invalid(
-        "Open/attach a project before image.generate, or pass project=<existing .acproj> through the CLI"))?;
+        "Open/attach a project before image.generate, or pass project=<existing .magic> through the CLI"))?;
     let root = project.parent().ok_or_else(|| invalid("Project has no parent directory"))?;
     let (references, poses, context) = request_context(s, root, p)?;
     if p.get("transparent_background").is_some_and(|v| !v.is_boolean()) {
@@ -206,7 +206,7 @@ pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     let prompt_file = dir.join("asset.prompt.md");
     fs::write(&prompt_file, args.last().ok_or_else(|| invalid("Missing native image instruction"))?)
         .map_err(|e| io_failure("write_prompt", &prompt_file, e))?;
-    let mut record = json!({"format":"animationcraft.image-generation", "project":project,
+    let mut record = json!({"format":"magicstudio.image-generation", "project":project,
         "prompt":prompt, "effective_prompt":effective_prompt, "poses":poses, "animation_context":context,
         "references":references, "transparent_background":p["transparent_background"], "agent_model":model, "image_model":"unknown; not reported by native tool",
         "quality":"auto", "resolution":"tool-controlled; measured after generation",

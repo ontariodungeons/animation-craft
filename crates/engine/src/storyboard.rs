@@ -1275,21 +1275,21 @@ fn write_backlot_mirror(
             if let Some(panel) = panels.get(j) {
                 let stem = panel.file_stem().and_then(|n| n.to_str()).unwrap_or("panel");
                 manifest.push(json!({"id": format!("{stem}@{id}"), "type": "image", "scene_id": id, "path": rel(panel),
-                    "prompt": prompts.get(j).cloned().flatten(), "source_tool": "animationcraft"}));
+                    "prompt": prompts.get(j).cloned().flatten(), "source_tool": "magicstudio"}));
             }
         }
     }
     for a in assets {
         let stem = a.file_stem().and_then(|n| n.to_str()).unwrap_or("asset");
         manifest.push(json!({"id": stem, "type": "image", "scene_id": null, "path": rel(a),
-            "prompt": std::fs::read_to_string(a.with_extension("prompt.md")).ok(), "source_tool": "animationcraft"}));
+            "prompt": std::fs::read_to_string(a.with_extension("prompt.md")).ok(), "source_tool": "magicstudio"}));
     }
     let write = |name: &str, v: Value| -> Result<()> {
         let text = serde_json::to_string_pretty(&v).map_err(|e| EngineError::InvalidParams(e.to_string()))?;
         std::fs::write(art.join(name), text)?;
         Ok(())
     };
-    write("scene_plan.json", json!({"scenes": scenes, "metadata": {"total_duration_seconds": total, "source": "animationcraft workshop.build_storyboard"}}))?;
+    write("scene_plan.json", json!({"scenes": scenes, "metadata": {"total_duration_seconds": total, "source": "magicstudio workshop.build_storyboard"}}))?;
     write("script.json", json!({"title": title, "sections": sections}))?;
     write("asset_manifest.json", json!({"assets": manifest}))?;
     let project_json = dir.join("project.json");

@@ -24,7 +24,7 @@ fn theatre_bundle() {
     let bun = |args: &[&str]| {
         let status = std::process::Command::new("bun").args(args).current_dir("frontend").status()
             .unwrap_or_else(|e| panic!("Building the Theatre panel needs Bun on PATH: {e}"));
-        assert!(status.success(), "`bun {}` failed in apps/animationcraft-shell/frontend", args.join(" "));
+        assert!(status.success(), "`bun {}` failed in apps/magicstudio-shell/frontend", args.join(" "));
     };
     if !std::path::Path::new("frontend/node_modules/@theatre/studio").exists() { bun(&["install"]); }
     bun(&["run", "build"]);

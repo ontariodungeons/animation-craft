@@ -3,7 +3,7 @@
 **Goal:** Port the complete approved Animation workspace into the live shell, then animate/export and inspect the bee.
 **Architecture:** Extract the existing Rust evaluator into engine commands; the canvas draws samples. UI and CLI/MCP share the window session. The inner agent validates operations and Craft connections while the coordinator implements.
 **Stack:** Existing Tauri 2.x/Rust, vanilla JS/CSS, Craft CLI pipeline.
-**Spec:** `.agents/skills/animationcraft-shell-ui/research.md`, approved by the user on 2026-10-21; HANDOFF is the behavior/source inventory.
+**Spec:** `.agents/skills/magicstudio-shell-ui/research.md`, approved by the user on 2026-10-21; HANDOFF is the behavior/source inventory.
 
 ## Constraints and review focus
 

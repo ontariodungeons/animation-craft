@@ -7,7 +7,7 @@ function node(id) {
   if (!nodes.has(id)) nodes.set(id, {value:'',textContent:'',disabled:false,handlers:{},classList:{toggle(){},contains(){return false;}},setAttribute(){},focus(){},prepend(...items){this.items=items;},reset(){calls.push('reset');},addEventListener(type,fn){this.handlers[type]=fn;}});
   return nodes.get(id);
 }
-const result={ok:true,project:'/chosen/ab/project/A&B.acproj',intake_ready:false,problems:['No valid transcript yet'],warnings:[{code:'recent_history_unavailable'}],_ui_engine_revision:7,status:{stages:[]}};
+const result={ok:true,project:'/chosen/ab/project/A&B.magic',intake_ready:false,problems:['No valid transcript yet'],warnings:[{code:'recent_history_unavailable'}],_ui_engine_revision:7,status:{stages:[]}};
 const context=vm.createContext({console,Promise,WeakMap,window:{__TAURI__:{dialog:{open:async()=>null}}},document:{addEventListener(){},body:{classList:{remove(){}}}},$:node,el:(tag,attrs,...children)=>({tag,...attrs,children}),toast:m=>toasts.push(m),state:{project:null},agent:{},acFeedback:{actions:new WeakMap(),acknowledge:async(revision,project)=>calls.push({ack:revision,project})},invoke:async(command,params)=>{calls.push({command,params});return result;},openProject:async()=>{throw Error('New must apply CLI result without issuing another Open');},applyOpenedProject:async opened=>{calls.push({applied:opened});},animationReset(){},renderTarget(){},renderBlocks(){},renderStoryboard(){},setView:async()=>{},agentToggle(){}});
 vm.runInContext(readFileSync(new URL('../ui/home.js',import.meta.url),'utf8'),context);
 node('new-name').value='A&B';node('new-root').value='/chosen';node('new-audio').value='/chosen/song.wav';
@@ -24,7 +24,7 @@ const source=readFileSync(new URL('../ui/app.js',import.meta.url),'utf8');
 const start=source.indexOf('async function openProject('),end=source.indexOf('document.querySelectorAll(".tab")',start);
 vm.runInContext(source.slice(start,end),context);
 calls.length=0;
-await vm.runInContext('openProject("/chosen/ab/project/A&B.acproj")',context);
+await vm.runInContext('openProject("/chosen/ab/project/A&B.magic")',context);
 assert.equal(calls.filter(c=>c.command==='project_open').length,1);
 assert.deepEqual(calls.find(c=>c.ack),{ack:7,project:result.project});
 assert.equal(context.state.data.problems[0],'No valid transcript yet');
@@ -35,7 +35,7 @@ vm.runInContext(readFileSync(new URL('../ui/bridge.js',import.meta.url),'utf8'),
 context.state.project=null;
 calls.length=0;
 context.invoke=async(command,params)=>{calls.push({command,params});return {status:{stages:[]}};};
-await vm.runInContext('window.acBridge.refresh("project.intake","/chosen/ab/project/A&B.acproj",7,{problems:["Needs captions"],intake_ready:false})',context);
+await vm.runInContext('window.acBridge.refresh("project.intake","/chosen/ab/project/A&B.magic",7,{problems:["Needs captions"],intake_ready:false})',context);
 assert.equal(calls.filter(c=>c.command==='project_open'||c.command==='project_create').length,0,'external transition refresh does not recursively launch the CLI');
 assert.equal(calls.filter(c=>c.command==='project_state').length,1);
 assert.equal(context.state.project,result.project);

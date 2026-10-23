@@ -1,4 +1,4 @@
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 use std::fs;
 
@@ -13,7 +13,7 @@ fn removed_static_copy_path_fails_without_altering_originals() {
     fs::write(source.join("storyboard/.preview/layout.json"),b"{\"page_size\":[842,595],\"first_scene_page\":2}").unwrap();
     fs::write(target.join("storyboard/scene-1.md"),b"user's existing authored scene").unwrap();
     let mut s=Session::default();
-    s.execute("project.new",json!({"path":target.join("Fixture.acproj")})).unwrap();
+    s.execute("project.new",json!({"path":target.join("Fixture.magic")})).unwrap();
     let error=s.execute("storyboard.import_openmontage",json!({"path":source,"preserve_document":true})).unwrap_err().to_string();
     assert!(error.contains("Static document copying was removed"));
     assert!(!target.join("storyboard/storyboard.pdf").exists());

@@ -1,6 +1,6 @@
 //! Offline security regression tests. The fake provider executable is a process-boundary fixture,
 //! never a replacement production route. Each case re-execs with isolated settings and dummy data.
-use animationcraft_engine::{Session, agent};
+use magicstudio_engine::{Session, agent};
 use serde_json::json;
 use std::{fs, path::PathBuf, process::Command};
 
@@ -42,7 +42,7 @@ else: sys.exit(91)
 
 fn run_case(name: &str) {
     let root = std::env::temp_dir().join(format!("ac-security-{}-{name}", std::process::id()));
-    fs::create_dir_all(root.join("config/animationcraft")).unwrap();
+    fs::create_dir_all(root.join("config/magicstudio")).unwrap();
     fs::create_dir_all(root.join("project")).unwrap();
     fs::write(root.join("opencode"), TOOL).unwrap();
     #[cfg(unix)] {
@@ -53,7 +53,7 @@ fn run_case(name: &str) {
         fs::rename(root.join("opencode"),root.join("dispatcher")).unwrap();
         std::os::unix::fs::symlink(root.join("dispatcher"),root.join("opencode")).unwrap();
     }
-    fs::write(root.join("config/animationcraft/agent.json"), json!({
+    fs::write(root.join("config/magicstudio/agent.json"), json!({
         "agent":"opencode","provider":"opencode","model":"synthetic-free",
         "api_key":"dummy-config-secret"
     }).to_string()).unwrap();
@@ -91,19 +91,19 @@ fn agent_security_child() {
     let case=std::env::var("AC_SECURITY_CASE").expect("run through isolated parent test");
     let root=PathBuf::from(std::env::var_os("AC_SECURITY_FIXTURE").unwrap());
     let mut session=Session::default();
-    session.project_path=Some(root.join("project/Synthetic.acproj"));
+    session.project_path=Some(root.join("project/Synthetic.magic"));
     let mut params=json!({"message":"Synthetic offline check","wait":5});
     if case=="image_scope" { params["image_task"]=json!(true); }
     if case=="invalid" {
-        fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"opencode","model":123}).to_string()).unwrap();
+        fs::write(root.join("config/magicstudio/agent.json"),json!({"agent":"opencode","provider":"opencode","model":123}).to_string()).unwrap();
     }
     if case=="unknown" {
-        fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"opencode","model":"missing-free"}).to_string()).unwrap();
+        fs::write(root.join("config/magicstudio/agent.json"),json!({"agent":"opencode","provider":"opencode","model":"missing-free"}).to_string()).unwrap();
     }
     if case=="override" {params["agent"]=json!("codex");}
     if case=="paid" {params["free_only"]=json!(true);}
     if case=="extra" {
-        fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"opencode","model":"synthetic-free","extra_args":["--dangerously-skip-permissions"]}).to_string()).unwrap();
+        fs::write(root.join("config/magicstudio/agent.json"),json!({"agent":"opencode","provider":"opencode","model":"synthetic-free","extra_args":["--dangerously-skip-permissions"]}).to_string()).unwrap();
     }
     if case=="newchat" {
         fs::create_dir_all(root.join("project/.agent")).unwrap();
@@ -127,14 +127,14 @@ fn agent_security_child() {
         return;
     }
     if case=="isolation" {
-        let before=fs::read(root.join("config/animationcraft/agent.json")).unwrap();
+        let before=fs::read(root.join("config/magicstudio/agent.json")).unwrap();
         let mut other=Session::default();
         agent::cmd_agent_config(&mut session,&json!({})).unwrap();
         agent::cmd_agent_config(&mut other,&json!({})).unwrap();
         agent::cmd_agent_config(&mut session,&json!({"selection":{"provider":"secondary","model":"synthetic-other-free"}})).unwrap();
         assert_eq!(agent::cmd_agent_config(&mut session,&json!({})).unwrap()["model"],"synthetic-other-free");
         assert_eq!(agent::cmd_agent_config(&mut other,&json!({})).unwrap()["model"],"synthetic-free");
-        assert_eq!(fs::read(root.join("config/animationcraft/agent.json")).unwrap(),before);
+        assert_eq!(fs::read(root.join("config/magicstudio/agent.json")).unwrap(),before);
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
     if case=="continued_location_mismatch" {
@@ -156,7 +156,7 @@ fn agent_security_child() {
         assert!(log.as_array().unwrap().iter().any(|m|m["role"]=="assistant"&&m["request_id"]=="queued-check"&&m["text"]=="synthetic reply"));
         assert_eq!(agent::cmd_agent_session(&mut session,&json!({})).unwrap()["request"]["status"],"replied");
         let again=agent::cmd_agent_log(&mut session,&json!({"refresh":true})).unwrap();assert_eq!(log,again);
-        session.project_path=Some(root.join("project/Other.acproj"));
+        session.project_path=Some(root.join("project/Other.magic"));
         assert!(agent::cmd_agent_send(&mut session,&json!({"message":"must not cross projects","new_chat":false})).is_err());
         println!("CASE_ASSERTIONS_COMPLETED");return;
     }
@@ -169,13 +169,13 @@ fn agent_security_child() {
         assert!(first["session"].as_str().is_some());
         if case=="switch" {
             agent::cmd_agent_config(&mut session,&json!({"selection":{"provider":"secondary","model":"synthetic-other-free"}})).unwrap();
-            fs::write(root.join("config/animationcraft/agent.json"),json!({"agent":"opencode","provider":"secondary","model":"synthetic-other-free","image_model":"preserve-me"}).to_string()).unwrap();
+            fs::write(root.join("config/magicstudio/agent.json"),json!({"agent":"opencode","provider":"secondary","model":"synthetic-other-free","image_model":"preserve-me"}).to_string()).unwrap();
         }
         let second=agent::cmd_agent_send(&mut session,&params).unwrap();
         if case=="switch" {
             assert_eq!(second["provider"],"secondary");
             assert_eq!(second["model"],"synthetic-other-free");
-            let config:serde_json::Value=serde_json::from_slice(&fs::read(root.join("config/animationcraft/agent.json")).unwrap()).unwrap();
+            let config:serde_json::Value=serde_json::from_slice(&fs::read(root.join("config/magicstudio/agent.json")).unwrap()).unwrap();
             assert_eq!(config["image_model"],"preserve-me");
         }
         assert_ne!(first["session"],second["session"]);
@@ -226,13 +226,13 @@ fn agent_security_rejects_nonprivate_symlink_and_wrong_type_paths() {
     let root=std::env::temp_dir().join(format!("ac-path-security-{}",std::process::id()));
     fs::create_dir_all(&root).unwrap();
     fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
-    assert!(animationcraft_engine::local_ipc::private_path(&root,true).is_ok());
+    assert!(magicstudio_engine::local_ipc::private_path(&root,true).is_ok());
     fs::set_permissions(&root,fs::Permissions::from_mode(0o755)).unwrap();
-    assert!(animationcraft_engine::local_ipc::private_path(&root,true).is_err());
+    assert!(magicstudio_engine::local_ipc::private_path(&root,true).is_err());
     fs::set_permissions(&root,fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(root.join("regular"),b"dummy").unwrap();
     symlink(&root,root.join("link")).unwrap();
-    assert!(animationcraft_engine::local_ipc::private_path(&root.join("link"),true).is_err());
-    assert!(animationcraft_engine::local_ipc::private_path(&root.join("regular"),false).is_err());
+    assert!(magicstudio_engine::local_ipc::private_path(&root.join("link"),true).is_err());
+    assert!(magicstudio_engine::local_ipc::private_path(&root.join("regular"),false).is_err());
     fs::remove_dir_all(root).unwrap();
 }

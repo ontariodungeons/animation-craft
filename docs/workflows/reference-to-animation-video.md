@@ -5,7 +5,7 @@ Use the shared engine commands through `mc`, MCP or the app. Image drawing uses 
 ## Draw an action from an existing character
 
 ```bash
-mc exec image.generate project='/path/Song.acproj' \
+mc exec image.generate project='/path/Song.magic' \
   reference_asset=older_fish_fabric_swim_v2 \
   character=older_fish_layered scene=2 animation=turn-around \
   poses='["right-facing three-quarter toward viewer","front-facing","left-facing three-quarter toward viewer"]' \
@@ -78,7 +78,7 @@ mc --bridge PORT exec video.place_track \
 
 `generation_receipt` is optional for existing callers. When supplied, it must be a successful native generation receipt inside this project, and the generated artwork must still match its SHA-256. Placement retains the generated asset, pose order and animation context in `hyperframes/assets/animation/CLIP_ID.json`, together with video timing, rectangle, copied media and the composition backup. This is an explicit source association; it does not falsely certify that a particular renderer used those pixels.
 
-For an existing procedural HTML character, retain its world travel and bank. The fish film now plays the native turn media only during each placed action window, fades the underlying articulated profile out during that window, and resumes its swimming rig afterward. The `data-animationcraft-character` / `data-animationcraft-track` attributes identify the action; HyperFrames owns media time. World-path binding and the registration pivot are still authored explicitly, not inferred by `video.place_track`. The current project maps all nine native turn placements in `workflow/fish-storyboard-video-map.json`.
+For an existing procedural HTML character, retain its world travel and bank. The fish film now plays the native turn media only during each placed action window, fades the underlying articulated profile out during that window, and resumes its swimming rig afterward. The `data-magicstudio-character` / `data-magicstudio-track` attributes identify the action; HyperFrames owns media time. World-path binding and the registration pivot are still authored explicitly, not inferred by `video.place_track`. The current project maps all nine native turn placements in `workflow/fish-storyboard-video-map.json`.
 
 ## What is automatic and what still needs authoring
 

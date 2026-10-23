@@ -1,12 +1,12 @@
 //! Synthetic metadata fixtures only; actual native save/inspection is verified through the CLIs.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 use std::{fs, path::PathBuf};
 
 fn fixture(name: &str) -> (Session, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("ac-design-state-{}-{name}", std::process::id()));
     fs::create_dir_all(dir.join("storyboard")).unwrap();
-    let project = dir.join("Fixture.acproj");
+    let project = dir.join("Fixture.magic");
     let mut session = Session::default();
     session
         .execute("project.new", json!({"path":project,"overwrite":true}))

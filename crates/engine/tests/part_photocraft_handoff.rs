@@ -1,6 +1,6 @@
 //! `part.open_photocraft` resolves one keyed-rig part's PNG (or its retained
 //! original) for the PhotoCraft handoff. `spawn` stays false so no window opens.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use image::{ImageBuffer, Rgba};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -23,8 +23,8 @@ fn fixture(tag: &str) -> (Session, PathBuf) {
     std::fs::write(&rig, serde_json::to_vec_pretty(&json!({"source":"source.png","canvas":[8,6],
         "layer_order":["antenna-l","body"],"layers":{
         "antenna-l":{"box":[1,1,3,2],"pivot":[2.0,1.5]},"body":{"box":[4,1,2,2],"pivot":[5.0,2.0]}}})).unwrap()).unwrap();
-    let project = root.join("project.acproj");
-    std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"animationcraft.project","version":1,"name":"Fixture",
+    let project = root.join("project.magic");
+    std::fs::write(&project, serde_json::to_vec_pretty(&json!({"format":"magicstudio.project","version":1,"name":"Fixture",
         "assets":[{"id":"bee","name":"Bee","preset":null,"path":rig,"kind":"cutout_rig","parts":[]}],"workshop":{}})).unwrap()).unwrap();
     let mut session = Session::default();
     session.cwd = root.clone();
@@ -110,7 +110,7 @@ fn original_resolves_retained_backup_after_replacement() {
 
 #[test]
 fn command_is_registered_as_unjournaled_parts_menu_item() {
-    let spec = animationcraft_engine::commands::find("part.open_photocraft").unwrap();
+    let spec = magicstudio_engine::commands::find("part.open_photocraft").unwrap();
     assert_eq!(spec.label, "Open Part in PhotoCraft");
     assert_eq!(spec.menu, ["Animation", "Parts"]);
     assert!(!spec.journal);

@@ -10,8 +10,8 @@ fn snapshot_and_tail_honor_the_explicit_bridge() {
 const CHECK: &str = r#"import json, os, pathlib, socket, subprocess, sys, tempfile, threading
 cli=str(pathlib.Path(sys.argv[1]).resolve())
 with tempfile.TemporaryDirectory(prefix='mc-snapshot-target-') as tmp:
-    root=pathlib.Path(tmp); project=root/'Selected.acproj'
-    project.write_text(json.dumps({'format':'animationcraft.project','version':1,'assets':[],'workshop':{}}))
+    root=pathlib.Path(tmp); project=root/'Selected.magic'
+    project.write_text(json.dumps({'format':'magicstudio.project','version':1,'assets':[],'workshop':{}}))
     env=dict(os.environ,XDG_CONFIG_HOME=str(root/'config'),XDG_STATE_HOME=str(root/'state'),XDG_RUNTIME_DIR=str(root/'runtime'))
     for mode in ['cli-snapshot','cli-tail','mcp-snapshot','mcp-tail']:
         listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen();listener.settimeout(.1)

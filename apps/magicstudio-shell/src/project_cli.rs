@@ -85,7 +85,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn cli_receipt_preserves_problems_and_uses_explicit_bridge() {
-        let cli=fixture("[ \"$1\" = '--bridge' ] && [ \"$2\" = 'unix:/chosen.sock' ] && [ \"$3\" = 'exec' ] && [ \"$4\" = 'project.intake' ] || exit 8\nprintf '%s' '{\"ok\":true,\"project\":\"/selected/A&B.acproj\",\"intake_ready\":false,\"problems\":[\"Needs transcript\"],\"_ui_engine_revision\":9}'");
+        let cli=fixture("[ \"$1\" = '--bridge' ] && [ \"$2\" = 'unix:/chosen.sock' ] && [ \"$3\" = 'exec' ] && [ \"$4\" = 'project.intake' ] || exit 8\nprintf '%s' '{\"ok\":true,\"project\":\"/selected/A&B.magic\",\"intake_ready\":false,\"problems\":[\"Needs transcript\"],\"_ui_engine_revision\":9}'");
         let result=invoke(&cli,"unix:/chosen.sock","project.intake",&json!({"name":"A&B"})).unwrap();
         assert_eq!(result["problems"][0],"Needs transcript");assert_eq!(result["_ui_engine_revision"],9);assert_eq!(result["_cli"]["exit_success"],true);
         std::fs::remove_file(cli).unwrap();

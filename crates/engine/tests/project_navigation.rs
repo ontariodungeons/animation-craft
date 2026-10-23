@@ -1,5 +1,5 @@
 //! Optional global navigation history must not undo successful project persistence/loading.
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::json;
 use std::{fs,process::Command};
 
@@ -21,7 +21,7 @@ fn new_and_open_survive_unavailable_global_history() {
 #[ignore="isolated environment subprocess helper"]
 fn navigation_child(){
     let root=std::path::PathBuf::from(std::env::var_os("AC_NAVIGATION_FIXTURE").unwrap());
-    let project=root.join("song/project/Synthetic.acproj");
+    let project=root.join("song/project/Synthetic.magic");
     let mut created=Session::user_session();
     let result=created.execute("project.new",json!({"path":project,"overwrite":false})).unwrap();
     assert_eq!(result["ok"],true);assert!(project.is_file());

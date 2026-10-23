@@ -48,35 +48,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "animationcraft-engine"
-version = "0.1.0"
-dependencies = [
- "glam",
- "image",
- "log",
- "rustix",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "animationcraft-shell"
-version = "0.1.0"
-dependencies = [
- "animationcraft-engine",
- "cairo-rs",
- "gio",
- "gtk",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "webkit2gtk",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1977,6 +1948,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicstudio-engine"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "image",
+ "log",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "magicstudio-shell"
+version = "0.1.0"
+dependencies = [
+ "cairo-rs",
+ "gio",
+ "gtk",
+ "magicstudio-engine",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "webkit2gtk",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1991,8 +1991,8 @@ dependencies = [
 name = "mc"
 version = "0.1.0"
 dependencies = [
- "animationcraft-engine",
  "crossterm",
+ "magicstudio-engine",
  "ratatui",
  "serde_json",
 ]

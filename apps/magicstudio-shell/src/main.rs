@@ -1,10 +1,10 @@
 //! Magic Studio shell: one window holding the project view (a webview fed by
-//! `animationcraft-engine`) and, as a tab, the project's video studio (HyperFrames or Remotion
+//! `magicstudio-engine`) and, as a tab, the project's video studio (HyperFrames or Remotion
 //! Studio) in a second webview of the same window.
 //!
-//!   animationcraft-shell [<project.acproj>] [<studio url>] [--view project|studio] [--open <block>|agent] [--control <port>]
+//!   magicstudio-shell [<project.magic>] [<studio url>] [--view project|studio] [--open <block>|agent] [--control <port>]
 
-use animationcraft_engine::Session;
+use magicstudio_engine::Session;
 use serde_json::{Value, json};
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, WindowBuilder, WindowEvent};
 
@@ -34,7 +34,7 @@ mod project_cli;
 /// The engine session of the open project: one for the window, shared by the page's commands and
 /// the `--control` bridge (the CLI and MCP), like the session of the older UI.
 pub struct Engine(pub std::sync::Mutex<Session>);
-impl Default for Engine{fn default()->Self{let mut s=Session::user_session();if let Err(e)=animationcraft_engine::agent::cmd_agent_config(&mut s,&json!({})){s.agent_selection=Some(json!({"selection_error":e.to_string()}));}Self(std::sync::Mutex::new(s))}}
+impl Default for Engine{fn default()->Self{let mut s=Session::user_session();if let Err(e)=magicstudio_engine::agent::cmd_agent_config(&mut s,&json!({})){s.agent_selection=Some(json!({"selection_error":e.to_string()}));}Self(std::sync::Mutex::new(s))}}
 
 impl Engine {
     /// Runs `f` on the session with `path` open (opened first when another project is).
@@ -67,7 +67,7 @@ fn project_state(engine: tauri::State<Engine>, path: String) -> Result<Value, St
 
 /// Execute the shared engine registry without blocking the UI thread.
 async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value) -> Result<Value, String> {
-    let long = animationcraft_engine::find_command(&id).is_some_and(|c| c.long_running);
+    let long = magicstudio_engine::find_command(&id).is_some_and(|c| c.long_running);
     // Image generation attaches an asset and saves the project. Keep that mutation serialized;
     // merging an old background snapshot could overwrite concurrent asset edits.
     if !long || id == "image.generate" {
@@ -141,7 +141,7 @@ async fn engine_command(app:tauri::AppHandle,id:String,mut params:Value)->Result
     if params["_request_id"].is_null(){params["_request_id"]=json!(feedback::new_request());}
     let request_id=params["_request_id"].as_str().map(str::to_owned);
     let mut result=execute_engine_command(app.clone(),id.clone(),params).await?;
-    if animationcraft_engine::find_command(&id).is_some_and(|c|!c.journal){return Ok(result);}
+    if magicstudio_engine::find_command(&id).is_some_and(|c|!c.journal){return Ok(result);}
     let revision=feedback::command_finished(&app,&id,&result,request_id.as_deref());
     if result.is_object(){result["_ui_engine_revision"]=json!(revision);}
     Ok(result)
@@ -155,7 +155,7 @@ fn object_preview(project: String, name: String, layers: Vec<String>) -> Result<
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let out = dir.join(format!("object-{name}.png"));
     let parts: Vec<std::path::PathBuf> = layers.iter().map(std::path::PathBuf::from).collect();
-    animationcraft_engine::storyboard::assembled_parts(&parts, &out)
+    magicstudio_engine::storyboard::assembled_parts(&parts, &out)
         .map(|p| p.to_string_lossy().into_owned())
         .ok_or_else(|| format!("{name}: its layers do not share one canvas"))
 }
@@ -166,12 +166,12 @@ fn recent_projects(engine:tauri::State<Engine>)->Result<Value,String>{engine.wit
 
 /// Takes a project off Recent (the files are untouched).
 #[tauri::command]
-fn recent_forget(path:String)->Result<(),String>{animationcraft_engine::project_catalog::forget(&path)}
+fn recent_forget(path:String)->Result<(),String>{magicstudio_engine::project_catalog::forget(&path)}
 
 /// Shared production setting; navigation history never selects a new song's location.
 #[tauri::command]
 fn projects_root() -> Result<String, String> {
-    animationcraft_engine::project_settings::root().map(|p|p.to_string_lossy().into_owned()).map_err(|e|e.to_string())
+    magicstudio_engine::project_settings::root().map(|p|p.to_string_lossy().into_owned()).map_err(|e|e.to_string())
 }
 
 /// Run the adjacent mc against this Studio's private bridge. The engine stays in
@@ -208,7 +208,7 @@ async fn studio_server(app: tauri::AppHandle, path: String, on: bool) -> Result<
     .map_err(|e| e.to_string())?
 }
 
-/// The project folder of a `.acproj` path.
+/// The project folder of a `.magic` path.
 fn project_dir(project: &str) -> Result<std::path::PathBuf, String> {
     std::path::Path::new(project).parent().map(std::path::Path::to_path_buf).ok_or_else(|| format!("bad project path: {project}"))
 }
@@ -306,6 +306,10 @@ fn agent_config_save(engine:tauri::State<Engine>,patch: Value) -> Result<Value, 
         }
     }
     engine.with(None,|s|s.execute("agent.config",json!({"selection":patch})).map_err(|e|e.to_string()))?;
+    // The app's own switch is the user's choice: keep it for the next launch and the CLI.
+    if let Err(error)=engine.with(None,|s|s.execute("agent.persist",json!({})).map_err(|e|e.to_string())){
+        eprintln!("chat selection not persisted: {error}");
+    }
     agent_config(engine)
 }
 
@@ -591,7 +595,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use animationcraft_engine::session::{Asset, ProjectAsset};
+    use magicstudio_engine::session::{Asset, ProjectAsset};
 
     fn connection(id: &str, name: &str) -> ProjectAsset {
         serde_json::from_value(json!({"id":id,"name":name,"preset":null,"path":null,"kind":"image"})).unwrap()

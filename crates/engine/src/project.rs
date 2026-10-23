@@ -1,4 +1,4 @@
-//! Project lifecycle: `.acproj` create/open/save/close and connect/load/remove/update assets.
+//! Project lifecycle: `.magic` create/open/save/close and connect/load/remove/update assets.
 
 use std::path::{Path, PathBuf};
 
@@ -6,10 +6,10 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
 
-/// Identifies a Magic Studio project file (`.acproj`, JSON).
-const PROJECT_FORMAT: &str = "animationcraft.project";
+/// Identifies a Magic Studio project file (`.magic`, JSON).
+const PROJECT_FORMAT: &str = "magicstudio.project";
 
-/// Writes the open project's asset connections to its `.acproj` file.
+/// Writes the open project's asset connections to its `.magic` file.
 pub fn write_project_file(s: &Session) -> Result<()> {
     let Some(path) = &s.project_path else { return Ok(()) };
     let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
@@ -68,7 +68,7 @@ fn write_preserving_lease_using(path: &Path, bytes: &[u8], mut store: impl FnMut
     Ok(())
 }
 
-/// Resolve and canonicalize a project path, appending `.acproj` when missing.
+/// Resolve and canonicalize a project path, appending `.magic` when missing.
 pub(crate) fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> {
     let raw = params
         .get("path")
@@ -76,8 +76,8 @@ pub(crate) fn project_file_path(s: &Session, params: &Value) -> Result<PathBuf> 
         .filter(|p| !p.trim().is_empty())
         .ok_or_else(|| EngineError::InvalidParams("missing project 'path'".into()))?;
     let mut path = super::workspace::resolve_workspace_path(s, raw);
-    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("acproj")) {
-        path.as_mut_os_string().push(".acproj");
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("magic")) {
+        path.as_mut_os_string().push(".magic");
     }
     if path.exists(){return std::fs::canonicalize(&path).map_err(EngineError::from);}
     Ok(path)
@@ -124,7 +124,7 @@ fn recent_warning(s:&Session,path:&Path,requested:bool)->Vec<Value>{
     }
 }
 
-/// Create a new `.acproj` session.
+/// Create a new `.magic` session.
 pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
     let path = project_file_path(s, params)?;
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
@@ -152,14 +152,14 @@ pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({"ok": true, "project": path, "warnings":warnings,"assets": s.project_assets, "workshop": super::workshop::workshop_status(s)?}))
 }
 
-/// Open an existing `.acproj` session.
+/// Open an existing `.magic` session.
 pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let path = project_file_path(s, params)?;
     let owner=if params["claim_owner"]==true {Some(claim(s,&path)?)} else {None};
     let text = std::fs::read_to_string(&path)?;
     let doc: Value = serde_json::from_str(&text)
         .map_err(|e| EngineError::InvalidParams(format!("invalid project file: {e}")))?;
-    if doc.get("format").and_then(Value::as_str) != Some(PROJECT_FORMAT) {
+    if doc.get("format").and_then(Value::as_str)!=Some(PROJECT_FORMAT) {
         return Err(EngineError::InvalidParams(format!(
             "{} is not a Magic Studio project",
             path.display()
@@ -561,7 +561,7 @@ mod tests {
 
     fn temp_dir(label: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "animationcraft_{label}_{}_{}",
+            "magicstudio_{label}_{}_{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn project_new_open_save_round_trip_keeps_connections() {
         let dir = temp_dir("project_round_trip");
-        let project = dir.join("demo.acproj");
+        let project = dir.join("demo.magic");
         image::RgbaImage::new(8, 8).save(dir.join("hero.png")).unwrap();
         let mut s = Session::default();
         s.cwd = dir.clone();
@@ -602,7 +602,7 @@ mod tests {
         image::RgbaImage::new(8, 8).save(outside.join("hero.png")).unwrap();
         let mut s = Session::default();
         s.cwd = dir.clone();
-        s.execute("project.new", json!({"path": dir.join("demo.acproj")})).unwrap();
+        s.execute("project.new", json!({"path": dir.join("demo.magic")})).unwrap();
         let err = s.execute("project.add_asset", json!({"path": outside.join("hero.png")}));
         assert!(err.is_err(), "an outside image without a destination is refused");
         s.execute("project.add_asset", json!({"path": outside.join("hero.png"), "character": "hero"}))
@@ -642,7 +642,7 @@ mod tests {
     fn partial_project_write_restores_bytes_without_replacing_the_leased_file() {
         use std::io::{Seek, SeekFrom, Write};
         let dir = temp_dir("write_rollback");
-        let path = dir.join("Project.acproj");
+        let path = dir.join("Project.magic");
         let before = b"retained project bytes";
         std::fs::write(&path, before).unwrap();
         let lease = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
@@ -671,7 +671,7 @@ mod tests {
         let dir = temp_dir("project_missing");
         let mut s = Session::default();
         s.cwd = dir.clone();
-        s.execute("project.new", json!({"path": dir.join("demo.acproj")})).unwrap();
+        s.execute("project.new", json!({"path": dir.join("demo.magic")})).unwrap();
         image::RgbaImage::new(8, 8).save(dir.join("gone.png")).unwrap();
         s.execute(
             "project.add_asset",
@@ -682,7 +682,7 @@ mod tests {
         std::fs::remove_file(dir.join("gone.png")).unwrap();
         let mut s2 = Session::default();
         s2.cwd = dir.clone();
-        let res = s2.execute("project.open", json!({"path": dir.join("demo.acproj")})).unwrap();
+        let res = s2.execute("project.open", json!({"path": dir.join("demo.magic")})).unwrap();
         assert!(res["missing"].as_array().unwrap().contains(&json!("moved")));
         let _ = std::fs::remove_dir_all(&dir);
     }

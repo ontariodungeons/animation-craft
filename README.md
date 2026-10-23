@@ -1,17 +1,17 @@
 # Magic Studio
 
-The application is the Tauri shell in `apps/animationcraft-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
+The application is the Tauri shell in `apps/magicstudio-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
 
 ## Run and discover
 
 ```bash
-cargo build -p animationcraft-shell -p mc
-./target/debug/animationcraft-shell
+cargo build -p magicstudio-shell -p mc
+./target/debug/magicstudio-shell
 mc --help
 mc commands
 ```
 
-The Omarchy menu entry is **Magic Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
+The Omarchy menu entry is **Magic Studio**. Rebuild the shell after changing `apps/magicstudio-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
 
 ## CLI and MCP
 
@@ -24,13 +24,13 @@ mc --bridge <port> exec ui.state
 mc --bridge <port> mcp
 ```
 
-A Studio window must have been started with `animationcraft-shell --control <port>` for that bridge to exist. Before restarting Studio, inspect pending/dirty state and preserve unsaved work. `ui.state` does not report unsaved-change safety.
+A Studio window must have been started with `magicstudio-shell --control <port>` for that bridge to exist. Before restarting Studio, inspect pending/dirty state and preserve unsaved work. `ui.state` does not report unsaved-change safety.
 
 ## Command Center
 
-`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.acproj` resumes inspection; `center --print project=...` prints its state. F1/F2 switch Control/Booth monitoring views; F4 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.magic` resumes inspection; `center --print project=...` prints its state. F1/F2 switch Control/Booth monitoring views; F4 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
 
-Scripted clients use the same `project.intake` and `center.status` engine commands. UI and CLI share the production root `/run/media/jesse/Speedy/media`, stored as `projects_root` in `$XDG_CONFIG_HOME/animationcraft/settings.json` (or `~/.config/animationcraft/settings.json`). Inspect it with `mc exec project.root`; persist it with `mc exec project.root root=/run/media/jesse/Speedy/media`. `project.intake name=...` resolves `<root>/<song-slug>/project/<Name>.acproj`. Explicit `root=...` or `path=...` choices apply only to that request, appear in the intake receipt, and never change the production setting. Recent history never determines the root. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
+Scripted clients use the same `project.intake` and `center.status` engine commands. UI and CLI share the production root `/run/media/jesse/Speedy/media`, stored as `projects_root` in `$XDG_CONFIG_HOME/magicstudio/settings.json` (or `~/.config/magicstudio/settings.json`). Inspect it with `mc exec project.root`; persist it with `mc exec project.root root=/run/media/jesse/Speedy/media`. `project.intake name=...` resolves `<root>/<song-slug>/project/<Name>.magic`. Explicit `root=...` or `path=...` choices apply only to that request, appear in the intake receipt, and never change the production setting. Recent history never determines the root. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
 
 `center.status trace=true` emits a timestamped shared prerequisite/metric observation and records started/result/completed evidence in `center.events`; ordinary polling returns observation IDs without filling the last-three action history. Studio and Booth consume the same prerequisite states. Missing data remains unknown/missing, and Studio rendering acknowledgement is separate from engine readiness.
 
@@ -40,7 +40,7 @@ Tauri New/Open invoke the adjacent CLI through the selected Studio bridge. `stor
 
 ## Generate an image
 
-`mc exec image.generate project=/absolute/project.acproj prompt='Describe the artwork' model=gpt-6-luna quality=auto` uses a fresh Codex session and the native image tool with the current login. The same `image.generate` command is exposed to MCP and the separate Project image-prompt block; it does not change chat settings. `mc commands image.generate` describes the contract. `mc` is the canonical CLI executable and package.
+`mc exec image.generate project=/absolute/project.magic prompt='Describe the artwork' model=gpt-6-luna quality=auto` uses a fresh Codex session and the native image tool with the current login. The same `image.generate` command is exposed to MCP and the separate Project image-prompt block; it does not change chat settings. `mc commands image.generate` describes the contract. `mc` is the canonical CLI executable and package.
 
 Generated PNGs and request receipts live in the selected project's `assets/generated-images/<request>/`. The one-shot subprocess stops after its first successful native image receipt; the adapter copies the receipt-correlated staged bytes rather than trusting an agent-authored file or save claim. A successful native tool receipt and full PNG decode are required before `project.add_asset` attaches it. Failures retain received files and logs without approval claims. The selected Codex model is distinct from the underlying image model; only `quality=auto` is verified, exact resolution is tool-controlled and actual dimensions are returned. Generation serializes engine mutations; the shell remains responsive but other engine requests wait. This block needs a rebuilt shell; terminal success alone does not verify UI rendering.
 
@@ -58,14 +58,14 @@ Storyboards and media commands operate in the selected project. `video.init targ
 
 | Area | Source |
 |---|---|
-| Studio UI and transport | `apps/animationcraft-shell/ui/`, `apps/animationcraft-shell/src/` |
+| Studio UI and transport | `apps/magicstudio-shell/ui/`, `apps/magicstudio-shell/src/` |
 | Terminal and MCP | `apps/mc/src/` |
 | Command contracts/dispatch | `crates/engine/src/commands.rs`, `lib.rs` |
 | Project persistence | `crates/engine/src/project.rs` |
 | Workshop/transcript | `crates/engine/src/workshop.rs` |
 | Storyboard | `crates/engine/src/storyboard.rs` |
 | Tool resolution | `crates/engine/src/workspace.rs`, `pipeline/craft_cli.py` |
-| Current Studio interaction contract | `apps/animationcraft-shell/agent.md` |
+| Current Studio interaction contract | `apps/magicstudio-shell/agent.md` |
 
 Read `AGENTS.md` before changes. Run `cargo check --workspace`; normal commit hooks run workspace checks/tests. Commit explicit owned paths; no generated media, credentials or local agent configuration. Source history is recovered through Git, not duplicated application trees in this checkout.
 
@@ -73,6 +73,6 @@ Shared audio intake retains the official HyperFrames audio project and determini
 
 ## Project agent coordination
 
-Studio and Booth use the existing `agent.send`, `agent.log` and `agent.session` commands. With the target Studio bridge selected, `exec agent.session` reports its project, session, active model and latest request. `exec agent.send message='Help identify the missing CLI capability' new_chat=false session=<reported-session> wait=0 _request_id=<unique-id>` submits to that same conversation; `exec agent.log refresh=true` retrieves and persists its reply, and `agent.session` reports queued/running/replied/stalled/error state. Polling never resends the prompt. `agent.new_chat` explicitly starts a short fresh conversation and archives history. A directory containing multiple `.acproj` files blocks chat rather than mixing contexts.
+Studio and Booth use the existing `agent.send`, `agent.log` and `agent.session` commands. With the target Studio bridge selected, `exec agent.session` reports its project, session, active model and latest request. `exec agent.send message='Help identify the missing CLI capability' new_chat=false session=<reported-session> wait=0 _request_id=<unique-id>` submits to that same conversation; `exec agent.log refresh=true` retrieves and persists its reply, and `agent.session` reports queued/running/replied/stalled/error state. Polling never resends the prompt. `agent.new_chat` explicitly starts a short fresh conversation and archives history. A directory containing multiple `.magic` files blocks chat rather than mixing contexts.
 
 Active model/provider selection belongs to each Studio engine, initialized from shared defaults when the window loads. The drawer and bridged `agent.config selection='{...}'` change only that instance. Credentials and shared defaults remain unchanged. Booth F9 composes into the pinned project chat; Enter sends through the current CLI, Esc retains the draft. Status/activity remain visible. Blue means not started, red failed, yellow stalled, green working; `[OK]` marks confirmed completion.

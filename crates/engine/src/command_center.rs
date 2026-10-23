@@ -68,13 +68,13 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
         root
             .join(sanitize_asset_id(name).replace('_', "-"))
             .join("project")
-            .join(format!("{name}.acproj"))
+            .join(format!("{name}.magic"))
     };
     if path
         .extension()
-        .is_none_or(|v| !v.eq_ignore_ascii_case("acproj"))
+        .is_none_or(|v| !v.eq_ignore_ascii_case("magic"))
     {
-        path.as_mut_os_string().push(".acproj");
+        path.as_mut_os_string().push(".magic");
     }
     if path.exists(){path=fs::canonicalize(&path)?;}
     let keep_owner=s.project_owner.is_some()&&s.project_path.as_ref()==Some(&path);
@@ -250,9 +250,9 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
   json!({"id":c.id,"label":c.label,"params":c.params,"menu":c.menu,"enabled":reason.is_none(),"block_reason":reason,"long_running":c.long_running})
  }).collect();
     let mapping = json!([
- {"control":"Home / Open Project","command":"project.open","source":"apps/animationcraft-shell/src/main.rs:project_open","status":"source verified; UI transport separate"},
- {"control":"Home / New song","command":"project.intake","source":"apps/animationcraft-shell/src/main.rs:project_create","status":"source verified; shared intake command"},
- {"control":"Add transcript","command":"workshop.import_transcript","source":"apps/animationcraft-shell/ui/app.js","status":"existing UI omits captions picker"},
+ {"control":"Home / Open Project","command":"project.open","source":"apps/magicstudio-shell/src/main.rs:project_open","status":"source verified; UI transport separate"},
+ {"control":"Home / New song","command":"project.intake","source":"apps/magicstudio-shell/src/main.rs:project_create","status":"source verified; shared intake command"},
+ {"control":"Add transcript","command":"workshop.import_transcript","source":"apps/magicstudio-shell/ui/app.js","status":"existing UI omits captions picker"},
  {"control":"Save","command":"project.save","source":"crates/engine/src/commands.rs","status":"backend command; not every UI save control verified"}]);
     let provenance = dir
         .and_then(|d| fs::read(d.join("transcript-provenance.json")).ok())
@@ -282,7 +282,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         let hf=dir.join("hyperframes");
         let host=fs::read_to_string(hf.join("index.html")).ok();
         let source=fs::read_to_string(hf.join("compositions/captions.html")).ok();
-        let receipt=fs::read(hf.join(".animationcraft-captions.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok());
+        let receipt=fs::read(hf.join(".magicstudio-captions.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok());
         let current=words.map(|w|format!("{:x}",Sha256::digest(serde_json::to_vec(w).unwrap_or_default())));
         let matched=receipt.as_ref().is_some_and(|r|r["input_sha256"].as_str()==current.as_deref() && count>0);
         let bound=host.as_ref().is_some_and(|v|v.contains("<audio") && v.contains("compositions/captions.html")) && source.as_ref().is_some_and(|v|v.contains("caption-group"));

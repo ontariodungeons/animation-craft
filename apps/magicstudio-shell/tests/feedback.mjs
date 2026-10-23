@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const reports=[],native=[],frames=[],intervals=[],listeners={};
 const pane={textContent:'Rendered project',getBoundingClientRect:()=>({width:900,height:600})};
-const context=vm.createContext({console,updateAppFooter(){},state:{project:'/fixture/test.acproj',view:'project',page:0},
+const context=vm.createContext({console,updateAppFooter(){},state:{project:'/fixture/test.magic',view:'project',page:0},
  document:{body:{classList:{contains:()=>false}},querySelectorAll:()=>[],querySelector:()=>pane,getElementById:()=>null,addEventListener:(event,fn)=>listeners[event]=fn},
  addEventListener:()=>{},getComputedStyle:()=>({display:'block'}),queueMicrotask,
  requestAnimationFrame:fn=>frames.push(fn),clearTimeout:()=>{},setTimeout:()=>1,setInterval:(fn,ms)=>intervals.push({fn,ms}),
@@ -63,7 +63,7 @@ const field=(id,value,defaultValue)=>({id,value,defaultValue,tagName:'INPUT',get
 context.document.querySelectorAll=()=>[field('motion-scrub','2.236','0'),field('agent-input','unsent draft','')];
 assert.deepEqual(Array.from(vm.runInContext('feedbackSnapshot().draft_fields',context)),['agent-input'],'playhead navigation is not an unsaved document edit; text drafts remain protected');
 
-context.document.querySelectorAll=()=>[];context.state.project='/fixture/test.acproj';context.acFeedback.errors=[];
+context.document.querySelectorAll=()=>[];context.state.project='/fixture/test.magic';context.acFeedback.errors=[];
 let timeoutFrame;context.setTimeout=fn=>{timeoutFrame=fn;return 1;};
 const priorAck=context.acFeedback.ack;const deferred=context.acFeedback.acknowledge(99,context.state.project);timeoutFrame();await deferred;
 assert.equal(context.acFeedback.ack,priorAck,'background frame timeout cannot acknowledge an unseen revision');

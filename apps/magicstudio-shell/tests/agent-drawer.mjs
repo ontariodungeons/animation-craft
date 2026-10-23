@@ -1,4 +1,4 @@
-// Runs the REAL apps/animationcraft-shell/ui/agent.js in Chromium against a harness page and
+// Runs the REAL apps/magicstudio-shell/ui/agent.js in Chromium against a harness page and
 // asserts the agent-drawer behaviour: no fade replay on unchanged content, node reuse, scroll,
 // selection, in-progress question input, model options, and the send/draft rules.
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright");
@@ -31,7 +31,7 @@ await page.addScriptTag({ content: `
     return node;
   }
   const motion = {character:null,track:null,time:0};
-  const state = { project: "/tmp/proj/Test.acproj", view: "project" };
+  const state = { project: "/tmp/proj/Test.magic", view: "project" };
   const toast = () => {};
   const convertFileSrc = (p) => p;
   window.__calls = [];

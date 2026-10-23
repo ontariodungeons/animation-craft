@@ -77,8 +77,9 @@ async function refreshModels() {
     const providers = [...new Set(agent.models.filter((m) => m.enabled).map((m) => m.providerID))];
     $("agent-providers").replaceChildren(...providers.map((p) => el("option", { value: p })));
     renderModelOptions();
+    const local = agent.models.filter((m) => m.enabled && m.local).length;
     $("agent-catalog-status").textContent = reply.available
-      ? `${agent.models.filter((m) => m.enabled).length} available models · selection is checked before sending`
+      ? `${agent.models.filter((m) => m.enabled).length} available models${local ? ` · ${local} local` : ""} · selection is checked before sending`
       : (reply.reason || "Catalog unavailable; no model substituted");
   } catch (error) {
     agent.models = [];
@@ -89,8 +90,11 @@ async function refreshModels() {
 }
 function renderModelOptions() {
   const provider = $("agent-provider").value.trim();
-  $("agent-models").replaceChildren(...agent.models.filter((m) => m.enabled && m.providerID === provider)
-    .map((m) => el("option", { value: m.id }, m.name || m.id)));
+  // Local models first: they run on this machine, cost nothing and have no quota.
+  const options = agent.models.filter((m) => m.enabled && m.providerID === provider)
+    .slice().sort((a, b) => (b.local ? 1 : 0) - (a.local ? 1 : 0) || String(a.id).localeCompare(String(b.id)));
+  $("agent-models").replaceChildren(...options.map((m) => el("option", { value: m.id, title: m.local ? "Local model — runs on this machine" : "" },
+    `${m.name || m.id}${m.local ? " · local" : ""}`)));
 }
 
 // ---- Conversation --------------------------------------------------------------------------

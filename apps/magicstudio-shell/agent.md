@@ -6,7 +6,7 @@ live app, act through its tools, show the result, and leave work reversible and 
 
 ## Learn and observe before acting
 
-1. Read `.agents/skills/animationcraft-shell-ui/SKILL.md` from the repository root. Learn its
+1. Read `.agents/skills/magicstudio-shell-ui/SKILL.md` from the repository root. Learn its
    visual and interaction contracts; distinguish approved requirements from proposed designs.
 2. Read the relevant ArtCraft, Magic Studio, layered-motion, rigging and QA skills named by the
    task. Discover command contracts with the CLI; never invent an operation.
@@ -17,8 +17,8 @@ live app, act through its tools, show the result, and leave work reversible and 
 
 ## One application, one live session
 
-Repository: `/run/media/jesse/Speedy/Work/omhas-animation`. Application: `apps/animationcraft-shell`.
-The shell's selected bridge and page share one `animationcraft_engine::Session`. Native Tauri
+Repository: `/run/media/jesse/Speedy/Work/omhas-animation`. Application: `apps/magicstudio-shell`.
+The shell's selected bridge and page share one `magicstudio_engine::Session`. Native Tauri
 `engine_command` handlers call that engine directly; New/Open invoke the adjacent `mc` process
 through the window's private bridge. A shared registry does not imply every UI action starts `mc`.
 
@@ -84,7 +84,7 @@ Work only on assigned files and coordinate ownership before editing. Read the re
 guidelines. Preserve unrelated changes. Use the existing model unless asked to switch; if Codex is
 chosen, the user permits Sol 6.1 only. Learn and observe regardless of model strength.
 
-Build `cargo build -p animationcraft-shell -p mc` after UI edits (assets are embedded). Before restarting the shared shell,
+Build `cargo build -p magicstudio-shell -p mc` after UI edits (assets are embedded). Before restarting the shared shell,
 inspect pending/dirty state and preserve unsaved edits. After every visible change run
 `mc --bridge <selected-endpoint> exec ui.look` and inspect the PNG. With a project open, captures
 default to `<project>/.agent/looks/`. Keep project outputs inside the project.

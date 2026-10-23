@@ -204,7 +204,7 @@ mod edit_count_tests {
         let dir = std::env::temp_dir().join(format!("ac-edits-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = Session::default();
-        s.execute("project.new", serde_json::json!({"path": dir.join("e.acproj")})).unwrap();
+        s.execute("project.new", serde_json::json!({"path": dir.join("e.magic")})).unwrap();
         assert_eq!(s.edits_since_save, 0);
         let fix = serde_json::json!({"asset": "a", "path": "a.png", "decision": "recreate", "problem": "torn edge"});
         s.execute("assets.fixlist_add", fix.clone()).unwrap();

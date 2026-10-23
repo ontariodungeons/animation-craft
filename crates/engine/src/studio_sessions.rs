@@ -89,7 +89,7 @@ pub fn discover() -> Value {
         let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") else {
             return json!({"sessions":[],"errors":["XDG_RUNTIME_DIR unavailable"]});
         };
-        let dir = PathBuf::from(runtime).join("animationcraft-studio");
+        let dir = PathBuf::from(runtime).join("magicstudio-studio");
         if !dir.exists() {
             return json!({"sessions":[],"errors":[]});
         }
