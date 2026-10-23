@@ -137,3 +137,9 @@ The Arch package's launcher prepends `<prefix>/lib/opentoonz` to
 render child use that same package layout, preserving inherited library search
 paths after it. Only those children receive the environment; Studio, the worker
 and the host configuration are not modified. Both children use offscreen Qt.
+
+
+Native dependency discovery decodes the quoted filename strings written by
+OpenToonz (`"+drawings/A B.png"`, including native quote/backslash escapes) before
+resolving and hashing them. Source bytes remain unchanged. This metadata support
+does not constitute successful native-render acceptance.

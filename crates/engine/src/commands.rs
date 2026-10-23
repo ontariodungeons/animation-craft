@@ -99,6 +99,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"opentoonz.render"
             | b"synfig.start"
             | b"motion.pose.export"
+            | b"motion.export_track"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -723,6 +724,11 @@ mod tests {
         let result = crate::workshop::cmd_query_list(&mut s, &json!({})).unwrap();
         let commands = result["commands"].as_array().unwrap();
         assert_eq!(commands.len(), command_specs().len());
+    }
+
+    #[test]
+    fn action_export_dispatches_without_holding_shared_session_during_render() {
+        assert!(find("motion.export_track").unwrap().long_running);
     }
 
     #[test]

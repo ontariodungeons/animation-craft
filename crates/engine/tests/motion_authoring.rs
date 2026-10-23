@@ -318,3 +318,19 @@ fn action_export_refuses_saved_theatre_before_sampling_or_renderer_work() {
     assert!(!root.join("tracks").exists());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn blender_migration_refuses_saved_theatre_before_loading_or_submission() {
+    let (mut s,root,rig)=fixture();
+    let state=json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{
+        "subject / move":{"sequence":{"tracksByObject":{"body":{"trackData":{"rotation":{"keyframes":[{"position":0,"value":15}]}}}}},"staticOverrides":{"byObject":{}}}
+    }});
+    fs::write(s.project_path.as_ref().unwrap(),json!({"theatre":state}).to_string()).unwrap();
+    s.theatre_state=Some(state);
+    // Missing rig guarantees this regression cannot submit a real worker on the old path.
+    fs::rename(&rig,root.join("preserved-rig.json")).unwrap();
+    let error=s.execute("blender.start",json!({"character":"subject","track":"move"})).unwrap_err().to_string();
+    assert!(error.contains("Relevant Theatre edits"),"must refuse silently omitted saved animation: {error}");
+    assert!(!root.join("animation").exists());
+    fs::remove_dir_all(root).unwrap();
+}

@@ -138,3 +138,16 @@ including rest and amount, still goes directly to the existing sampler. Rest bak
 its single sampled resting transform into a static-duration export; it does not
 export the moving action. Successful export responses report actual sampler `rest`
 and requested `amount`. No additional renderer run is needed for the refusal test.
+
+
+### Export integration
+
+Transparent action export preserves the sampler's effective parent IDs and layer
+order, including actions which exclude a parent. It is registered as a
+long-running command so Studio renders from a session snapshot without holding
+the shared engine mutex throughout the external render.
+
+Blender's legacy rig migration applies the same relevant saved-Theatre refusal
+before reading the rig or submitting a worker. Saved `.blend` rerenders remain
+independent of the current rig/Theatre state. Neither path silently converts
+Theatre animation into shared-sampler keys.

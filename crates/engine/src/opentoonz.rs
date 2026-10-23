@@ -210,6 +210,22 @@ fn level_files(path: &Path) -> Vec<PathBuf> {
     frames
 }
 
+// Native TIStream writes filenames as quoted strings, escaping quotes and
+// backslashes. Resolve that value, not the enclosing serialization syntax.
+fn native_path_text(raw: &str) -> Result<String> {
+    let raw = raw.trim();
+    let Some(quoted) = raw.strip_prefix('"') else { return Ok(raw.to_owned()) };
+    let quoted = quoted.strip_suffix('"').ok_or_else(||invalid("Unterminated native level path"))?;
+    let mut chars = quoted.chars().peekable();
+    let mut path = String::new();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek().is_some_and(|next| matches!(next, '\\' | '"' | '\'')) {
+            if let Some(next) = chars.next() { path.push(next); }
+        } else { path.push(c); }
+    }
+    Ok(path)
+}
+
 /// Every level the scene references, resolved and hashed. Missing files fail the job.
 fn dependencies(scene: &Path, xml: &str) -> Result<(Option<PathBuf>, Vec<Value>)> {
     let root = project_root(scene);
@@ -224,6 +240,8 @@ fn dependencies(scene: &Path, xml: &str) -> Result<(Option<PathBuf>, Vec<Value>)
     }
     let (mut found, mut missing, mut unresolved) = (Vec::new(), Vec::new(), Vec::new());
     for raw in paths.into_iter().map(str::trim).filter(|p| !p.is_empty()) {
+        let decoded = native_path_text(raw)?;
+        let raw = decoded.as_str();
         let resolved = if let Some(aliased) = raw.strip_prefix('+') {
             let (alias, tail) = aliased.split_once('/').unwrap_or((aliased, ""));
             match (&root, ALIASES.contains(&alias)) {
@@ -525,6 +543,19 @@ mod tests {
         let scene_path = root.join("scenes/demo.tnz");
         fs::write(&scene_path, scene).unwrap();
         (root, scene_path)
+    }
+
+    #[test]
+    fn dependencies_resolve_native_quoted_paths() {
+        let quoted = SCENE.replace("<path>+drawings/A.png</path>", "<path>\"+drawings/A.png\"</path>");
+        let (root, scene) = project("quoted-path", &quoted);
+        let (_, files) = dependencies(&scene, &quoted).expect("native quoted level path resolves");
+        assert_eq!(files[0]["path"], json!(root.join("drawings/A.png")));
+        fs::rename(root.join("drawings/A.png"), root.join("drawings/A B.png")).unwrap();
+        let spaced = quoted.replace("A.png", "A B.png");
+        let (_, files) = dependencies(&scene, &spaced).expect("quoted filename preserves spaces");
+        assert_eq!(files[0]["path"], json!(root.join("drawings/A B.png")));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

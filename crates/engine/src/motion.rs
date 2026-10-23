@@ -1188,6 +1188,10 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 /// Bake the existing engine samples into exporter keys. No second evaluator.
+fn sampled_export_layers(rig: &LoadedCutoutRigPlan, sample: &Value) -> Vec<Value> {
+    rig.parts.iter().enumerate().map(|(index,part)|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":sample["effective_parents"][index]})).collect()
+}
+
 pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     let id = load_character(s, p)?;
     crate::motion_authoring::theatre_guard(s, &id, p["track"].as_str().filter(|id| !id.is_empty()))?;
@@ -1239,7 +1243,7 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
             motion[&part.id][prop] = json!([{"kind":"keys","ease":"linear","keys":keys}]);
         }
     }
-    let layers:Vec<Value>=rig.parts.iter().map(|part|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":part.parent})).collect();
+    let layers = sampled_export_layers(&rig, &sample);
     let name = crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
     let bounds = sample["bounds"].as_array();
     let b = |i: usize, default: f64| {
@@ -1283,6 +1287,21 @@ mod tests {
 
     fn part(id: &str, size: [u32; 2], pivot: [f32; 2]) -> CutoutRigPart {
         CutoutRigPart { id: id.into(), label: id.into(), crop_size: size, pivot, ..CutoutRigPart::default() }
+    }
+
+    #[test]
+    fn action_export_preserves_sampled_parent_filter_and_stack() {
+        let root = part("root", [4,4], [2.0,2.0]);
+        let mut child = part("child", [2,2], [3.0,3.0]);
+        child.parent = Some("root".into());
+        let rig = LoadedCutoutRigPlan { parts:vec![root,child], ..LoadedCutoutRigPlan::default() };
+        for selected in [json!(["child"]),json!(["root","child"])] {
+            let parents:Vec<_> = rig.parts.iter().map(|p|effective_parent(p,selected.as_array())).collect();
+            let sample=json!({"effective_parents":parents});
+            let layers=sampled_export_layers(&rig,&sample);
+            assert_eq!(layers.iter().map(|p|p["id"].clone()).collect::<Vec<_>>(),vec![json!("root"),json!("child")]);
+            assert_eq!(layers[1]["parent"],sample["effective_parents"][1],"export must not restore an excluded parent's transform");
+        }
     }
 
     #[test]

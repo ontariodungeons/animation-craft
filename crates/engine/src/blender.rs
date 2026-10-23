@@ -435,6 +435,8 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         }
         request["blend"] = json!(path);
     } else {
+        let character = p["character"].as_str().ok_or_else(||invalid("character is required for legacy migration"))?;
+        crate::motion_authoring::theatre_guard(s, character, p["track"].as_str().filter(|id| !id.is_empty()))?;
         let actions = cmd_blender_actions(s, p)?;
         if !p["track"].is_string()
             || !actions["tracks"]
