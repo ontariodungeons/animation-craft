@@ -12,14 +12,14 @@ pub fn live(ui: &Value, previous: &Value) -> Value {
     let Some(endpoint) = ui["endpoint"].as_str().filter(|_| ui["connection"] == "connected") else {
         return json!({});
     };
-    let page = crate::local_ui::call(endpoint, "ui.state", json!({})).unwrap_or_else(|e| json!({"error": e}));
+    let page = crate::bridge_call(endpoint, "ui.state", json!({})).unwrap_or_else(|e| json!({"error": e}));
     let subject = page["animation"]["character"].as_str();
     let fps = if subject.is_some() && subject == previous["subject"].as_str() && !previous["fps"].is_null() {
         previous["fps"].clone()
     } else if let Some(character) = subject.filter(|_| ui["engine_unsaved"].is_boolean()) {
         // motion.tracks waits for the engine lock; ask only while ui.feedback found it free.
         // A rig without its own fps is sampled at motion.sample's default of 30.
-        crate::local_ui::call(endpoint, "motion.tracks", json!({"character": character}))
+        crate::bridge_call(endpoint, "motion.tracks", json!({"character": character}))
             .map(|t| if t["fps"].is_number() { t["fps"].clone() } else { json!(30) })
             .unwrap_or(Value::Null)
     } else {
@@ -157,9 +157,19 @@ fn now_ms() -> u128 {
 
 /// `mc exec center.snapshot` / `center.tail`: observe the Studio for `project` (or the only
 /// open Studio) and read its journal. Never launches, switches or writes anything.
-pub fn collect(project: Option<&str>) -> (Value, Value) {
-    let ui = crate::local_ui::call("auto", "ui.feedback", json!({"project": project}))
+pub fn collect(project: Option<&str>, bridge: Option<&str>) -> (Value, Value) {
+    let target = bridge.unwrap_or("auto");
+    let mut ui = crate::bridge_call(target, "ui.feedback", json!({"project": project}))
         .unwrap_or_else(|e| json!({"connection": "error", "error": e}));
+    if bridge.is_some() && ui["connection"] == "connected" {
+        if let Some(expected) = project {
+            let canonical = |p: &str| animationcraft_engine::studio_sessions::canonical(std::path::Path::new(p));
+            if canonical(expected).ok().zip(ui["active_project"].as_str().and_then(|p| canonical(p).ok())).is_none_or(|(a,b)| a != b) {
+                ui = json!({"connection":"error","error":"Selected Studio does not show the requested project; no fallback observation used"});
+            }
+        }
+        if ui["connection"] == "connected" { ui["endpoint"] = json!(target); }
+    }
     let project = ui["active_project"].as_str().or(project).map(str::to_owned);
     let mut session = animationcraft_engine::Session::default();
     let activity = session

@@ -416,7 +416,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
                 let mut args = params.get("arguments").cloned().unwrap_or(json!({}));args["_origin"]=json!("MCP");
-                if let Some(v) = center_observation(&raw_name.replace('_', "."), &args) {
+                if let Some(v) = center_observation(&raw_name.replace('_', "."), &args, bridge.as_deref()) {
                     outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default()}]}}));
                     continue;
                 }
@@ -631,13 +631,13 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
 }
 
 /// `center.snapshot` / `center.tail` are mc observations, not engine commands; None for any other id.
-fn center_observation(id: &str, params: &Value) -> Option<Value> {
+fn center_observation(id: &str, params: &Value, bridge: Option<&str>) -> Option<Value> {
     let project = params["project"].as_str();
     match id {
-        "center.snapshot" => Some(snapshot::collect(project).0),
+        "center.snapshot" => Some(snapshot::collect(project, bridge).0),
         "center.tail" => {
             let last = params["last"].as_u64().unwrap_or(20).clamp(1, 192) as usize;
-            let (state, activity) = snapshot::collect(project);
+            let (state, activity) = snapshot::collect(project, bridge);
             let events = snapshot::tail(&activity, state["project"].as_str());
             let events = &events[events.len().saturating_sub(last)..];
             Some(json!({"schema": snapshot::TAIL_SCHEMA, "project": state["project"], "events": events,
@@ -778,7 +778,7 @@ fn main() {
                 .unwrap_or_else(|| usage("exec <id> [key=value ...]"));
             let mut params = a.params_from(2).unwrap_or_else(|e| usage(e));
             params["_origin"]=json!("CLI");
-            if let Some(v) = center_observation(id, &params) {
+            if let Some(v) = center_observation(id, &params, a.bridge_addr().as_deref()) {
                 outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                 return;
             }
