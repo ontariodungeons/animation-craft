@@ -821,6 +821,123 @@ pub fn cmd_part_undo_image(s: &mut Session, params: &Value) -> Result<Value> {
     )
 }
 
+/// Resolve an installed Craft binary the way `resolve_craft_cli` names it: an
+/// explicit path must be a file, a bare name must be on PATH.
+fn installed_craft_binary(name: &str) -> Option<PathBuf> {
+    let resolved = PathBuf::from(crate::workspace::resolve_craft_cli(name));
+    if resolved.components().count() > 1 {
+        return resolved.is_file().then_some(resolved);
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(&resolved))
+            .find(|path| path.is_file())
+    })
+}
+
+/// The earliest retained `before.png` for this part: the image the part had
+/// before its first replacement. Verified against its receipt digest.
+fn original_backup(root: &Path, history: &Path, part: &str) -> Result<Option<PathBuf>> {
+    if !history.exists() {
+        return Ok(None);
+    }
+    checked_dir(root, history, false)?;
+    let mut earliest: Option<(u64, PathBuf, String)> = None;
+    for entry in std::fs::read_dir(history)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let receipt_path = entry.path().join("receipt.json");
+        check_regular_or_missing(root, &receipt_path)?;
+        let Ok(bytes) = std::fs::read(&receipt_path) else {
+            continue;
+        };
+        let record: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| invalid(format!("Invalid part-image receipt: {e}")))?;
+        if record["part"].as_str() != Some(part) {
+            continue;
+        }
+        let revision = record["revision_before"]
+            .as_u64()
+            .ok_or_else(|| invalid("Part-image receipt has no revision"))?;
+        let backup = record["backup"]
+            .as_str()
+            .ok_or_else(|| invalid("Part-image receipt has no original image"))?;
+        let digest = record["before_sha256"].as_str().unwrap_or_default().to_owned();
+        if earliest.as_ref().is_none_or(|(r, _, _)| revision < *r) {
+            earliest = Some((revision, PathBuf::from(backup), digest));
+        }
+    }
+    let Some((_, backup, digest)) = earliest else {
+        return Ok(None);
+    };
+    let backup = resolve_project_file(
+        root,
+        backup
+            .to_str()
+            .ok_or_else(|| invalid("Backup path is not UTF-8"))?,
+        "original part backup",
+    )?;
+    if sha(&std::fs::read(&backup)?) != digest {
+        return Err(invalid(
+            "Original part backup failed integrity verification",
+        ));
+    }
+    Ok(Some(backup))
+}
+
+/// Resolve one rig part's PNG (current, or its retained original) and report
+/// what PhotoCraft would open. `spawn: true` launches the PhotoCraft app on it.
+pub fn cmd_part_open_photocraft(s: &mut Session, params: &Value) -> Result<Value> {
+    let asset = asset_id(s, params)?;
+    let part = params["part"]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("Choose a stable part ID"))?;
+    let which = params["which"].as_str().unwrap_or("current");
+    if which != "current" && which != "original" {
+        return Err(invalid("`which` must be \"current\" or \"original\""));
+    }
+    let spawn = params["spawn"].as_bool().unwrap_or(false);
+    let root = project_root(s)?;
+    let (spec, raw, _) = rig_snapshot(s, &asset)?;
+    let bound = layer_file(&raw, &spec, part)?;
+    let current = resolve_project_file(
+        &root,
+        bound
+            .to_str()
+            .ok_or_else(|| invalid("Layer path is not UTF-8"))?,
+        "part image",
+    )?;
+    let history = spec
+        .parent()
+        .ok_or_else(|| invalid("Rig has no parent directory"))?
+        .join(".part-image-history")
+        .join(safe_id(&asset));
+    let original = original_backup(&root, &history, part)?;
+    let file = match (which, &original) {
+        ("original", Some(backup)) => backup.clone(),
+        _ => current,
+    };
+    let bytes = std::fs::read(&file)?;
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()?
+        .into_dimensions()
+        .map_err(|e| invalid(format!("Cannot read part image dimensions: {e}")))?;
+    let photocraft_cli = installed_craft_binary("photocraft-cli");
+    if spawn {
+        // photocraft-cli is headless; only the PhotoCraft app opens a window.
+        let app = installed_craft_binary("photocraft").ok_or_else(|| {
+            invalid("PhotoCraft app (`photocraft`) is not installed; set PHOTOCRAFT or CRAFT_CLI_DIR")
+        })?;
+        std::process::Command::new(app).arg(&file).spawn()?;
+    }
+    Ok(json!({"ok":true,"command":"part.open_photocraft","part":part,"which":which,"file":file,
+        "original_file":original,"width":width,"height":height,"sha256":sha(&bytes),
+        "photocraft_cli":photocraft_cli,"spawned":spawn}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
