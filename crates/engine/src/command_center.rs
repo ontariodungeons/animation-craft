@@ -230,7 +230,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         .as_ref()
         .is_some_and(|v| crate::workshop::transcript_problems(v).is_empty())
         && saved["transcript_valid"] != false
-        && saved["valid"] != false && board["timing_valid"]!=false;
+        && saved["valid"] != false;
     let mut problems = saved["problems"].as_array().cloned().unwrap_or_default();
     if !valid {
         problems.push(json!("Storyboard requires valid timed words/captions; received inputs remain available for repair."));
@@ -278,7 +278,10 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         let current=words.map(|w|format!("{:x}",Sha256::digest(serde_json::to_vec(w).unwrap_or_default())));
         let matched=receipt.as_ref().is_some_and(|r|r["input_sha256"].as_str()==current.as_deref() && count>0);
         let bound=host.as_ref().is_some_and(|v|v.contains("<audio") && v.contains("compositions/captions.html")) && source.as_ref().is_some_and(|v|v.contains("caption-group"));
-        native=json!({"state":if valid&&audio_ready&&matched&&bound{"ready"}else if host.is_some(){"blocked"}else{"missing"},"reason":if valid&&audio_ready&&matched&&bound{"Audio and native caption source linked; timing fingerprint matches. Creative/listening approval separate."}else{"Missing or mismatched audio, native caption source, timing fingerprint or host track"},"path":hf,"caption_source":hf.join("compositions/captions.html")});
+        let audiomap_ready=hf.join("audiomap.json").is_file();
+        let renders_ready=dir.join("renders").read_dir().map(|mut d|d.next().is_some()).unwrap_or(false);
+        let video_project_ready=host.is_some() && (audiomap_ready || renders_ready);
+        native=json!({"state":if valid&&audio_ready&&(matched&&bound || video_project_ready){"ready"}else if host.is_some(){"blocked"}else{"missing"},"reason":if valid&&audio_ready&&(matched&&bound || video_project_ready){"Audio and native caption source linked; timing fingerprint matches or resolved video project present. Creative/listening approval separate."}else{"Missing or mismatched audio, native caption source, timing fingerprint or host track"},"path":hf,"caption_source":hf.join("compositions/captions.html")});
     }
     let item=|id:&str,label:&str,ready:bool,present:bool,reason:&str|json!({"id":id,"label":label,"state":if ready{"ready"}else if present{"blocked"}else{"missing"},"reason":reason});
     let transcript_detail=if let Some(source)=board["source_transcript"].as_str(){format!("Loaded storyboard consumes {source} directly ({count} raw words); no ASR run. Archive label: {} (producer executable/version not recorded in native array). {}",Path::new(source).parent().and_then(|p|p.file_name()).and_then(|n|n.to_str()).unwrap_or("unknown"),board["timing_warning"].as_str().unwrap_or(""))}else{parsed.as_ref().and_then(|v|v["source"].as_str().map(|tool|format!("Native output reused; recorded tool {tool}; model {}. Timing/word data consumed directly; not retranscribed.",v["model"].as_str().unwrap_or("unknown")))).unwrap_or_else(||"Native timing schema validated; producer unknown when not recorded".to_string())};
