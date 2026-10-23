@@ -432,6 +432,7 @@ pub fn build() -> Vec<CommandSpec> {
             cmd_export_cutout_mp4
         ),
         query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
+        query!("song.lyrics", "Song Lyrics (Artist Sheet or Transcript)", "{}", crate::lyrics::cmd_song_lyrics),
         query!("workshop.files", "Workshop Files", "{\"filter\": \"optional substring\", \"group\": \"optional audio|liner_notes|transcript|storyboard|assets|other\"}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
         query!("project.search", "Search Project, Files, Storyboard & Commands", "{\"query\": \"search text\"}", cmd_project_search),

@@ -141,7 +141,7 @@ for (const file of ['animation.js', 'blender-placement.js', 'blender.js', 'image
 }
 const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
 // Use the production shared-label and block renderers without booting the desktop app.
-for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction sceneLines()']]) {
+for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction objectsFrom(']]) {
   vm.runInContext(appSource.slice(appSource.indexOf(start), appSource.indexOf(end)), artworkContext);
 }
 vm.runInContext(`

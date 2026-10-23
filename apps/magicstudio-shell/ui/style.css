@@ -757,3 +757,37 @@ body.at-home .app-footer { display:none; }
 .animation-authoring-fields button { white-space:normal;max-width:100%; }
 
 .animation-pose-preview { width:100%;max-height:180px;object-fit:contain;background:var(--bg); }
+/* Song: play/pause beside the header; lyrics and transcription as sections inside it. */
+.block-headrow { display: flex; align-items: center; padding-right: 10px; }
+.block-headrow .block-head { flex: 1; min-width: 0; }
+.song-play { flex: none; }
+.song-section { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.song-section-head { display: flex; align-items: center; gap: 8px; }
+.song-section-head .title { font-weight: 600; flex: 1; min-width: 0; }
+.song-section-head .meta { color: var(--faint); font-size: 12px; }
+.song-section[data-section=lyrics] .title { color: var(--tone-lyrics); }
+.song-section[data-section=transcript] .title { color: var(--tone-transcript); }
+.song-details summary { color: var(--faint); font-size: 12px; cursor: pointer; }
+.song-details[open] { display: flex; flex-direction: column; gap: 6px; }
+/* Read-only transcript reader layered over the workstation panes. */
+.magic-reader { position: absolute; inset: 8px 8px 8px 0; z-index: 3; }
+.magic-reader .magic-pane-head { display: flex; align-items: center; gap: 8px; }
+.magic-reader .magic-pane-head > span:first-child { flex: 1; }
+.reader-body { overflow: auto; padding: 4px 14px 14px; line-height: 1.7; }
+.reader-line { margin: 0 0 6px; }
+.reader-time { color: var(--faint); font: 11px ui-monospace, monospace; margin-right: 8px; background: none; border: 0; cursor: pointer; }
+.reader-time:hover { color: var(--accent); }
+.reader-word.now { color: var(--accent-ink); background: var(--accent); border-radius: 4px; }
+/* Lyric sheet: the artist's words first; timing cues sit apart, never glued to the text. */
+.lyric-source { color: var(--faint); font-size: 12px; margin: 0; }
+.artist-note { margin: 0; padding: 8px 12px; border-left: 3px solid var(--tone-lyrics); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.artist-note p { margin: 0; font-style: italic; }
+.artist-note cite { color: var(--muted); font-size: 12px; font-style: normal; }
+.lyric-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.not-linked { color: var(--amber); font-size: 12px; }
+.lyric-sheet, .reader-body { display: flex; flex-direction: column; gap: 12px; }
+.lyric-stanza { display: flex; flex-direction: column; gap: 2px; }
+.stanza-label { color: var(--faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+.lyric-line { display: flex; align-items: baseline; gap: 10px; }
+.lyric-text { flex: 1; min-width: 0; line-height: 1.5; }
+.lyric-line .cue { flex: none; color: var(--faint); font: 11px ui-monospace, monospace; }

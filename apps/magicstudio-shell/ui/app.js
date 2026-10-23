@@ -24,6 +24,8 @@ const ICONS = {
   transcript: '<svg viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/></svg>',
   animate: '<svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
   chev: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
 };
 
 let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
@@ -134,7 +136,7 @@ async function footerGo(id) {
   if (id === 'studio') return setView('studio');
   if (state.view !== 'project' && await setView('project') === false) return;
   if (id === 'storyboard') return;
-  state.open = id; state.blocksCollapsed = false; $('blocks').classList.remove('collapsed'); renderBlocks();
+  state.open = SONG_SECTIONS.includes(id) ? 'song' : id; state.blocksCollapsed = false; $('blocks').classList.remove('collapsed'); renderBlocks();
 }
 
 function footerContext() {
@@ -213,7 +215,165 @@ async function openPath(path) {
 
 // ---- Blocks -------------------------------------------------------------------------------
 
-function block(id, icon, title, meta, done, body, blockState) {
+const SONG_SECTIONS = ['lyrics', 'transcript'];
+
+function songSection(id, title, meta, done, sectionState, body) {
+  return el("div", { class: "song-section", id: `song-${id}`, "data-section": id, "data-state": sectionState },
+    el("div", { class: "song-section-head" },
+      el("span", { class: `dot ${done ? "ok" : "warn"}`, title: done ? "Ready" : "Needs work" }),
+      el("span", { class: "title" }, title), el("span", { class: "meta" }, meta || "")),
+    ...body);
+}
+
+function transcriptSummary(doc, ok) {
+  const words = doc?.words || [];
+  if (!words.length) return "No timed words yet";
+  const end = doc.recording_duration_sec ?? words.at(-1).end;
+  return `${words.length} words · ${clockTime(end)} · ${ok ? "timing ok" : "timing needs review"}`;
+}
+
+function clockTime(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// ---- Song playback: one audio element per project, shared by the Song header and the reader ----
+const songPlayer = { audio: null, path: null };
+
+function songAudio(path) {
+  if (songPlayer.path !== path) {
+    songPlayer.audio?.pause();
+    songPlayer.audio = new Audio(convertFileSrc(path));
+    songPlayer.path = path;
+    for (const type of ["play", "pause", "ended"]) songPlayer.audio.addEventListener(type, renderSongPlay);
+    songPlayer.audio.addEventListener("timeupdate", readerFollow);
+  }
+  return songPlayer.audio;
+}
+
+function songStop() { songPlayer.audio?.pause(); songPlayer.audio = null; songPlayer.path = null; }
+
+function songPlayButton(path) {
+  const button = el("button", { class: "icon song-play", id: "song-play", "data-path": path,
+    onclick: (e) => {
+      e.stopPropagation(); // play/pause never opens or closes the Song section
+      const audio = songAudio(path);
+      if (audio.paused) audio.play().catch((error) => toast(`Cannot play the song: ${error.message || error}`));
+      else audio.pause();
+    } });
+  renderSongPlay(button);
+  return button;
+}
+
+function renderSongPlay(button = $("song-play")) {
+  if (!button?.dataset) return;
+  const playing = songPlayer.path === button.dataset.path && songPlayer.audio && !songPlayer.audio.paused;
+  const label = playing ? "Pause song" : "Play song";
+  button.setAttribute("aria-label", label); button.title = label; button.setAttribute("aria-pressed", String(!!playing));
+  button.innerHTML = playing ? ICONS.pause : ICONS.play;
+}
+
+// ---- Lyrics: the artist's sheet when the project has one, otherwise the transcript as heard ----
+// One model feeds both the Song sheet and the reader, so they always show the same words.
+function lyricModel(lyrics, doc, asHeard = false) {
+  if (!asHeard && lyrics?.source === "canonical") return { canonical: true, sections: (lyrics.sections || []).map((s) => ({ label: s.label,
+    lines: s.lines.map((l) => ({ text: l.text, start: l.start ?? null, words: l.words || [] })) })) };
+  const words = (doc?.words || []).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end));
+  const lines = [];
+  let line = [];
+  words.forEach((w, i) => {
+    if (line.length && (w.start - words[i - 1].end >= 0.6 || line.length >= 10)) { lines.push(line); line = []; }
+    line.push(w);
+  });
+  if (line.length) lines.push(line);
+  return { canonical: false, sections: [{ label: null, lines: lines.map((l) => ({ text: l.map((w) => w.text).join(" "), start: l[0].start, words: l })) }] };
+}
+
+async function loadSongLyrics() {
+  const project = state.project;
+  try {
+    const lyrics = await invoke("engine_command", { id: "song.lyrics", params: {} });
+    if (state.project === project) { state.lyrics = lyrics; renderBlocks(); }
+  } catch (error) { if (state.project === project) state.lyrics = null; }
+}
+
+async function attachOriginal() {
+  const path = await dialog.open({ title: "Attach the artist's original lyrics or liner notes" });
+  if (!path) return;
+  try {
+    await designCommand("workshop.add", { kind: "liner_notes", paths: [path] });
+    await loadSongLyrics();
+    toast("Attached to liner notes; the original file is unchanged");
+  } catch (error) { toast(String(error)); }
+}
+
+function lyricSheet(model) {
+  return el("div", { class: "lyric-sheet" }, ...model.sections.map((section) => el("div", { class: "lyric-stanza" },
+    section.label ? el("div", { class: "stanza-label" }, section.label) : null,
+    ...section.lines.map((line) => el("div", { class: "lyric-line" }, el("span", { class: "lyric-text" }, line.text),
+      line.start != null ? el("span", { class: "cue", title: "Sung at" }, clockTime(line.start)) : null)))));
+}
+
+function lyricsBody(lyrics, doc, liner, songPath) {
+  const model = lyricModel(lyrics, doc);
+  const original = lyrics?.original;
+  const name = (path) => String(path).split("/").pop();
+  return [
+    el("p", { class: "lyric-source" }, model.canonical
+      ? `${lyrics.artist ? `${lyrics.artist} · ` : ""}the artist's lyric sheet${lyrics.timing ? " · timing from the recording" : ""}`
+      : "From the transcript, as heard and not corrected · no artist lyric sheet attached"),
+    model.canonical && lyrics.artist_note ? el("blockquote", { class: "artist-note" }, el("p", {}, lyrics.artist_note), el("cite", {}, lyrics.artist || "The artist")) : null,
+    el("div", { class: "lyric-actions" },
+      original?.exists
+        ? el("button", { id: "song-open-original", class: "ghost", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
+        : [el("span", { class: "not-linked" }, original ? `Original not found: ${name(original.path)}` : "Original not linked"),
+           el("button", { id: "song-attach-original", class: "ghost", onclick: attachOriginal }, "Attach original…")],
+      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", class: "ghost", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
+    lyricSheet(model),
+    el("div", { class: "group-label" }, "Liner notes"),
+    liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None attached yet."),
+  ];
+}
+
+// ---- Reader: the same lyric model in the right workstation; read only, follows the song ----
+const lyricReader = { words: [] };
+
+function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
+  if (typeof agentToggle === "function" && !document.body.classList.contains("agent-docked")) agentToggle(true);
+  const model = lyricModel(lyrics, doc, asHeard);
+  const seek = (t) => { if (songPath && t != null) songAudio(songPath).currentTime = t; };
+  const words = [];
+  const body = el("div", { class: "reader-body" }, ...model.sections.map((section) => el("div", { class: "lyric-stanza" },
+    section.label ? el("div", { class: "stanza-label" }, section.label) : null,
+    ...section.lines.map((line) => el("p", { class: "reader-line" },
+      line.start != null ? el("button", { class: "reader-time", title: songPath ? "Play from here" : "", "aria-label": `Seek to ${clockTime(line.start)}`, onclick: () => seek(line.start) }, clockTime(line.start)) : null,
+      ...(line.words.length
+        ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
+        : [el("span", {}, line.text)]))))));
+  const title = model.canonical ? "Lyrics" : "Transcript";
+  const pane = el("section", { class: "magic-pane magic-reader", id: "magic-reader", "aria-label": `${title}, read only` },
+    el("div", { class: "magic-pane-head" }, el("span", {}, title),
+      el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
+      el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
+    body);
+  $("magic-reader")?.remove();
+  $("magic-workstation")?.append(pane);
+  lyricReader.words = words;
+  readerFollow();
+}
+
+function transcriptReaderClose() { $("magic-reader")?.remove(); lyricReader.words = []; }
+
+function readerFollow() {
+  const pane = $("magic-reader");
+  if (!pane || !songPlayer.audio) return;
+  const t = songPlayer.audio.currentTime;
+  const index = lyricReader.words.findIndex((w) => t >= w.start && t < w.end);
+  pane.querySelector(".reader-word.now")?.classList.remove("now");
+  if (index >= 0) pane.querySelector(`.reader-word[data-index="${index}"]`)?.classList.add("now");
+}
+
+function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
   const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? " · " + meta : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
@@ -222,18 +382,8 @@ function block(id, icon, title, meta, done, body, blockState) {
     el("span", { class: "title" }, title),
     el("span", { class: "meta" }, meta || ""),
     el("span", { class: "chev", html: ICONS.chev }));
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id }, head,
+  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id }, action ? el("div", { class: "block-headrow" }, head, action) : head,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
-}
-
-function sceneLines() {
-  // "Scene 3 · arm. · 0:06–0:07" -> {time, lyric}
-  const doc=state.data?.status?.stages?.find(s=>s.id==='transcript')?.document;
-  if(doc?.paragraphs?.length) return doc.paragraphs.map(p=>({time:`${p.start}–${p.end}s`,lyric:p.text||''}));
-  return (state.data?.storyboard?.scene_titles || []).map((t) => {
-    const parts = t.split(" · ");
-    return { lyric: parts.slice(1, -1).join(" · "), time: (parts.at(-1) || "").split("–")[0] };
-  });
 }
 
 function objectsFrom(files) {
@@ -287,20 +437,20 @@ function renderBlocks() {
 
   const observed=id=>state.data?.monitoring?.prerequisites?.find(p=>p.id===id);
   const ready=id=>observed(id)?.state==='ready';
+  // Song holds its lyrics and transcription; each keeps its own readiness light and state.
   const songState = observed("song")?.state || "unknown";
-  box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
-    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null], songState));
-
-  const lines = sceneLines();
   const lyricsState = observed("lyrics")?.state || "unknown";
-  box.append(block("lyrics", ICONS.lyrics, "Lyrics & notes", `${lines.filter((l) => l.lyric && l.lyric !== "Instrumental").length} lines`, ready("lyrics"),
-    [...lines.map((l) => el("div", { class: "lyric" }, el("span", { class: "t" }, l.time), el("span", {}, l.lyric))),
-     el("div", { class: "group-label" }, "Liner & teaching notes"),
-     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None in this project yet.")], lyricsState));
-
   const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
   const transcriptState = observed("transcript")?.state || "unknown";
-  box.append(block("transcript", ICONS.transcript, "Transcription", `${outputs.length} files`, ready("transcript"), [el('div',{class:'why'},transcript.why||''),...outputs.map(fileButton)], transcriptState));
+  const doc = transcript.document;
+  box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
+    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null,
+     songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
+       ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
+     songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
+       [doc?.words?.length ? el("button", { id: "song-open-transcript", class: "ghost", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
+        el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
+    songState, audio ? songPlayButton(audio.path) : null));
 
   const assets=state.data?.assets?.assets||[];
   const cards=assets.map(a=>{
@@ -535,11 +685,14 @@ async function applyOpenedProject(opened, start = {}) {
   if(!path)throw new Error('Project command did not return its canonical location');
   state.data=opened;
   state.projectReceipt=opened;
-  if (state.project !== path) animationReset();
+  if (state.project !== path) { animationReset(); songStop(); transcriptReaderClose(); }
   state.project = path;
+  state.lyrics = null;
+  loadSongLyrics();
   window.magicCompanions?.sync();
   state.page = 0;
-  state.open = start.open && start.open !== "agent" ? start.open : "song";
+  const startOpen = start.open && start.open !== "agent" ? start.open : "song";
+  state.open = SONG_SECTIONS.includes(startOpen) ? "song" : startOpen;
   document.body.classList.remove("at-home");
   $("project-name").textContent = path.split("/").pop().replace(/\.magic$/, "");
   document.title = `${$("project-name").textContent} · Magic Studio`;

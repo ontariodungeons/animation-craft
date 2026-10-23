@@ -44,6 +44,7 @@ pub mod sequence;
 pub mod sheets;
 pub mod image_generation;
 pub mod session;
+pub mod lyrics;
 pub mod storyboard;
 pub mod storyboard_design;
 pub mod studio_cues;
