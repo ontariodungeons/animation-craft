@@ -39,7 +39,7 @@ pub(crate) const STORYBOARD_PDF: &str = "storyboard.pdf";
 /// Static images for video tracks (characters, props, backgrounds), ideally transparent.
 pub(crate) const ASSETS_DIR: &str = "assets";
 /// Video targets the song can be edited in; Remotion is the default.
-pub(crate) const VIDEO_TARGETS: &[&str] = &["remotion", "filmcraft", "hyperframes"];
+pub const VIDEO_TARGETS: &[&str] = &["remotion", "filmcraft", "hyperframes"];
 /// FilmCraft time base: ticks per second.
 pub(crate) const FILMCRAFT_TICKS_PER_SECOND: f64 = 254_016_000_000.0;
 /// Asset fix list: one decision per problem asset ("clean" or "recreate").

@@ -52,13 +52,13 @@ fn history_path() -> Option<PathBuf> {
 const HISTORY_LIMIT: usize = 512;
 fn notable(event: &Value) -> bool {
     let stage = event["stage"].as_str().unwrap_or_default();
-    matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched" | "theatre_selection" | "theatre_saved" | "theatre_error")
+    matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched" | "theatre_selection" | "theatre_saved" | "theatre_error" | "clip_sheet_started" | "clip_sheet_converted" | "clip_sheet_failed" | "theatre_keyframes")
         || (matches!(event["command"].as_str(), Some("image.generate" | "motion.path" | "motion.undo_path"))
             && matches!(stage, "dispatch_running" | "engine_success" | "engine_needs_work"))
 }
 /// Page selection reports would each become a root action; they live only in the history.
 fn history_only(event: &Value) -> bool {
-    matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched" | "theatre_selection"))
+    matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched" | "theatre_selection" | "clip_sheet_started" | "clip_sheet_converted" | "clip_sheet_failed" | "theatre_keyframes"))
 }
 fn read_rows(path: &std::path::Path) -> Vec<Value> {
     fs::read_to_string(path)

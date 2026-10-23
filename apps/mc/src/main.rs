@@ -91,7 +91,8 @@ SUBCOMMANDS
                                       last_error (null = not observed); the Command Center status line
   exec center.tail [last=20] [project=<file>]
                                       last N typed events: saved, generation_started/finished,
-                                      keyframe_added/removed, selection_changed, clip_switched, error
+                                      keyframe_added/removed (Theatre), motion_path_drawn/undone,
+                                      selection_changed, clip_switched, clip_sheet_*, error
                                       (activity history: last 512, UI clicks never evict them)
   login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
@@ -101,7 +102,15 @@ SUBCOMMANDS
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
-  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or live GUI viewport when --bridge is used)
+  <project> <subcommand | command id> [ARGS]
+                                      run against one project: an .acproj, or a folder with exactly
+                                      one (a song's hyperframes/ or remotion/ folder finds its song);
+                                      same as project=<file> _expected_project=<file>, e.g.
+                                      mc \"Bumble Bee.acproj\" center.snapshot
+  clips [character=<id>] [project=<file>] [--convert]
+                                      each clip's Theatre sheet, duration and conversion status
+                                      (motion.clips; --convert runs motion.clips.convert first)
+  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis of a PNG or a character's artwork
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
   mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
                                       register it with your agent as: command `mc`, args [\"mcp\"]
@@ -112,17 +121,17 @@ SUBCOMMANDS
                                       talk to the app-selected chat agent (fresh by default; prints its reply);
                                       also: agent read [last=10], agent session (not an MCP tool)
 
-LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec ui.state`)
-  ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
-  ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
-  ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
-  ui.vision                           analyze the live stage canvas pixels (no screenshot download needed)
-  ui.screenshot [output=...]          save window PNG + vision metrics for the stage canvas (see vision.region)
+LIVE UI CONTROL COMMANDS (run with `--bridge auto exec <command>`, or the Studio's unix:<socket>)
+  ui.state                            project, view, animation (subject, track, time, selected part)
+  ui.elements [region=<id or CSS>]    visible clickable elements with ids, labels and boxes
+  ui.click id=<element id>            click an element by its ui.elements id (or aria label)
+  ui.set id=<element id> value=<v>    set an input or select (e.g. id=motion-track)
+  ui.key key=<key> [id=<element id>]  press a key, optionally on an element
+  ui.screenshot [output=...]          save a PNG of the window
   ui.look [region=<id prefix>] [click=<id>] [pad=0] [max_side=1000] [output=...]
                                       one-step look: click (optional), then a PNG of the window or region,
                                       the app state and the ids inside it (MCP: ui_look returns the image)
-  ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
-                                      switch live GUI viewport tab, action cycle, yaw, or pose range
+  ui.focus                            bring the Studio window to the front
   app.quit                            request guarded close; unsaved/unknown state refuses
   app_quit (MCP tool)                 same guarded close, current Studio auto-discovery
 
@@ -518,7 +527,8 @@ fn mcp_tools() -> Vec<Value> {
     tools.push(json!({
         "name": "center_tail",
         "description": "Last N typed Magic Studio events (saved, generation_started, generation_finished, \
-            keyframe_added, keyframe_removed, selection_changed, clip_switched, error) from the activity history, oldest first. Read-only.",
+            keyframe_added, keyframe_removed (Theatre keyframes), motion_path_drawn, motion_path_undone, selection_changed, clip_switched, \
+            clip_sheet_started, clip_sheet_converted, clip_sheet_failed, error) from the activity history, oldest first. Read-only.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -663,8 +673,69 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "center", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
+
+/// The command line with a leading project path resolved (see `project_argument`), read once.
+fn cli_args() -> &'static Vec<String> {
+    static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ARGS.get_or_init(|| project_argument(std::env::args().collect()).unwrap_or_else(|e| usage(e)))
+}
+
+/// `mc <project> <subcommand | command id> ...`: a leading project path becomes
+/// `project=<file> _expected_project=<file>` for this call, and a bare command id after it
+/// runs as `exec <id>`. Anything else is returned unchanged.
+fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
+    let mut i = 1;
+    while i < raw.len() && raw[i].starts_with('-') && !SUBCOMMANDS.contains(&raw[i].as_str()) {
+        i += if raw[i] == "--bridge" { 2 } else { 1 };
+    }
+    let Some(token) = raw.get(i).cloned() else { return Ok(raw) };
+    if SUBCOMMANDS.contains(&token.as_str()) || !(token.contains('/') || token.ends_with(".acproj")) {
+        return Ok(raw);
+    }
+    let project = resolve_project(std::path::Path::new(&token))?;
+    raw.remove(i);
+    if raw.get(i).is_some_and(|next| !SUBCOMMANDS.contains(&next.as_str()) && next.contains('.')) {
+        raw.insert(i, "exec".into());
+    }
+    raw.push(format!("project={}", project.display()));
+    raw.push(format!("_expected_project={}", project.display()));
+    Ok(raw)
+}
+
+/// An .acproj file, or the one .acproj in a folder. A song project's video-target folder
+/// (hyperframes/, remotion/, filmcraft/, or one level inside it) resolves to that song project.
+fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if path.is_file() {
+        if path.extension().is_some_and(|e| e == "acproj") {
+            return std::fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()));
+        }
+        return Err(format!("{} is not an .acproj project file", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!("{}: no such project file or folder", path.display()));
+    }
+    for dir in path.ancestors().take(3) {
+        // Above the given folder, only a song project's video-target folder leads up to it.
+        let via_target = path.strip_prefix(dir).ok().and_then(|rest| rest.components().next())
+            .and_then(|c| c.as_os_str().to_str()).is_some_and(|c| animationcraft_engine::workshop::VIDEO_TARGETS.contains(&c));
+        if dir != path && !via_target {
+            continue;
+        }
+        let found: Vec<_> = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?
+            .filter_map(Result::ok).map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "acproj")).collect();
+        match found.as_slice() {
+            [] => continue,
+            [one] => return std::fs::canonicalize(one).map_err(|e| e.to_string()),
+            many => return Err(format!("{} has {} .acproj files; pass the one you mean", dir.display(), many.len())),
+        }
+    }
+    Err(format!("no .acproj in {} (or above it, from a hyperframes/remotion/filmcraft folder); pass the project file", path.display()))
+}
+
 fn main() {
-    let a = args::Args::parse(std::env::args().skip(1));
+    let a = args::Args::parse(cli_args().iter().cloned().skip(1));
     if a.help {
         outln!("{HELP}");
         return;
@@ -699,7 +770,7 @@ fn main() {
         }
         "center" => {
             if a.bridge_addr().is_some(){usage("Command Center currently uses an explicit headless project; --bridge is reserved for existing live command access");}
-            if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),std::env::args().any(|a|a=="--print")){fail(e);}
+            if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),cli_args().iter().cloned().any(|a|a=="--print")){fail(e);}
         }
         "info" => {
             let specs = animationcraft_engine::command_specs();
@@ -730,7 +801,8 @@ fn main() {
         "vision" => {
             let target = a.pos(1);
             let res = match (a.bridge_addr(), target) {
-                (Some(addr), None) => bridge_call(&addr, "ui.vision", json!({})),
+                // Character metrics on a whole-window screenshot are meaningless; ask for a picture instead.
+                (Some(_), None) => usage("vision needs an image or character; for a picture of the window use `exec ui.look` or `exec ui.screenshot`"),
                 (bridge_opt, Some(t)) => {
                     let params = if std::path::Path::new(t).exists() {
                         json!({ "image": t })
@@ -761,16 +833,41 @@ fn main() {
             }
         }
         "storyboard" => {
-            if std::env::args().any(|v|v=="--doctor"){
+            if cli_args().iter().cloned().any(|v|v=="--doctor"){
                 if a.pos(1).is_some_and(|v|!v.contains('=')){usage("storyboard --doctor (select the project with --bridge <port>)");}
                 let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.doctor",a.params_from(1).map(|mut p|{p["_origin"]=json!("CLI");p}).unwrap_or_else(|e|usage(e))).unwrap_or_else(|e|fail(e));
                 outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
                 std::process::exit(if result["healthy"]==true{0}else if result["healthy"]==false{1}else{2});
             }
-            let params=storyboard_edit_params(&std::env::args().skip(1).collect::<Vec<_>>()).unwrap_or_else(|e|usage(e));
+            let params=storyboard_edit_params(&cli_args().iter().cloned().skip(1).collect::<Vec<_>>()).unwrap_or_else(|e|usage(e));
             let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.edit",params).unwrap_or_else(|e|fail(e));
             if is_payload_error(&result){fail(format!("storyboard.edit: {result}"));}
             outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
+        }
+        "clips" => {
+            let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));
+            params["_origin"]=json!("CLI");
+            let bridge = a.bridge_addr();
+            let mut s = Session::user_session();
+            // Headless reads need the project attached; dispatch then follows a Studio that has it open.
+            if bridge.is_none() {
+                if let Some(project) = params["project"].as_str() {
+                    s.execute("project.attach", json!({"path": project})).unwrap_or_else(|e| fail(format!("clips: {e}")));
+                }
+            }
+            let mut run = |id: &str| match &bridge { Some(addr) => bridge_call(addr, id, params.clone()), None => dispatch(&mut s, id, params.clone()) };
+            if cli_args().iter().cloned().any(|v| v == "--convert") {
+                run("motion.clips.convert").unwrap_or_else(|e| fail(format!("motion.clips.convert: {e}")));
+            }
+            let v = run("motion.clips").unwrap_or_else(|e| fail(format!("motion.clips: {e}")));
+            outln!("{:<30} {:<36} {:>8}  STATUS", "CLIP", "SHEET", "SECONDS");
+            for c in v["clips"].as_array().into_iter().flatten() {
+                let seconds = c["duration"].as_f64().map(|d| format!("{d:.2}")).unwrap_or_else(|| "-".into());
+                outln!("{:<30} {:<36} {:>8}  {}", c["clip"].as_str().unwrap_or("?"), c["sheet"].as_str().unwrap_or("?"), seconds, c["status"].as_str().unwrap_or("?"));
+            }
+            if let Some(legacy) = v["legacy_sheet"].as_str() {
+                outln!("legacy per-character sheet kept: {legacy}");
+            }
         }
         "exec" => {
             let id = a
@@ -778,6 +875,11 @@ fn main() {
                 .unwrap_or_else(|| usage("exec <id> [key=value ...]"));
             let mut params = a.params_from(2).unwrap_or_else(|e| usage(e));
             params["_origin"]=json!("CLI");
+            // Opening names its target with path=; pinning the current project would refuse the switch.
+            if matches!(id, "project.open" | "project.identity") && params["path"].is_null() && params["project"].is_string() {
+                params["path"] = params["project"].clone();
+                params.as_object_mut().map(|p| { p.remove("project"); p.remove("_expected_project") });
+            }
             if let Some(v) = center_observation(id, &params, a.bridge_addr().as_deref()) {
                 outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                 return;
@@ -787,6 +889,10 @@ fn main() {
                 bridge_call(&addr, id, params)
             } else {
                 let mut s = Session::user_session();
+                // A named project is attached first, so dispatch reaches the Studio that has it open.
+                if let Some(project) = params["project"].as_str() {
+                    s.execute("project.attach", json!({"path": project})).unwrap_or_else(|e| fail(format!("{id}: {e}")));
+                }
                 dispatch(&mut s,id,params)
             };
             match res {
@@ -800,7 +906,7 @@ fn main() {
             }
         }
         "run" => {
-            let raw_args: Vec<String> = std::env::args().skip(1).collect();
+            let raw_args: Vec<String> = cli_args().iter().cloned().skip(1).collect();
             let script = run_script_argument(a.pos(1), &raw_args)
                 .unwrap_or_else(|| usage("run <script.jsonl | ->"));
             let text = if script == "-" {
@@ -973,6 +1079,96 @@ mod tests {
         assert!(is_payload_error(&json!({ "ok": false, "error": "failed" })));
         assert!(!is_payload_error(&json!({ "ok": true })));
         assert!(!is_payload_error(&json!({ "viewport_tab": "2d" })));
+    }
+}
+
+#[cfg(test)]
+mod project_argument_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mc-project-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    fn args(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn file_folder_and_video_target_folder_resolve_to_the_one_project() {
+        let dir = temp("one");
+        let file = dir.join("Song.acproj");
+        std::fs::write(&file, "{}").unwrap();
+        std::fs::create_dir_all(dir.join("hyperframes/src")).unwrap();
+        let canonical = std::fs::canonicalize(&file).unwrap();
+        for path in [file.clone(), dir.clone(), dir.join("hyperframes"), dir.join("hyperframes/src")] {
+            assert_eq!(resolve_project(&path).unwrap(), canonical, "{}", path.display());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn folders_with_no_or_several_projects_and_other_files_are_refused() {
+        let empty = temp("none");
+        assert!(resolve_project(&empty).unwrap_err().contains("no .acproj"));
+        let many = temp("many");
+        std::fs::write(many.join("A.acproj"), "{}").unwrap();
+        std::fs::write(many.join("B.acproj"), "{}").unwrap();
+        assert!(resolve_project(&many).unwrap_err().contains("has 2 .acproj files"));
+        std::fs::write(empty.join("notes.txt"), "").unwrap();
+        assert!(resolve_project(&empty.join("notes.txt")).unwrap_err().contains("not an .acproj"));
+        assert!(resolve_project(&empty.join("missing.acproj")).unwrap_err().contains("no such project"));
+        std::fs::remove_dir_all(&empty).unwrap();
+        std::fs::remove_dir_all(&many).unwrap();
+    }
+
+    #[test]
+    fn a_leading_project_becomes_pinned_params_and_a_bare_id_runs_as_exec() {
+        let dir = temp("argv");
+        let file = dir.join("Song.acproj");
+        std::fs::write(&file, "{}").unwrap();
+        let p = std::fs::canonicalize(&file).unwrap().display().to_string();
+        let f = file.display().to_string();
+        let pinned = [format!("project={p}"), format!("_expected_project={p}")];
+        let got = project_argument(args(&["mc", "--bridge", "auto", &f, "center.tail", "last=5"])).unwrap();
+        assert_eq!(got[..6], args(&["mc", "--bridge", "auto", "exec", "center.tail", "last=5"])[..]);
+        assert_eq!(got[6..], pinned[..]);
+        let got = project_argument(args(&["mc", &f, "clips", "character=bee"])).unwrap();
+        assert_eq!(got[1..3], args(&["clips", "character=bee"])[..], "subcommands stay as they are");
+        assert_eq!(got[3..], pinned[..]);
+        let plain = args(&["mc", "exec", "center.snapshot", &format!("project={f}")]);
+        assert_eq!(project_argument(plain.clone()).unwrap(), plain, "key=value forms are unchanged");
+        assert!(project_argument(args(&["mc", "/no/such/place", "center.snapshot"])).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_studio_showing_another_project_refuses_the_command() {
+        let dir = temp("wrong");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (mine, other) = (dir.join("Mine.acproj"), dir.join("Other.acproj"));
+        std::fs::write(&mine, "{}").unwrap();
+        std::fs::write(&other, "{}").unwrap();
+        let socket = dir.join("studio.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let shown = std::fs::canonicalize(&other).unwrap();
+        let served = std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            let mut ids = Vec::new();
+            for stream in listener.incoming().take(1) {
+                let mut stream = stream.unwrap();
+                let mut line = String::new();
+                std::io::BufReader::new(&stream).read_line(&mut line).unwrap();
+                ids.push(serde_json::from_str::<Value>(&line).unwrap()["id"].as_str().unwrap().to_owned());
+                writeln!(stream, "{}", json!({"ok": true, "result": {"active_project": shown, "project_guard_version": 1}})).unwrap();
+            }
+            ids
+        });
+        let err = local_ui::call(&format!("unix:{}", socket.display()), "workshop.status", json!({"_expected_project": mine})).unwrap_err();
+        assert!(err.contains("changed project"), "{err}");
+        assert_eq!(served.join().unwrap(), ["ui.feedback"], "only the identity check reached the Studio; the command never ran");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
 

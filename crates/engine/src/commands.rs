@@ -209,6 +209,8 @@ pub fn build() -> Vec<CommandSpec> {
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .acproj identity\"}", crate::theatre::read),
+        query!("motion.clips", "List clips and their Theatre sheets", "{\"character\":\"asset id\"}", crate::theatre::list),
+        cmd!("motion.clips.convert", "Give every clip its own Theatre sheet", [], None, "{\"character\":\"asset id\"}", always, crate::theatre::convert),
         cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .acproj identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
         query!(
             "project.list_assets",
