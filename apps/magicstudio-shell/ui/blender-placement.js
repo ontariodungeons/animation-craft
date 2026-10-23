@@ -1,5 +1,5 @@
 // Place only a completed full receipt. The backend verifies media and maps the canvas rectangle.
-function blenderPlacementControls({project,getJob,current}){
+function blenderPlacementControls({project,getJob,current,jobParameter='blender_job'}){
  let scene=null,placing=false,renderBusy=false,lastJob=null,defaultId='',sceneRevision=0,validationError=false;
  const field=(name,label,value,type='number')=>{
   const input=el('input',{id:`blender-place-${name}`,type,value:String(value),step:'any','aria-label':label,style:'width:100%;min-width:0;box-sizing:border-box'});
@@ -29,8 +29,8 @@ function blenderPlacementControls({project,getJob,current}){
   if(box[2]<=0||box[3]<=0)throw Error('Placement rectangle width and height must be positive.');
   if(!Number.isFinite(job.clip_seconds)||job.clip_seconds<=0)throw Error('Completed receipt has no valid clip duration.');
   if(d>job.clip_seconds/r+1e-6)throw Error(`Clip covers ${(job.clip_seconds/r).toFixed(3)}s at this playback rate; shorten the duration or lower the rate.`);
-  if(!job.job||!job.character||!job.track)throw Error('Completed receipt is missing its job or source action identity.');
-  return {id:id.input.value,blender_job:job.job,scene:scene.scene,start:t,duration:d,rect:box,playback_rate:r,character:job.character,track:job.track};
+  if(!job.job||(jobParameter==='blender_job'&&(!job.character||!job.track)))throw Error('Completed receipt is missing its job or source action identity.');
+  return {id:id.input.value,[jobParameter]:job.job,scene:scene.scene,start:t,duration:d,rect:box,playback_rate:r,...(job.character&&job.track?{character:job.character,track:job.track}:{})};
  }
  const quote=value=>`'${String(value).replaceAll("'","'\\''")}'`;
  function update(){
@@ -44,7 +44,7 @@ function blenderPlacementControls({project,getJob,current}){
  }
  function sceneId(){
   if(!scene)return;
-  const next=`blender-scene-${scene.scene}-${getJob()?.track||'action'}`.replace(/[^a-zA-Z0-9_-]/g,'-');
+  const next=`${jobParameter==='blender_job'?'blender':'animation'}-scene-${scene.scene}-${getJob()?.track||getJob()?.backend||'action'}`.replace(/[^a-zA-Z0-9_-]/g,'-');
   if(!id.input.value||id.input.value===defaultId)id.input.value=next;
   defaultId=next;
  }
@@ -58,7 +58,7 @@ function blenderPlacementControls({project,getJob,current}){
    }
    sceneId();
   }
-  jobInfo.textContent=job?`${job.character||''} · ${job.track||''} · ${job.job} · ${job.partial===false?'full action':'preview'}`:'No completed action selected.';
+  jobInfo.textContent=job?`${job.character||job.backend||'Native source'}${job.track?` · ${job.track}`:''} · ${job.job} · ${job.partial===false?'full action':'preview'}`:'No completed action selected.';
   update();
  }
  async function selectScene(){
@@ -88,12 +88,12 @@ function blenderPlacementControls({project,getJob,current}){
   placing=true;update();message('Placing rendered action…');
   try{
    const result=await motionCommand('video.place_track',params);
-   if(!current()||getJob()?.job!==params.blender_job)return;
+   if(!current()||getJob()?.job!==params[jobParameter])return;
    readback.textContent=JSON.stringify(result,null,2);
    if(result.ok!==true)throw Error(result.error||'Placement command did not confirm success.');
-   if(result.id!==params.id||result.blender_job!==params.blender_job||result.scene!==params.scene||result.start!==params.start||result.duration!==params.duration||result.playback_rate!==params.playback_rate||JSON.stringify(result.canvas_rect)!==JSON.stringify(params.rect)||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
+   if(result.id!==params.id||result[jobParameter]!==params[jobParameter]||result.scene!==params.scene||result.start!==params.start||result.duration!==params.duration||result.playback_rate!==params.playback_rate||JSON.stringify(result.canvas_rect)!==JSON.stringify(params.rect)||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
    message(`Placed ${result.id} · scene ${params.scene} · track ${result.track_index}.`);
-  }catch(error){if(current()&&getJob()?.job===params.blender_job)message(String(error),true);}
+  }catch(error){if(current()&&getJob()?.job===params[jobParameter])message(String(error),true);}
   finally{placing=false;if(current())update();}
  };
  const node=el('details',{id:'blender-placement',class:'motion-section'},el('summary',{},'Place in scene'),

@@ -791,3 +791,5 @@ body.at-home .app-footer { display:none; }
 .lyric-line { display: flex; align-items: baseline; gap: 10px; }
 .lyric-text { flex: 1; min-width: 0; line-height: 1.5; }
 .lyric-line .cue { flex: none; color: var(--faint); font: 11px ui-monospace, monospace; }
+
+.native-backend-fields[hidden] { display:none; }
