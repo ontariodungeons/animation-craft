@@ -173,3 +173,6 @@ assert.equal(wholeArtwork.params.prompt, 'Draw a whole new artwork');
 assert.ok(!('references' in wholeArtwork.params), 'new whole-artwork request must not reuse a previous captured part reference');
 assert.equal(vm.runInContext('existingDraft.error', artworkContext), 'Error: Native generation disabled in fixture');
 console.log('PASS: Legacy -> Blender clears shared part selection, preserves captured generation data and permits whole-artwork requests');
+
+// The same normal hook also exercises the generic ambient indicator state machine.
+await import('./companions.mjs');

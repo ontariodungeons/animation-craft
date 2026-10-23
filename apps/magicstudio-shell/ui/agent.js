@@ -336,6 +336,7 @@ function agentToggle(open = !agent.open) {
   $("agent-toggle").classList.toggle("on", open);
   $("agent-toggle").setAttribute("aria-pressed", String(open));
   $("agent-toggle-label").textContent = open ? "Hide panel ▸" : "◂ Show panel";
+  window.magicCompanions?.sync();
   clearInterval(agent.timer);
   if (!open) return;
   if (agent.loaded) agentReloadLog();

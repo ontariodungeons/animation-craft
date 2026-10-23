@@ -12,6 +12,7 @@ async function showHome() {
   if (agent.open) agentToggle(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
   state.project = null;
+  window.magicCompanions?.sync();
   state.data = null;
   document.body.classList.add("at-home");
   document.body.classList.remove("split");

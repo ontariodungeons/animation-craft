@@ -42,6 +42,7 @@ async function imagePromptCompleted(project, draft, result, captured) {
     if (state.view === 'animation') await animationRefresh();
     if (state.project !== project) return;
     renderBlocks();
+    window.magicCompanions?.event({project,view:state.view,command:'image.generate',request:result._request_id||`image-${result.asset_id}`,phase:'success',params:{},result});
     await acFeedback.report(null, null, { stage: 'image_block_rendered', command: 'image.generate', asset_id: result.asset_id, receipt: result.receipt, captured_part: captured?.partId || null });
   } catch (error) { draft.refreshError = `Artwork created; view refresh failed: ${String(error)}`; }
 }

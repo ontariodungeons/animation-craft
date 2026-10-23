@@ -719,3 +719,12 @@ body.at-home .app-footer { display:none; }
 #view-animation.active:has(.blender-controls) { grid-template-columns:270px minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 @media(max-width:1000px){#view-animation.active:has(.blender-controls){grid-template-columns:230px minmax(0,1fr)}}
 @media(max-width:760px){#view-animation.active:has(.blender-controls){grid-template-columns:190px minmax(0,1fr)}.blender-controls{width:190px}}
+
+/* Decorative ASCII slots reserve space outside controls; never intercept input. */
+.ambient-companion { pointer-events:none; user-select:none; flex:0 0 34px; width:34px; height:18px; margin:0 3px; padding:0; color:var(--muted); font:8px/9px ui-monospace,monospace; white-space:pre; align-self:center; }
+.ambient-companion[hidden] { display:none; }
+.companion-artwork-home { display:flex; align-items:center; min-width:0; }
+.companion-artwork-home > button { flex:1; min-width:0; }
+#ambient-companions { width:auto; margin-right:6px; }
+
+.agent-config .companion-setting { display:flex; align-items:center; gap:6px; }

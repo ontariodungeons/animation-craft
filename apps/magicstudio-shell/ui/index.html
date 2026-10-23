@@ -132,6 +132,7 @@
           <label>Model<input id="agent-model" list="agent-models" placeholder="CLI default" title="Exact model ID; saved for both app and CLI" /><datalist id="agent-models"></datalist></label>
           <button class="ghost" id="agent-catalog-refresh" title="Read the installed model catalog without inference">Refresh models</button>
           <small id="agent-catalog-status" role="status"></small>
+          <label class="companion-setting"><input type="checkbox" id="ambient-companions" /> Ambient ASCII companions (off by default)</label>
           <small>Messages start fresh. Chat settings are separate from image generation.</small>
           <label>Thinking<select id="agent-thinking" title="Reasoning effort">
             <option value="">default</option><option value="off">off</option><option value="low">low</option>
@@ -154,7 +155,7 @@
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Sproket and Gaffer artwork sections" data-splitter="chat"></div>
         <section class="magic-pane magic-image-pane" id="magic-image-pane" aria-label="Gaffer artwork generation">
-          <button class="magic-pane-head magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Gaffer artwork"><span>🐈 Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span></button>
+          <div class="companion-artwork-home"><button class="magic-pane-head magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Gaffer artwork"><span>🐈 Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span></button></div>
           <div id="magic-image-tools" class="magic-image-tools"></div>
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Gaffer artwork and parts sections" data-splitter="image"></div>
@@ -177,5 +178,6 @@
   <script src="agent.js"></script>
   <script src="home.js"></script>
   <script src="bridge.js"></script>
+  <script src="companions.js"></script>
 </body>
 </html>

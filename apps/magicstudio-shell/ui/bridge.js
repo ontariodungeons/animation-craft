@@ -31,6 +31,7 @@ function find(target) {
 window.acBridge = {
   state() {
     return {
+      companions: window.magicCompanions?.snapshot() || null,
       animation: typeof motion === "undefined" ? null : { character: motion.character, track: motion.track, rest: motion.rest, time: motion.time, playing: motion.playing, selected_layer: motion.selected },
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
       storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
@@ -86,7 +87,8 @@ window.acBridge = {
     return [x, y, Math.min(innerWidth, r.right + pad) - x, Math.min(innerHeight, r.bottom + pad) - y];
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
-  async refresh(id, project, revision, result = {}) {
+  async refresh(id, project, revision, result = {}, request_id = null, params = {}) {
+    if(project===state.project)window.magicCompanions?.event({command:id,project,view:state.view,request:request_id||result._request_id||`cli-revision-${revision}`,phase:'success',params,result});
     if (id.startsWith("motion.")) return { refreshed: id };
     if (id === "agent.new_chat") {
       await agentLoad(); agent.newChat = !result.session;

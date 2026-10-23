@@ -137,7 +137,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
             if ui_project_request {return Ok(result);}
             // The page shows the change (and follows a project opened or created from outside).
             let project = app.state::<Engine>().with(None, |s| Ok(s.project_path.clone()))?;
-            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision), &result])?;
+            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision), &result, &json!(request_id), params])?;
             Ok(result)
         }
     }

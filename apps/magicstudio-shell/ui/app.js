@@ -3,15 +3,17 @@
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
  const action=acFeedback.action;
+ const companion=command==='engine_command'?window.magicCompanions?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
  acFeedback.pending++;await acFeedback.report();
- if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id}};}
+ if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id||params.params?._request_id||companion?.request}};}
  if(command==='project_create'||command==='project_open'){params={...params,request:params?.request??action?.request_id??null,control:params?.control??action?.control??null};}
  acFeedback.report(null,null,{stage:'handler_dispatch',control:action?.control||null,request_id:action?.request_id||null,command:params?.id||command});
  try{
   const result=await nativeInvoke(command,params);acFeedback.last={transport:command,id:params?.id||null,status:'success'};
+  if(companion)window.magicCompanions?.event({...companion,phase:'success',result});
   if(result?._ui_engine_revision) acFeedback.pendingRevision=result._ui_engine_revision;
   return result;
- }catch(error){acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
+ }catch(error){if(companion)window.magicCompanions?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
  finally{acFeedback.pending--;await acFeedback.report();}
 }
 const $ = (id) => document.getElementById(id);
@@ -463,6 +465,7 @@ async function setView(view, action) {
     }
   }
   updateAppFooter();
+  window.magicCompanions?.sync();
   if (action && feedbackSnapshot().rendered && acFeedback.errors.length === errors) {
     await acFeedback.report(null, null, {stage:"ui_navigation_applied",...action,view:state.view});
   }
@@ -534,6 +537,7 @@ async function applyOpenedProject(opened, start = {}) {
   state.projectReceipt=opened;
   if (state.project !== path) animationReset();
   state.project = path;
+  window.magicCompanions?.sync();
   state.page = 0;
   state.open = start.open && start.open !== "agent" ? start.open : "song";
   document.body.classList.remove("at-home");
