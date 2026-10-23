@@ -24,6 +24,7 @@ async function blenderAnimationOpen(){
  blenderDispose();
  theatreRequireSaved();
  animationPause();motion.resizeObserver?.disconnect();motion.images=[];motion.sample=null;motion.request++;
+ motion.selected=null;updateMagicSelection();
  for(const pending of magicTheatre.exports.values()){clearTimeout(pending.timer);pending.reject(new Error('Animation editor closed'));}
  magicTheatre.exports.clear();
  Object.assign(magicTheatre,{frame:null,load:null,key:null,sheet:null,ready:false,project:null,stateSentProject:null,availability:'unavailable',rotations:{},sequenced:{}});

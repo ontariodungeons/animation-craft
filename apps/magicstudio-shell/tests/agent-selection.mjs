@@ -96,3 +96,80 @@ const drawer = shell.indexOf('id="agent"');
 assert.ok(drawer > projectEnd && drawer > projectStart, "shared drawer cannot be nested in Project");
 assert.ok(shell.indexOf('</main>') < drawer, "drawer is independent of tab-specific view visibility");
 console.log("PASS: shared Sproket drawer is outside tab-specific containers");
+
+// A Legacy part selection cannot leak into Blender and block whole-artwork generation.
+// Run real mode-switch, selection-label and Gaffer handlers; only native transport is synthetic.
+const artworkNodes = new Map(), artworkCalls = [];
+function artworkElement(tag, attrs = {}, ...children) {
+  const n = { tag, ...attrs, children: children.flat(), style: {}, dataset: {}, textContent: children.filter(c => typeof c === 'string').join(''),
+    classList: { add() {} }, addEventListener() {}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, replaceWith() {},
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelector(selector) {
+      const cls = selector.split(' ').at(-1).slice(1);
+      const find = node => node && typeof node === 'object' && ((node.class || '').split(' ').includes(cls) ? node : node.children?.map(find).find(Boolean));
+      return this.children.map(find).find(Boolean) || null;
+    },
+    get options() { return this.children.filter(c => c?.tag === 'option'); },
+    get selectedOptions() { return this.options.filter(o => o.value === this.value); },
+    get value() { return this._value ?? this.options[0]?.value ?? ''; }, set value(v) { this._value = v; },
+  };
+  if (attrs.id) artworkNodes.set(attrs.id, n);
+  return n;
+}
+for (const id of ['view-animation', 'magic-target-image', 'magic-target-parts']) artworkElement('div', { id });
+const artworkContext = vm.createContext({
+  console, Map, Set, URL, Promise, performance, Event, clearTimeout, setTimeout, clearInterval, setInterval,
+  localStorage: { getItem: () => null, setItem() {} },
+  state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
+  $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
+  document: { querySelector: () => null }, window: { addEventListener() {} },
+  magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
+  updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
+  invoke: async (id, args) => {
+    artworkCalls.push({ id, ...args });
+    if (id !== 'engine_command') throw Error(`Unexpected fixture transport ${id}`);
+    if (args.id === 'project.list_assets') return { assets: [{ id: 'paper-puppet', kind: 'cutout_rig', name: 'Paper puppet' }] };
+    if (args.id === 'blender.actions') return { character: 'paper-puppet', tracks: [{ id: 'wave', duration: 1, standard: false }], layers: [], canvas: [64, 64], spec: '/fixture/rig.json' };
+    if (args.id === 'blender.list') return { jobs: [] };
+    if (args.id === 'image.generate') throw Error('Native generation disabled in fixture');
+    throw Error(`Unexpected fixture command ${args.id}`);
+  },
+});
+for (const file of ['animation.js', 'blender.js', 'image-prompt.js']) {
+  vm.runInContext(readFileSync(new URL(`../ui/${file}`, import.meta.url), 'utf8'), artworkContext);
+}
+const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
+// Use the production shared-label and block renderers without booting the desktop app.
+for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction sceneLines()']]) {
+  vm.runInContext(appSource.slice(appSource.indexOf(start), appSource.indexOf(end)), artworkContext);
+}
+vm.runInContext(`
+  motion.mode='subject'; motion.character='paper-puppet'; motion.selected='left-piece';
+  motion.meta={original_reference:'/fixture/source.png',layers:[
+    {id:'left-piece',label:'Left piece',file:'/fixture/left.png'},
+    {id:'right-piece',label:'Right piece',file:'/fixture/right.png'}]};
+  updateMagicSelection();
+  const captured=selectedPartTarget();
+  const existingResult={asset_id:'earlier-candidate',image:'/fixture/candidate.png'};
+  const existingDraft={prompt:'Draw a whole new artwork',model:'gpt-6-luna',busy:false,error:'',target:captured,candidateTarget:captured,result:existingResult};
+  imageDrafts.set(state.project,existingDraft);
+`, artworkContext);
+assert.match(artworkNodes.get('magic-target-image').textContent, /Left piece/);
+assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
+// Click the actual Blender mode control, including its normal metadata loading.
+await vm.runInContext(`motionModeSwitch().children.find(n=>n.id==='motion-mode-blender').onclick()`, artworkContext);
+assert.equal(vm.runInContext('motion.selected', artworkContext), null, 'entering Blender must clear the Legacy part ID');
+assert.equal(artworkNodes.get('magic-target-image').textContent, 'No part selected');
+assert.equal(artworkNodes.get('magic-target-parts').textContent, 'No part selected');
+assert.equal(vm.runInContext('selectedPartTarget()', artworkContext), null);
+assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 0, 'fixture must reach the Blender metadata response');
+assert.equal(vm.runInContext('existingDraft.target===captured && existingDraft.candidateTarget===captured && existingDraft.result===existingResult', artworkContext), true, 'switching backend preserves captured generation data');
+assert.equal(vm.runInContext('JSON.stringify(captured.references)', artworkContext), '["source.png","left.png"]');
+await vm.runInContext(`imagePromptBlock();`, artworkContext);
+await artworkNodes.get('image-generate').onclick();
+const wholeArtwork = artworkCalls.find(c => c.id === 'image.generate');
+assert.ok(wholeArtwork, 'whole-artwork request must reach transport instead of the stale-part reference guard');
+assert.equal(wholeArtwork.params.prompt, 'Draw a whole new artwork');
+assert.ok(!('references' in wholeArtwork.params), 'new whole-artwork request must not reuse a previous captured part reference');
+assert.equal(vm.runInContext('existingDraft.error', artworkContext), 'Error: Native generation disabled in fixture');
+console.log('PASS: Legacy -> Blender clears shared part selection, preserves captured generation data and permits whole-artwork requests');
