@@ -1,7 +1,8 @@
 # Magic Studio shell research and proposed Animation workspace
 
 Research date: 2026-10-21. **Animation layout approved by the user on 2026-10-21; implementation is in progress.**
-Authority: user instructions and `apps/animationcraft-shell/HANDOFF.md` at `e1cac3a`.
+Historical source (2026-10-21, before the full rename): user instructions and
+`apps/animationcraft-shell/HANDOFF.md` as it existed at `e1cac3a`.
 The user subsequently specified: animation inspector on the **left**, useful artwork immediately
 after import, and the in-app agent as the app's technical collaborator. Preserve all functionality
 in the handoff checklist; progressive disclosure changes placement, not scope.
@@ -333,9 +334,10 @@ Sources: [Cua repository/demo](https://github.com/trycua/cua#cua-driver),
 [cursor](https://cua.ai/docs/cua-driver/reference/mcp-tools/pointer-cursor-and-browser),
 [platform limits](https://cua.ai/docs/cua-driver/concepts/platform-support).
 
-1. **Persistent live MCP.** Global command: `mc --bridge 19897 mcp`, with no project
-   path. Initially proposed as a user configuration change; the user then explicitly authorized
-   moving MCP to the shell. The global `animationcraft` command was updated with a backup and
+1. **Persistent live MCP.** Historical observation (2026-10-21, before the full rename): the
+   global command was `mc --bridge 19897 mcp`, with no project path. Initially proposed as a user
+   configuration change; the user then explicitly authorized moving MCP to the shell. The global
+   `animationcraft` command was updated with a backup and
    OpenCode configuration reloaded. An inner-agent read-only task confirmed Bumble Bee in the
    shell after switching from Hey Ho, demonstrating window-session scope. The installed OpenCode
    v2 API normalizes configuration under `mcp.servers` and uses `disabled`; the on-disk legacy entry
@@ -488,9 +490,13 @@ Pending approval questions: (1) approve this Animation frame, (2) intake as scre
 (3) pose-sheet viewer as screen or CLI chain, (4) 3D shape controls as screen or CLI chain.
 No Animation screen implementation is authorized by this document alone.
 
-## Runtime investigation / operational evidence
+## Historical runtime investigation / operational evidence
 
-- Rebuilt `e1cac3a` using `cargo build -p animationcraft-shell`; relaunched owned shell on 19897.
+The following observations describe commit `e1cac3a` and its pre-rename paths. They are not current
+build or file-location instructions; use `magicstudio-shell`, `.magic` and `mc` for current work.
+
+- Rebuilt historical commit `e1cac3a` using `cargo build -p animationcraft-shell`; relaunched its
+  shell on 19897.
   Opened `ui.look` PNG at Hey Ho's `.agent/looks/look-1792562627379.png`; project-local default works.
 - Opened reference on 19898; compositor reported two 1261×1381 tiled windows, reference left and
   shell right. Inspected bee reference capture `.agent/looks/older-ui-comparison.png`.
@@ -505,8 +511,9 @@ No Animation screen implementation is authorized by this document alone.
   concern to measure, not evidence it causes the observed fade cycle. No speculative Rust patch.
 - `Cargo.lock` has Tauri 2.12.4; official [release history](https://tauri.app/release/tauri/all-versions/)
   was checked. No dependency upgrade needed for this documentation/JS work.
-- Current app agent instructions live in `apps/animationcraft-shell/agent.md`, intentionally free
-  of migration/reference-app instructions. Give those to the current coding agent separately.
+- At `e1cac3a`, app agent instructions lived in `apps/animationcraft-shell/agent.md`, intentionally
+  free of migration/reference-app instructions. Current instructions live in
+  `apps/magicstudio-shell/agent.md`; give those to the current coding agent separately.
 - Chat bugfix committed as `1cedbfc`: stable transcript nodes, safe draft delivery, Enter/Shift+Enter
   behavior. The inner agent implemented the focused patch after reading the app/UI/debugging instructions.
   Coordinator reran 25 browser assertions successfully, rebuilt and relaunched the shell, preserved the
