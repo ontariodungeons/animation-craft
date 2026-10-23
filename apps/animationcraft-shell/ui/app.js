@@ -30,7 +30,7 @@ function setupMagicSplitters() {
   const workstation = $('magic-workstation');
   if (!workstation || workstation.dataset.splittersReady) return;
   workstation.dataset.splittersReady = 'true';
-  const sizes = { chat: 160, image: 190 };
+  const sizes = { chat: 230, image: 270 };
   for (const key of Object.keys(sizes)) {
     const saved = Number(localStorage.getItem(`magic.${key}-height`));
     if (Number.isFinite(saved) && saved >= 120 && saved <= 700) sizes[key] = saved;

@@ -64,7 +64,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 main { flex: 1; min-height: 0; position: relative; }
 .view { position: absolute; inset: 0; display: none; }
 .view.active { display: flex; animation: fade var(--slow) var(--ease); }
-@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+@keyframes fade { from { transform: translateY(4px); } }
 
 /* Project body: blocks rail + storyboard main side by side */
 .project-body { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 0; }
@@ -220,7 +220,7 @@ body.agent-docked main { margin-right: min(400px, 92vw); }
 :root { --magic-workstation-width: clamp(290px, 27vw, 380px); }
 main { margin-right: var(--magic-workstation-width); transition: margin-right var(--slow) var(--ease); }
 .magic-workstation { position: absolute; z-index: 12; top: 48px; right: 0; bottom: 0; width: var(--magic-workstation-width);
-  display: grid; grid-template-rows: 34px minmax(90px,var(--magic-chat-h,160px)) 8px minmax(100px,var(--magic-image-h,190px)) 8px minmax(80px,1fr);
+  display: grid; grid-template-rows: 34px max(150px,min(var(--magic-chat-h,230px),29vh)) 8px max(170px,min(var(--magic-image-h,270px),32vh)) 8px minmax(100px,1fr);
   min-height: 0; overflow: hidden; background: var(--surface); border-left: 1px solid var(--line); }
 .magic-workstation-title { display: flex; align-items: center; padding: 0 12px; font-weight: 650; letter-spacing: .02em; border-bottom: 1px solid var(--line); }
 .magic-pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -257,6 +257,7 @@ main { margin-right: var(--magic-workstation-width); transition: margin-right va
 .magic-asset-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .magic-asset-row img { width: 36px; height: 32px; flex: none; object-fit: contain; border-radius: 4px; background: var(--bg); }
 .magic-asset-row.candidate { border: 1px solid color-mix(in srgb,var(--amber) 45%,var(--line)); }
+.magic-part-compare #part-image-replace,.magic-part-compare #part-image-undo { width: 100%; margin-top: 4px; }
 .magic-asset-placeholder { width: 36px; height: 32px; flex: none; display: grid; place-items: center; font-size: 8px; color: var(--faint); border-radius: 4px; background: var(--bg); }
 .magic-asset-row:hover, .magic-asset-row.active { background: var(--surface-2); color: var(--text); }
 .magic-part-compare { padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
@@ -276,7 +277,7 @@ body.at-home main { margin-right: 0; }
 }
 @media (max-width: 700px) {
   :root { --magic-workstation-width: 286px; }
-  .magic-workstation { grid-template-rows: 34px minmax(90px,var(--magic-chat-h,160px)) 8px minmax(100px,var(--magic-image-h,190px)) 8px minmax(80px,1fr); }
+  .magic-workstation { grid-template-rows: 34px max(150px,min(var(--magic-chat-h,230px),29vh)) 8px max(170px,min(var(--magic-image-h,270px),32vh)) 8px minmax(100px,1fr); }
   .blocks { width: 48px; }
   .motion-inspector { width: 170px; }
 }
