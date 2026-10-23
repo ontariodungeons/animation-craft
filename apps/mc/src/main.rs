@@ -683,7 +683,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -1071,7 +1071,7 @@ fn main() {
                 fail(e);
             }
         }
-        "doctor" => {
+        "doctor" | "debug" => {
             let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));
             if a.flag_clean {
                 if let Some(obj) = params.as_object_mut() {
@@ -1080,7 +1080,16 @@ fn main() {
             }
             let mut s = Session::user_session();
             match s.execute("app.doctor", params) {
-                Ok(v) => {
+                Ok(mut v) => {
+                    // Same question an agent asks its owner; answer it here too.
+                    let (rows, errors) = studios::rows();
+                    v["studios"] = serde_json::json!(rows);
+                    v["studio_errors"] = serde_json::json!(errors);
+                    v["studio_guidance"] = serde_json::json!(if rows.is_empty() {
+                        "no Studio is running: start one, or read the project with mc backstage --print project=<file>"
+                    } else {
+                        "address one with --bridge <endpoint>; mc studios lists them and can pin one"
+                    });
                     outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                 }
                 Err(e) => fail(format!("doctor: {e}")),
