@@ -19,9 +19,29 @@
 //     closed; nothing is ever invented.
 const BOX_STATES = ["idle", "working", "ready", "needs-attention", "failed"];
 
+// One number per state: the only thing a control has to reveal, and the only thing a pet reads.
+//   0 none · 1 green in use · 2 yellow attention · 3 red problem
+const SIGNAL = { idle: 0, ready: 1, working: 2, "needs-attention": 2, failed: 3 };
+const SIGNAL_CLASS = { 0: "", 1: "ok", 2: "warn", 3: "off" };
+
 function createCompanionBoxes() {
   const boxes = new Map();
   const observed = new Map();
+  const listeners = new Set();
+  let quiet = false;
+  let changeSeq = 0;
+
+  // One notification per change batch. Readers never poll.
+  function notify() {
+    if (quiet) return;
+    quiet = true;
+    queueMicrotask(() => {
+      quiet = false;
+      for (const fn of listeners) {
+        try { fn(); } catch (e) { console.warn(String(e)); }
+      }
+    });
+  }
 
   const bounded = (map, key, value) => {
     if (map instanceof Map) map.set(key, value);
@@ -72,6 +92,8 @@ function createCompanionBoxes() {
     if (resolution != null) box.resolution = resolution;
     box.source = source;
     box.observed_at = observed_at || Date.now();
+    box.seq = ++changeSeq;
+    notify();
     return box;
   }
 
@@ -91,6 +113,8 @@ function createCompanionBoxes() {
     if (job != null) box.job = job;
     box.source = "frontend";
     box.observed_at = Date.now();
+    box.seq = ++changeSeq;
+    notify();
     return box;
   }
 
@@ -104,6 +128,8 @@ function createCompanionBoxes() {
       if (reason != null) box.reason = String(reason).slice(0, 180);
       box.source = "readiness";
       box.observed_at = Date.now();
+      box.seq = ++changeSeq;
+      notify();
     }
     return box;
   }
@@ -124,7 +150,9 @@ function createCompanionBoxes() {
       if (reason != null) box.reason = String(reason).slice(0, 180);
       box.source = "engine";
       box.observed_at = Date.now();
+      box.seq = ++changeSeq;
     }
+    if (candidates.length) notify();
     return candidates;
   }
 
@@ -144,6 +172,8 @@ function createCompanionBoxes() {
         project: box.project,
         context: box.context,
         state: box.state,
+        signal: SIGNAL[box.state] ?? 0,
+        seq: box.seq ?? 0,
         reason: box.reason,
         priority: box.priority,
         request: box.request,
@@ -172,9 +202,28 @@ function createCompanionBoxes() {
   function clear() {
     boxes.clear();
     observed.clear();
+    notify();
   }
 
-  return { register, fact, observe, readiness, resolve, get, snapshot, markUnavailable, clear, states: BOX_STATES };
+  // A control's public face: one number, and one light that cannot disagree with it.
+  function signal(state) {
+    return SIGNAL[state] ?? 0;
+  }
+  function dot(state) {
+    const value = signal(state);
+    const node = document.createElement("span");
+    node.className = `dot ${SIGNAL_CLASS[value]}`.trim();
+    node.dataset.signal = String(value);
+    node.setAttribute("role", "img");
+    node.setAttribute("aria-label", value === 3 ? "problem" : value === 2 ? "attention" : value === 1 ? "in use" : "idle");
+    return node;
+  }
+  function subscribe(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  }
+
+  return { register, fact, observe, readiness, resolve, get, snapshot, markUnavailable, clear, states: BOX_STATES, signal, dot, subscribe };
 }
 
 // One shared registry, created before the app renders, so every control can

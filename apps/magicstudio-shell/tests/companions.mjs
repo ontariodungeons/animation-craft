@@ -1,42 +1,108 @@
-// Generic app fixtures. Real controller, virtual clock/DOM; no renderer, native generation or worker.
+// Companion pets follow signals. No command ids, no job correlation, no pin.
+// Loads the real companion-boxes.js and companions.js in a vm with a stub DOM.
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import {readFileSync,existsSync} from 'node:fs';
-const sourceUrl=new URL('../ui/companions.js',import.meta.url);
-const source=existsSync(sourceUrl)?readFileSync(sourceUrl,'utf8'):'';
-const frameUrl=new URL('../ui/companions.frames.json',import.meta.url);
-const frames=existsSync(frameUrl)?JSON.parse(readFileSync(frameUrl,'utf8')):{fps:2,burst_ms:1500,frames:{sproket:['dog','DOG'],gaffer:['cat','CAT']}};
-function fixture(){
- const nodes=new Map(),timers=new Map(),listeners={},mediaListeners={};let next=0,now=0,writes=0,layoutReads=0;const paints=[];
- const element=id=>({id,hidden:false,style:{},dataset:{},attrs:{},children:[],parentElement:null,
-  get textContent(){return this.text||''},set textContent(v){this.text=v;writes++;paints.push({id:this.id,at:now})},
-  setAttribute(k,v){this.attrs[k]=String(v)},getAttribute(k){return this.attrs[k]??null},
-  after(n){this.parentElement.children.push(n);n.parentElement=this.parentElement},
-  append(n){this.children.push(n);n.parentElement=this},
-  getBoundingClientRect(){layoutReads++;return {width:this.hidden?0:80,height:24}},
- });
- for(const id of ['chat-home','artwork-home','tab-project','tab-animation','tab-studio']){const n=element(id);n.parentElement=element(id+'-row');nodes.set(id,n);}
- const tabs=['project','animation','studio'].map(view=>{const n=nodes.get('tab-'+view);n.dataset.view=view;return n});
- const doc={hidden:false,createElement:()=>element(''),getElementById:id=>nodes.get(id),querySelectorAll:selector=>selector.includes('data-view')?tabs:[],querySelector:s=>s==='.agent-title'?nodes.get('chat-home'):s==='#magic-image-toggle'?nodes.get('artwork-home'):null,addEventListener:(k,fn)=>listeners[k]=fn};
- const media={matches:false,addEventListener:(k,fn)=>mediaListeners[k]=fn};
- const ctx=vm.createContext({console,document:doc,window:{},state:{project:'/generic/Study.magic',view:'project'},localStorage:{getItem:()=>null,setItem(){}},matchMedia:()=>media,performance:{now:()=>now},setTimeout:(fn,delay)=>{const id=++next;timers.set(id,{fn,at:now+delay});return id},clearTimeout:id=>timers.delete(id)});
- vm.runInContext(source,ctx);assert.equal(typeof ctx.createCompanions,'function','companion controller must implement the approved state machine');
- const c=ctx.createCompanions(frames);return {c,ctx,doc,media,nodes,timers,listeners,mediaListeners,get writes(){return writes},get layoutReads(){return layoutReads},paints,tick(ms){const end=now+ms;while(true){const next=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;now=next[1].at;timers.delete(next[0]);next[1].fn()}now=end}};
+import { readFileSync } from 'node:fs';
+
+const read = name => readFileSync(new URL(`../ui/${name}`, import.meta.url), 'utf8');
+
+function fixture() {
+  const timers = new Map();
+  const mediaListeners = [];
+  let id = 0;
+  const node = () => ({
+    id: '', className: '', hidden: false, textContent: '', dataset: {}, style: {},
+    classList: { add() {}, remove() {} },
+    setAttribute() {}, getAttribute() { return null; },
+    replaceChildren() {}, append() {}, after() {}, closest() { return null; },
+    getBoundingClientRect() { return { x: 0, y: 0, width: 80, height: 24 }; },
+  });
+  const doc = {
+    hidden: false, body: { append() {} },
+    createElement: node, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+    addEventListener() {},
+  };
+  const media = { matches: false, addEventListener: (_k, fn) => mediaListeners.push(fn) };
+  const ctx = vm.createContext({
+    console, JSON, Map, Set, Promise, Date, queueMicrotask,
+    document: doc, window: {}, state: { project: '/p/Study.magic', view: 'project' },
+    localStorage: { getItem: () => null, setItem() {} },
+    matchMedia: () => media,
+    setTimeout: (fn, ms) => { timers.set(++id, { fn, at: ms }); return id; },
+    clearTimeout: i => timers.delete(i),
+  });
+  vm.runInContext(read('companion-boxes.js'), ctx);
+  vm.runInContext(read('companions.js'), ctx);
+  return { ctx, boxes: ctx.window.companionBoxes, timers };
 }
-const command=(overrides={})=>({project:'/generic/Study.magic',request:'r1',command:'project.save',view:'project',phase:'success',params:{},result:{ok:true},...overrides});
-const tests=[
- ['off by default, noninteractive and idle without timers',()=>{const f=fixture();assert.equal(f.c.snapshot().enabled,false);assert.equal(f.timers.size,0);f.c.setEnabled(true);for(const n of Object.values(f.c.nodes)){assert.equal(n.style.pointerEvents,'none');assert.equal(n.getAttribute('aria-hidden'),'true');assert.equal(n.getAttribute('tabindex'),null);assert.equal(n.onclick,undefined)}assert.equal(f.timers.size,0)}],
- ['poll/list/read/heartbeat/navigation do not move Gaffer',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command());f.tick(2000);const before=JSON.stringify(f.c.snapshot());for(const id of ['blender.status','blender.list','motion.sample','agent.log','project.open','ui.state'])for(let i=0;i<30;i++)f.c.event(command({command:id,request:'poll'+i,result:{state:'completed',job:'old'}}));assert.equal(JSON.stringify(f.c.snapshot()),before);assert.equal(f.timers.size,0)}],
- ['image completion returns Gaffer home',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'part.set_state',view:'animation'}));assert.equal(f.c.snapshot().gaffer.destination,'animation');f.c.event(command({command:'image.generate',request:'image',phase:'start',view:'studio'}));f.c.event(command({command:'image.generate',request:'image',view:'studio'}));assert.equal(f.c.snapshot().gaffer.destination,'artwork');assert.equal(f.c.snapshot().gaffer.request,'image')}],
- ['error persists across chat query, unrelated target retry; matching retry resolves',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'part.set_state',view:'animation',phase:'error',params:{part:'arm'},error:'Missing source'}));const pin=JSON.stringify(f.c.snapshot().sproket);f.c.event(command({command:'agent.send',request:'why'}));f.c.event(command({command:'part.set_state',request:'other',params:{part:'leg'}}));assert.equal(JSON.stringify(f.c.snapshot().sproket),pin);f.c.event(command({command:'part.set_state',request:'retry',params:{part:'arm'}}));assert.equal(f.c.snapshot().sproket.destination,'chat');assert.equal(f.c.snapshot().sproket.status,'resolved')}],
- ['a failed chat operation can resolve only its own pin',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'agent.send',phase:'error',request:'chat-failed'}));f.c.event(command({command:'agent.send',request:'chat-retry'}));assert.equal(f.c.snapshot().sproket.status,'resolved')}],
- ['explicit blocked result stays pinned until matching successful resolution',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'video.place_track',result:{ok:false,state:'blocked'},view:'studio'}));assert.equal(f.c.snapshot().sproket.destination,'studio');assert.equal(f.c.snapshot().sproket.status,'blocked');f.c.event(command({command:'agent.send'}));assert.equal(f.c.snapshot().sproket.destination,'studio');f.c.event(command({command:'video.place_track',request:'retry'}));assert.equal(f.c.snapshot().sproket.destination,'chat')}],
- ['stale project completions ignored and project switch clears old state',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command());const before=JSON.stringify(f.c.snapshot());f.c.event(command({project:'/other/Study.magic',phase:'error'}));assert.equal(JSON.stringify(f.c.snapshot()),before);f.ctx.state.project='/other/Study.magic';f.c.sync();assert.equal(f.c.snapshot().gaffer.destination,'artwork');assert.equal(f.c.snapshot().sproket.destination,'chat');assert.equal(f.timers.size,0)}],
- ['only correlated terminal job transitions matter, dedupe remains bounded',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'blender.start',view:'animation',result:{job:'j1',state:'submitted'}}));f.c.event(command({command:'blender.status',request:'p1',params:{job:'j1'},result:{job:'j1',state:'failed'}}));assert.equal(f.c.snapshot().sproket.status,'failed');f.tick(2000);const writes=f.writes;for(let i=0;i<150;i++)f.c.event(command({command:'blender.status',request:'p'+i,params:{job:'j1'},result:{job:'j1',state:'failed'}}));assert.equal(f.writes,writes);for(let i=0;i<150;i++)f.c.event(command({request:'op'+i,command:'blender.start',result:{job:'j'+i,state:'submitted'}}));assert.ok(f.c.snapshot().dedupe<=64);assert.ok(f.c.snapshot().jobs<=64)}],
- ['real invoke and CLI refresh preserve the observed request identity',async()=>{const f=fixture();f.c.setEnabled(true);f.ctx.window.magicCompanions=f.c;let dispatched;Object.assign(f.ctx,{nativeInvoke:async(command,args)=>{dispatched=args;return {ok:true}},acFeedback:{pending:0,action:null,report:async()=>{},acknowledge:async()=>{}},invoke:async()=>({}),renderTarget(){},renderBlocks(){},renderStoryboard(){}});const app=readFileSync(new URL('../ui/app.js',import.meta.url),'utf8');vm.runInContext(app.slice(app.indexOf('async function invoke('),app.indexOf('const $ =')),f.ctx);await vm.runInContext("invoke('engine_command',{id:'project.save',params:{}})",f.ctx);assert.ok(dispatched.params._request_id,'native transport receives the same request used by companion state');assert.equal(f.c.snapshot().gaffer.request,dispatched.params._request_id);vm.runInContext(readFileSync(new URL('../ui/bridge.js',import.meta.url),'utf8'),f.ctx);await f.ctx.window.acBridge.refresh('video.place_track',f.ctx.state.project,7,{ok:false,state:'blocked'},'cli-request-7',{asset:'A'});assert.equal(f.c.snapshot().sproket.request,'cli-request-7');await f.ctx.window.acBridge.refresh('video.place_track',f.ctx.state.project,8,{ok:true},'cli-request-8',{asset:'B'});assert.equal(f.c.snapshot().sproket.status,'blocked','CLI retry for another asset must not resolve the pin');await f.ctx.window.acBridge.refresh('video.place_track',f.ctx.state.project,9,{ok:true},'cli-request-9',{asset:'A'});assert.equal(f.c.snapshot().sproket.status,'resolved')}],
- ['hidden anchors cancel timers; heartbeat during a burst does not repaint',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command());f.tick(500);const writes=f.writes,reads=f.layoutReads;for(let i=0;i<20;i++)f.c.event(command({command:'agent.log',request:'poll'+i}));assert.equal(f.writes,writes);assert.equal(f.layoutReads,reads,'ignored polling must not force layout reads');for(const n of f.nodes.values())n.hidden=true;f.c.sync();assert.equal(f.timers.size,0)}],
- ['a matching job retry only resolves after actual completion',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command({command:'blender.start',phase:'error'}));f.c.event(command({command:'blender.start',request:'retry',result:{job:'retry-job',state:'submitted'}}));assert.equal(f.c.snapshot().sproket.status,'failed');f.c.event(command({command:'blender.status',params:{job:'retry-job'},result:{job:'retry-job',state:'completed'}}));assert.equal(f.c.snapshot().sproket.status,'resolved')}],
- ['rapid meaningful events do not exceed2fps',()=>{const f=fixture();f.c.setEnabled(true);f.c.event(command());f.tick(500);f.tick(100);f.c.event(command({request:'next',view:'animation'}));f.tick(1500);for(const name of ['sproket','gaffer']){const times=f.paints.filter(p=>p.id==='companion-'+name).map(p=>p.at);for(let i=1;i<times.length;i++)assert.ok(times[i]-times[i-1]>=500,'frame writes must remain at least500ms apart')}}],
- ['burst <=2fps stops by1.5s; hidden/off/reduced motion cancel immediately',()=>{for(const stop of ['hidden','off','reduced']){const f=fixture();f.c.setEnabled(true);const start=f.writes;f.c.event(command());f.tick(1500);assert.equal(f.timers.size,0);assert.ok(f.writes-start<=8,'two pets at most four writes each per burst');f.c.event(command({request:'new',view:'animation'}));assert.ok(f.timers.size>0);if(stop==='hidden'){f.doc.hidden=true;f.listeners.visibilitychange()}if(stop==='off')f.c.setEnabled(false);if(stop==='reduced'){f.media.matches=true;f.mediaListeners.change()}assert.equal(f.timers.size,0);const writes=f.writes;f.tick(10000);assert.equal(f.writes,writes)}}],
+
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+const tests = [
+  ['one number per state, and the light cannot disagree with it', () => {
+    const { boxes } = fixture();
+    const expect = { idle: 0, ready: 1, working: 2, 'needs-attention': 2, failed: 3 };
+    for (const [state, value] of Object.entries(expect)) {
+      assert.equal(boxes.signal(state), value, `${state} signal`);
+      const dot = boxes.dot(state);
+      assert.equal(dot.dataset.signal, String(value), `${state} dot attr`);
+      assert.ok(dot.className.includes(['', 'ok', 'warn', 'off'][value]), `${state} dot class`);
+    }
+  }],
+  ['readers are notified once per change batch, never per fact', async () => {
+    const { boxes } = fixture();
+    let calls = 0;
+    boxes.subscribe(() => calls++);
+    for (let i = 0; i < 5; i++) boxes.fact({ id: `b${i}`, project: '/p/Study.magic', state: 'working' });
+    await flush();
+    assert.equal(calls, 1, 'five facts must coalesce into one notification');
+    boxes.fact({ id: 'b1', project: '/p/Study.magic', state: 'failed' });
+    await flush();
+    assert.equal(calls, 2);
+  }],
+  ['Sproket takes the worst signal, Gaffer the newest', async () => {
+    const { ctx, boxes } = fixture();
+    boxes.fact({ id: 'green', project: '/p/Study.magic', state: 'ready' });
+    boxes.fact({ id: 'red', project: '/p/Study.magic', state: 'failed' });
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    await flush();
+    const snap = pets.snapshot();
+    assert.equal(snap.sproket.box, 'red');
+    assert.equal(snap.sproket.signal, 3);
+    assert.equal(snap.sproket.pose, 'alert');
+    assert.equal(snap.gaffer.box, 'red', 'newest change wins for the cat');
+  }],
+  ['yellow is attention, green is only in use', async () => {
+    const { ctx, boxes } = fixture();
+    boxes.fact({ id: 'yellow', project: '/p/Study.magic', state: 'needs-attention' });
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    await flush();
+    assert.equal(pets.snapshot().sproket.pose, 'work');
+    boxes.fact({ id: 'yellow', project: '/p/Study.magic', state: 'ready' });
+    await flush();
+    const snap = pets.snapshot();
+    assert.equal(snap.sproket.box, null, 'a green box is not a warning');
+    assert.equal(snap.gaffer.box, 'yellow', 'the cat still follows the work');
+    assert.equal(snap.gaffer.pose, 'rest');
+  }],
+  ['commands and jobs move nothing; only box signals do', async () => {
+    const { ctx, boxes } = fixture();
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    const before = JSON.stringify(pets.snapshot().sproket);
+    pets.event({ command: 'blender.start', project: '/p/Study.magic', phase: 'error' });
+    pets.event({ command: 'agent.send', project: '/p/Study.magic', phase: 'error' });
+    await flush();
+    assert.equal(JSON.stringify(pets.snapshot().sproket), before);
+  }],
+  ['no engine command id may live in the companion controller', () => {
+    const source = read('companions.js');
+    const hit = source.match(/\b(agent|image|blender|storyboard|mlt|synfig|opentoonz|video|sprocket)\.[a-z_]+/g);
+    assert.equal(hit, null, `companion controller must not know commands: ${hit}`);
+  }],
 ];
-let failed=0;for(const [name,test] of tests){try{await test();console.log('PASS companions: '+name)}catch(e){failed++;console.error('FAIL companions: '+name+'\n'+e.stack)}}assert.equal(failed,0,`${failed} companion regressions failed`);
+
+let failed = 0;
+for (const [name, test] of tests) {
+  try { await test(); console.log('PASS companions: ' + name); }
+  catch (e) { failed++; console.error('FAIL companions: ' + name + '\n' + e.stack); }
+}
+assert.equal(failed, 0, `${failed} companion regressions failed`);
