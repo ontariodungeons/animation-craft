@@ -1,12 +1,14 @@
 // Blender owns animation data; this surface only chooses jobs and plays rendered media.
-let blenderViewRevision=0;
+let blenderViewRevision=0,blenderDialog=null;
 let blenderMediaUrl=null,blenderMediaFetch=null,blenderPollTimer=null;
 function blenderDispose(){
  clearTimeout(blenderPollTimer);blenderPollTimer=null;
  ++blenderViewRevision;blenderMediaFetch?.abort();blenderMediaFetch=null;
- const video=document.querySelector('#view-animation video');
+ const dialog=blenderDialog;blenderDialog=null;
+ const video=dialog?.querySelector('video');
  if(video){video.pause();video.removeAttribute('src');video.load();}
  if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
+ if(dialog){dialog.close();dialog.remove();}
 }
 async function blenderLoadPreview(video,path,current){
  if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
@@ -20,22 +22,22 @@ async function blenderLoadPreview(video,path,current){
  blenderMediaUrl=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));
  video.src=blenderMediaUrl;video.load();
 }
-async function blenderAnimationOpen(){
+async function blenderAnimationOpen(selection={}){
  theatreRequireSaved();
  blenderDispose();
- animationPause();motion.resizeObserver?.disconnect();motion.images=[];motion.sample=null;motion.request++;
- motion.selected=null;updateMagicSelection();
- for(const pending of magicTheatre.exports.values()){clearTimeout(pending.timer);pending.reject(new Error('Animation editor closed'));}
- magicTheatre.exports.clear();
- Object.assign(magicTheatre,{frame:null,load:null,key:null,sheet:null,ready:false,project:null,stateSentProject:null,availability:'unavailable',rotations:{},sequenced:{}});
+ const choice={character:selection.character??motion.character,track:selection.track??motion.track};
  const revision=++blenderViewRevision,project=state.project;
- const current=()=>revision===blenderViewRevision&&state.project===project&&state.view==='animation'&&motion.mode==='blender';
- const view=$('view-animation');view.replaceChildren();
+ const dialog=el('dialog',{id:'blender-render-dialog',class:'blender-render-dialog','aria-label':'Blender render controls'});
+ blenderDialog=dialog;
+ const current=()=>revision===blenderViewRevision&&state.project===project&&state.view==='animation'&&blenderDialog===dialog&&dialog.open;
+ const close=el('button',{id:'blender-close',class:'ghost','aria-label':'Close Blender render controls',onclick:blenderDispose},'Close');
  const controls=el('aside',{class:'motion-inspector blender-controls',id:'blender-controls','aria-label':'Blender animation controls'});
  const stage=el('div',{class:'motion-stage'});
  const status=el('span',{class:'muted',role:'status'},'Loading artwork…');
- const main=el('div',{class:'motion-main'},el('div',{class:'motion-stagebar'},motionModeSwitch(),status),stage);
- view.append(controls,main);
+ const main=el('div',{class:'motion-main'},el('div',{class:'motion-stagebar'},status),stage);
+ dialog.append(el('div',{class:'blender-render-header'},el('strong',{},'Blender render'),close),el('div',{class:'blender-render-layout'},controls,main));
+ dialog.addEventListener('close',()=>{if(blenderDialog===dialog)blenderDispose();});
+ document.body.append(dialog);dialog.showModal();
  const video=el('video',{id:'blender-preview',controls:true,loop:true,'aria-label':'Rendered Blender animation'});
  video.style.cssText='width:100%;height:100%;object-fit:contain';
  stage.append(video);
@@ -45,19 +47,17 @@ async function blenderAnimationOpen(){
   const result=await motionCommand('project.list_assets');if(!current())return;
   const assets=result.assets||result.project_assets||[];
   const candidates=assets.filter(a=>a.kind==='cutout_rig');
-  if(!candidates.some(a=>a.id===motion.character))motion.character=candidates[0]?.id;
-  if(!motion.character){report('Choose a rigged character in Project to begin.');return;}
+  if(!candidates.some(a=>a.id===choice.character))choice.character=candidates[0]?.id;
+  if(!choice.character){report('Choose a rigged character in Project to begin.');return;}
   const picker=el('select',{'aria-label':'Animated object',id:'blender-object'},...candidates.map(a=>el('option',{value:a.id},a.name||a.id)));
-  picker.value=motion.character;
-  picker.onchange=()=>{motion.character=picker.value;blenderAnimationOpen();};
+  picker.value=choice.character;
+  picker.onchange=()=>blenderAnimationOpen({character:picker.value,track:choice.track});
   controls.append(picker);
-  const meta=await motionCommand('blender.actions',{character:motion.character});if(!current())return;
-  motion.meta=meta;motion.project=project;updateMagicSelection();
-  motion.rest=false;
+  const meta=await motionCommand('blender.actions',{character:choice.character});if(!current())return;
   const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id)));
   if(!tracks.options.length){report('Author a motion track before migrating this rig.');return;}
-  if([...tracks.options].some(option=>option.value===motion.track))tracks.value=motion.track;
-  motion.track=tracks.value;
+  if([...tracks.options].some(option=>option.value===choice.track))tracks.value=choice.track;
+  choice.track=tracks.value;
   const render=el('button',{class:'start',id:'blender-render'},'Render preview');
   const cancel=el('button',{class:'ghost',id:'blender-cancel',disabled:true},'Cancel render');
   const details=el('p',{class:'muted'},'Editable Blender scene and transparent clip are saved with the project.');
@@ -95,7 +95,7 @@ async function blenderAnimationOpen(){
      const failure=value.state==='cancelled'?'Render cancelled':'Render failed';
      if(!latest&&(value.state==='failed'||value.state==='cancelled')){
       const saved=await motionCommand('blender.list');if(!selected())return;
-      const matching=saved.jobs.filter(j=>j.character===motion.character&&j.track===tracks.value);
+      const matching=saved.jobs.filter(j=>j.character===choice.character&&j.track===tracks.value);
       const index=matching.findIndex(j=>j.job===requestedJob);
       for(const previous of index<0?[]:matching.slice(index+1)){
        const result=await motionCommand('blender.status',{job:previous.job});if(!selected())return;
@@ -116,10 +116,10 @@ async function blenderAnimationOpen(){
    clearTimeout(blenderPollTimer);const requestedSelection=++selectionRevision;
    blenderMediaFetch?.abort();
    if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
-   job=null;latest=null;busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();motion.track=tracks.value;
+   job=null;latest=null;busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();choice.track=tracks.value;
    const selected=tracks.value;
    const saved=await motionCommand('blender.list');if(!current()||requestedSelection!==selectionRevision)return;
-   job=saved.jobs.find(j=>j.character===motion.character&&j.track===selected)?.job;
+   job=saved.jobs.find(j=>j.character===choice.character&&j.track===selected)?.job;
    if(job){cancel.disabled=false;await poll();}else{busy(false);report('Ready to create an editable Blender animation');}
    if(!current()||requestedSelection!==selectionRevision)return;
    source.options[0].disabled=!latest?.blend;source.value=latest?.blend?'saved':'legacy';source.dispatchEvent(new Event('change'));
@@ -129,7 +129,7 @@ async function blenderAnimationOpen(){
    ++selectionRevision;clearTimeout(blenderPollTimer);blenderMediaFetch?.abort();
    busy(true);cancel.disabled=true;report('Submitting animation…');
    try{
-    const value=await motionCommand('blender.start',{character:motion.character,track:tracks.value,
+    const value=await motionCommand('blender.start',{character:choice.character,track:tracks.value,
      ...(source.value==='saved'&&latest?.blend?{blend:latest.blend}:{}),max_frames:Number(range.value),resolution_percent:Number(resolution.value)});
     if(!current())return;job=value.job;cancel.disabled=false;poll();
    }catch(error){if(!current())return;busy(false);report(String(error));}

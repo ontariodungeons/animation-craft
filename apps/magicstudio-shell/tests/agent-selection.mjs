@@ -97,12 +97,12 @@ assert.ok(drawer > projectEnd && drawer > projectStart, "shared drawer cannot be
 assert.ok(shell.indexOf('</main>') < drawer, "drawer is independent of tab-specific view visibility");
 console.log("PASS: shared Sproket drawer is outside tab-specific containers");
 
-// A Legacy part selection cannot leak into Blender and block whole-artwork generation.
+// Supplemental Blender rendering cannot replace the authoring editor or its part selection.
 // Run real mode-switch, selection-label and Gaffer handlers; only native transport is synthetic.
 const artworkNodes = new Map(), artworkCalls = [];
 function artworkElement(tag, attrs = {}, ...children) {
-  const n = { tag, ...attrs, children: children.flat(), style: {}, dataset: {}, textContent: children.filter(c => typeof c === 'string').join(''),
-    classList: { add() {} }, addEventListener() {}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, replaceWith() {},
+  const n = { tag, ...attrs, _value:attrs.value, children: children.flat(), style: {}, dataset: {}, events:{}, textContent: children.filter(c => typeof c === 'string').join(''),
+    classList: { add() {} }, addEventListener(type,fn) {this.events[type]=fn;}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, replaceWith() {}, showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},remove(){},
     append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
     querySelector(selector) {
       const cls = selector.split(' ').at(-1).slice(1);
@@ -122,7 +122,7 @@ const artworkContext = vm.createContext({
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
-  document: { querySelector: () => null }, window: { addEventListener() {} },
+  document: { querySelector: () => null,body:{append(){}} }, window: { addEventListener() {} },
   magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
   updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
   invoke: async (id, args) => {
@@ -158,21 +158,22 @@ assert.match(artworkNodes.get('magic-target-image').textContent, /Left piece/);
 assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
 // Click the actual Blender mode control, including its normal metadata loading.
 await vm.runInContext(`motionModeSwitch().children.find(n=>n.id==='motion-mode-blender').onclick()`, artworkContext);
-assert.equal(vm.runInContext('motion.selected', artworkContext), null, 'entering Blender must clear the Legacy part ID');
-assert.equal(artworkNodes.get('magic-target-image').textContent, 'No part selected');
-assert.equal(artworkNodes.get('magic-target-parts').textContent, 'No part selected');
-assert.equal(vm.runInContext('selectedPartTarget()', artworkContext), null);
-assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 0, 'fixture must reach the Blender metadata response');
+assert.equal(vm.runInContext('motion.selected', artworkContext), 'left-piece', 'rendering must preserve the authoring part ID');
+assert.equal(artworkNodes.get('blender-render-dialog').open,true,'actual render dialog must open');
+assert.equal(artworkNodes.get('magic-target-image').textContent, 'Left piece · left-piece');
+assert.equal(artworkNodes.get('magic-target-parts').textContent, 'Left piece · left-piece');
+assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
+assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 2, 'lightweight render metadata must not replace authoring layers');
+assert.ok(artworkCalls.some(c=>c.id==='blender.actions'),'fixture must reach the real render metadata query');
 assert.equal(vm.runInContext('existingDraft.target===captured && existingDraft.candidateTarget===captured && existingDraft.result===existingResult', artworkContext), true, 'switching backend preserves captured generation data');
 assert.equal(vm.runInContext('JSON.stringify(captured.references)', artworkContext), '["source.png","left.png"]');
 await vm.runInContext(`imagePromptBlock();`, artworkContext);
 await artworkNodes.get('image-generate').onclick();
 const wholeArtwork = artworkCalls.find(c => c.id === 'image.generate');
-assert.ok(wholeArtwork, 'whole-artwork request must reach transport instead of the stale-part reference guard');
+assert.ok(wholeArtwork, 'valid captured part request still reaches the transport');
 assert.equal(wholeArtwork.params.prompt, 'Draw a whole new artwork');
-assert.ok(!('references' in wholeArtwork.params), 'new whole-artwork request must not reuse a previous captured part reference');
+assert.equal(JSON.stringify(wholeArtwork.params.references),'["source.png","left.png"]','render selection must not retarget generation references');
 assert.equal(vm.runInContext('existingDraft.error', artworkContext), 'Error: Native generation disabled in fixture');
-console.log('PASS: Legacy -> Blender clears shared part selection, preserves captured generation data and permits whole-artwork requests');
-
-// The same normal hook also exercises the generic ambient indicator state machine.
+console.log('PASS: supplemental Blender controls preserve authoring selection and captured generation references');
 await import('./companions.mjs');
+await import('./animation-authoring.mjs');

@@ -728,3 +728,9 @@ body.at-home .app-footer { display:none; }
 #ambient-companions { width:auto; margin-right:6px; }
 
 .agent-config .companion-setting { display:flex; align-items:center; gap:6px; }
+/* Rendering is supplemental: the authoring inspector, canvas and timeline remain mounted. */
+.blender-render-dialog { width:min(900px,calc(100vw - 32px)); max-height:calc(100vh - 64px); margin:auto; padding:12px; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:12px; }
+.blender-render-dialog::backdrop { background:#0009; backdrop-filter:blur(4px); }
+.blender-render-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.blender-render-layout { display:grid; grid-template-columns:minmax(180px,230px) minmax(0,1fr); height:min(65vh,620px); min-height:260px; }
+.blender-render-dialog .blender-controls { width:auto; min-width:0; }
