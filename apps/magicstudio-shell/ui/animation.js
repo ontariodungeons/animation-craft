@@ -1,8 +1,8 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.backendMode')||'blender', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
- blenderDispose();
  theatreRequireSaved();
+ blenderDispose();
  animationPause();
  Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
  $('view-animation').replaceChildren();

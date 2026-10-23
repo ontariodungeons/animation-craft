@@ -21,8 +21,8 @@ async function blenderLoadPreview(video,path,current){
  video.src=blenderMediaUrl;video.load();
 }
 async function blenderAnimationOpen(){
- blenderDispose();
  theatreRequireSaved();
+ blenderDispose();
  animationPause();motion.resizeObserver?.disconnect();motion.images=[];motion.sample=null;motion.request++;
  motion.selected=null;updateMagicSelection();
  for(const pending of magicTheatre.exports.values()){clearTimeout(pending.timer);pending.reject(new Error('Animation editor closed'));}
