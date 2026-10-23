@@ -821,19 +821,19 @@ fn render_gang(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 
 /// Compact tally strip: the glyph shape and the colour both carry the state, so the
 /// signal survives a monochrome terminal.
-fn gang_tally_spans(c: &Center)->Vec<Span<'static>>{
+fn gang_tally_spans(c: &Center, compact: bool)->Vec<Span<'static>>{
  let mut spans:Vec<Span<'static>>=Vec::new();
  for g in c.state["agent_gang"].as_array().into_iter().flatten(){
   let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?").to_string();
   let (colour,word)=tally(g["agent_status"].as_str().unwrap_or(""));
   let glyph=match word{"WORKING"=>"●","STALLED"=>"◐","AVAILABLE"=>"○",_=>"·"};
-  spans.push(Span::styled(format!("{glyph} {name}"),colour));
+  spans.push(Span::styled(format!("{glyph}{}{name}",if compact{""}else{" "}),colour));
   spans.push(Span::raw(" "));
  }
  let status=c.state["chat"]["request"]["status"].as_str().unwrap_or("");
  let (colour,word)=match status{"replied"=> (GREEN,"REPLIED"),"running"|"queued"=> (RED,"WORKING"),"error"=> (AMBER,"ERROR"),_=> (MUTED,"IDLE")};
  let glyph=match word{"WORKING"=>"●","ERROR"=>"◐","REPLIED"=>"◆",_=>"○"};
- spans.push(Span::styled(format!("{glyph} Sprocket"),colour));
+ spans.push(Span::styled(format!("{glyph}{}Sprocket",if compact{""}else{" "}),colour));
  spans
 }
 
@@ -845,7 +845,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let song=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("NO PROJECT").to_uppercase();
  let playhead=snapshot["playhead_sec"].as_f64().unwrap_or(0.0);
  let fps=snapshot["fps"].as_f64().unwrap_or(24.0);
- let reel=snapshot["clip"].as_str().unwrap_or("00");
+ let reel=snapshot["clip"].as_str().unwrap_or("").trim_start_matches('@').to_uppercase();let reel=if reel.is_empty(){"IDLE".to_string()}else{reel};
  let caption=format!("REEL {reel} · {song} · {}",timecode(playhead,fps));
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ MAGIC STUDIO",&caption)),chunks[0]);
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ THE BOOTH","")),chunks[5]);
@@ -862,11 +862,17 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  }
  if gang_rows>0{render_gang(f,c,chunks[3]);}
  let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BOOTH ● open"}else{"BOOTH ○ off"};
- let keys=if narrow{"F10 · [ / ] · F9 · D · C · ^Q"}else{"F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
+ let keys=if narrow{"F10 F9 D C ^Q"}else{"F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
  let footer:Vec<Line>=if c.message.starts_with("COPIED")||c.message.contains("error"){vec![styled(c.message.clone(),AMBER)]}else{
-  let mut spans=vec![Span::styled(booth_light.to_string(),if booth_open{GREEN}else{AMBER}),Span::raw("  ·  GANG: ")];
-  spans.extend(gang_tally_spans(c));
-  spans.push(Span::styled(format!("  ·  {keys}"),MUTED));
+  let mut spans=vec![Span::styled(if narrow{(if booth_open{"● OPEN"}else{"○ OFF"}).to_string()}else{booth_light.to_string()},if booth_open{GREEN}else{AMBER}),Span::raw(if narrow{"  ·  "}else{"  ·  GANG: "})];
+  spans.extend(gang_tally_spans(c,narrow));
+  let mut key_span=Span::styled(format!("  ·  {keys}"),MUTED);
+  // Fit the strip to the pane: the tally comes first, the key hints are what gets dropped.
+  let width=area.width as usize;
+  let used=|spans:&Vec<Span>|spans.iter().map(|s|s.content.chars().count()).sum::<usize>();
+  if used(&spans)+key_span.content.chars().count()>width{key_span=Span::raw("");}
+  while used(&spans)>width&&spans.len()>2{spans.pop();}
+  spans.push(key_span);
   vec![Line::from(spans)]
  };
  f.render_widget(Paragraph::new(footer),chunks[4]);
