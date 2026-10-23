@@ -3,10 +3,68 @@
 //! `photocraft-cli`, and writes a derived PNG.
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{EngineError, Result, Session};
 
 use crate::workspace::{build_photocraft_run_args, resolve_craft_cli, resolve_workspace_path, run_tool_in, workspace_root};
+
+/// Register a reviewed pose onto a shared canvas without distorting or clipping its silhouette.
+pub fn cmd_image_register_frame(s: &mut Session, p: &Value) -> Result<Value> {
+    let invalid = |message: &str| EngineError::InvalidParams(message.into());
+    let pair = |value: &Value| -> Result<[f64; 2]> {
+        let a = value.as_array().filter(|a| a.len() == 2)
+            .ok_or_else(|| invalid("Pivots and canvas must be two-number arrays"))?;
+        let number = |v: &Value| v.as_f64().filter(|v| v.is_finite())
+            .ok_or_else(|| invalid("Coordinates must be finite numbers"));
+        Ok([number(&a[0])?, number(&a[1])?])
+    };
+    let source = resolve_workspace_path(s, p["source"].as_str().ok_or_else(|| invalid("source image is required"))?);
+    let out = resolve_workspace_path(s, p["out"].as_str().ok_or_else(|| invalid("out is required; originals are never overwritten"))?);
+    if !out.extension().and_then(|v| v.to_str()).is_some_and(|v| v.eq_ignore_ascii_case("png")) {
+        return Err(invalid("out must be PNG to preserve pose transparency"));
+    }
+    let receipt = out.with_extension("registration.json");
+    if out.exists() || receipt.exists() { return Err(invalid("Registration output already exists; choose a new version")); }
+    let canvas = pair(&p["canvas"])?;
+    if canvas.iter().any(|v| v.fract() != 0.0 || !(16.0..=8192.0).contains(v)) || canvas[0]*canvas[1] > 16_777_216.0 {
+        return Err(invalid("canvas must use integer dimensions 16..8192 and at most 16777216 pixels"));
+    }
+    let from = pair(&p["source_pivot"])?;
+    let to = if p.get("target_pivot").is_some() { pair(&p["target_pivot"])? } else { [canvas[0]/2.0, canvas[1]/2.0] };
+    let scale = p.get("scale").map(|v| v.as_f64().filter(|v| v.is_finite() && *v > 0.0 && *v <= 16.0)
+        .ok_or_else(|| invalid("scale must be in (0,16]"))).transpose()?.unwrap_or(1.0);
+    let (w, h) = image::image_dimensions(&source)?;
+    if u64::from(w)*u64::from(h) > 16_777_216 { return Err(invalid("Source exceeds 16777216 pixels")); }
+    let pixels = image::open(&source)?.to_rgba8();
+    let mut bounds = [w, h, 0, 0];
+    for (x, y, _) in pixels.enumerate_pixels().filter(|(_,_,p)| p[3] > 0) {
+        bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x+1), bounds[3].max(y+1)];
+    }
+    if bounds[2] == 0 { return Err(invalid("Source has no visible pixels")); }
+    let placed = [to[0]+(bounds[0] as f64-from[0])*scale, to[1]+(bounds[1] as f64-from[1])*scale,
+        to[0]+(bounds[2] as f64-from[0])*scale, to[1]+(bounds[3] as f64-from[1])*scale];
+    if placed[0] < 0.0 || placed[1] < 0.0 || placed[2] > canvas[0] || placed[3] > canvas[1] {
+        return Err(invalid("Registered silhouette would be clipped; enlarge canvas or adjust target_pivot/scale"));
+    }
+    let center = [to[0]+(w as f64/2.0-from[0])*scale, to[1]+(h as f64/2.0-from[1])*scale];
+    if let Some(parent) = out.parent() { std::fs::create_dir_all(parent)?; }
+    let root = workspace_root(s);
+    run_tool_in(&root, "photocraft-cli", &[
+        "run".into(), "--new".into(), json!({"width":canvas[0] as u32,"height":canvas[1] as u32,"background":"transparent"}).to_string(),
+        "--cmd".into(), "file.placeEmbedded".into(), "--params".into(), json!({"path":source,"scale":scale*100.0,"fit":false,"center":center}).to_string(),
+        "--out".into(), out.to_string_lossy().into_owned(),
+    ])?;
+    let decoded = image::open(&out)?;
+    if [decoded.width(), decoded.height()] != [canvas[0] as u32, canvas[1] as u32] || !decoded.color().has_alpha() {
+        return Err(invalid("PhotoCraft output does not match the requested transparent canvas; inspect retained output"));
+    }
+    let result = json!({"ok":true,"source":source,"output":out,"canvas":canvas,"source_pivot":from,
+        "target_pivot":to,"scale":scale,"source_bounds":bounds,"placed_bounds":placed,
+        "source_sha256":format!("{:x}",Sha256::digest(std::fs::read(&source)?)),"receipt":receipt});
+    std::fs::write(&receipt, serde_json::to_vec_pretty(&result).map_err(|e| invalid(&e.to_string()))?)?;
+    Ok(result)
+}
 
 /// Mask the active asset's source into per-part PNGs from explicit `regions` polygons.
 pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {

@@ -124,8 +124,11 @@ pub(crate) fn run_image_agent(program: &str, args: &[String], cwd: &Path, timeou
 }
 
 fn run_agent_inner(program: &str, args: &[String], cwd: &Path, timeout_s: u64, stop_on_image:bool) -> Result<AgentRun> {
-    let mut child = std::process::Command::new(program)
-        .current_dir(cwd)
+    let mut command = std::process::Command::new(program);
+    // `codex exec` defaults to error-only stderr. The native image importer needs
+    // its INFO tool receipt to correlate staged bytes; never rely on the parent's log level.
+    if stop_on_image { command.env("RUST_LOG", "error,codex_otel=info"); }
+    let mut child = command.current_dir(cwd)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

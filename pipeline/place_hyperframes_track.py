@@ -5,11 +5,30 @@ from pathlib import Path
 
 def place(project,request):
     root=Path(project)/'hyperframes'; entry=root/'index.html'; source=Path(request['path']).resolve(strict=True)
+    generation=None
+    if 'generation_receipt' in request:
+        project_root=Path(project).resolve(strict=True)
+        receipt=(project_root/request['generation_receipt']).resolve(strict=True)
+        if not receipt.is_relative_to(project_root): raise ValueError('generation_receipt must belong to this project')
+        data=json.loads(receipt.read_text())
+        if data.get('format')!='animationcraft.image-generation' or data.get('result',{}).get('ok') is not True:
+            raise ValueError('generation_receipt is not a successful native image generation')
+        if Path(data['project']).resolve().parent!=project_root:
+            raise ValueError('generation_receipt belongs to another project folder')
+        artwork=Path(data['image']).resolve(strict=True)
+        if not artwork.is_relative_to(project_root): raise ValueError('Generated artwork is outside this project')
+        digest=hashlib.sha256(artwork.read_bytes()).hexdigest()
+        if digest!=data['result']['sha256']: raise ValueError('Generated artwork changed after its receipt; review the new version before placement')
+        generation={'receipt':str(receipt),'asset_id':data['result']['asset_id'],'image':str(artwork),
+            'sha256':digest,'poses':data.get('poses',[]),'animation_context':data.get('animation_context',{}),
+            'relationship':'declared source artwork; video rendering is a separate step'}
     if source.suffix.lower() not in {'.webm','.mp4','.mov'}: raise ValueError('Expected a video track')
     key=request['id']
     if not re.fullmatch(r'[a-zA-Z0-9_-]+',key): raise ValueError('id must be a stable filename-safe identifier')
     start=float(request['start']);duration=float(request['duration']);rect=request['rect']
     if start<0 or duration<=0 or len(rect)!=4 or not all(math.isfinite(float(v)) for v in [start,duration,*rect]) or rect[2]<=0 or rect[3]<=0: raise ValueError('Invalid timing or placement')
+    playback_rate=float(request.get('playback_rate',1))
+    if not math.isfinite(playback_rate) or not 0<playback_rate<=16: raise ValueError('playback_rate must be in (0,16]')
     text=entry.read_text(); root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
     if not root_tag: raise ValueError('Composition root missing')
     digest=hashlib.sha256(source.read_bytes()).hexdigest()[:12]; folder=root/'assets/animation';folder.mkdir(parents=True,exist_ok=True)
@@ -18,12 +37,15 @@ def place(project,request):
     text=existing.sub('',text)
     track=max([int(v) for v in re.findall(r'data-track-index=["\'](\d+)',text)]+[-1])+1
     x,y,w,h=rect
-    tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-track-index="{track}" data-animationcraft-scene="{request.get("scene", "")}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
+    character=html.escape(str(request.get('character','')),quote=True)
+    motion_track=html.escape(str(request.get('track','')),quote=True)
+    tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-playback-rate="{playback_rate}" data-track-index="{track}" data-animationcraft-scene="{request.get("scene", "")}" data-animationcraft-character="{character}" data-animationcraft-track="{motion_track}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
     root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
     backup=root/'.animationcraft-history';backup.mkdir(exist_ok=True);stamp=time.time_ns();shutil.copy2(entry,backup/f'index-{stamp}.html')
     text=text[:root_tag.end()]+'\n'+tag+text[root_tag.end():]
     entry.write_text(text)
     record=dict(request,ok=True,media=str(target),track_index=track,backup=str(backup/f'index-{stamp}.html'))
+    if generation is not None: record['source_generation']=generation
     (folder/f'{key}.json').write_text(json.dumps(record,indent=2));return record
 
 if __name__=='__main__':

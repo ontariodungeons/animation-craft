@@ -33,7 +33,7 @@ pub use crate::vision::{analyze_rgba_image, analyze_viewport_region};
 pub use crate::project::write_project_file;
 
 // Import command handlers into this module so the `build()` array can reference them.
-use crate::image_cmds::{cmd_image_break_apart, cmd_image_color_to_alpha, cmd_image_content_aware_fill, cmd_image_image_size, cmd_image_puppet_warp};
+use crate::image_cmds::{cmd_image_break_apart, cmd_image_color_to_alpha, cmd_image_content_aware_fill, cmd_image_image_size, cmd_image_register_frame, cmd_image_puppet_warp};
 use crate::parts::{cmd_part_set_state, cmd_part_show_all};
 use crate::photocraft::{
     cmd_asset_build_cutout_rig, cmd_asset_cut_sheet, cmd_asset_extract_background,
@@ -115,6 +115,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"workshop.split_panels"
             | b"video.place_references"
             | b"image.generate"
+            | b"image.register_frame"
     )
 }
 
@@ -406,11 +407,12 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("assets.fixlist_add", "Add to Asset Fix List", ["Workshop"], None,
             "{\"asset\": \"id\", \"path\": \"png\", \"decision\": \"clean|recreate\", \"problem\": \"what is wrong\", \"tool\": \"exact command (clean)\", \"reference\": \"optional\", \"status\": \"open|done\"}", always, cmd_assets_fixlist_add),
         cmd!("assets.request_sheet", "Request Asset Sheet (one pass)", ["Workshop"], None, "{}", always, cmd_assets_request_sheet),
+        cmd!("image.register_frame", "Register a pose on a shared canvas", ["Edit"], None, "{\"source\":\"pose.png\",\"out\":\"new-version.png\",\"canvas\":[1400,900],\"source_pivot\":[490,389],\"target_pivot\":[700,450],\"scale\":1.15}", always, cmd_image_register_frame),
         cmd!("image.image_size", "Image Size (normalise a sheet)", ["Edit"], None, "{\"source\":\"path.png\",\"out\":\"path.png\",\"width\":2048,\"height\":2048,\"anchor\":\"center\",\"extensionColor\":\"#ffffff\"}", always, cmd_image_image_size),
         query!("agent.log", "Agent Transcript / Reply Retrieval", "{\"refresh\":false}", cmd_agent_log),
         cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":true,\"session\":\"optional expected existing session; requires new_chat=false\",\"wait\":300,\"free_only\":false,\"image_task\":false}", always, cmd_agent_send),
         cmd!("image.generate", "Generate Image (Codex)", ["Project Assets"], None,
-            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"references\":[\"project-relative or absolute project PNG; max 5\"],\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .acproj for CLI targeting\"}",
+            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"reference_asset\":\"optional registered reference PNG asset ID\",\"references\":[\"project-relative or absolute project PNG; max 5 including reference_asset\"],\"poses\":[\"optional 2 to 8 ordered pose descriptions; requires a reference\"],\"character\":\"optional registered source character ID\",\"scene\":1,\"animation\":\"optional intended action name\",\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .acproj for CLI targeting\"}",
             always, crate::image_generation::generate),
         cmd!("assets.agent_sheets", "Draw Asset Sheets (agent)", ["Rig & Matting"], None, "{\"character\":\"optional id\",\"kinds\":[\"turnaround\",\"skeleton\",\"poses\"],\"agent\":\"codex|omp|claude\",\"run\":true,\"check\":false,\"timeout_s\":1800,\"note\":\"optional\"}", always, cmd_assets_agent_sheets),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
@@ -429,7 +431,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
-        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14}", always, crate::video_target::cmd_video_place_track),
+        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
         cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
             "{\"target\": \"remotion|filmcraft|hyperframes\"}", always, cmd_workshop_set_target),
         cmd!("workshop.add", "Add Liner Notes / Panels / Assets", ["Workshop"], None,
