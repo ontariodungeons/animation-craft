@@ -6,7 +6,12 @@ function feedbackSnapshot(){
  const pane=typeof state==='undefined'?null:document.querySelector(state.project?'#view-'+(state.view==='studio'&&typeof serverUrl==='function'&&serverUrl()?'project':state.view):'#view-home');
  const rendered=!!pane&&pane.getBoundingClientRect().width>0&&pane.getBoundingClientRect().height>0&&getComputedStyle(pane).display!=='none'&&pane.textContent.trim().length>0;
  const chat=typeof agent!=="undefined"&&agent.loaded?{agent:document.getElementById('agent-command')?.value||null,provider:document.getElementById('agent-provider')?.value||null,model:document.getElementById('agent-model')?.value||null,source:'rendered selector; may include unsaved edits'}:null;
- return {companions:window.magicCompanions?.snapshot()||null,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
+ // The shared box snapshot rides in the EXISTING feedback payload, so the app
+ // light, the companion and the TUI all read ONE observation. Each row says
+ // where it came from and when it was seen; a stale or closed-app observation
+ // is marked, never invented as a failure. No new poller and no new command.
+ const boxes=window.companionBoxes?window.companionBoxes.snapshot({project:typeof state==='undefined'?null:state.project}):[];
+ return {companions:window.magicCompanions?.snapshot()||null,boxes,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
 }
 acFeedback.report=async function(phase,ack,event){
  if(phase)acFeedback.phase=phase;if(ack)acFeedback.ack=Math.max(acFeedback.ack,ack);

@@ -793,3 +793,77 @@ body.at-home .app-footer { display:none; }
 .lyric-line .cue { flex: none; color: var(--faint); font: 11px ui-monospace, monospace; }
 
 .native-backend-fields[hidden] { display:none; }
+
+/* ---------------------------------------------------------------------------
+   Companion pets.
+
+   A rail is any element that declares data-companion-rail; the same component
+   serves the top bar, the footer and the docked workstation. A slot is a
+   dedicated surface inside a rail -- never a clickable control -- so a pet
+   standing there never covers something a user can press.
+
+   The pets live in their own fixed layer, so they never reflow the page.
+   Travel is a transform, which the compositor animates on its own.
+   --------------------------------------------------------------------- */
+.bar { position: relative; }
+
+.companion-slot {
+  position: absolute;
+  width: 0; height: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Bars and the footer: the pets stand inboard of the trailing edge. */
+.block { position: relative; }
+.block .companion-slot { right: 6px; top: 10px; }
+
+.bar > .companion-slot[data-companion-slot="bar-chat"] { right: 214px; top: 12px; }
+.bar > .companion-slot[data-companion-slot="bar-artwork"] { right: 168px; top: 12px; }
+.app-footer > .companion-slot[data-companion-slot="footer-chat"] { right: 116px; bottom: 4px; }
+.app-footer > .companion-slot[data-companion-slot="footer-artwork"] { right: 84px; bottom: 4px; }
+
+/* The docked workstation: beside each pane heading, outside the button. */
+.magic-workstation > .companion-slot[data-companion-slot="dock-chat"] { right: 34px; top: 8px; }
+.magic-workstation > .companion-slot[data-companion-slot="dock-artwork"] { right: 34px; top: 176px; }
+
+.companion-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.ambient-companion {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  transform-origin: 50% 100%;
+  will-change: transform;
+  transition: transform 620ms cubic-bezier(.2, .8, .2, 1);
+}
+.ambient-companion.companion-traveling { transition: transform 620ms cubic-bezier(.2, .8, .2, 1); }
+.ambient-companion:not(.companion-traveling) { transition: none; }
+
+.companion-sprite { display: block; line-height: 0; }
+.companion-sprite img {
+  display: block;
+  height: 34px;
+  width: auto;
+  filter: drop-shadow(0 3px 5px #000a);
+  transform-origin: 50% 100%;
+}
+/* News makes a pet bigger for a finite moment. It is a transform, so the
+   page never reflows and no control is covered. */
+.ambient-companion.companion-news .companion-sprite img { height: 46px; }
+
+/* The ASCII fallback keeps its old inline footprint. */
+.ambient-companion:not(.companion-traveling) .companion-sprite { display: inline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-companion { transition: none; }
+}
+
+.companion-note { color: var(--faint); font-size: 11px; }
+.companion-state { margin: 2px 0 6px; padding-left: 18px; color: var(--muted); font-size: 11px; }
+.companion-state li { margin: 1px 0; }

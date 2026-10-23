@@ -189,15 +189,48 @@ function toast(text) {
   toast.timer = setTimeout(() => t.classList.remove("show"), 2400);
 }
 
+// Every control in this app is built here.
+//
+// `el()` is therefore the ONE place a control joins the shared contracts, and
+// it inherits BOTH of them:
+//
+//   * THE BOX -- a stable id, the project and context it belongs to, and the
+//     state the app knows about it (idle, working, ready, needs-attention,
+//     failed) with its reason, priority, request, job and resolution. Every box
+//     exposes the same "scent", so the app light, the companion and the TUI all
+//     react to one observation instead of three guesses.
+//
+//   * THE SLOT -- membership of a rail. A slot declares a stable id, the
+//     destinations or roles it accepts, and an explicit priority. Every rail is
+//     the same reusable component, so a control can join a rail without
+//     knowing anything about how rails work.
+//
+// A control is in both contracts BY CONSTRUCTION: there is no per-block
+// companion logic anywhere and no block has to opt in.
+//
+// Box ids must be STABLE across renders, so they come from explicit intent
+// first (the `box` attribute, then the element's own id) and only fall back
+// to a label. Labels change; ids are contracts.
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
+  let box = null;
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") node.className = v;
     else if (k === "html") node.innerHTML = v;
+    else if (k === "box") box = v;
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), event=>{const previous=acFeedback.action;acFeedback.action=event.acAction;try{return v(event);}finally{acFeedback.action=previous;}});
     else node.setAttribute(k, v);
   }
   for (const c of children.flat()) if (c != null) node.append(c);
+  const project = typeof state === "undefined" ? null : state.project;
+  const boxId = box || attrs.id || null;
+  if (boxId) {
+    node.setAttribute("data-box-id", boxId);
+    if (window.companionBoxes) window.companionBoxes.register(boxId, { project });
+  }
+  // A control may also be a rail slot. Declaring it here means the slot
+  // inherits the same stable id and the same contract as the box.
+  if (attrs["data-companion-slot"] && boxId && !node.getAttribute("data-box-id")) node.setAttribute("data-box-id", boxId);
   return node;
 }
 
@@ -373,16 +406,30 @@ function readerFollow() {
   if (index >= 0) pane.querySelector(`.reader-word[data-index="${index}"]`)?.classList.add("now");
 }
 
+// A block is a shared UI box: it has a stable id, and its header row is a
+// slot on the rail so a companion can enter the block. The header is the
+// stable surface -- the body expands and collapses, so nothing there can
+// hold a position.
+//
+// The body is wrapped, never rewritten: the same DOM arrives, and a block
+// that does not care about companions inherits the contract for free.
 function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
-  const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? " · " + meta : ""}`,
+  const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
     el("span", { class: `dot ${done ? "ok" : "warn"}`, title: done ? "Ready" : "Needs work" }),
     el("span", { class: "ico", html: icon }),
     el("span", { class: "title" }, title),
     el("span", { class: "meta" }, meta || ""),
     el("span", { class: "chev", html: ICONS.chev }));
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id }, action ? el("div", { class: "block-headrow" }, head, action) : head,
+  // The header row carries the slot. It sits on the block's own edge, outside
+  // the clickable head button, so a companion never covers a control.
+  const slot = el("span", { class: "companion-slot", "data-companion-slot": `block-${id}`, "data-companion-target": id, "data-box-id": id });
+  // Readiness informs a prerequisite status. An empty block is not an error.
+  if (window.companionBoxes) window.companionBoxes.readiness(id, { state: blockState, reason: done ? "Ready" : "Needs work" });
+  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
+    action ? el("div", { class: "block-headrow" }, head, action) : head,
+    slot,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 
