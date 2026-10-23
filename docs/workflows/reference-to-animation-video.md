@@ -36,6 +36,17 @@ Save source identity and intended clip in the scene's native fields. This is a s
 
 Keep the whole-character reference and individual parts. Use the existing `image.image_size`, `intake.validate`, `asset.cut_sheet` and rig commands after visual review, with their current `mc commands` parameter contracts. A generated pose sheet does not automatically become a valid rig or a 3D mesh.
 
+For a sheet whose drawings are not evenly spaced, do not cut equal cells through a nose or tail. Load the generated image, inspect its actual silhouette bounds, then use the existing PhotoCraft-backed polygon separation command:
+
+```bash
+mc --bridge PORT exec project.load_asset id=GENERATED_ASSET
+mc --bridge PORT exec image.break_apart asset=GENERATED_ASSET \
+  out_dir=/path/to/project/assets/characters/CHARACTER/turn/frames \
+  'regions={"quarter_right":[[18,55],[752,55],[752,700],[18,700]],"front":[[760,45],[1336,45],[1336,686],[760,686]],"quarter_left":[[1338,60],[2090,60],[2090,700],[1338,700]]}'
+```
+
+Those coordinates are an example from the older fish's 2103×748 sheet, not a universal grid. Read `parts`, `parts_produced` and `errors` in the result and inspect every output. This command masks each view on the original canvas, preserving alpha. Record the pivot/translation and common scale that register each body into the existing rig; a shared image size alone does not register the drawings. Forward and reverse turns can reuse the same three views, with timing derived from the existing facing keys.
+
 For a turn, profile → three-quarter → front → opposite three-quarter → opposite profile provides actual shape changes. Use a short anticipation, head-led turn, delayed tail/fins and a settling hold. A flat plane rotated in Three.js still has no thickness. Mesh deformation and drawing substitutions can be combined; Remotion can schedule/interpolate those poses but cannot invent the missing views.
 
 Once a named track exists, inspect `motion.tracks`, sample with `motion.sample`, convert/save native Theatre clips with `motion.clips.convert` / `motion.theatre.save`, and export with `motion.export_track`. That exporter uses the engine's sampled motion. Do not assume an unrelated HTML performance or arbitrary Theatre-only edits are already part of that export.
