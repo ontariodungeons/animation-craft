@@ -36,7 +36,18 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            match sessions.as_slice(){[]=>None,[one]=>Some((one["endpoint"].as_str().unwrap_or_default().trim_start_matches("unix:").to_string(),one.clone())),_=>return Err("Multiple Studios available; pass project=<canonical project path> or an explicit pinned endpoint. Nothing switched.".into())}
+            match sessions.as_slice(){
+                [] => None,
+                [one] => Some((one["endpoint"].as_str().unwrap_or_default().trim_start_matches("unix:").to_string(), one.clone())),
+                _ => {
+                    // A pinned endpoint turns "which of these?" into an answer the caller can repeat.
+                    let pinned = crate::studios::pinned_endpoint().and_then(|endpoint| sessions.iter().find(|s| s["endpoint"].as_str() == Some(endpoint.as_str())).cloned());
+                    match pinned {
+                        Some(one) => Some((one["endpoint"].as_str().unwrap_or_default().trim_start_matches("unix:").to_string(), one)),
+                        None => return Err("Multiple Studios available; pass project=<path> or --bridge <port>. `mc studios` lists them, `mc studios <port>` pins one, and `mc backstage --print project=<path>` reads the same project without a window. Nothing switched.".into()),
+                    }
+                }
+            }
         };
         if let Some((path, feedback)) = selected {
             if let Some(expected) = expected {

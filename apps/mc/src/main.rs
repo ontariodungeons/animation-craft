@@ -19,6 +19,7 @@ mod center;
 mod logo;
 mod local_ui;
 mod snapshot;
+mod studios;
 mod telemetry;
 
 use magicstudio_engine::Session;
@@ -84,6 +85,11 @@ SUBCOMMANDS
                                       F1 GREEN ROOM · F2 ON AIR · F4 ROLL CALL · D details
                                       optional root= name= audio= transcript= captions= audiomap=
                                       --print prints current state without entering terminal UI
+  studios [--json] [<port>|--unpin|--check]
+                                      which Studio is running: port, project, view, readiness, and
+                                      how to confirm it. <port> pins it for plain `mc exec` calls;
+                                      --check exits 0 only when one is UI-ready; with none running,
+                                      names both ways forward (start a window, or read the TUI)
   booth, center                      aliases of `backstage`
   exec ui.feedback                    discover canonical Studio identity, readiness, unsaved and ack state
   exec ui.components region=#view-project limit=30
@@ -850,6 +856,17 @@ fn main() {
             for spec in specs {
                 outln!("  {} — {}", spec.id, spec.label);
             }
+        }
+        "studios" | "windows" => {
+            // skip the program and this subcommand, so the first free argument is the studio to pin
+            let raw = cli_args().iter().cloned().skip(2).collect::<Vec<_>>();
+            let target = raw.iter().find(|v| !v.starts_with("--") && !v.contains('=')).map(String::as_str);
+            let code = if raw.iter().any(|v| v == "--check") {
+                studios::verify()
+            } else {
+                studios::run(raw.iter().any(|v| v == "--json"), target, raw.iter().any(|v| v == "--unpin"))
+            };
+            std::process::exit(code);
         }
         "commands" => {
             let f = a.pos(1).map(str::to_ascii_lowercase).unwrap_or_default();
