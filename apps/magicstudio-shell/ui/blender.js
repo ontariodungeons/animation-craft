@@ -1,7 +1,8 @@
 // Blender owns animation data; this surface only chooses jobs and plays rendered media.
 let blenderViewRevision=0;
-let blenderMediaUrl=null,blenderMediaFetch=null;
+let blenderMediaUrl=null,blenderMediaFetch=null,blenderPollTimer=null;
 function blenderDispose(){
+ clearTimeout(blenderPollTimer);blenderPollTimer=null;
  ++blenderViewRevision;blenderMediaFetch?.abort();blenderMediaFetch=null;
  const video=document.querySelector('#view-animation video');
  if(video){video.pause();video.removeAttribute('src');video.load();}
@@ -29,15 +30,15 @@ async function blenderAnimationOpen(){
  const revision=++blenderViewRevision,project=state.project;
  const current=()=>revision===blenderViewRevision&&state.project===project&&state.view==='animation'&&motion.mode==='blender';
  const view=$('view-animation');view.replaceChildren();
- const controls=el('aside',{class:'motion-inspector'});
+ const controls=el('aside',{class:'motion-inspector blender-controls',id:'blender-controls','aria-label':'Blender animation controls'});
  const stage=el('div',{class:'motion-stage'});
  const status=el('span',{class:'muted',role:'status'},'Loading artwork…');
  const main=el('div',{class:'motion-main'},el('div',{class:'motion-stagebar'},motionModeSwitch(),status),stage);
  view.append(controls,main);
- const video=el('video',{controls:true,loop:true,'aria-label':'Rendered Blender animation'});
+ const video=el('video',{id:'blender-preview',controls:true,loop:true,'aria-label':'Rendered Blender animation'});
  video.style.cssText='width:100%;height:100%;object-fit:contain';
  stage.append(video);
- let latest=null,job=null,timer=null;
+ let latest=null,job=null,selectionRevision=0;
  const report=message=>{if(current())status.textContent=message;};
  try{
   const result=await motionCommand('project.list_assets');if(!current())return;
@@ -54,46 +55,62 @@ async function blenderAnimationOpen(){
   motion.rest=false;
   const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id)));
   if(!tracks.options.length){report('Author a motion track before migrating this rig.');return;}
-  motion.track=tracks.options[0].value;
+  if([...tracks.options].some(option=>option.value===motion.track))tracks.value=motion.track;
+  motion.track=tracks.value;
   const render=el('button',{class:'start',id:'blender-render'},'Render preview');
   const cancel=el('button',{class:'ghost',id:'blender-cancel',disabled:true},'Cancel render');
   const details=el('p',{class:'muted'},'Editable Blender scene and transparent clip are saved with the project.');
-  controls.append(el('label',{},'Action',tracks),render,cancel,details);
+  const source=el('select',{id:'blender-source','aria-label':'Animation source'},
+   el('option',{value:'saved'},'Saved Blender scene'),el('option',{value:'legacy'},'Reimport legacy action'));
+  const range=el('select',{id:'blender-range','aria-label':'Render length'},
+   el('option',{value:'90'},'Quick preview · up to 90 frames'),el('option',{value:'18000'},'Full action · up to 18,000 frames'));
+  const resolution=el('select',{id:'blender-resolution','aria-label':'Render resolution'},
+   ...[25,50,100].map(value=>el('option',{value:String(value)},`${value}% resolution`)));
+  resolution.value='50';
+  const busy=value=>{render.disabled=value;cancel.disabled=!value;for(const input of [picker,tracks,source,range,resolution])input.disabled=value;};
+  controls.append(el('label',{},'Action',tracks),el('label',{},'Source',source),
+   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,details);
   async function poll(){
    if(!current()||!job)return;
-   const requestedJob=job;
+   const requestedJob=job,selectedRevision=selectionRevision;
+   const selected=()=>current()&&job===requestedJob&&selectionRevision===selectedRevision;
    try{
-    const value=await motionCommand('blender.status',{job});if(!current()||job!==requestedJob)return;
+    const value=await motionCommand('blender.status',{job});if(!selected())return;
     if(value.state==='running'){
      report(value.progress?.total?`Rendering ${value.progress.completed} / ${value.progress.total}`:'Preparing animation…');
-     timer=setTimeout(poll,1000);return;
+     blenderPollTimer=setTimeout(poll,1000);return;
     }
-    render.disabled=false;cancel.disabled=true;picker.disabled=false;tracks.disabled=false;
+    busy(false);
     if(value.state==='completed'){
-     latest=value;await blenderLoadPreview(video,value.clip,current);if(!current())return;
+     latest=value;source.options[0].disabled=false;source.value='saved';await blenderLoadPreview(video,value.clip,selected);if(!selected())return;
      details.textContent='Editable Blender scene saved';details.title=value.blend;
      report(value.partial?'Preview ready · shortened clip':'Preview ready');
     }else report(value.state==='cancelled'?'Render cancelled':`Render failed · ${value.error||value.detail||'inspect the worker log'}`);
-   }catch(error){render.disabled=false;cancel.disabled=true;picker.disabled=false;tracks.disabled=false;report(String(error));}
+   }catch(error){if(!selected())return;busy(false);report(String(error));}
   }
   async function restore(){
-   clearTimeout(timer);
-   latest=null;video.removeAttribute('src');video.load();motion.track=tracks.value;
+   clearTimeout(blenderPollTimer);const requestedSelection=++selectionRevision;
+   blenderMediaFetch?.abort();
+   if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
+   job=null;latest=null;busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();motion.track=tracks.value;
    const selected=tracks.value;
-   const saved=await motionCommand('blender.list');if(!current()||tracks.value!==selected)return;
+   const saved=await motionCommand('blender.list');if(!current()||requestedSelection!==selectionRevision)return;
    job=saved.jobs.find(j=>j.character===motion.character&&j.track===selected)?.job;
-   if(job){render.disabled=true;cancel.disabled=false;await poll();}else report('Ready to create an editable Blender animation');
+   if(job){cancel.disabled=false;await poll();}else{busy(false);report('Ready to create an editable Blender animation');}
+   if(!current()||requestedSelection!==selectionRevision)return;
+   source.options[0].disabled=!latest?.blend;source.value=latest?.blend?'saved':'legacy';
   }
-  tracks.onchange=()=>restore().catch(error=>report(String(error)));
+  tracks.onchange=()=>restore().catch(error=>{if(current()){busy(false);report(String(error));}});
   render.onclick=async()=>{
-   render.disabled=true;picker.disabled=true;tracks.disabled=true;report('Submitting animation…');
+   ++selectionRevision;clearTimeout(blenderPollTimer);blenderMediaFetch?.abort();
+   busy(true);cancel.disabled=true;report('Submitting animation…');
    try{
     const value=await motionCommand('blender.start',{character:motion.character,track:tracks.value,
-     ...(latest?.blend?{blend:latest.blend}:{}),max_frames:18000,resolution_percent:50});
+     ...(source.value==='saved'&&latest?.blend?{blend:latest.blend}:{}),max_frames:Number(range.value),resolution_percent:Number(resolution.value)});
     if(!current())return;job=value.job;cancel.disabled=false;poll();
-   }catch(error){render.disabled=false;picker.disabled=false;tracks.disabled=false;report(String(error));}
+   }catch(error){if(!current())return;busy(false);report(String(error));}
   };
-  cancel.onclick=async()=>{try{await motionCommand('blender.cancel',{job});}catch(error){report(String(error));}};
-  await restore();
+  cancel.onclick=async()=>{cancel.disabled=true;try{await motionCommand('blender.cancel',{job});if(current()){clearTimeout(blenderPollTimer);await poll();}}catch(error){if(current())cancel.disabled=false;report(String(error));}};
+  await restore().catch(error=>{if(current())busy(false);throw error;});
  }catch(error){report(String(error));}
 }

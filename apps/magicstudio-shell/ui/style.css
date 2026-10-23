@@ -710,3 +710,10 @@ body.at-home .app-footer { display:none; }
 .proj:nth-child(5n+4) { --proj-tone: var(--tone-transcript); }
 .proj:nth-child(5n) { --proj-tone: var(--tone-assets); }
 .proj .name { color: var(--proj-tone); }
+
+/* Blender controls retain a usable preview in tiled windows. */
+.blender-controls { flex-shrink:0; display:flex; flex-direction:column; gap:12px; }
+.blender-controls label { display:flex; flex-direction:column; gap:5px; color:var(--muted); }
+.blender-controls + .motion-main .motion-stagebar { flex-wrap:wrap; }
+.blender-controls + .motion-main [role="status"] { min-width:0; overflow-wrap:anywhere; }
+@media(max-width:760px){.blender-controls{width:190px}}

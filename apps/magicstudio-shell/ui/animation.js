@@ -60,7 +60,7 @@ function motionModeSwitch(){
   ...['blender','subject','composite'].map(m=>el('button',{
    class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,role:'tab','data-mode':m,
    'aria-selected':String(motion.mode===m),title:m==='blender'?'Blender animation and rendered previews':m==='subject'?'Legacy rig and Theatre editor':'Images arranged in time',
-   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;blenderDispose();motion.mode=m;localStorage.setItem('animation.backendMode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
+   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;blenderDispose();motion.project=null;motion.meta=null;motion.request++;motion.mode=m;localStorage.setItem('animation.backendMode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
   },m==='blender'?'Blender':m==='subject'?'Legacy':'Composite')));
 }
 function animationShell(){
