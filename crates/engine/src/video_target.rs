@@ -398,8 +398,9 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     status["replaced_existing_scaffold"]=json!(existed&&replace);
     s.video_project_path = target_project_path(s, &dir, &target);
     status["video_project_path"]=json!(s.video_project_path);
+    if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
     status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
-    if target=="hyperframes" {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
+    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
     Ok(status)
 }
 
