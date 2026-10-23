@@ -28,7 +28,16 @@ A Studio window must have been started with `magicstudio-shell --control <port>`
 
 ## Command Center
 
-`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.magic` resumes inspection; `center --print project=...` prints its state. F1/F2 switch Control/Booth monitoring views; F4 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.magic` resumes inspection; `center --print project=...` prints its state. F1/F2/F3/F4 switch the Workshop, Booth, Muppets and Telemetry tabs; F6 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+
+The Telemetry tab (F4) is read-only and on demand: while it is open it samples
+host CPU, memory and swap, the busiest processes, the Blender worker log, the
+Studio's own activity journal, the Omarchy user journal and each coding agent's
+recorded quota (`omarchy agent usage`); closing the tab stops all of it. The
+gang strip selects an agent with `,` and `.`; `P` pokes the selected idle or
+stalled agent with a status request and `p` opens the composer to write your
+own message. A working agent is never interrupted, and a refusal from the
+multiplexer is reported as a refusal.
 
 Scripted clients use the same `project.intake` and `center.status` engine commands. UI and CLI share the production root `/run/media/jesse/Speedy/media`, stored as `projects_root` in `$XDG_CONFIG_HOME/magicstudio/settings.json` (or `~/.config/magicstudio/settings.json`). Inspect it with `mc exec project.root`; persist it with `mc exec project.root root=/run/media/jesse/Speedy/media`. `project.intake name=...` resolves `<root>/<song-slug>/project/<Name>.magic`. Explicit `root=...` or `path=...` choices apply only to that request, appear in the intake receipt, and never change the production setting. Recent history never determines the root. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
 

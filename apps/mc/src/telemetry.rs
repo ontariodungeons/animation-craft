@@ -37,7 +37,7 @@ impl Sample {
     }
 }
 
-fn clock_ticks() -> Option<u64> {
+pub fn clock_ticks() -> Option<u64> {
     static TICKS: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *TICKS.get_or_init(|| {
         let out = std::process::Command::new("getconf").arg("CLK_TCK").output().ok()?;
@@ -62,6 +62,17 @@ pub fn tree(root: u32) -> Vec<Proc> {
     out
 }
 
+/// Every readable process on the machine, for a host-wide list.
+pub fn all_procs() -> Vec<Proc> {
+    fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(read_proc)
+        .collect()
+}
+
 fn children_map() -> std::collections::HashMap<u32, Vec<u32>> {
     let mut map: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for entry in fs::read_dir("/proc").into_iter().flatten().flatten() {
@@ -82,7 +93,7 @@ fn parent_of(pid: u32) -> Option<u32> {
     after.split_whitespace().nth(1)?.parse().ok()
 }
 
-fn read_proc(pid: u32) -> Option<Proc> {
+pub fn read_proc(pid: u32) -> Option<Proc> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let open = stat.find('(')?;
     let close = stat.rfind(')')?;
@@ -98,7 +109,7 @@ fn read_proc(pid: u32) -> Option<Proc> {
 }
 
 /// Only compare processes present in both samples, guarding against PID reuse.
-fn cpu_percent(previous: &[Proc], current: &[Proc], elapsed: Duration, hz: u64) -> Option<f64> {
+pub fn cpu_percent(previous: &[Proc], current: &[Proc], elapsed: Duration, hz: u64) -> Option<f64> {
     if elapsed.is_zero() || hz == 0 { return None; }
     let mut delta = 0u64;
     let mut matched = false;

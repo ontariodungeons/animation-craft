@@ -16,6 +16,7 @@
 
 mod args;
 mod center;
+mod dials;
 mod logo;
 mod local_ui;
 mod snapshot;
