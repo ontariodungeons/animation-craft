@@ -34,6 +34,39 @@ class NativeWorkerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'outside|escape'):
                 worker.snapshot_synfig({'source':str(source), 'bundle':str(bundle)}, root/'bad')
 
+    def test_native_xml_self_closing_tags_and_quoted_relative_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'scene.tnz'
+            for xml in [
+                '<project><folders><folder name="drawings" path="drawings"/></folders></project>',
+                '<tnz><level id="1"/><level id="2" /></tnz>',
+                '<tnz><path>"+drawings/a b.png"</path></tnz>',
+                "<tnz><path>'drawings/a.png'</path></tnz>",
+            ]:
+                with self.subTest(xml=xml):
+                    path.write_text(xml)
+                    worker.validate_native_references(path)
+                    self.assertEqual(path.read_text(),xml)
+
+    def test_native_xml_rejects_absolute_and_escaping_resource_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'scene.tnz'
+            for value in ['/outside.png', '../outside.png', 'drawings/../../outside.png',
+                          'C:/outside.png', r'C:\outside.png', r'\\host\share\a.png']:
+                for xml in [f'<tnz><path>"{value}"</path></tnz>',
+                            f'<project><folder path="{value}"/></project>']:
+                    with self.subTest(xml=xml):
+                        path.write_text(xml)
+                        with self.assertRaisesRegex(ValueError,'Absolute/escaping'):
+                            worker.validate_native_references(path)
+
+    def test_native_xml_rejects_entity_definitions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'scene.tnz'
+            path.write_text('<!DOCTYPE tnz [<!ENTITY path "../outside.png">]><tnz><path>&path;</path></tnz>')
+            with self.assertRaisesRegex(ValueError,'externally defined'):
+                worker.validate_native_references(path)
+
     def test_frame_collection_rejects_gap_and_preserves_alpha(self):
         self.assertIsNotNone(worker, 'Native frame validation is not implemented')
         with tempfile.TemporaryDirectory() as tmp:

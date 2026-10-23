@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import resource
 import shutil
@@ -237,6 +237,25 @@ def snapshot_tree(source, target):
     return manifest
 
 
+def validate_native_references(path):
+    # Inspect parsed scalar values, never XML delimiters such as quotes or />.
+    # Native .tnz path text can itself be quoted; keep the frozen bytes unchanged.
+    if path.stat().st_size > 64*1024*1024:
+        raise ValueError('Native XML exceeds 64 MiB')
+    content=path.read_bytes()
+    if len(content)>64*1024*1024 or b'<!DOCTYPE' in content.upper() or b'<!ENTITY' in content.upper():
+        raise ValueError('Oversized or externally defined native XML is unsupported')
+    root=ET.fromstring(content)
+    for node in root.iter():
+        for value in [node.text or '', *node.attrib.values()]:
+            value=value.strip()
+            if len(value)>=2 and value[0] in ('"', "'") and value[-1]==value[0]:
+                value=value[1:-1].strip()
+            normalized=value.replace('\\','/')
+            if normalized.startswith('/') or PureWindowsPath(value).drive or '..' in normalized.split('/'):
+                raise ValueError('Absolute/escaping native resource references unsupported; make bundle self-contained')
+
+
 def render_opentoonz(request, request_path):
     from worker import write_json
     job=request_path.parent
@@ -246,9 +265,7 @@ def render_opentoonz(request, request_path):
     frozen=snapshot/original.relative_to(root)
     # Native project aliases must not resolve outside the frozen bundle.
     for path in [frozen,*snapshot.glob('*_otprj.xml')]:
-        content=path.read_text()
-        if re.search(r'(?:>|")\s*(?:/|[A-Za-z]:[\\/]|\.\.[\\/])',content):
-            raise ValueError('Absolute/escaping native resource references unsupported; make bundle self-contained')
+        validate_native_references(path)
     stuff=job/'toonz-stuff';stuff_manifest=snapshot_tree(Path(request['stuff']),stuff)
     prepared=dict(request,scene=str(frozen),bundle=str(snapshot))
     helper_request=job/'opentoonz-request.json';write_json(helper_request,prepared)
