@@ -194,3 +194,5 @@ await import('./animation-native.mjs');
 await import('./motion-authoring-controls.mjs');
 
 await import('./animation-session.mjs');
+
+await import('./animation-feedback.mjs');

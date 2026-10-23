@@ -1,7 +1,7 @@
 // Bounded rendered feedback for this application only. Never read input values or agent chat text.
 window.acFeedback={phase:'booting',errors:[],pending:0,ack:0,last:null,actions:new WeakMap()};
 function feedbackSnapshot(){
- const changed=[...document.querySelectorAll('input:not([type=password]),textarea,[contenteditable=true]')].filter(n=>n.getBoundingClientRect().width&&n.getBoundingClientRect().height&&!n.closest('#agent-log')&&n.id!=='motion-scrub').filter(n=>n.isContentEditable?!!n.textContent.trim():n.value!==n.defaultValue).map(n=>n.id||n.tagName.toLowerCase());
+ const changed=[...document.querySelectorAll('input:not([type=password]),textarea,[contenteditable=true]')].filter(n=>n.getBoundingClientRect().width&&n.getBoundingClientRect().height&&!n.closest('#agent-log')&&n.id!=='motion-scrub').filter(n=>n.isContentEditable?!!n.textContent.trim():n.type==='checkbox'||n.type==='radio'?n.checked!==n.defaultChecked:n.value!==n.defaultValue).map(n=>n.id||n.tagName.toLowerCase());
  if(typeof theatreFeedback==='function'&&theatreFeedback().live_edits==='needs_save')changed.push('theatre-motion');
  const pane=typeof state==='undefined'?null:document.querySelector(state.project?'#view-'+(state.view==='studio'&&typeof serverUrl==='function'&&serverUrl()?'project':state.view):'#view-home');
  const rendered=!!pane&&pane.getBoundingClientRect().width>0&&pane.getBoundingClientRect().height>0&&getComputedStyle(pane).display!=='none'&&pane.textContent.trim().length>0;

@@ -71,8 +71,8 @@ function createCompanions(frames) {
 async function initCompanions(){
  const response=await fetch('companions.frames.json');if(!response.ok)throw new Error('Companion frames unavailable');
  const controller=createCompanions(await response.json());window.magicCompanions=controller;
- const setting=document.getElementById('ambient-companions');setting.checked=controller.snapshot().enabled;
- setting.addEventListener('change',()=>controller.setEnabled(setting.checked));
+ const setting=document.getElementById('ambient-companions');setting.checked=controller.snapshot().enabled;setting.defaultChecked=setting.checked;
+ setting.addEventListener('change',()=>{controller.setEnabled(setting.checked);setting.defaultChecked=setting.checked;});
 }
 
 if(document.getElementById('ambient-companions'))initCompanions().catch(error=>console.warn(String(error)));
