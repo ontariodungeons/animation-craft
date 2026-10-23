@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const sent=[],projects=[];let listener,clockCallback,pauses=0;
+const nativeState={definitionVersion:'0.4.0',revisionHistory:['fixture'],sheetsById:{bee:{sequence:{tracksByObject:{antenna:{}}}}}};
+const sequence={position:0,pointer:{position:{},playing:{}},pause(){pauses++;}};
+const sheet={sequence,object(){return {onValuesChange(){return ()=>{};}};}};
+const project={ready:Promise.resolve(),sheet(){return sheet;}};
+const parent={postMessage:m=>sent.push(m)};
+const context=vm.createContext({parent,location:{origin:'tauri://localhost'},window:{addEventListener:(_,f)=>listener=f},studio:{initialize(){},setSelection(){},onSelectionChange(){return ()=>{};},createContentOfSaveFile:()=>nativeState},getProject:(id,config)=>{projects.push({id,config});return project;},types:{number:()=>0},onChange:(pointer,f)=>{if(pointer===sequence.pointer.position)clockCallback=f;return ()=>{};},theatreProjectId:async()=> 'Magic Studio test'});
+const source=readFileSync(new URL('../frontend/theatre-frame.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
+vm.runInContext(source,context);
+await listener({source:parent,data:{magicTheatre:true,type:'context',project:'/project/Bee.acproj',character:'bee',part:'antenna-l',state:nativeState}});
+assert.equal(projects[0].config.state,nativeState,'initialization passes the unmodified native save file to core');
+await listener({source:parent,data:{magicTheatre:true,type:'export',project:'/project/Bee.acproj',request:4}});
+assert.equal(sent.find(m=>m.type==='exported').state,nativeState,'public Studio export returns native state');
+await listener({source:parent,data:{magicTheatre:true,type:'export',project:'/wrong.acproj',request:5}});
+assert.equal(sent.find(m=>m.type==='error'&&m.request===5)?.request,5,'wrong-project export errors retain request correlation');
+sent.length=0;
+await listener({source:parent,data:{magicTheatre:true,type:'seek',time:1}});
+clockCallback(1); // Theatre delivers subscriptions after the parent message has returned.
+assert.equal(sent.filter(m=>m.type==='seek').length,0,'native playhead echo must not pause native playback');
+assert.equal(pauses,1,'taking the native clock stops a Theatre sequence clock');
+clockCallback(1.5);
+assert.equal(sent.find(m=>m.type==='seek')?.time,1.5,'a real Theatre scrub still reaches the native renderer');
+console.log('PASS: delayed native clock echo is ignored; Theatre scrub is forwarded; one clock owns playback');

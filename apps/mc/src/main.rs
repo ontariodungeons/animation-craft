@@ -17,6 +17,7 @@
 mod args;
 mod center;
 mod local_ui;
+mod snapshot;
 
 use animationcraft_engine::Session;
 use serde_json::{Value, json};
@@ -84,6 +85,14 @@ SUBCOMMANDS
   exec ui.components region=#view-project limit=30
                                       bounded actual DOM geometry/style/state; no input values
   exec center.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
+  exec center.snapshot [project=<file>]
+                                      one JSON object with stable keys: project, subject, clip,
+                                      playhead_sec, selected_part, unsaved_edits, hyperframes, fps,
+                                      last_error (null = not observed); the Command Center status line
+  exec center.tail [last=20] [project=<file>]
+                                      last N typed events: saved, generation_started/finished,
+                                      keyframe_added/removed, selection_changed, clip_switched, error
+                                      (activity history: last 512, UI clicks never evict them)
   login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
@@ -407,6 +416,10 @@ fn run_mcp_stdio(bridge: Option<String>) {
                     .map(|s| s.id)
                     .unwrap_or(raw_name.as_str());
                 let mut args = params.get("arguments").cloned().unwrap_or(json!({}));args["_origin"]=json!("MCP");
+                if let Some(v) = center_observation(&raw_name.replace('_', "."), &args) {
+                    outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default()}]}}));
+                    continue;
+                }
                 if raw_name == "ui_look" || raw_name == "ui.look" {
                     outln!("{}", json!({"jsonrpc": "2.0", "id": id, "result": ui_look(bridge.as_deref(), args)}));
                     continue;
@@ -472,7 +485,7 @@ fn mcp_tools() -> Vec<Value> {
         .collect();
     tools.push(json!({
         "name": "ui_look",
-        "description": "See the live AnimationCraft window in one call: optionally click an element first, \
+        "description": "See the live Magic Studio window in one call: optionally click an element first, \
             then get a picture of the window (or of the elements whose id starts with `region`, e.g. \
             `workshop.storyboard`, `stage`, `header`) plus the app state and the clickable ids inside it. \
             Needs `mcp --bridge <port>`.",
@@ -488,8 +501,32 @@ fn mcp_tools() -> Vec<Value> {
         }
     }));
     tools.push(json!({
+        "name": "center_snapshot",
+        "description": "Current Magic Studio state as one JSON object with stable keys: project, subject, clip, \
+            playhead_sec, selected_part, unsaved_edits, hyperframes, fps, last_error (null = not observed). \
+            Read-only; uses the open Studio for `project` (or the only one open).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"project": {"type": "string", "description": "canonical .acproj path; default the only open Studio"}},
+            "additionalProperties": false
+        }
+    }));
+    tools.push(json!({
+        "name": "center_tail",
+        "description": "Last N typed Magic Studio events (saved, generation_started, generation_finished, \
+            keyframe_added, keyframe_removed, selection_changed, clip_switched, error) from the activity history, oldest first. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "last": {"type": "integer", "minimum": 1, "maximum": 192, "description": "default 20"},
+                "project": {"type": "string", "description": "canonical .acproj path; default the only open Studio"}
+            },
+            "additionalProperties": false
+        }
+    }));
+    tools.push(json!({
         "name": "app_quit",
-        "description": "Quit the live AnimationCraft window this server is bridged to. \
+        "description": "Quit the live Magic Studio window this server is bridged to. \
             Refuses unsaved, pending or unknown state; reports close requested, not proof of exit. \
             Uses current Studio auto-discovery or the explicit --bridge target; never launches an app.",
         "inputSchema": {
@@ -589,6 +626,23 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
  session.execute(id,params).map_err(|e|e.to_string())
 }
 
+/// `center.snapshot` / `center.tail` are mc observations, not engine commands; None for any other id.
+fn center_observation(id: &str, params: &Value) -> Option<Value> {
+    let project = params["project"].as_str();
+    match id {
+        "center.snapshot" => Some(snapshot::collect(project).0),
+        "center.tail" => {
+            let last = params["last"].as_u64().unwrap_or(20).clamp(1, 192) as usize;
+            let (state, activity) = snapshot::collect(project);
+            let events = snapshot::tail(&activity, state["project"].as_str());
+            let events = &events[events.len().saturating_sub(last)..];
+            Some(json!({"schema": snapshot::TAIL_SCHEMA, "project": state["project"], "events": events,
+                "next_cursor": activity["next_cursor"], "error": activity["error"]}))
+        }
+        _ => None,
+    }
+}
+
 fn call_app_quit(bridge: Option<&str>, mut args: Value) -> Result<Value, String> {
     args["_origin"]=json!("MCP");
     bridge_call(bridge.unwrap_or("auto"), "app.quit", args)
@@ -645,7 +699,7 @@ fn main() {
         }
         "info" => {
             let specs = animationcraft_engine::command_specs();
-            outln!("AnimationCraft engine v{}", env!("CARGO_PKG_VERSION"));
+            outln!("Magic Studio engine v{}", env!("CARGO_PKG_VERSION"));
             outln!("Registered commands: {}", specs.len());
             for spec in specs {
                 outln!("  {} — {}", spec.id, spec.label);
@@ -720,6 +774,10 @@ fn main() {
                 .unwrap_or_else(|| usage("exec <id> [key=value ...]"));
             let mut params = a.params_from(2).unwrap_or_else(|e| usage(e));
             params["_origin"]=json!("CLI");
+            if let Some(v) = center_observation(id, &params) {
+                outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                return;
+            }
             let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
             }else if let Some(addr) = a.bridge_addr() {
                 bridge_call(&addr, id, params)

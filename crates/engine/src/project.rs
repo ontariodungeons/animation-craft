@@ -33,6 +33,7 @@ pub fn write_project_file(s: &Session) -> Result<()> {
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| EngineError::InvalidParams(format!("cannot encode project: {e}")))?;
     std::fs::write(path, &text)?;
+    s.project_saves.set(s.project_saves.get() + 1);
     if s.record_user_state{crate::activity::stored(path,text.len());}
     Ok(())
 }

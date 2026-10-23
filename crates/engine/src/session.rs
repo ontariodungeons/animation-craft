@@ -46,6 +46,10 @@ pub struct Session {
     pub last_result: Option<Value>,
     /// Whether Blender 5.3 is reachable at 127.0.0.1:9876.
     pub blender_available: bool,
+    /// Project-file writes; `write_project_file` takes `&Session`, hence the cell.
+    pub project_saves: std::cell::Cell<u64>,
+    /// Successful journaled commands since the project file was last written.
+    pub edits_since_save: u64,
 }
 
 impl Default for Session {
@@ -68,6 +72,8 @@ impl Default for Session {
             preview_range: (0, 72),
             last_result: None,
             blender_available: false,
+            project_saves: std::cell::Cell::new(0),
+            edits_since_save: 0,
         }
     }
 }

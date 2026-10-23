@@ -26,6 +26,7 @@ yarn-error.log*
 dist/
 build/
 *.bundle.js
+apps/animationcraft-shell/frontend/node_modules
 
 # IDE / editor
 .idea/

@@ -332,6 +332,9 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
 #view-animation { min-width:0; }
 .motion-inspector { width:270px; flex:none; overflow-y:auto; padding:12px; border-right:1px solid var(--line); scrollbar-width:thin; }
 .motion-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.motion-theatre { flex:0 0 300px; min-height:180px; resize:vertical; overflow:hidden; border-top:1px solid var(--line); }
+.theatre-heading { height:28px; display:flex; gap:12px; align-items:center; padding:0 10px; font-size:11px; }
+#theatre-timeline { display:block; width:100%; height:calc(100% - 28px); border:0; }
 .motion-stagebar,.motion-transport { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--line); }
 .motion-stagebar { min-height:50px; }
 #motion-caption { white-space:nowrap; text-overflow:ellipsis; overflow:hidden; flex:1; }
