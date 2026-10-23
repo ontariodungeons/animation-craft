@@ -110,7 +110,7 @@ SUBCOMMANDS
   clips [character=<id>] [project=<file>] [--convert]
                                       each clip's Theatre sheet, duration and conversion status
                                       (motion.clips; --convert runs motion.clips.convert first)
-  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis (or a screenshot of the live window when --bridge is used)
+  vision [image_path | character]     direct pixel/alpha/drift/lift vision analysis of a PNG or a character's artwork
   run <script.jsonl | ->              run commands, one {\"id\",\"params\"} per line
   mcp                                 MCP server on stdio (headless engine, or the open window with --bridge);
                                       register it with your agent as: command `mc`, args [\"mcp\"]
@@ -121,16 +121,17 @@ SUBCOMMANDS
                                       talk to the app-selected chat agent (fresh by default; prints its reply);
                                       also: agent read [last=10], agent session (not an MCP tool)
 
-LIVE UI CONTROL COMMANDS (run with `--bridge <port> exec <command>`, e.g. `exec ui.state`)
-  ui.state                            inspect live GUI tab, anim_mode, yaw_deg, pose_range_pct
-  ui.inspect [filter=...]             list all interactive UI elements & bounding boxes
-  ui.click id=<elem_id> | x=.. y=..   click a UI element by its ui.inspect id (e.g. viewport.fit) or screen coordinate
+LIVE UI CONTROL COMMANDS (run with `--bridge auto exec <command>`, or the Studio's unix:<socket>)
+  ui.state                            project, view, animation (subject, track, time, selected part)
+  ui.elements [region=<id or CSS>]    visible clickable elements with ids, labels and boxes
+  ui.click id=<element id>            click an element by its ui.elements id (or aria label)
+  ui.set id=<element id> value=<v>    set an input or select (e.g. id=motion-track)
+  ui.key key=<key> [id=<element id>]  press a key, optionally on an element
   ui.screenshot [output=...]          save a PNG of the window
   ui.look [region=<id prefix>] [click=<id>] [pad=0] [max_side=1000] [output=...]
                                       one-step look: click (optional), then a PNG of the window or region,
                                       the app state and the ids inside it (MCP: ui_look returns the image)
-  ui.set_view tab=2d|3d mode=Walk yaw=90 pose_range_pct=70
-                                      switch live GUI viewport tab, action cycle, yaw, or pose range
+  ui.focus                            bring the Studio window to the front
   app.quit                            request guarded close; unsaved/unknown state refuses
   app_quit (MCP tool)                 same guarded close, current Studio auto-discovery
 
@@ -800,12 +801,8 @@ fn main() {
         "vision" => {
             let target = a.pos(1);
             let res = match (a.bridge_addr(), target) {
-                // The window has no vision command; analyze a screenshot of it instead.
-                (Some(addr), None) => {
-                    let out = std::env::temp_dir().join(format!("mc-vision-{}.png", std::process::id()));
-                    bridge_call(&addr, "ui.screenshot", json!({ "output": out }))
-                        .and_then(|_| bridge_call(&addr, "vision.analyze", json!({ "image": out })))
-                }
+                // Character metrics on a whole-window screenshot are meaningless; ask for a picture instead.
+                (Some(_), None) => usage("vision needs an image or character; for a picture of the window use `exec ui.look` or `exec ui.screenshot`"),
                 (bridge_opt, Some(t)) => {
                     let params = if std::path::Path::new(t).exists() {
                         json!({ "image": t })
