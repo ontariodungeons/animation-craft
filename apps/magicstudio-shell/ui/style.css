@@ -716,4 +716,6 @@ body.at-home .app-footer { display:none; }
 .blender-controls label { display:flex; flex-direction:column; gap:5px; color:var(--muted); }
 .blender-controls + .motion-main .motion-stagebar { flex-wrap:wrap; }
 .blender-controls + .motion-main [role="status"] { min-width:0; overflow-wrap:anywhere; }
-@media(max-width:760px){.blender-controls{width:190px}}
+#view-animation.active:has(.blender-controls) { grid-template-columns:270px minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+@media(max-width:1000px){#view-animation.active:has(.blender-controls){grid-template-columns:230px minmax(0,1fr)}}
+@media(max-width:760px){#view-animation.active:has(.blender-controls){grid-template-columns:190px minmax(0,1fr)}.blender-controls{width:190px}}
