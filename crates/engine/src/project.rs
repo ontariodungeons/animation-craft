@@ -124,6 +124,24 @@ fn recent_warning(s:&Session,path:&Path,requested:bool)->Vec<Value>{
     }
 }
 
+/// Migrate one legacy `.acproj` to `.magic`: rename the file and write the current format
+/// inside it. Explicit, reversible (the old name is reported) and never touches other files.
+pub fn cmd_project_migrate(_s:&mut Session,p:&Value)->Result<Value>{
+    let raw=p["path"].as_str().ok_or_else(||EngineError::InvalidParams("Give path=<legacy .acproj file>".into()))?;
+    let source=std::path::PathBuf::from(raw);
+    if !source.is_file(){return Err(EngineError::InvalidParams(format!("{} is not a file",source.display())));}
+    if source.extension().is_some_and(|e|e.eq_ignore_ascii_case("magic")){return Err(EngineError::InvalidParams("already a .magic project".into())); }
+    if !source.extension().is_some_and(|e|e.eq_ignore_ascii_case("acproj")){return Err(EngineError::InvalidParams("only a legacy .acproj can be migrated".into()));}
+    let target=source.with_extension("magic");
+    if target.exists(){return Err(EngineError::InvalidParams(format!("{} already exists; nothing was changed",target.display())));}
+    let mut doc:Value=serde_json::from_slice(&std::fs::read(&source)?).map_err(|e|EngineError::InvalidParams(format!("not a project file: {e}")))?;
+    let before=doc["format"].as_str().unwrap_or_default().to_string();
+    doc["format"]=json!(PROJECT_FORMAT);
+    std::fs::rename(&source,&target)?;
+    std::fs::write(&target,serde_json::to_vec_pretty(&doc).map_err(|_|EngineError::InvalidParams("cannot encode the migrated project".into()))?)?;
+    Ok(json!({"ok":true,"from":source,"to":target,"format_before":before,"format_after":PROJECT_FORMAT,"note":"The legacy file name is gone; rename it back to restore the old one."}))
+}
+
 /// Create a new `.magic` session.
 pub fn cmd_project_new(s: &mut Session, params: &Value) -> Result<Value> {
     let path = project_file_path(s, params)?;
