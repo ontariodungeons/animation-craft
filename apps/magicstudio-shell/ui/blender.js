@@ -75,8 +75,9 @@ async function blenderAnimationOpen(selection={}){
   }
   const placement=blenderPlacementControls({project,getJob:()=>latest,current});
   const busy=value=>{placement.setBusy(value);render.disabled=value;cancel.disabled=!value;for(const input of [picker,tracks,source,range,resolution])input.disabled=value;};
+  const roundtrip=el('button',{class:'ghost',id:'blender-source-links',onclick:()=>nativeAnimationOpen({backend:'blender',source:latest?.blend||'',character:choice.character,track:tracks.value})},'Native source / result / Save');
   controls.append(el('label',{},'Action',tracks),el('label',{},'Source',source),
-   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,details,placement.node);
+   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,roundtrip,details,placement.node);
   placement.load();
   async function poll(){
    if(!current()||!job)return;
