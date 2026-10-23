@@ -16,6 +16,7 @@
 
 mod args;
 mod center;
+mod find;
 mod logo;
 mod local_ui;
 mod snapshot;
@@ -107,6 +108,7 @@ SUBCOMMANDS
   login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
   commands [filter]                   list commands (id, label, shortcut, params)
+  find [words] [project=<file>] [--json]  ranked commands, project objects and visible controls; no words suggests likely reads
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
   storyboard --doctor                read-only section-boundary task list for the selected Studio project
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
@@ -683,7 +685,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -884,6 +886,16 @@ fn main() {
                     spec.shortcut.unwrap_or("-"),
                     spec.params
                 );
+            }
+        }
+        "find" => {
+            let query = (1..).map_while(|index| a.pos(index)).filter(|part| !part.contains('=')).collect::<Vec<_>>().join(" ");
+            let params = a.params_from(1).unwrap_or_else(|error| usage(error));
+            let report = find::report(&query, params["project"].as_str(), a.bridge_addr().as_deref());
+            if cli_args().iter().any(|arg| arg == "--json") {
+                outln!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+            } else {
+                outln!("{}", find::display(&report));
             }
         }
         "vision" => {
