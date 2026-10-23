@@ -73,6 +73,9 @@ impl Center {
                 value["ui"]=ui;
                 if self.pinned_instance.is_none(){self.pinned_instance=value["ui"]["instance"].as_str().map(str::to_owned);}
                 value["catalog"]=self.session.execute("project.catalog",json!({})).unwrap_or_else(|e|json!({"error":e.to_string()}));
+                let live=crate::snapshot::live(&value["ui"],&self.state["snapshot"]);
+                value["snapshot"]=crate::snapshot::build(value["project"].as_str(),&value["ui"],&live,&value["activity"]);
+                value["tail"]=merge_tail(&self.state["tail"],crate::snapshot::tail(&value["activity"],value["snapshot"]["project"].as_str()));
                 let cursor=value["activity"]["next_cursor"].as_u64().unwrap_or(0);
                 if self.seen_cursor>0&&cursor>self.seen_cursor{self.flash_after=self.seen_cursor;self.flash_started=Some(std::time::Instant::now());}
                 self.seen_cursor=cursor;self.state=value;
@@ -239,7 +242,7 @@ fn render_form(f: &mut Frame, c: &Center) {
     let title = Paragraph::new(vec![
         Line::from(vec![
             Span::styled(
-                "  ANIMATIONCRAFT ",
+                "  MAGIC STUDIO ",
                 Style::default()
                     .fg(Color::Rgb(102, 226, 205))
                     .add_modifier(Modifier::BOLD),
@@ -705,6 +708,17 @@ fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let skip=wrapped_rows(&lines,parts[0].width).saturating_sub(parts[0].height);f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((skip,0)),parts[0]);
  f.render_widget(Paragraph::new(vec![styled(if c.chat_editing{"F9/Esc leave draft · Enter send"}else{"F9 compose · Enter sends only while composing"},MUTED),styled(format!("> {}{}",c.chat_draft,if c.chat_editing{"_"}else{""}),DESK_FG)]).wrap(Wrap{trim:false}),parts[1]);
 }
+/// The booth keeps typed events past the journal's three-action retention while it runs.
+fn merge_tail(old:&Value,new:Vec<Value>)->Value{
+ let mut events=old.as_array().cloned().unwrap_or_default();let seen=events.iter().filter_map(|e|e["sequence"].as_u64()).max().unwrap_or(0);
+ events.extend(new.into_iter().filter(|e|e["sequence"].as_u64().is_some_and(|n|n>seen)));let excess=events.len().saturating_sub(50);events.drain(..excess);json!(events)
+}
+fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let block=round_panel("EVENTS · live · center.tail",MUTED,false);let rows=block.inner(area).height as usize;
+ let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().take(rows).map(|e|{let error=e["error"].as_str().map(|m|format!(" · {m}")).unwrap_or_default();styled(format!("{} {} {}{error}",stamp(e),e["type"].as_str().unwrap_or("?"),e["command"].as_str().unwrap_or("")),if e["ok"]==false{RED}else{DESK_FG})}).collect();
+ if lines.is_empty(){lines.push(styled("— No saved, generation, keyframe or error events yet.",MUTED));}
+ f.render_widget(Paragraph::new(lines).block(block),area);
+}
 fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let commands=c.copy_commands();let Some((effect,literal))=commands.get(c.command_selected%commands.len().max(1))else{return;};
  let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["label"].as_str()==Some(*effect)).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
@@ -713,17 +727,17 @@ fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
- let chunks=Layout::vertical([Constraint::Length(5),Constraint::Min(1),Constraint::Length(1)]).split(area);
+ let chunks=Layout::vertical([Constraint::Length(6),Constraint::Min(1),Constraint::Length(1)]).split(area);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
  let (saved,_)=saved_observation(ui);let status=if !matched{"? Studio unobserved"}else if ui["ui_ready"]==true{"[OK] Studio rendered"}else{"? Studio receipt pending"};
- let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED)];
+ let session=c.state["chat"]["session"].as_str().unwrap_or("none");let chat_status=if c.details_open{chat_outcome(&c.state)}else{let(mark,_)=state_badge(c.state["chat"]["request"]["status"].as_str());format!("Chat {mark}")};let header=vec![styled(format!("{name} · Studio {} · {status}",ui["view"].as_str().unwrap_or("tab unknown")),DESK_FG),styled(format!("{} / {} · session {}",sel["provider"].as_str().unwrap_or("agent unknown"),sel["model"].as_str().unwrap_or("model unknown"),if c.details_open{session}else{session.get(..session.len().min(16)).unwrap_or(session)}),MUTED),styled(format!("{saved} · {chat_status}"),MUTED),styled(crate::snapshot::status_line(&c.state["snapshot"]),TEAL)];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"F1 CONTROL | F2 BOOTH | F4 INTAKE"}else{"F1 CONTROL | F2 BOOTH | F4 INTAKE · D details"},MUTED,false)),chunks[0]);
  if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(9)]).split(chunks[1]);render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[1]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",MUTED,true)),p[0]);render_stage_activity(f,c,p[1]);render_conversation(f,c,p[2]);}
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
- if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);render_actions(f,c,p[0],true);render_next(f,c,p[1]);}
+ if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"F10 🩺 Doctor · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
@@ -743,8 +757,9 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     }
     if print {
         println!(
-            "ANIMATIONCRAFT / COMMAND CENTER\nProject: {}\nTranscript valid: {}\n{}\n{}",
+            "MAGIC STUDIO / COMMAND CENTER\nProject: {}\nStatus: {}\nTranscript valid: {}\n{}\n{}",
             c.state["project"],
+            crate::snapshot::status_line(&c.state["snapshot"]),
             c.state["transcript"]["valid"],
             c.message,
             c.details()
@@ -915,6 +930,18 @@ mod feedback_tests {
         let mut c=fixture();c.message="Chat running · old request".into();c.state["chat"]=json!({"session":"sessionA","selection":{"provider":"opencode","model":"free"},"request":{"status":"replied","request_id":"replyA"}});c.state["chat_turns"]=json!([{"role":"assistant","text":"ACTUAL_REPLY"}]);
         assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"transcript cannot establish official artist lyrics");
         for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Official lyrics","Liner notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
+    }
+    #[test]
+    fn both_views_show_the_shared_status_line_and_booth_follows_the_tail(){
+        let mut c=fixture();
+        c.state["snapshot"]=json!({"project":"/fixture.acproj","subject":"bee","clip":"fly","playhead_sec":1.5,"selected_part":"wing","unsaved_edits":1,"hyperframes":false,"fps":24,"last_error":null});
+        c.state["tail"]=merge_tail(&json!([]),crate::snapshot::tail(&json!({"events":[{"sequence":9,"stage":"saved_state","command":"project.save"}]}),None));
+        assert_eq!(merge_tail(&c.state["tail"],crate::snapshot::tail(&json!({"events":[{"sequence":9,"stage":"saved_state","command":"project.save"}]}),None)).as_array().unwrap().len(),1,"polling the same journal row twice adds it once");
+        for control in [false,true]{for(w,h)in [(90,38),(140,44)]{
+            let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,control)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");
+            assert!(screen.contains("subject bee · clip fly · ▶ 1.500s · part wing"),"{w} control={control}: missing status line\n{screen}");
+            if !control{assert!(screen.contains("EVENTS")&&screen.contains("saved project.save"),"{w}: missing event tail\n{screen}");}
+        }}
     }
 
 }
