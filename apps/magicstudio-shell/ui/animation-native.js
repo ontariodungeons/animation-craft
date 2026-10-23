@@ -24,6 +24,7 @@ async function nativeAnimationOpen(selection={}){
  let activeJob=null,lastReceipt=null,revision=0,rendering=false,selectedBackend=backend.value,requiredBundleFor=null;
  const capable={blender:true,synfig:false,opentoonz:false,mlt:false},names={blender:'Blender',synfig:'Synfig',opentoonz:'OpenToonz',mlt:'MLT assembly'};
  let sources=[],linked=null,unsaved=false,mutating=false;
+ const suggestedId=(selection.sourceId||[backend.value,selection.character,selection.track||selection.source?.split('/').pop()?.replace(/\.[^.]+$/,'')].filter(Boolean).join('-')).replace(/[^A-Za-z0-9_-]+/g,'-').slice(0,64)||'native-source';
  const links=el('select',{id:'native-source-links','aria-label':'Registered editable animation source'}),linkId=field('link-id','Source ID','text'),character=field('character','Character ID (optional pair)','text'),track=field('track','Authored action ID (optional pair)','text');
  const linkState=el('p',{id:'native-link-status',role:'status'}),linkReadback=el('pre',{id:'native-link-result',class:'animation-readback'}),linkCommand=el('code',{id:'native-link-command',class:'animation-readback'});
  const register=el('button',{id:'native-source-register',class:'ghost','data-commands':'animation.source.set'},'Register / update source'),accept=el('button',{id:'native-source-accept',class:'ghost','data-commands':'animation.source.accept'},'Accept completed result'),saveProject=el('button',{id:'native-source-save',class:'ghost','data-commands':'project.save'},'Save project'),reload=el('button',{id:'native-source-reload',class:'ghost','data-commands':'animation.sources'},'Reload sources');
@@ -68,7 +69,11 @@ async function nativeAnimationOpen(selection={}){
   const token=revision,selectedId=linked?.id;const value=await motionCommand('animation.sources',{expected_project:project});if(!current()||revision!==token)return;
   if(value.project!==project||!Array.isArray(value.sources))throw Error('Source readback belongs to another project or is incomplete.');
   sources=value.sources;unsaved=value.unsaved===true;sourceOptions();
-  const row=sources.find(row=>row.id===selectedId);if(row)showRow(row);else showRow(null);
+  const row=sources.find(row=>row.id===selectedId);if(row)showRow(row);else{
+   linked=null;links.value='';
+   if(selection.source&&linkId.input.value===suggestedId){let candidate=suggestedId,index=2;while(sources.some(row=>row.id===candidate))candidate=`${suggestedId}-${index++}`;linkId.input.value=candidate;}
+   linkState.textContent=selection.source?'Registration draft from saved scene · Register explicitly. Existing sources remain unchanged.':unsaved?'Source links changed in memory · Save project explicitly.':'Select or register an editable source.';cli();
+  }
  }
  reload.onclick=async()=>{if(rendering||mutating)return;try{await loadSources();}catch(error){if(current())linkState.textContent=String(error);}};
  links.onchange=async()=>{
@@ -119,7 +124,7 @@ async function nativeAnimationOpen(selection={}){
 
  session.dialog=dialogNode;dialogNode.addEventListener('close',()=>{if(nativeAnimationSession===session)nativeAnimationDispose()});document.body.append(dialogNode);dialogNode.showModal();busy(false);
  const discoverSynfig=async()=>{try{const value=await motionCommand('synfig.discover');if(!current())return;capable.synfig=value.available===true;capability.textContent=[capable.synfig?'Synfig available':'Synfig unavailable',value.install_dependency,...(value.limitations||[])].filter(Boolean).join(' · ');busy(rendering);}catch(error){if(current())capability.textContent=String(error);}};
+ if(selection.source){entry().input.value=selection.source;character.input.value=selection.character||'';track.input.value=selection.track||'';linkId.input.value=suggestedId;cli();}
  await Promise.all([discoverSynfig(),discoverToonz(),discoverMlt(),placement.load(),loadSources().catch(error=>{if(current())linkState.textContent=String(error);}),list().catch(error=>report(String(error),true))]);
- if(current()&&selection.source){entry().input.value=selection.source;character.input.value=selection.character||'';track.input.value=selection.track||'';cli();}
  if(current())report(capable[backend.value]?'Select or register an editable source to render.':'Native runtime unavailable; inspect discovery guidance.',!capable[backend.value]);
 }
