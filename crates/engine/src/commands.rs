@@ -517,6 +517,17 @@ pub fn build() -> Vec<CommandSpec> {
             always,
             crate::part_replacement::cmd_part_undo_image
         ),
+        CommandSpec {
+            id: "part.open_photocraft",
+            label: "Open Part in PhotoCraft",
+            menu: &["Animation", "Parts"],
+            shortcut: None,
+            params: "{\"asset\":\"optional asset id\",\"part\":\"stable part id\",\"which\":\"current|original\",\"spawn\":false}",
+            enabled: always,
+            run: crate::part_replacement::cmd_part_open_photocraft,
+            journal: false,
+            long_running: false,
+        },
         cmd!(
             "export.agent_prompt",
             "Export Agent Rig Prompt",
