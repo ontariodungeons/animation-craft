@@ -755,7 +755,8 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|{let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?");let task=g["terminal_title_stripped"].as_str().unwrap_or("");let cwd=g["cwd"].as_str().or(g["foreground_cwd"].as_str()).unwrap_or("");let proj=cwd.split('/').last().unwrap_or(cwd);format!("{}:{}{} {} @{}",name,g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"},task,proj)}).collect::<Vec<_>>().join("  |  ")).unwrap_or_default();
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
+ let app_open=c.state["ui"]["connection"]=="connected";let app_light=if app_open{"APP ● open"}else{"APP ○ off"};
+ let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("{}  ·  GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",app_light,if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
 
 fn render(f: &mut Frame,c: &Center) {
