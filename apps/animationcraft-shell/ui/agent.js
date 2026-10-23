@@ -314,9 +314,11 @@ function pointStart() {
 function agentToggle(open = !agent.open) {
   if (!state.project) return toast("Open a project first");
   agent.open = open;
+  document.body.classList.toggle("workstation-collapsed", !open);
   if (open && !agent.floating) {
     document.body.classList.add("agent-docked");
-    invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch((e) => status(String(e)));
+    const dockNode = typeof $("magic-workstation")?.getBoundingClientRect === "function" ? $("magic-workstation") : $("agent");
+    invoke("agent_dock", { width: dockNode.getBoundingClientRect().width }).catch((e) => status(String(e)));
   } else if (!open) {
     document.body.classList.remove("agent-docked");
     invoke("agent_dock", { width: 0 }).catch((e) => status(String(e)));

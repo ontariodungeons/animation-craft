@@ -1,6 +1,6 @@
 // Stock Theatre UI is contained inside the current Animation surface, so it
 // cannot cover the native inspector or Sproket workstation.
-const magicTheatre={frame:null,key:null,part:null,rotation:0,ready:false,syncing:false,availability:'unavailable',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',exports:new Map(),nextRequest:0,interactionRevision:0,savedRevision:0,gestureActive:false};
+const magicTheatre={frame:null,key:null,sheet:null,part:null,rotation:0,rotations:{},ready:false,syncing:false,availability:'unavailable',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',exports:new Map(),nextRequest:0,interactionRevision:0,savedRevision:0,gestureActive:false};
 function theatreFeedback(){
  return {availability:magicTheatre.availability,package_version:'0.7.0',error:magicTheatre.error,selected_objects:magicTheatre.objects,native_selected_part:motion.selected,sequence_position_seconds:magicTheatre.position,sequence_playing:magicTheatre.playing,native_playing:motion.playing,value_update:magicTheatre.valueUpdate,persistence:magicTheatre.persistence,saved_snapshot_unix_ms:magicTheatre.savedAt,live_edits:magicTheatre.interactionRevision>magicTheatre.savedRevision||magicTheatre.gestureActive?'needs_save':magicTheatre.savedAt||magicTheatre.persistence==='saved'?'saved_snapshot':'no_observed_interaction',visual_quality:'not_assessed'};
 }
@@ -16,25 +16,41 @@ function theatreCanLeave(){
 function theatreMount(container){
  theatreRequireSaved();
  const status=el('span',{id:'theatre-status',class:'muted'},'Loading Theatre…');
+ const clips=el('div',{id:'theatre-clips',class:'theatre-clips','aria-label':'Authored clips'});
  const frame=el('iframe',{id:'theatre-timeline',title:'Theatre motion timeline',src:'theatre-frame.html'});
- Object.assign(magicTheatre,{frame,key:null,ready:false,rotation:0,availability:'loading',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',interactionRevision:0,savedRevision:0,gestureActive:false});
+ Object.assign(magicTheatre,{frame,key:null,sheet:null,ready:false,rotation:0,rotations:{},availability:'loading',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',interactionRevision:0,savedRevision:0,gestureActive:false});
  const save=el('button',{id:'theatre-save',disabled:true,title:'Save native Theatre keyframes and curves into the current project',onclick:()=>theatreSave().catch(error=>toast(String(error)))},'Save motion');
- container.append(el('div',{class:'theatre-heading'},el('strong',{},'Theatre'),status,save),frame);
+ container.append(el('div',{class:'theatre-heading'},el('strong',{},'Theatre'),clips,status,save),frame);
+}
+function theatreSyncClips(){
+ const bar=$('theatre-clips');if(!bar||typeof bar.replaceChildren!=='function'||!motion.meta?.tracks)return;
+ const authored=(motion.meta.tracks||[]).filter(t=>!t.standard);
+ const pills=authored.map(t=>{
+  const active=!motion.rest&&motion.track===t.id;
+  const label=t.id.replace(/^.*?-beat\d+-/,'').replaceAll('-',' ');
+  const dur=Number.isFinite(t.duration)?` · ${Number(t.duration).toFixed(2)}s`:'';
+  return el('button',{class:`theatre-clip-pill${active?' active':''}`,title:`Open clip sheet ${t.id}`,'aria-pressed':String(active),onclick:async()=>{if(!theatreCanLeave())return;motion.track=t.id;motion.rest=false;motion.time=0;if(typeof acFeedback!=='undefined')acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});if(typeof animationControls==='function')animationControls();if(typeof animationSample==='function')await animationSample();}},`${label}${dur}`);
+ });
+ pills.push(el('button',{class:`theatre-clip-pill${motion.rest?' active':''}`,title:'Open rest pose sheet','aria-pressed':String(Boolean(motion.rest)),onclick:async()=>{if(!theatreCanLeave())return;motion.rest=true;motion.time=0;if(typeof acFeedback!=='undefined')acFeedback.report(null,null,{stage:'clip_switched',clip:'@rest'});if(typeof animationControls==='function')animationControls();if(typeof animationSample==='function')await animationSample();}},'Rest'));
+ bar.replaceChildren(...pills);
 }
 async function theatreContext(){
+ theatreSyncClips();
  if(!magicTheatre.ready||!motion.meta)return;
  const part=motion.selected||motion.meta.layers[0]?.id;if(!part)return;
  // One Theatre sheet per clip, the same "<asset> / <clip>" id the engine's motion.clips uses.
  const sheet=`${motion.character} / ${(motion.rest?'@rest':motion.track||'@rest').replace(/^@/,'')}`;
+ const parts=(motion.meta.layers||[]).map(l=>l.id);
  const key=JSON.stringify([state.project,motion.character,part,sheet]);if(key===magicTheatre.key)return;
- magicTheatre.key=key;magicTheatre.part=part;magicTheatre.rotation=0;
+ if(magicTheatre.sheet!==sheet){magicTheatre.sheet=sheet;magicTheatre.rotations={};}
+ magicTheatre.key=key;magicTheatre.part=part;magicTheatre.rotation=magicTheatre.rotations[part]||0;
  const project=state.project,character=motion.character,frame=magicTheatre.frame;
  try{
   if(magicTheatre.project!==project){magicTheatre.project=project;magicTheatre.load=motionCommand('motion.theatre.read',{expected_project:project});}
   const loaded=await magicTheatre.load;
   if(frame!==magicTheatre.frame||key!==magicTheatre.key||project!==state.project)return;
   magicTheatre.persistence=loaded.status;
-  frame.contentWindow.postMessage({magicTheatre:true,type:'context',project,character,sheet,part,state:loaded.state},location.origin);
+  frame.contentWindow.postMessage({magicTheatre:true,type:'context',project,character,sheet,part,parts,state:loaded.state},location.origin);
  }catch(error){magicTheatre.availability='error';magicTheatre.error=String(error);$('theatre-status').textContent=`Theatre load failed: ${error}`;theatreEvent('error',{error:String(error)});}
 }
 async function theatreSave(){
@@ -48,7 +64,7 @@ async function theatreSave(){
   });
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during export; no state saved');
   // An untouched timeline exports no sheets; the engine only stores real Theatre state.
-  if(!Object.keys(exported.state?.sheetsById||{}).length){$('theatre-status').textContent=`${magicTheatre.part} · no Theatre edits to save`;return {saved:false,reason:'no Theatre edits'};}
+  if(!Object.keys(exported.state?.sheetsById||{}).length){if(magicTheatre.interactionRevision===revision&&!magicTheatre.gestureActive)magicTheatre.savedRevision=revision;$('theatre-status').textContent=`${magicTheatre.part} · no Theatre edits to save`;return {saved:false,reason:'no Theatre edits'};}
   const result=await motionCommand('motion.theatre.save',{expected_project:project,state:exported.state});
   if(result.saved!==true||result.project!==project)throw new Error('Native Theatre save was not acknowledged');
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during save; the previous project snapshot was saved');
@@ -74,12 +90,17 @@ window.addEventListener('message',event=>{
  if(message.type==='keyframes'){theatreEvent('keyframes',{sheet:message.sheet,part:message.part,count:message.count,previous:message.previous});}
  if(message.type==='selection'){magicTheatre.objects=message.objects;theatreEvent('selection',{objects:message.objects});}
  if(message.type==='playback'){const changed=magicTheatre.playing!==message.playing;magicTheatre.playing=message.playing;if(changed)theatreEvent('playback',{playing:message.playing});}
- if(message.type==='values'&&message.part===magicTheatre.part){magicTheatre.rotation=message.rotation;theatreRender();magicTheatre.valueUpdate={part:message.part,property:'rotation',value:message.rotation,received_unix_ms:Date.now(),render_call_completed:true};}
+ if(message.type==='values'){
+  if(motion.meta?.layers?.some(l=>l.id===message.part))magicTheatre.rotations[message.part]=message.rotation;
+  if(message.part===magicTheatre.part){magicTheatre.rotation=message.rotation;theatreRender();magicTheatre.valueUpdate={part:message.part,property:'rotation',value:message.rotation,received_unix_ms:Date.now(),render_call_completed:true};}
+  else if(motion.meta?.layers?.some(l=>l.id===message.part)){theatreRender();}
+ }
  if(message.type==='seek'&&motion.sample){animationPause();motion.time=Math.max(0,Math.min(message.time,motion.sample.duration));magicTheatre.position=message.time;theatreRender();}
- if(message.type==='error'){magicTheatre.availability='error';magicTheatre.error=String(message.error);$('theatre-status').textContent=`Theatre failed: ${message.error}`;theatreEvent('error',{error:magicTheatre.error});}
+ if(message.type==='error'){magicTheatre.availability='error';magicTheatre.error=String(message.error);$('theatre-status').textContent=`Theatre failed: ${message.error}`;theatreEvent('error',{error:message.error});}
 });
 function theatreTransform(ctx,layer){
- if(layer.id!==magicTheatre.part||!magicTheatre.rotation)return;
+ const rot=layer.id===magicTheatre.part?magicTheatre.rotation:(magicTheatre.rotations?.[layer.id]||0);
+ if(!rot)return;
  const pivot=layer.pivot||[0,0];
- ctx.translate(pivot[0],pivot[1]);ctx.rotate(magicTheatre.rotation*Math.PI/180);ctx.translate(-pivot[0],-pivot[1]);
+ ctx.translate(pivot[0],pivot[1]);ctx.rotate(rot*Math.PI/180);ctx.translate(-pivot[0],-pivot[1]);
 }

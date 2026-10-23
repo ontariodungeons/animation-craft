@@ -65,9 +65,13 @@ function animationShell(){
   el('button',{class:'icon',id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
  const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step','Next frame','step',()=>{animationPause();motion.time=Math.min(motion.sample?.duration||0,motion.time+1/(motion.sample?.fps||30));animationDraw();}),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>{animationPause();motion.time=Number(e.target.value);animationDraw();}}));
- const theatre=el('section',{class:'motion-theatre','aria-label':'Theatre timeline'});
- view.append(inspector,el('div',{class:'motion-main'},toolbar,stage,transport,theatre));
- theatreMount(theatre);
+ const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar','aria-label':'Selected part controls'});
+ view.append(inspector,el('div',{class:'motion-main'},toolbar,stage,transport,partBar));
+ if(motion.mode!=='composite'){
+  const theatre=el('section',{class:'motion-theatre','aria-label':'Theatre timeline'});
+  view.append(theatre);
+  theatreMount(theatre);
+ }
  new ResizeObserver(()=>animationDraw()).observe(stage);
  $('motion-canvas').addEventListener('click',()=>{if(!motion.pen)$('motion-layers')?.setAttribute('open','');});
  setupPathPen($('motion-canvas'));
@@ -103,14 +107,23 @@ function animationControls(){
  const section=motionSection('Layers',layers,true);section.id='motion-layers';
  const selected=meta.layers.find(part=>part.id===motion.selected);
  const candidate=selected&&typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,selected.id):null;
+ const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file),alt:''}),el('span',{},part.id))));
  const compare=selected?el('div',{class:'magic-part-compare',id:'magic-part-compare'},
   el('div',{class:'magic-compare-title'},`${selected.label||selected.id} · ${selected.id}`),
   el('div',{class:'magic-compare-grid'},
    el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${selected.label||selected.id}`}),el('figcaption',{},'Original')),
    el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:convertFileSrc(candidate.image),alt:`Candidate for ${selected.label||selected.id}` }):el('div',{class:'magic-compare-empty'},'Generate a candidate for this selected part.'),el('figcaption',{},candidate?'Candidate · needs review':'Candidate'))
   ),
+  partsStrip,
+  el('div',{class:'magic-part-actions'},
+   el('span',{class:'magic-part-filename muted'},(selected.file||'').split('/').pop()||selected.id),
+   el('div',{class:'magic-part-links'},
+    el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${selected.label||selected.id}`,onclick:()=>selected.file&&openPath(selected.file)},'Inspect original'),
+    el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${selected.label||selected.id}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy asset path')
+   )
+  ),
   candidate?el('p',{class:'why'},'Original source remains unchanged until you explicitly replace it. Candidate dimensions must match the selected part exactly; motion, pivot, and timing stay in place.'):null
- ):el('p',{class:'why'},'Select a layer to compare its original with a generated candidate.');
+ ):el('div',{class:'magic-part-compare',id:'magic-part-compare'},el('p',{class:'why'},'Select a layer to compare its original with a generated candidate.'),partsStrip);
  if(selected){
   const sourceSize=selected.source_size||[];const dimensionsMatch=!!candidate&&candidate.result.width===sourceSize[0]&&candidate.result.height===sourceSize[1];
   const actionStatus=el('p',{class:'why',id:'part-image-status'},dimensionsMatch?'Candidate dimensions match the selected part.':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${selected.label||selected.id} requires ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}.`: 'Replacement requires a reviewed candidate for this captured part.');
@@ -146,6 +159,37 @@ function animationControls(){
   }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
  }},'Export track');
  box.append(motionSection('Export & integrations',[exportButton,exportStatus]));
+ const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
+ box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
+  el('strong',{},`${motion.character} · ${meta.layers.length} layers / ${authoredCount} authored clips`),
+  el('span',{class:'muted'},selected?`Selected: ${selected.label||selected.id}`:'Select a part in Layers or Parts & assets')
+ ));
+ renderPartControlsBar(selected);
+ if(typeof theatreSyncClips==='function')theatreSyncClips();
+}
+function renderPartControlsBar(selected){
+ const bar=$('motion-part-bar');if(!bar||typeof bar.replaceChildren!=='function')return;
+ if(motion.mode==='composite'||!motion.meta){bar.replaceChildren();bar.hidden=true;return;}
+ bar.hidden=false;
+ const activePart=selected||motion.meta.layers?.[0];
+ if(!activePart){bar.replaceChildren(el('span',{class:'muted'},'No rig layers available'));return;}
+ const shown=activePart.state?.visible!==false;
+ const currentAngle=Math.round((magicTheatre.part===activePart.id?magicTheatre.rotation:(magicTheatre.rotations?.[activePart.id]||0))*10)/10;
+ const angleOut=el('output',{id:'motion-part-angle-out'},`${currentAngle}°`);
+ const angleInput=el('input',{id:'motion-part-angle',type:'range',min:-45,max:45,step:1,value:currentAngle,'aria-label':`${activePart.label||activePart.id} angle`,title:'Rotate selected part around its pivot (-45° to +45°)',oninput:e=>{
+  const deg=Number(e.target.value);angleOut.textContent=`${deg}°`;
+  if(motion.selected!==activePart.id)motion.selected=activePart.id;
+  magicTheatre.part=activePart.id;magicTheatre.rotation=deg;magicTheatre.rotations[activePart.id]=deg;
+  animationDraw();
+ }});
+ bar.replaceChildren(
+  el('div',{class:'motion-part-title'},el('strong',{},activePart.label||activePart.id),el('span',{class:'muted'},activePart.id)),
+  el('label',{class:'motion-part-control'},el('span',{},'Angle',angleOut),angleInput),
+  motionRange('motion-bar-amount','Amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;if($('motion-amount'))$('motion-amount').value=String(v);clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);}),
+  motionRange('motion-bar-speed','Speed',0.25,2.25,0.05,motion.speed,'×',v=>{motion.speed=v;if($('motion-speed'))$('motion-speed').value=String(v);}),
+  motionButton('motion-bar-visible',`${shown?'Hide':'Show'} ${activePart.label||activePart.id}`,'eye',async()=>{await motionCommand('part.set_state',{part:activePart.id,visible:!shown});await animationRefresh();})
+ );
+ bar.lastChild?.setAttribute('aria-pressed',String(shown));
 }
 async function animationSample(){
  if(!motion.meta?.tracks?.length)return;
@@ -180,6 +224,7 @@ function animationDraw(){
  drawMotionPath(ctx,scale);
  $('motion-caption').textContent=`${motion.character} · ${motion.rest?'Rest pose':(meta.tracks.find(t=>t.id===motion.track)?.label||motion.track.replaceAll('-',' '))}`;
  $('motion-time').textContent=`${Math.floor(motion.time/60)}:${(motion.time%60).toFixed(3).padStart(6,'0')}`;$('motion-scrub').value=motion.time;
+ if($('motion-part-angle')&&document.activeElement!==$('motion-part-angle')){const deg=Math.round((magicTheatre.rotation||0)*10)/10;$('motion-part-angle').value=String(deg);if($('motion-part-angle-out'))$('motion-part-angle-out').textContent=`${deg}°`;}
  theatreSeek(motion.time);
 }
 

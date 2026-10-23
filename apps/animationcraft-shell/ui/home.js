@@ -6,6 +6,7 @@ const FILM = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" 
 const CROSS = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 async function showHome() {
+  if (typeof theatreCanLeave === "function" && !theatreCanLeave()) return;
   if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
   animationReset();
   if (agent.open) agentToggle(false);
@@ -14,8 +15,8 @@ async function showHome() {
   state.data = null;
   document.body.classList.add("at-home");
   document.body.classList.remove("split");
-  $("project-name").textContent = "AnimationCraft";
-  document.title = "AnimationCraft";
+  $("project-name").textContent = "Magic Studio";
+  document.title = "Magic Studio";
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-home"));
   await invoke("studio_hide").catch(() => {});
   await renderRecent();

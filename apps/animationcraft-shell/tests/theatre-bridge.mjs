@@ -104,4 +104,14 @@ const recover=vm.runInContext('theatreSave()',context);const recoverExport=messa
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:recoverExport.request,project:'/project/Bee.acproj',state:nativeState}});
 await recover;
 assert.equal(vm.runInContext('theatreCanLeave()',context),true,'saving recovers from an expected navigation refusal without a persistent frontend error');
-console.log('PASS: expected navigation refusal is recoverable after Save motion');
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'interaction',project:'/project/Bee.acproj',revision:4,active:false}});
+const untouched=vm.runInContext('theatreSave()',context);const untouchedExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:untouchedExport.request,project:'/project/Bee.acproj',state:{sheetsById:{}}}});
+await untouched;
+assert.equal(vm.runInContext('theatreCanLeave()',context),true,'saving an untouched timeline clears non-edit interaction lock');
+context.motion.meta.layers=[{id:'antenna'},{id:'wing-l'}];
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'wing-l',rotation:15}});
+operations.length=0;
+vm.runInContext('theatreTransform(ctx,{id:"wing-l",pivot:[4,8]})',context);
+assert.deepEqual(operations,[['translate',4,8],['rotate',15*Math.PI/180],['translate',-4,-8]],'non-selected rig layers on the active clip sheet retain their Theatre rotation');
+console.log('PASS: expected navigation refusal is recoverable after Save motion (including untouched timelines and multi-part sheets)');
