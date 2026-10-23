@@ -72,7 +72,7 @@ impl Center {
             ui=observe(None);
         }
         // Keep the last project inspection while the engine is busy; read its real journal directly.
-        let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null(){
+        let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null() && self.state["project"].is_string(){
             let mut value=self.state.clone();
             value["activity"]=self.session.execute("backstage.events",json!({"project":project,"limit":192})).unwrap_or_else(|e|json!({"error":e.to_string()}));
             Ok(value)

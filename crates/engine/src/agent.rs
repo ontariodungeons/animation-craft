@@ -34,6 +34,24 @@ pub fn settings() -> Result<Value> {
     Ok(selected)
 }
 
+/// Persist a repaired chat selection to the same settings file the app edits.
+/// Every other key (including credentials) is preserved exactly.
+fn persist_selection(selection:&Value)->Result<Value>{
+    let base=std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
+        .or_else(||std::env::var_os("HOME").map(|h|std::path::PathBuf::from(h).join(".config")))
+        .ok_or_else(||invalid("Cannot locate the app settings directory; selection not persisted"))?;
+    let path=base.join("animationcraft/agent.json");
+    let mut stored=fs::read_to_string(&path).ok().and_then(|t|serde_json::from_str::<Value>(&t).ok()).unwrap_or_else(||json!({}));
+    if !stored.is_object(){stored=json!({});}
+    for key in ["agent","provider","model","thinking"]{
+        if let Some(value)=selection[key].as_str(){stored[key]=json!(value);}
+    }
+    fs::create_dir_all(path.parent().ok_or_else(||invalid("App settings directory unavailable; selection not persisted"))?)?;
+    fs::write(&path,serde_json::to_vec_pretty(&stored).map_err(|_|invalid("Cannot encode the app settings; selection not persisted"))?)
+        .map_err(|_|invalid("Cannot write the app settings; selection not persisted"))?;
+    Ok(stored)
+}
+
 pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
     let mut value=match &s.agent_selection{Some(v)=>v.clone(),None=>settings()?};
     if let Some(error)=value["selection_error"].as_str(){return Err(invalid(error));}
@@ -121,7 +139,7 @@ fn models(dir:&Path)->Result<Vec<Value>> {
 /// repair is reported in the receipt; nothing is silently overridden per request.
 pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
     let mut selection=cmd_agent_config(s,&json!({}))?;
-    let mut repaired=Value::Null;
+    let mut repaired=Value::Null;let mut persisted=Value::Null;
     if selection["agent"]=="opencode" {
         let catalog=models(&crate::workshop::project_dir(s)?)?;
         let provider=selection["provider"].as_str().unwrap_or_default().to_string();
@@ -133,6 +151,11 @@ pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
             let pick=catalog.iter().find(|m|m["enabled"]==true&&free(m)).or_else(||catalog.iter().find(|m|m["enabled"]==true));
             if let Some(m)=pick{
                 cmd_agent_config(s,&json!({"selection":{"agent":"opencode","provider":m["providerID"],"model":m["id"]}}))?;
+                // Persisting is best-effort: the app may hold the settings file locked. The
+                // session still uses the repaired selection; the receipt reports the outcome.
+                if let Err(error)=persist_selection(&json!({"agent":"opencode","provider":m["providerID"],"model":m["id"]})){
+                    persisted=json!({"ok":false,"error":error.to_string()});
+                }
                 repaired=json!({"from":{"provider":provider,"model":model},"to":{"provider":m["providerID"],"model":m["id"]},"reason":"the selected model is no longer enabled in agent.models; the shared app selection was moved to an enabled model"});
                 selection=cmd_agent_config(s,&json!({}))?;
             }
@@ -141,7 +164,7 @@ pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
     let mut send=params.clone();
     if !send.get("free_only").is_some(){send["free_only"]=json!(true);}
     let mut result=cmd_agent_send(s,&send)?;
-    result["sprocket"]=json!({"name":"Sprocket","role":"the app's own in-app agent","selection":selection,"selection_repaired":repaired});
+    result["sprocket"]=json!({"name":"Sprocket","role":"the app's own in-app agent","selection":selection,"selection_repaired":repaired,"selection_persisted":persisted});
     Ok(result)
 }
 
@@ -174,7 +197,7 @@ fn state_dir(s:&Session)->Result<std::path::PathBuf> {Ok(crate::workshop::projec
 fn chat_identity(s:&Session)->Result<Value>{
  let path=s.project_path.as_ref().ok_or_else(||invalid("Open the target project before chat"))?;
  let dir=crate::workshop::project_dir(s)?;
- let files=fs::read_dir(&dir)?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("acproj"))).count();
+ let files=fs::read_dir(&dir).map_err(|e|invalid(format!("Cannot read the project directory for chat: {e}")))?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("acproj"))).count();
  if files>1{return Err(invalid("Multiple project files share this chat directory; chat blocked to prevent cross-project messages. Give each project its own directory; history was preserved"));}
  let project=fs::canonicalize(path).unwrap_or_else(|_|path.clone());
  let owner=state_dir(s)?.join("chat-project.json");
@@ -183,7 +206,7 @@ fn chat_identity(s:&Session)->Result<Value>{
 }
 fn request_file(s:&Session)->Result<std::path::PathBuf>{Ok(state_dir(s)?.join("chat-request.json"))}
 fn request_read(s:&Session)->Value{request_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)}
-fn request_write(s:&Session,v:&Value)->Result<()>{fs::create_dir_all(state_dir(s)?)?;fs::write(request_file(s)?,serde_json::to_vec_pretty(v).map_err(|_|invalid("Cannot encode chat receipt"))?)?;Ok(())}
+fn request_write(s:&Session,v:&Value)->Result<()>{fs::create_dir_all(state_dir(s)?)?;write_atomic(&request_file(s)?,&serde_json::to_vec_pretty(v).map_err(|_|invalid("Cannot encode chat receipt"))?)?;Ok(())}
 fn refresh_reply(s:&Session)->Result<Value>{
  chat_identity(s)?;let mut r=request_read(s);
  if !matches!(r["status"].as_str(),Some("running"|"stalled")){return Ok(r);}
@@ -214,14 +237,29 @@ fn refresh_reply(s:&Session)->Result<Value>{
 }
 fn log_file(s:&Session)->Result<std::path::PathBuf> {Ok(state_dir(s)?.join("agent-log.json"))}
 pub(crate) fn log_read(s:&Session)->Value {log_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).filter(Value::is_array).unwrap_or_else(||json!([]))}
+/// Write a file by rename, never in place: the live Studio and the CLI share these
+/// paths, and an in-place write on a busy volume fails with EAGAIN.
+fn write_atomic(path:&Path,bytes:&[u8])->Result<()>{
+    let parent=path.parent().ok_or_else(||invalid("Chat state path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    let temporary=parent.join(format!(".{}.{}.tmp",path.file_name().and_then(|n|n.to_str()).unwrap_or("chat"),stamp()));
+    fs::write(&temporary,bytes)?;
+    fs::rename(&temporary,path).map_err(|e|{let _=fs::remove_file(&temporary);invalid(format!("Cannot publish chat state: {e}"))})?;
+    Ok(())
+}
+
 fn log_push(s:&Session,entry:Value)->Result<()> {
     let file=log_file(s)?;fs::create_dir_all(state_dir(s)?)?;
     let mut turns=log_read(s);if let Some(list)=turns.as_array_mut(){list.push(entry);}
-    fs::write(file,serde_json::to_vec_pretty(&turns).map_err(|_|invalid("Cannot serialize chat log"))?)?;Ok(())
+    write_atomic(&file,&serde_json::to_vec_pretty(&turns).map_err(|_|invalid("Cannot serialize chat log"))?)?;Ok(())
 }
+/// Archive the previous transcript. Best-effort: the live Studio may hold the file open,
+/// and keeping the old log is better than failing the request.
 fn archive(s:&Session)->Result<()> {
     let file=log_file(s)?;
-    if file.exists(){fs::rename(&file,file.with_file_name(format!("agent-log.{}.json",stamp())))?;}
+    if file.exists(){
+        let _=fs::rename(&file,file.with_file_name(format!("agent-log.{}.json",stamp())));
+    }
     Ok(())
 }
 fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
@@ -266,7 +304,7 @@ fn open_session(s:&Session,wanted:&Value,fresh:bool,image_task:bool)->Result<Str
         let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
         verify_model(&dir,id.trim(),wanted)?;if image_task{verify_image_task(s,id.trim())?;}return Ok(id.trim().into());
     }
-    let mut body=json!({"title":"Sproket · AnimationCraft","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}});
+    let mut body=json!({"title":"Sproket · AnimationCraft","model":wanted,"location":{"directory":fs::canonicalize(&dir).map_err(|e|invalid(format!("Cannot resolve the project directory for the chat: {e}")))?}});
     if image_task{body["permissions"]=image_task_permissions()?;}
     let response=api(&dir,"session.create",None,Some(body))?;
     let id=data(&response)["id"].as_str().filter(|id|id.starts_with("ses_")&&!id.chars().any(char::is_control)).ok_or_else(||invalid("OpenCode did not return a valid session ID; no prompt sent"))?;
@@ -274,11 +312,13 @@ fn open_session(s:&Session,wanted:&Value,fresh:bool,image_task:bool)->Result<Str
     fs::create_dir_all(&state)?;archive(s)?;
     if let Ok(previous)=fs::read_to_string(&file) {
         use std::io::Write;
-        let mut history=fs::OpenOptions::new().create(true).append(true).open(state.join("chat-history.jsonl"))?;
-        writeln!(history,"{}",json!({"session":previous.trim(),"replaced_by":id}))?;
+        let mut history=fs::OpenOptions::new().create(true).append(true).open(state.join("chat-history.jsonl"))
+            .map_err(|e|invalid(format!("Cannot record the replaced chat: {e}")))?;
+        writeln!(history,"{}",json!({"session":previous.trim(),"replaced_by":id}))
+            .map_err(|e|invalid(format!("Cannot record the replaced chat: {e}")))?;
     }
-    fs::write(state.join("chat-project.json"),json!({"project":project}).to_string())?;
-    fs::write(file,id)?;Ok(id.into())
+    write_atomic(&state.join("chat-project.json"),json!({"project":project}).to_string().as_bytes())?;
+    write_atomic(&file,id.as_bytes())?;Ok(id.into())
 }
 pub fn cmd_agent_log(s:&mut Session,p:&Value)->Result<Value> {chat_identity(s)?;if p["refresh"]==true{refresh_reply(s)?;}Ok(log_read(s))}
 pub fn cmd_agent_session(s:&mut Session,_:&Value)->Result<Value> {

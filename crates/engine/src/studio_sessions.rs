@@ -8,29 +8,61 @@ use std::{
 pub fn canonical(path: &Path) -> Result<PathBuf, String> {
     std::fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))
 }
+/// A busy Studio can refuse a connection with EAGAIN while its accept queue is full.
+/// Retry briefly: a dropped command is worse than a short wait.
+#[cfg(unix)]
+fn connect_with_retry(path: &Path) -> Result<std::os::unix::net::UnixStream, String> {
+    let mut last = String::new();
+    for attempt in 0..20 {
+        match std::os::unix::net::UnixStream::connect(path) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::ConnectionRefused {
+                    return Err(format!("stale endpoint: {e}"));
+                }
+                last = e.to_string();
+                if attempt < 19 {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+    Err(last)
+}
 #[cfg(unix)]
 pub fn request(path: &Path, id: &str, params: Value) -> Result<Value, String> {
+    request_within(path, id, params, 3)
+}
+#[cfg(unix)]
+pub fn request_within(path: &Path, id: &str, params: Value, timeout_seconds: u64) -> Result<Value, String> {
     crate::local_ipc::private_path(path.parent().ok_or("Endpoint directory missing")?, true)?;
     crate::local_ipc::private_path(path, false)?;
-    let mut stream = std::os::unix::net::UnixStream::connect(path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::ConnectionRefused {
-            format!("stale endpoint: {e}")
-        } else {
-            e.to_string()
-        }
-    })?;
-    crate::local_ipc::peer(&stream)?;
+    let mut stream = connect_with_retry(path)?;
+    crate::local_ipc::peer(&stream).map_err(|e|format!("Studio peer check failed: {e}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
+        .set_read_timeout(Some(Duration::from_secs(timeout_seconds)))
         .map_err(|e| e.to_string())?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(3)))
+        .set_write_timeout(Some(Duration::from_secs(timeout_seconds)))
         .map_err(|e| e.to_string())?;
     writeln!(stream, "{}", json!({"id":id,"params":params})).map_err(|e| e.to_string())?;
     let mut line = String::new();
-    BufReader::new(stream)
-        .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stream);
+    for attempt in 0..4 {
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => break,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
+                ) && attempt < 3 =>
+            {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     let reply: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
     if reply["ok"] == true {
         Ok(reply["result"].clone())
@@ -67,7 +99,7 @@ pub fn discover() -> Value {
             if path.extension().is_none_or(|e| e != "sock") {
                 continue;
             }
-            match request(&path,"ui.feedback",json!({})){
+            match request_within(&path,"ui.feedback",json!({}),1){
    Ok(mut value)=>{value["endpoint"]=json!(format!("unix:{}",path.display()));value["instance"]=json!(path.file_name().and_then(|p|p.to_str()));if let Some(raw)=value["active_project"].as_str(){value["canonical_project"]=json!(canonical(Path::new(raw)).ok());}sessions.push(value);},
    Err(error)=>errors.push(json!({"endpoint":path,"error":error,"state":if error.starts_with("stale endpoint:"){"stale endpoint; no listener"}else{"unresponsive or inaccessible; ownership unknown"}}))
   }
