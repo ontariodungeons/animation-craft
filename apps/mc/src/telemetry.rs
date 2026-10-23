@@ -81,6 +81,26 @@ pub fn pid_from_socket(socket: &Path) -> Option<u32> {
     socket.file_name()?.to_str()?.split('-').next()?.parse().ok()
 }
 
+/// The newest Studio endpoint in the runtime directory, as a pid.
+pub fn studio_pid() -> Option<u32> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)?;
+    let dir = runtime.join("magicstudio-studio");
+    let mut newest: Option<(std::time::SystemTime, u32)> = None;
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "sock") {
+            continue;
+        }
+        let Some(pid) = pid_from_socket(&path) else { continue; };
+        let stamp = entry.metadata().and_then(|m| m.modified()).ok();
+        let stamp = stamp.unwrap_or(std::time::UNIX_EPOCH);
+        if newest.as_ref().is_none_or(|(old, _)| stamp > *old) {
+            newest = Some((stamp, pid));
+        }
+    }
+    newest.map(|(_, pid)| pid)
+}
+
 /// Human-readable byte size.
 pub fn mib(bytes_kb: u64) -> String {
     format!("{:.0}M", bytes_kb as f64 / 1024.0)

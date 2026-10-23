@@ -33,6 +33,9 @@ struct Center {
     agent_gang: Value,
     agent_gang_at: Option<std::time::Instant>,
     muppets_view: bool,
+    catalog_selected: usize,
+    spy: Option<String>,
+    spy_at: Option<std::time::Instant>,
     pulse: Option<(f64, f64, Vec<crate::telemetry::Proc>)>,
     pulse_at: Option<std::time::Instant>,
     scroll: u16,
@@ -57,14 +60,11 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,muppets_view:false,pulse:None,pulse_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
-        if self.session.project_path.is_none() {
-            if let Some(first)=crate::dispatch(&mut self.session,"project.catalog",json!({})).ok().and_then(|v|v["projects"].as_array().cloned()).and_then(|ps|ps.into_iter().find(|p|p["exists"]==true)).and_then(|p|p["path"].as_str().map(str::to_owned)) {
-                let _=self.session.execute("project.attach",json!({"path":first}));
-            }
-        }
+        // No project is attached: the booth waits in the workshop for you to choose one.
+        if self.session.project_path.is_none() { self.control_view=true; }
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
         let observe=|pin:Option<&str>|crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":pin.map(str::to_owned)})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
         let mut ui=observe(self.pinned_instance.as_deref());
@@ -122,17 +122,22 @@ impl Center {
                     }
                 }
                 self.state["agent_gang"]=self.agent_gang.clone();
-                if self.pulse_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true){
-                    if let Some(endpoint)=self.state["ui"]["endpoint"].as_str(){
-                        if let Some(pid)=crate::telemetry::pid_from_socket(std::path::Path::new(endpoint.trim_start_matches("unix:"))){
-                            let tree=crate::telemetry::tree(pid);
-                            let previous=self.pulse.as_ref().map(|(cpu,_,_)|*cpu).unwrap_or(0.0);
-                            let ticks=tree.iter().map(|p|p.cpu_pct).sum::<f64>();
-                            let cpu=crate::telemetry::cpu_since(previous,&tree);
-                            let _=ticks;
-                            self.pulse=Some((cpu,crate::telemetry::rss_mb(&tree),tree));
-                            self.pulse_at=Some(std::time::Instant::now());
+                // The backstage watch: read what an agent last said, straight from its pane.
+                if self.spy_at.map(|t|t.elapsed().as_secs()>=5).unwrap_or(true){
+                    if let Some(name)=self.state["agent_gang"].as_array().and_then(|a|a.first()).and_then(|g|g["name"].as_str().map(str::to_owned)){
+                        if let Ok(out)=std::process::Command::new("herdr").args(["agent","read",&name,"--source","recent-unwrapped","--lines","40"]).output(){
+                            if let Ok(text)=String::from_utf8(out.stdout){self.spy=Some(text.lines().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"));}
                         }
+                    }
+                    self.spy_at=Some(std::time::Instant::now());
+                }
+                if self.pulse_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true){
+                    if let Some(pid)=crate::telemetry::studio_pid(){
+                        let tree=crate::telemetry::tree(pid);
+                        let previous=self.pulse.as_ref().map(|(cpu,_,_)|*cpu).unwrap_or(0.0);
+                        let cpu=crate::telemetry::cpu_since(previous,&tree);
+                        self.pulse=Some((cpu,crate::telemetry::rss_mb(&tree),tree));
+                        self.pulse_at=Some(std::time::Instant::now());
                     }
                 }
                 if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
@@ -140,6 +145,16 @@ impl Center {
 
             },Err(error)=>{self.message=error.clone();self.state["ui"]=json!({"connection":"stale_or_unavailable","ui_ready":false,"error":error,"recovery":"F8 explicitly reattaches the same project; Studio is never switched."});},
         }
+    }
+    /// Attach the project chosen in the workshop and watch it from the booth.
+    fn observe_selected(&mut self){
+        let Some(path)=self.state["catalog"]["projects"].as_array().and_then(|p|p.get(self.catalog_selected)).and_then(|p|p["path"].as_str().map(str::to_owned)) else {return;};
+        if self.session.execute("project.attach",json!({"path":path})).is_err(){return;}
+        self.fields[0]=path;
+        self.control_view=false;
+        self.muppets_view=false;
+        self.pinned_instance=None;
+        self.refresh();
     }
     fn observe_chat_delivery(&mut self){
         let receipt=&self.state["chat"]["request"];
@@ -711,21 +726,22 @@ fn render_catalog(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
     let projects: Vec<&Value> = c.state["catalog"]["projects"].as_array().into_iter().flatten().collect();
     let block = round_panel("ALL PROJECTS · shared Home recent catalog", TEAL, false);
     let inner = block.inner(area); let width = inner.width as usize;
-    let mut lines = vec![styled("Existing Home catalog · newest ten paths · readiness is not approval", MUTED)];
+    let mut lines = vec![styled("Existing Home catalog · j/k choose · Enter observes from the booth · readiness is not approval", MUTED)];
     let widths = if width >= 100 { [width * 24 / 100, width * 20 / 100, width * 25 / 100, width * 12 / 100, width * 19 / 100] } else { [width,0,0,0,0] };
     if width >= 100 { lines.push(styled(format!("{}{}{}{}{}", padded("PROJECT",widths[0]), padded("ENGINE",widths[1]), padded("STUDIO UI",widths[2]), padded("REV LAG",widths[3]), padded("LAST ACTION",widths[4])), MUTED)); }
     let actions = root_actions(c);
-    for project in projects {
+    for (index, project) in projects.iter().enumerate() {
         let current = project["path"] == c.state["project"] && c.state["project"].is_string();
         let ui = &c.state["ui"];
         let matched = current && ui["active_project"] == c.state["project"] && ui["connection"] == "connected";
         let engine = if current { actions.first().map(|a|engine_badge(a)).unwrap_or(("— UNKNOWN", DESK_FG)) } else { ("— UNKNOWN", DESK_FG) };
         let ack = if matched && ui["ui_ready"] == true { ("▣ UI UPDATED",GREEN) } else { ("! ACK UNKNOWN / MISSING",AMBER) };
-        let name = format!("{} {}", if current { ">" } else { " " }, project["name"].as_str().unwrap_or("unnamed"));
+        let picked = index == c.catalog_selected;
+        let name = format!("{}{} {}", if current { ">" } else { " " }, if picked { "›" } else { " " }, project["name"].as_str().unwrap_or("unnamed"));
         if width >= 100 {
             lines.push(Line::from(vec![Span::styled(padded(&name,widths[0]),Style::default().fg(if current { BLUE } else { DESK_FG })), Span::styled(padded(engine.0,widths[1]),Style::default().fg(engine.1)), Span::styled(padded(ack.0,widths[2]),Style::default().fg(ack.1)), Span::styled(padded(&lag(ui,matched),widths[3]),Style::default().fg(if matched && ui["ui_ready"] == true { GREEN } else { AMBER })), Span::styled(padded(if current { actions.first().and_then(|a|root_start(a)).map(target).unwrap_or("—") } else { "— unobserved" },widths[4]),Style::default().fg(MUTED))]));
         } else {
-            lines.push(styled(name, BLUE));
+            lines.push(styled(name, if picked { TEAL } else { BLUE }));
             lines.push(Line::from(vec![Span::styled(format!("  {}  ",engine.0),Style::default().fg(engine.1)), Span::styled(ack.0,Style::default().fg(ack.1))]));
         }
         lines.push(styled(format!("  └─ {}",compact_path(project["path"].as_str().unwrap_or("path unavailable"), width.saturating_sub(5))),MUTED));
@@ -869,7 +885,14 @@ fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  match &c.pulse{
   Some((cpu,rss,procs))=>{
    lines.push(styled(format!("studio · {} · cpu {:.0}% · mem {:.0}M",procs.len(),cpu,rss),DESK_FG));
-   for p in procs.iter().take(6){lines.push(styled(format!("  {:<18}{:>7}  {}",fit_text(&p.name,18),crate::telemetry::mib(p.rss_kb),p.pid),MUTED));}
+   let room=area.width.saturating_sub(4) as usize;
+   for p in procs.iter().take(6){
+    let name=fit_text(&p.name,room.saturating_sub(9).max(6));
+    let width=room.saturating_sub(9).max(6);
+    let mut row=format!("  {name:<width$}{:>7}",crate::telemetry::mib(p.rss_kb),width=width);
+    if room>=34{row.push_str(&format!("  {}",p.pid));}
+    lines.push(styled(row,MUTED));
+   }
   }
   None=>lines.push(styled("Studio process not observed",AMBER)),
  }
@@ -883,6 +906,7 @@ fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 /// MAPPETS: every agent in the gang, what it is building, and whether it is free.
 fn render_muppets(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines:Vec<Line<'static>>=Vec::new();
+ let watch=c.spy.clone().unwrap_or_default();
  lines.push(styled("The gang on this project",DESK_FG));
  lines.push(styled("● working · ◐ stalled · ○ idle — ○ is who you can hand the next scene to.",MUTED));
  let mut free=0usize;
@@ -899,6 +923,10 @@ fn render_muppets(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
   ]));
  }
  lines.push(styled(format!("{free} idle and available"),if free>0{GREEN}else{MUTED}));
+ if !watch.is_empty(){
+  lines.push(Line::raw(""));
+  for line in watch.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev(){lines.push(styled(line.to_string(),MUTED));}
+ }
  let sprocket=c.state["chat"]["request"]["status"].as_str().unwrap_or("");
  let (colour,word)=match sprocket{"replied"=>(GREEN,"REPLIED"),"running"|"queued"=>(AMBER,"WORKING"),"error"=>(RED,"ERROR"),_=>(MUTED,"IDLE")};
  lines.push(Line::from(vec![Span::styled(format!("{} Sprocket",if word=="WORKING"{"●"}else{"○"}),colour),Span::styled(format!("  {:<9}","in-app"),MUTED),Span::styled(format!("{word:<8}"),colour),Span::styled(" the app's own agent",DESK_FG)]));
@@ -907,14 +935,14 @@ fn render_muppets(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
  let gang_rows=if narrow{0}else{5};
- let chunks=Layout::vertical([Constraint::Length(1),Constraint::Length(6),Constraint::Min(1),Constraint::Length(gang_rows),Constraint::Length(1),Constraint::Length(1)]).split(area);
+ let chunks=Layout::vertical([Constraint::Length(1),Constraint::Length(4),Constraint::Min(1),Constraint::Length(gang_rows),Constraint::Length(1),Constraint::Length(1)]).split(area);
  let snapshot=&c.state["snapshot"];
  let song=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("NO PROJECT").to_uppercase();
  let playhead=snapshot["playhead_sec"].as_f64().unwrap_or(0.0);
  let fps=snapshot["fps"].as_f64().unwrap_or(24.0);
  let reel=snapshot["clip"].as_str().unwrap_or("").trim_start_matches('@').to_uppercase();let reel=if reel.is_empty(){"IDLE".to_string()}else{reel};
  let caption=format!("REEL {reel} · {song} · {}",timecode(playhead,fps));
- f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ MAGIC STUDIO",&caption)),chunks[0]);
+ f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ MAGIC STUDIO: BACKSTAGE",&caption)),chunks[0]);
  f.render_widget(Paragraph::new(letterbox(area.width as usize,"◉ BACKSTAGE","")),chunks[5]);
  let name=c.state["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("No project");let ui=&c.state["ui"];let sel=&c.state["chat"]["selection"];
  let matched=ui["connection"]=="connected"&&ui["active_project"]==c.state["project"];
@@ -925,10 +953,15 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  ];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS"}else{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS · D PULSE"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
  if c.muppets_view{render_muppets(f,c,chunks[2]);}
- else if control{let p=Layout::vertical([Constraint::Length(4),Constraint::Min(5),Constraint::Length(9)]).split(chunks[2]);
+ else if control{let p=Layout::vertical([Constraint::Length(5),Constraint::Min(5),Constraint::Length(11)]).split(chunks[2]);
   let card=crate::logo::title_card_fitted(p[0].width as usize);
   if card.is_empty(){f.render_widget(Paragraph::new(styled("MAGIC STUDIO",TEAL)).block(round_panel("WORKSHOP · the studio",TEAL,false)),p[0]);}
-  else{f.render_widget(Paragraph::new(card),p[0]);}
+  else{
+   let card_width=crate::logo::TITLE_CARD[0].chars().count().min(p[0].width as usize);
+   let pad=((p[0].width as usize).saturating_sub(card_width))/2;
+   let lines:Vec<Line<'static>>=card.into_iter().map(|l|{let mut spans=vec![Span::raw(" ".repeat(pad))];spans.extend(l.spans);Line::from(spans)}).collect();
+   f.render_widget(Paragraph::new(lines),p[0]);
+  }
   render_catalog(f,c,p[1]);render_commands(f,c,p[2],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
  if narrow{let p=Layout::vertical([Constraint::Length(6),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,true)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);if c.details_open{render_pulse(f,c,p[2]);}else{render_conversation(f,c,p[2]);}}
@@ -1015,6 +1048,9 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
                     KeyCode::Char('[')=>c.stage_selected=(c.stage_selected+PROJECT_STAGES.len()-1)%PROJECT_STAGES.len(),
                     KeyCode::Char(']')=>c.stage_selected=(c.stage_selected+1)%PROJECT_STAGES.len(),
                     KeyCode::Char('d')=>c.details_open=!c.details_open,
+                    KeyCode::Char('j') if c.control_view=>c.catalog_selected+=1,
+                    KeyCode::Char('k') if c.control_view=>c.catalog_selected=c.catalog_selected.saturating_sub(1),
+                    KeyCode::Enter if c.control_view=>c.observe_selected(),
                     KeyCode::PageDown=>c.scroll=c.scroll.saturating_add(4),
                     KeyCode::PageUp=>c.scroll=c.scroll.saturating_sub(4),
                     KeyCode::F(8)=>{c.pinned_instance=None;c.refresh();},
@@ -1100,7 +1136,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,muppets_view:false,pulse:None,pulse_at:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,muppets_view:false,catalog_selected:0,pulse:None,pulse_at:None,spy:None,spy_at:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){

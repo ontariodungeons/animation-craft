@@ -1,17 +1,15 @@
 //! The Magic Studio title card.
 //!
 //! Drawn with `bit` (Terminal ANSI Logo Designer) in the `dogica` face, then baked in as
-//! plain glyphs so the app carries no runtime dependency and no escape codes.
+//! plain glyphs so the app carries no runtime dependency and no escape codes. The colour
+//! ramp is the same teal-to-gold gradient `bit` renders, interpolated per column.
 
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
 };
 
-/// The word "MAGIC" ends at this column; "STUDIO" follows.
-const SPLIT: usize = 32;
-
-/// The studio mark: four rows of glyphs.
+/// The studio mark: four rows of glyphs, straight from `bit -font dogica`.
 pub const TITLE_CARD: [&str; 4] = [
     "█    █  ▄▀▀▀▄  ▄▀▀▀▀  ▀█▀  ▄▀▀▀▄     ▄▀▀▀▄ ▀▀█▀▀  █   █  ▀█▀▀▀▄  ▀█▀  ▄▀▀▀▄",
     "█▀▄▄▀█  █   █  █  ▄▄   █   █         ▀▄▄▄    █    █   █   █   █   █   █   █",
@@ -19,20 +17,35 @@ pub const TITLE_CARD: [&str; 4] = [
     "▀    ▀  ▀   ▀   ▀▀▀▀  ▀▀▀   ▀▀▀       ▀▀▀    ▀     ▀▀▀    ▀▀▀▀   ▀▀▀   ▀▀▀ ",
 ];
 
-/// The mark as styled lines: "MAGIC" in the studio teal, "STUDIO" in the reel gold.
+/// Interpolate the studio gradient across `width` columns.
+fn ramp(width: usize) -> Vec<Color> {
+    let (r0, g0, b0) = (100u8, 215u8, 194u8);
+    let (r1, g1, b1) = (240u8, 190u8, 112u8);
+    (0..width.max(1))
+        .map(|i| {
+            let t = if width <= 1 { 0.0 } else { i as f32 / (width - 1) as f32 };
+            Color::Rgb(
+                (r0 as f32 + (r1 as f32 - r0 as f32) * t).round() as u8,
+                (g0 as f32 + (g1 as f32 - g0 as f32) * t).round() as u8,
+                (b0 as f32 + (b1 as f32 - b0 as f32) * t).round() as u8,
+            )
+        })
+        .collect()
+}
+
+/// The mark as styled lines, coloured with the studio gradient.
 pub fn title_card() -> Vec<Line<'static>> {
+    let width = TITLE_CARD[0].chars().count();
+    let colours = ramp(width);
     TITLE_CARD
         .iter()
         .map(|row| {
-            let (left, right) = row
-                .char_indices()
-                .nth(SPLIT)
-                .map(|(at, _)| row.split_at(at))
-                .unwrap_or((row, ""));
-            Line::from(vec![
-                Span::styled(left.to_string(), Style::default().fg(Color::Rgb(100, 215, 194))),
-                Span::styled(right.to_string(), Style::default().fg(Color::Rgb(240, 190, 112))),
-            ])
+            Line::from(
+                row.chars()
+                    .enumerate()
+                    .map(|(index, ch)| Span::styled(ch.to_string(), Style::default().fg(colours[index.min(colours.len() - 1)])))
+                    .collect::<Vec<_>>(),
+            )
         })
         .collect()
 }
@@ -77,6 +90,13 @@ mod tests {
         for row in TITLE_CARD {
             assert_eq!(row.chars().count(), width);
         }
+    }
+
+    #[test]
+    fn the_gradient_runs_from_teal_to_gold() {
+        let colours = ramp(10);
+        assert_eq!(colours.first(), Some(&Color::Rgb(100, 215, 194)));
+        assert_eq!(colours.last(), Some(&Color::Rgb(240, 190, 112)));
     }
 
     #[test]
