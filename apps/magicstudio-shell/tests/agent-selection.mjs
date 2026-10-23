@@ -190,3 +190,7 @@ await import('./animation-bridge.mjs');
 await import('./animation-transport.mjs');
 
 await import('./animation-native.mjs');
+
+await import('./motion-authoring-controls.mjs');
+
+await import('./animation-session.mjs');

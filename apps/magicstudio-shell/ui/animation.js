@@ -1,10 +1,23 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
 function animationFeedback(){
- return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null};
+ return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
+}
+// UI view preferences are project-scoped; rig/Theatre persistence remains owned by the engine.
+function animationRemember(){
+ if(!state.project||motion.project!==state.project||!motion.character)return;
+ const value={project:state.project,character:motion.character,track:motion.track,selected:motion.selected,rest:motion.rest,time:motion.time,speed:motion.speed,amount:motion.amount,previewLoop:motion.previewLoop,points:motion.points.map(p=>[...p]),pathUndo:motion.pathUndo,pathLayer:motion.pathLayer,pathDuration:motion.pathDuration,startSize:motion.startSize,endSize:motion.endSize};
+ const serialized=JSON.stringify(value);if(motion.remembered===serialized)return;motion.remembered=serialized;
+ try{const prior=JSON.parse(localStorage.getItem('animation.sessions')||'[]');localStorage.setItem('animation.sessions',JSON.stringify([value,...(Array.isArray(prior)?prior:[]).filter(v=>v.project!==state.project)].slice(0,20)));}catch{}
+}
+function animationRestore(){
+ try{const entries=JSON.parse(localStorage.getItem('animation.sessions')||'[]'),v=Array.isArray(entries)?entries.find(v=>v.project===state.project):null;if(!v||typeof v.character!=='string'||typeof v.track!=='string')return null;
+ const number=(key,fallback,min,max)=>Number.isFinite(v[key])&&v[key]>=min&&v[key]<=max?v[key]:fallback;
+ return {character:v.character,track:v.track,selected:typeof v.selected==='string'?v.selected:null,rest:v.rest===true,time:number('time',0,0,600),speed:number('speed',1,0.25,2.25),amount:number('amount',100,0,100),previewLoop:typeof v.previewLoop==='boolean'?v.previewLoop:null,points:Array.isArray(v.points)&&v.points.length<=512&&v.points.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite))?v.points.map(p=>[...p]):[],pathUndo:typeof v.pathUndo==='string'?v.pathUndo:null,pathLayer:typeof v.pathLayer==='string'?v.pathLayer:null,pathDuration:number('pathDuration',5,0.1,600),startSize:number('startSize',100,1,1000),endSize:number('endSize',100,1,1000)};
+ }catch{return null;}
 }
 function animationReset(){
- theatreRequireSaved();
+ theatreRequireSaved();animationRemember();
  blenderDispose();
  animationPause();
  Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pathLayer:null,previewLoop:null,pen:false,fit:true,zoom:1});
@@ -45,6 +58,7 @@ async function animationOpen(){
  if(motion.project===state.project && motion.meta){animationDraw();return;}
  theatreRequireSaved();
  motion.project=state.project;motion.meta=null;motion.sample=null;motion.time=0;motion.rest=true;
+ motion.resume=animationRestore();if(motion.resume)Object.assign(motion,motion.resume);
  animationShell();
  try{
   const assets=await motionCommand('project.list_assets');
@@ -89,13 +103,13 @@ function animationShell(){
  $('motion-canvas').addEventListener('keydown',e=>{if(e.key===' '){e.preventDefault();animationPlay();}});
 }
 async function animationLoad(){
- animationPause();const request=++motion.request;motion.loading=true;
+ animationPause();const request=++motion.request,resume=motion.resume;motion.resume=null;motion.loading=true;
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
-  motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
+  motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=resume&&meta.tracks?.some(t=>t.id===resume.track)?resume.track:meta.tracks?.[0]?.id||'';motion.time=resume?.time||0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file);})));if(request!==motion.request)return;
   // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
-  const opening=motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
+  const opening=!resume&&motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
   if(opening){motion.track=opening.id;motion.rest=false;}
   animationControls();await animationSample();refreshPartDrafts();
   if(opening&&motion.meta===meta&&!motion.playing)await animationPlay();
@@ -103,21 +117,22 @@ async function animationLoad(){
 }
 function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
+ const authoring=motionAuthoringPanels(meta);
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
- box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
+ box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker),authoring.status);
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
- box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
+ box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks,authoring.action],true));
  box.append(pathControls());
- const loop=el('input',{id:'motion-preview-loop',type:'checkbox',onchange:e=>{motion.previewLoop=e.target.checked;}});loop.checked=motion.previewLoop??meta.tracks.find(t=>t.id===motion.track)?.loop??false;
+ const loop=el('input',{id:'motion-preview-loop',type:'checkbox',onchange:e=>{motion.previewLoop=e.target.checked;animationRemember();}});loop.checked=motion.previewLoop??meta.tracks.find(t=>t.id===motion.track)?.loop??false;
  box.append(motionSection('Motion & timing',[el('label',{},loop,'Loop preview'),
- motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>motion.speed=v),
- motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],false));
+ motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>{motion.speed=v;animationRemember();}),
+ motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;animationRemember();clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],false));
  const layers=el('div',{class:'motion-layers'});
  for(const l of [...meta.layers].reverse()){
   const row=el('div',{class:`motion-layer${motion.selected===l.id?' selected':''}`,id:`motion-layer-${l.id}`,title:l.id});const shown=l.state?.visible!==false;
-  row.append(el('img',{src:motionAssetUrl(l.file),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{part:l.id,visible:!shown});await animationRefresh();}));
+  row.append(el('img',{src:motionAssetUrl(l.file),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:l.id,visible:!shown});await animationRefresh();}));
   row.lastChild.setAttribute('aria-pressed',String(shown));if(!shown)row.classList.add('hidden-layer');layers.append(row);
  }
  const section=motionSection('Layers',layers,true);section.id='motion-layers';
@@ -170,37 +185,26 @@ function animationControls(){
    const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
   }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
  }},'Export track');
- box.append(motionSection('Export & integrations',[exportButton,exportStatus],false));
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus,authoring.pose],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.assets?.find(a=>a.id===motion.character)?.name||motion.character} · Subject / shared engine · ${meta.layers.length} layers / ${authoredCount} authored clips`),
   el('span',{class:'muted'},selected?`Selected: ${selected.label||selected.id}`:'Select a part in Layers or Parts & assets')
  ));
- renderPartControlsBar(selected);
+ renderPartControlsBar(selected,authoring.part);
  if(typeof theatreSyncClips==='function')theatreSyncClips();
+ animationRemember();
 }
-function renderPartControlsBar(selected){
- const bar=$('anim-selected-part-inspector');if(!bar||typeof bar.replaceChildren!=='function')return;
- if(motion.mode==='composite'||!motion.meta){bar.replaceChildren();return;}
- const activePart=selected||motion.meta.layers?.[0];
- if(!activePart){bar.replaceChildren(el('span',{class:'muted'},'No rig layers available'));return;}
- const shown=activePart.state?.visible!==false;
- const currentAngle=Math.round((magicTheatre.part===activePart.id?magicTheatre.rotation:(magicTheatre.rotations?.[activePart.id]||0))*10)/10;
- const angleOut=el('output',{id:'motion-part-angle-out'},`${currentAngle}°`);
- const angleInput=el('input',{id:'motion-part-angle',type:'range',min:-45,max:45,step:1,value:currentAngle,'aria-label':`${activePart.label||activePart.id} angle`,title:'Rotate selected part around its pivot (-45° to +45°)',oninput:e=>{
-  const deg=Number(e.target.value);angleOut.textContent=`${deg}°`;
-  if(motion.selected!==activePart.id)motion.selected=activePart.id;
-  magicTheatre.part=activePart.id;magicTheatre.rotation=deg;magicTheatre.rotations[activePart.id]=deg;
-  animationDraw();
- }});
- bar.replaceChildren(
-  el('div',{class:'motion-part-title'},el('strong',{},activePart.label||activePart.id),el('span',{class:'muted'},activePart.id)),
-  el('label',{class:'motion-part-control'},el('span',{},'Angle',angleOut),angleInput),
-  motionRange('motion-bar-amount','Amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;if($('motion-amount'))$('motion-amount').value=String(v);clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);}),
-  motionRange('motion-bar-speed','Speed',0.25,2.25,0.05,motion.speed,'×',v=>{motion.speed=v;if($('motion-speed'))$('motion-speed').value=String(v);}),
-  motionButton('motion-bar-visible',`${shown?'Hide':'Show'} ${activePart.label||activePart.id}`,'eye',async()=>{await motionCommand('part.set_state',{part:activePart.id,visible:!shown});await animationRefresh();})
- );
- bar.lastChild?.setAttribute('aria-pressed',String(shown));
+function renderPartControlsBar(selected,controls){
+ const bar=$('anim-selected-part-inspector');if(!bar)return;
+ bar.replaceChildren(controls);
+ if(!selected)return;
+ const character=motion.character,project=state.project,shown=selected.state?.visible!==false;
+ const set=async values=>{try{await motionCommand('part.set_state',{expected_project:project,character,part:selected.id,...values});await animationRefresh();}catch(error){toast(String(error));}};
+ bar.append(el('p',{class:'muted'},`Layer ${selected.order??'?'} · parent ${selected.parent||'root'} · pivot ${(selected.pivot||[]).join(', ')}`),
+ motionButton('motion-bar-visible',`${shown?'Hide':'Show'} ${selected.label||selected.id}`,'eye',()=>set({visible:!shown})),
+ motionButton('motion-bar-solo',`${selected.state?.solo?'Unsolo':'Solo'} ${selected.label||selected.id}`,'layers',()=>set({solo:!selected.state?.solo})),
+ el('button',{id:'motion-show-all',class:'ghost','data-commands':'part.show_all',onclick:async()=>{try{await motionCommand('part.show_all',{expected_project:project,character});await animationRefresh();}catch(error){toast(String(error));}}},'Show all parts'));
 }
 // Compare | All parts: one tab at a time, remembered while the view is open.
 function partsDrawer(compare,assetsGrid){
@@ -210,7 +214,7 @@ function partsDrawer(compare,assetsGrid){
   const candidate=partCandidate(part.id);
   const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
   const badge=candidate?el('span',{class:'magic-part-dot warn',title:candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'}):picked?el('span',{class:'magic-part-dot accent',title:'Selected'}):null;
-  const visible=motionButton(`magic-part-visible-${part.id}`,`${shown?'Hide':'Show'} ${name}`,'eye',async()=>{await motionCommand('part.set_state',{part:part.id,visible:!shown});await animationRefresh();});
+  const visible=motionButton(`magic-part-visible-${part.id}`,`${shown?'Hide':'Show'} ${name}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:part.id,visible:!shown});await animationRefresh();});
   visible.setAttribute('aria-pressed',String(shown));
   return el('article',{class:`magic-part-card${picked?' active':''}${shown?'':' hidden-layer'}`,id:`magic-part-card-${part.id}`,title:`${name} (${part.id})`},
    el('button',{class:'magic-part-card-thumb',tabindex:'-1','aria-hidden':'true',onclick:select},el('img',{src:motionAssetUrl(part.file),alt:''})),
@@ -284,7 +288,7 @@ async function animationRefresh(){
 
 function animationSeek(time){
  if(!Number.isFinite(time))return;
- animationPause();motion.time=Math.max(0,Math.min(motion.sample?.duration||0,time));animationDraw();
+ animationPause();motion.time=Math.max(0,Math.min(motion.sample?.duration||0,time));animationDraw();animationRemember();
 }
 function animationStep(direction){animationSeek(motion.time+direction/(motion.sample?.fps||30));}
 function animationPause(){
@@ -292,6 +296,7 @@ function animationPause(){
  const wasPlaying=motion.playing;motion.playing=false;motion.playId=(motion.playId||0)+1;
  if(typeof cancelAnimationFrame==='function'&&motion.tick){cancelAnimationFrame(motion.tick);motion.tick=0;}
  if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';$('motion-play').setAttribute('aria-label','Play motion');}
+ if(wasPlaying)animationRemember();
  if(wasPlaying&&typeof theatreSeek==='function'&&motion.sample)theatreSeek(motion.time);
 }
 async function animationPlay(){
@@ -320,6 +325,7 @@ function animationDraw(){
  $('motion-caption').textContent=`${motion.character} · ${motion.rest?'Rest pose':(meta.tracks.find(t=>t.id===motion.track)?.label||motion.track.replaceAll('-',' '))}`;
  $('motion-time').textContent=`${Math.floor(motion.time/60)}:${(motion.time%60).toFixed(3).padStart(6,'0')}`;$('motion-scrub').value=motion.time;
  if($('motion-part-angle')&&document.activeElement!==$('motion-part-angle')){const deg=Math.round((magicTheatre.rotation||0)*10)/10;$('motion-part-angle').value=String(deg);if($('motion-part-angle-out'))$('motion-part-angle-out').textContent=`${deg}°`;}
+ if(!motion.playing&&!motion.loading)animationRemember();
  if(!motion.playing||magicTheatre.interactionRevision>magicTheatre.savedRevision)theatreSeek(motion.time);
  if(typeof timelineSeek==='function')timelineSeek(motion.time);
 }
@@ -365,3 +371,5 @@ async function applyMotionPath(){
  motion.pathUndo=result.undo;motion.sample=null;motion.track=result.track;motion.rest=false;motion.pen=false;motion.time=0;motion.meta=await motionCommand('motion.tracks',{character:motion.character});animationControls();$('motion-pen').setAttribute('aria-pressed','false');$('motion-canvas').classList.remove('drawing');await animationSample();toast('Path ready · play to review');
  }catch(e){toast(String(e));}finally{if($('motion-path-apply'))$('motion-path-apply').disabled=motion.points.length<2;}
 }
+
+window.addEventListener('pagehide',animationRemember);

@@ -55,7 +55,7 @@ async function blenderAnimationOpen(selection={}){
   picker.onchange=()=>blenderAnimationOpen({character:picker.value,track:choice.track});
   controls.append(picker);
   const meta=await motionCommand('blender.actions',{character:choice.character});if(!current())return;
-  const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id)));
+  const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id,title:t.id},(choice.character===motion.character?motion.meta?.tracks?.find(a=>a.id===t.id)?.label:null)||t.id.replaceAll('_',' ').replaceAll('-',' '))));
   if(!tracks.options.length){report('Author a motion track before migrating this rig.');return;}
   if([...tracks.options].some(option=>option.value===choice.track))tracks.value=choice.track;
   choice.track=tracks.value;

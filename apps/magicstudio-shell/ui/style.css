@@ -749,3 +749,11 @@ body.at-home .app-footer { display:none; }
 .native-render-body video { width:100%;max-height:280px; }
 .animation-readback { white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto; }
 .motion-stagebar, .motion-tools, .motion-modes { flex-wrap:wrap; }
+
+.animation-authoring-fields { display:grid;gap:8px;min-width:0; }
+.animation-authoring-fields label { display:grid;gap:3px;min-width:0; }
+.animation-authoring-fields input:not([type=checkbox]),.animation-authoring-fields select { width:100%;min-width:0;box-sizing:border-box; }
+.animation-authoring-fields p:empty,#authoring-edit-status:empty { display:none; }
+.animation-authoring-fields button { white-space:normal;max-width:100%; }
+
+.animation-pose-preview { width:100%;max-height:180px;object-fit:contain;background:var(--bg); }
