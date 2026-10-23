@@ -68,6 +68,7 @@ function createCompanionBoxes() {
         resolution: null,
         source: null,
         observed_at: null,
+        receipt: null,
       };
       boxes.set(id, box);
     } else {
@@ -120,11 +121,14 @@ function createCompanionBoxes() {
 
   // Readiness the page already renders. It may say a prerequisite is unmet;
   // it never means the box failed.
+  // Readiness is what the page already renders. It may say a prerequisite is unmet, so it maps both
+  // the legacy "needs" flag and a real box state; it never turns a control into a failure.
   function readiness(id, { state = null, reason = null } = {}) {
     const box = register(id);
     if (!box) return null;
-    if (state === "needs" && box.state !== "working" && box.state !== "failed") {
-      box.state = "needs-attention";
+    const next = state === "needs" ? "needs-attention" : BOX_STATES.includes(state) ? state : null;
+    if (next && box.state !== next && box.state !== "working" && box.state !== "failed") {
+      box.state = next;
       if (reason != null) box.reason = String(reason).slice(0, 180);
       box.source = "readiness";
       box.observed_at = Date.now();
@@ -156,6 +160,25 @@ function createCompanionBoxes() {
     return candidates;
   }
 
+  // A command's receipt, kept beside the control it came from. Global Undo/Redo and Autosave read
+  // this instead of every element growing its own save logic: one shape, written once.
+  function recordReceipt(id, result = {}) {
+    const box = boxes.get(id);
+    if (!box) return null;
+    const dirty = result.dirty;
+    box.receipt = {
+      undo: result.undo ?? null,
+      revision: result.revision ?? result._ui_engine_revision ?? null,
+      saved: result.saved ?? (dirty === false ? true : dirty === true ? false : null),
+      command: result.command ?? null,
+      at: Date.now(),
+    };
+    box.observed_at = Date.now();
+    box.seq = ++changeSeq;
+    notify();
+    return box.receipt;
+  }
+
   function get(id) {
     return boxes.get(id) || null;
   }
@@ -181,6 +204,7 @@ function createCompanionBoxes() {
         resolution: box.resolution,
         source: box.source,
         observed_at: box.observed_at,
+        receipt: box.receipt,
       });
     }
     rows.sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id.localeCompare(b.id));
@@ -223,7 +247,7 @@ function createCompanionBoxes() {
     return () => listeners.delete(fn);
   }
 
-  return { register, fact, observe, readiness, resolve, get, snapshot, markUnavailable, clear, states: BOX_STATES, signal, dot, subscribe };
+  return { register, fact, observe, readiness, resolve, recordReceipt, get, snapshot, markUnavailable, clear, states: BOX_STATES, signal, dot, subscribe };
 }
 
 // One shared registry, created before the app renders, so every control can

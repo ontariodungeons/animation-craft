@@ -93,6 +93,17 @@ const tests = [
     await flush();
     assert.equal(JSON.stringify(pets.snapshot().sproket), before);
   }],
+  ['a command receipt rides on the control, never in per-element save logic', async () => {
+    const { boxes } = fixture();
+    boxes.register('save', { project: '/p/Study.magic' });
+    const receipt = boxes.recordReceipt('save', { undo: 'tok-1', revision: 7, dirty: false, command: 'project.save' });
+    assert.equal(receipt.undo, 'tok-1', 'undo token is kept');
+    assert.equal(receipt.revision, 7, 'project revision is kept');
+    assert.equal(receipt.saved, true, 'a clean result is saved');
+    const row = boxes.snapshot({ project: '/p/Study.magic' }).find(r => r.id === 'save');
+    assert.deepEqual(row.receipt, receipt, 'readers see the same receipt');
+    assert.equal(boxes.recordReceipt('save', { dirty: true }).saved, false);
+  }],
   ['no engine command id may live in the companion controller', () => {
     const source = read('companions.js');
     const hit = source.match(/\b(agent|image|blender|storyboard|mlt|synfig|opentoonz|video|sprocket)\.[a-z_]+/g);
