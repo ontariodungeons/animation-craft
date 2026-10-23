@@ -42,6 +42,8 @@ function createCompanions(frames, options = {}) {
       const holder = document.createElement("span");
       holder.className = "companion-sprite";
       nodes[name].sprite = holder;
+      // The holder is the pet's only child: without this the sprite is built but never painted.
+      nodes[name].replaceChildren(holder);
     }
     const holder = nodes[name].sprite;
     if (holder.firstChild !== img) {
@@ -142,6 +144,7 @@ function createCompanions(frames, options = {}) {
 
   function react() {
     if (!boxes) return;
+    if (!enabled) { for (const name of Object.keys(nodes)) nodes[name].hidden = true; return; }
     rails?.discover();
     const rows = boxes.snapshot({ project: state.project }).filter(row => row.signal > 0);
     const newestFirst = (a, b) => (b.seq ?? 0) - (a.seq ?? 0) || (b.observed_at ?? 0) - (a.observed_at ?? 0);

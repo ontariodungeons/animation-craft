@@ -64,6 +64,7 @@ const tests = [
     boxes.fact({ id: 'green', project: '/p/Study.magic', state: 'ready' });
     boxes.fact({ id: 'red', project: '/p/Study.magic', state: 'failed' });
     const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
     await flush();
     const snap = pets.snapshot();
     assert.equal(snap.sproket.box, 'red');
@@ -75,6 +76,7 @@ const tests = [
     const { ctx, boxes } = fixture();
     boxes.fact({ id: 'yellow', project: '/p/Study.magic', state: 'needs-attention' });
     const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
     await flush();
     assert.equal(pets.snapshot().sproket.pose, 'work');
     boxes.fact({ id: 'yellow', project: '/p/Study.magic', state: 'ready' });
@@ -87,6 +89,7 @@ const tests = [
   ['commands and jobs move nothing; only box signals do', async () => {
     const { ctx, boxes } = fixture();
     const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
     const before = JSON.stringify(pets.snapshot().sproket);
     pets.event({ command: 'blender.start', project: '/p/Study.magic', phase: 'error' });
     pets.event({ command: 'agent.send', project: '/p/Study.magic', phase: 'error' });
