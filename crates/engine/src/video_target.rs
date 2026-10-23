@@ -617,17 +617,35 @@ fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
         .ok_or_else(||invalid("Open a .magic project first".into()))?;
     let clip=PathBuf::from(receipt["clip"].as_str().ok_or_else(||invalid("Receipt has no clip".into()))?);
     if clip.parent()!=Some(jobs.as_path()){return Err(invalid("Receipt clip is outside its job folder".into()));}
-    if receipt["clip_sha256"].as_str()!=Some(format!("{:x}",Sha256::digest(std::fs::read(&clip)?)).as_str()){
+    // Stream the hash: a long clip must not be loaded into Studio memory.
+    let mut hasher=Sha256::new();
+    std::io::copy(&mut std::fs::File::open(&clip)?,&mut hasher)?;
+    if receipt["clip_sha256"].as_str()!=Some(format!("{:x}",hasher.finalize()).as_str()){
         return Err(invalid("Clip does not match its receipt clip_sha256".into()));
     }
     for key in ["character","track"]{
         if let Some(v)=params.get(key) && *v!=receipt[key]{return Err(invalid(format!("{key} does not match the rendered job ({})",receipt[key])));}
     }
     let number=|v:&Value,what:&str|v.as_f64().filter(|n|n.is_finite()).ok_or_else(||invalid(format!("{what} is missing or invalid")));
-    let rate=params.get("playback_rate").map_or(Ok(1.0),|v|number(v,"playback_rate"))?;
-    let duration=number(&params["duration"],"duration")?;
-    let seconds=number(&receipt["clip_seconds"],"Receipt clip_seconds")?;
-    if rate>0.0 && duration>seconds/rate+1e-6{
+    let positive=|v:&Value,what:&str|number(v,what).and_then(|n|if n>0.0{Ok(n)}else{Err(invalid(format!("{what} must be positive")))});
+    let rate=params.get("playback_rate").map_or(Ok(1.0),|v|positive(v,"playback_rate"))?;
+    if rate>16.0{return Err(invalid("playback_rate must be in (0,16]".into()));}
+    let duration=positive(&params["duration"],"duration")?;
+    let (seconds,fps)=(positive(&receipt["clip_seconds"],"Receipt clip_seconds")?,positive(&receipt["fps"],"Receipt fps")?);
+    let (width,height)=(positive(&receipt["width"],"Receipt width")?,positive(&receipt["height"],"Receipt height")?);
+    // The receipt must describe the actual media: dimensions exact, rate and duration within a frame.
+    let probe=run_tool_in(&jobs,"ffprobe",&["-v","error","-select_streams","v:0","-show_entries","stream=width,height,r_frame_rate:format=duration","-of","json"].map(String::from).into_iter().chain([clip.to_string_lossy().into_owned()]).collect::<Vec<_>>())?;
+    let probe:Value=serde_json::from_str(&probe).map_err(|e|invalid(format!("ffprobe output: {e}")))?;
+    let stream=&probe["streams"][0];
+    let media_fps=stream["r_frame_rate"].as_str().and_then(|r|r.split_once('/'))
+        .and_then(|(n,d)|Some(n.parse::<f64>().ok()?/d.parse::<f64>().ok()?)).filter(|f|f.is_finite()&&*f>0.0);
+    let media_seconds=probe["format"]["duration"].as_str().and_then(|d|d.parse::<f64>().ok());
+    let (Some(media_fps),Some(media_seconds),Some(media_w),Some(media_h))=(media_fps,media_seconds,stream["width"].as_f64(),stream["height"].as_f64())
+        else{return Err(invalid("ffprobe could not read the clip's frame rate, duration or dimensions".into()));};
+    if media_w!=width||media_h!=height||(media_fps-fps).abs()>fps*1e-3||(media_seconds-seconds).abs()>1.0/fps{
+        return Err(invalid(format!("Clip media ({media_w}x{media_h}, {media_fps:.3}fps, {media_seconds:.3}s) does not match its receipt ({width}x{height}, {fps:.3}fps, {seconds:.3}s)")));
+    }
+    if duration>seconds/rate+1e-6{
         return Err(invalid(format!("Clip covers {:.3}s at playback_rate {rate}; requested duration is {duration}s",seconds/rate)));
     }
     // rect frames the original canvas with object-fit: contain; the clip itself shows world_rect.
@@ -636,7 +654,6 @@ fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
         a.iter().map(|x|number(x,what)).collect()
     };
     let (c,world,rect)=(values(&receipt["canvas"],2,"Receipt canvas")?,values(&receipt["world_rect"],4,"Receipt world_rect")?,values(&params["rect"],4,"rect")?);
-    let (width,height)=(number(&receipt["width"],"Receipt width")?,number(&receipt["height"],"Receipt height")?);
     let (ww,wh)=(world[2]-world[0],world[3]-world[1]);
     if !(c[0]>0.0&&c[1]>0.0&&ww>0.0&&wh>0.0&&rect[2]>0.0&&rect[3]>0.0) || (ww/wh*height-width).abs()>1.0{
         return Err(invalid("rect, canvas or world_rect is invalid, or world_rect does not match the clip aspect".into()));
@@ -650,7 +667,7 @@ fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
     request["character"]=receipt["character"].clone();
     request["track"]=receipt["track"].clone();
     let mut frozen=json!({"receipt":jobs.join("result.json"),"relationship":"provenance frozen when this clip was rendered; later source edits do not change it"});
-    for key in ["job","source_job","character","track","spec","rig_sha256","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect"]{
+    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect"]{
         frozen[key]=receipt[key].clone();
     }
     request["rendered_source"]=frozen;
