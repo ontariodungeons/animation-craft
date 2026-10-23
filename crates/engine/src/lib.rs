@@ -42,6 +42,7 @@ pub mod image_generation;
 pub mod session;
 pub mod storyboard;
 pub mod storyboard_design;
+pub mod studio_cues;
 pub mod turnaround;
 pub mod video_target;
 pub mod vision;
