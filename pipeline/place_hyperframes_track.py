@@ -5,6 +5,23 @@ from pathlib import Path
 
 def place(project,request):
     root=Path(project)/'hyperframes'; entry=root/'index.html'; source=Path(request['path']).resolve(strict=True)
+    generation=None
+    if 'generation_receipt' in request:
+        project_root=Path(project).resolve(strict=True)
+        receipt=(project_root/request['generation_receipt']).resolve(strict=True)
+        if not receipt.is_relative_to(project_root): raise ValueError('generation_receipt must belong to this project')
+        data=json.loads(receipt.read_text())
+        if data.get('format')!='animationcraft.image-generation' or data.get('result',{}).get('ok') is not True:
+            raise ValueError('generation_receipt is not a successful native image generation')
+        if Path(data['project']).resolve().parent!=project_root:
+            raise ValueError('generation_receipt belongs to another project folder')
+        artwork=Path(data['image']).resolve(strict=True)
+        if not artwork.is_relative_to(project_root): raise ValueError('Generated artwork is outside this project')
+        digest=hashlib.sha256(artwork.read_bytes()).hexdigest()
+        if digest!=data['result']['sha256']: raise ValueError('Generated artwork changed after its receipt; review the new version before placement')
+        generation={'receipt':str(receipt),'asset_id':data['result']['asset_id'],'image':str(artwork),
+            'sha256':digest,'poses':data.get('poses',[]),'animation_context':data.get('animation_context',{}),
+            'relationship':'declared source artwork; video rendering is a separate step'}
     if source.suffix.lower() not in {'.webm','.mp4','.mov'}: raise ValueError('Expected a video track')
     key=request['id']
     if not re.fullmatch(r'[a-zA-Z0-9_-]+',key): raise ValueError('id must be a stable filename-safe identifier')
@@ -24,6 +41,7 @@ def place(project,request):
     text=text[:root_tag.end()]+'\n'+tag+text[root_tag.end():]
     entry.write_text(text)
     record=dict(request,ok=True,media=str(target),track_index=track,backup=str(backup/f'index-{stamp}.html'))
+    if generation is not None: record['source_generation']=generation
     (folder/f'{key}.json').write_text(json.dumps(record,indent=2));return record
 
 if __name__=='__main__':
