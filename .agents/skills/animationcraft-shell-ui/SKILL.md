@@ -1,9 +1,9 @@
 ---
 name: animationcraft-shell-ui
-description: Use before building or changing any screen of the AnimationCraft Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
+description: Use before building or changing any screen of the Magic Studio Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
 ---
 
-# AnimationCraft shell UI
+# Magic Studio shell UI
 
 The shell is a creative tool for one person working with an agent. Every screen answers: **what is this,
 what's its state, what's the one next step.** Everything else waits behind a hover, a tooltip or a click.

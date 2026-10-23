@@ -17,13 +17,13 @@ fn file() -> Result<PathBuf> {
     crate::project_catalog::file()
         .and_then(|p| p.parent().map(|p| p.join("settings.json")))
         .ok_or_else(|| {
-            invalid("AnimationCraft config directory unavailable; no recent-project fallback used")
+            invalid("Magic Studio config directory unavailable; no recent-project fallback used")
         })
 }
 
 fn parse(bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice::<Value>(bytes).ok().filter(Value::is_object)
-        .ok_or_else(||invalid("Invalid AnimationCraft settings.json; repair it explicitly. No history fallback used"))
+        .ok_or_else(||invalid("Invalid Magic Studio settings.json; repair it explicitly. No history fallback used"))
 }
 
 fn stored() -> Result<Value> {

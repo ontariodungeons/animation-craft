@@ -325,7 +325,7 @@ fn write_binary_glb(
     let gltf_json = json!({
         "asset": {
             "version": "2.0",
-            "generator": "AnimationCraft Rust 4-Dir Visual Hull Builder"
+            "generator": "Magic Studio Rust 4-Dir Visual Hull Builder"
         },
         "scene": 0,
         "scenes": [{ "nodes": [0] }],
@@ -469,7 +469,7 @@ fn write_wavefront_obj(
         .map(|f| f.to_string_lossy().into_owned())
         .unwrap_or_else(|| "character.mtl".to_string());
     let mut out = format!(
-        "# AnimationCraft 4-Dir Visual Hull OBJ\nmtllib {mtl_filename}\no CharacterVisualHull\nusemtl MAT_Character_Felt\n"
+        "# Magic Studio 4-Dir Visual Hull OBJ\nmtllib {mtl_filename}\no CharacterVisualHull\nusemtl MAT_Character_Felt\n"
     );
     for p in positions {
         out.push_str(&format!("v {:.5} {:.5} {:.5}\n", p[0], p[1], p[2]));
@@ -490,7 +490,7 @@ fn write_wavefront_obj(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, out)?;
-    let mtl_content = "# AnimationCraft Wavefront Material Library (.MTL)\nnewmtl MAT_Character_Felt\nKd 0.9451 0.8745 0.7804\nKs 0.0800 0.0800 0.0800\nNs 30.00\nd 1.0\n";
+    let mtl_content = "# Magic Studio Wavefront Material Library (.MTL)\nnewmtl MAT_Character_Felt\nKd 0.9451 0.8745 0.7804\nKs 0.0800 0.0800 0.0800\nNs 30.00\nd 1.0\n";
     std::fs::write(mtl_path, mtl_content)?;
     Ok(())
 }

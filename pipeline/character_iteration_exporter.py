@@ -688,7 +688,7 @@ def _render_six_actions_strip_and_video(
             cdraw.rectangle([0, 0, 1280, 54], fill=(26, 31, 42))
             cdraw.text(
                 (20, 16),
-                f"AnimationCraft 2D Track - {title} | Action {a_idx + 1}/6: {track['title']} | Pose: {pose_entry['label']}",
+                f"Magic Studio 2D Track - {title} | Action {a_idx + 1}/6: {track['title']} | Pose: {pose_entry['label']}",
                 fill=(230, 240, 255),
             )
 

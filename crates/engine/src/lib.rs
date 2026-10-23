@@ -1,4 +1,4 @@
-//! AnimationCraft engine façade.
+//! Magic Studio engine façade.
 //!
 //! Every user-visible action is a command with a stable id
 //! (`sheet.slice`, `turnaround.register`, `mesh.build4dir`, `export.blender`…)

@@ -11,7 +11,7 @@ mc --help
 mc commands
 ```
 
-The Omarchy menu entry is **AnimationCraft Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
+The Omarchy menu entry is **Magic Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
 
 ## CLI and MCP
 

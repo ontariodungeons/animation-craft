@@ -354,7 +354,7 @@ Keep the exact prompt of every image call in `<sheet>.prompt.md` beside its shee
 fn chain_instructions(project_path: &Path, sheet_dir: &Path, character: &str) -> String {
     let sheet = sheet_dir.join(sheet_file(character, "turnaround"));
     format!(
-        "## Then prepare the layers with AnimationCraft's CLI\n\n\
+        "## Then prepare the layers with Magic Studio's CLI\n\n\
 `mc exec` runs **one command in a throwaway session**: the next call starts \
 with no project open, so `intake.validate`, `asset.cut_sheet` and `asset.build_cutout_rig` \
 all fail with \"no project\". Run the whole chain in **one** `mc run` script, \

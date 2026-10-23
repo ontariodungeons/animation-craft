@@ -1,4 +1,4 @@
-//! AnimationCraft shell: one window holding the project view (a webview fed by
+//! Magic Studio shell: one window holding the project view (a webview fed by
 //! `animationcraft-engine`) and, as a tab, the project's video studio (HyperFrames or Remotion
 //! Studio) in a second webview of the same window.
 //!
@@ -79,8 +79,23 @@ async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value
     }
     // Exports, renders and agent runs take minutes. They work on a snapshot of the session so the
     // window keeps answering (clicks, look, other engine commands); their changes merge back after.
-    let base = { app.state::<Engine>().0.lock().map_err(|e| e.to_string())?.clone() };
-    let mut session = base.clone();
+    let (base, mut session) = {
+        let engine = app.state::<Engine>();
+        let shared = engine.0.lock().map_err(|e| e.to_string())?;
+        let base = Session {
+            cwd: shared.cwd.clone(),
+            assets: shared.assets.clone(),
+            project_assets: shared.project_assets.clone(),
+            project_path: shared.project_path.clone(),
+            video_project_path: shared.video_project_path.clone(),
+            song_audio: shared.song_audio.clone(),
+            draft_approved: shared.draft_approved,
+            video_target: shared.video_target.clone(),
+            active_asset: shared.active_asset.clone(),
+            ..Session::default()
+        };
+        (base, shared.clone())
+    };
     let (finished, result) = tauri::async_runtime::spawn_blocking(move || {
         let result = session.execute(&id, params).map_err(|e| e.to_string());
         (session, result)
@@ -569,7 +584,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("AnimationCraft shell failed to start")
+        .expect("Magic Studio shell failed to start")
         .run(|app,event|{if matches!(event,tauri::RunEvent::Exit){#[cfg(unix)] bridge::cleanup(app);}});
 }
 

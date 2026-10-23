@@ -1,16 +1,16 @@
 ---
 name: storyboard
-description: Use when working on a song's storyboard in AnimationCraft — reading, searching or editing scenes, adding or replacing panels and prompts, recording notes or lyric corrections, or preparing a scene for approval. The storyboard PDF is one shared document of chapters (scenes) for the user and every agent.
+description: Use when working on a song's storyboard in Magic Studio — reading, searching or editing scenes, adding or replacing panels and prompts, recording notes or lyric corrections, or preparing a scene for approval. The storyboard PDF is one shared document of chapters (scenes) for the user and every agent.
 ---
 
-# Storyboard (AnimationCraft)
+# Storyboard (Magic Studio)
 
 A song project is one folder with an `<Song>.acproj` file. Its storyboard is ONE shared document:
 `storyboard/storyboard.pdf` (portrait): page 1 lists every caption (number, time, lyric); then the
 **Cast & sets** board (master prompt, locks, a card per character and location); then one page per
 scene (image box, lyric cue, planned hold, visible cast, story beat, continuity lock, motion,
 editable caption). A scene is one caption, or an instrumental stretch (1 s or more with no caption).
-Every box is a form field: type into it, or put an image in an image box, in AnimationCraft or
+Every box is a form field: type into it, or put an image in an image box, in Magic Studio or
 PDFCraft. `workshop.build_storyboard` redraws the pages and keeps the text typed into fields.
 
 ## Sources (the template)
@@ -51,7 +51,7 @@ Every edit puts the scene back to **needs review** and rebuilds the PDF. Only th
 1. `storyboard.toc`, then `storyboard.read` the scene you were given. Work one scene at a time.
 2. Make the image or text in the template's place (a panel per sung line, with its prompt).
 3. Record it with `storyboard.edit`: the panel, its prompt, and a short note of what you changed.
-4. Stop and report. The user reviews that scene in AnimationCraft's storyboard pane.
+4. Stop and report. The user reviews that scene in Magic Studio's storyboard pane.
 
 ## Rules
 - Keep layers separate: a background, each character, each prop and each drawn track as its own file. One flattened image never stands in for several layers.

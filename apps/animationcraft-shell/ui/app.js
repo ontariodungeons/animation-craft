@@ -1,4 +1,4 @@
-// AnimationCraft shell: the project view. Data comes from animationcraft-engine through the
+// Magic Studio shell: the project view. Data comes from animationcraft-engine through the
 // shell's commands; files open with one click; the studio tab hosts the video target's studio.
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
@@ -220,7 +220,7 @@ function block(id, icon, title, meta, done, body, blockState) {
     el("span", { class: "title" }, title),
     el("span", { class: "meta" }, meta || ""),
     el("span", { class: "chev", html: ICONS.chev }));
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState }, head,
+  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id }, head,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 

@@ -12,9 +12,9 @@ pub fn settings() -> Result<Value> {
         .or_else(||std::env::var_os("HOME").map(|h|std::path::PathBuf::from(h).join(".config")));
     let stored=if let Some(base)=base {
         match fs::read_to_string(base.join("animationcraft/agent.json")) {
-            Ok(text)=>serde_json::from_str::<Value>(&text).map_err(|_|invalid("Invalid AnimationCraft agent.json; repair existing settings without changing credentials"))?,
+            Ok(text)=>serde_json::from_str::<Value>(&text).map_err(|_|invalid("Invalid Magic Studio agent.json; repair existing settings without changing credentials"))?,
             Err(e) if e.kind()==std::io::ErrorKind::NotFound=>json!({}),
-            Err(_)=>return Err(invalid("Cannot read AnimationCraft chat settings; no fallback agent selected")),
+            Err(_)=>return Err(invalid("Cannot read Magic Studio chat settings; no fallback agent selected")),
         }
     } else {json!({})};
     if stored.get("agent").is_some_and(|v|!v.is_string()) {return Err(invalid("Invalid saved agent; choose an installed chat agent in the app. No fallback selected"));}
@@ -266,7 +266,7 @@ fn open_session(s:&Session,wanted:&Value,fresh:bool,image_task:bool)->Result<Str
         let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
         verify_model(&dir,id.trim(),wanted)?;if image_task{verify_image_task(s,id.trim())?;}return Ok(id.trim().into());
     }
-    let mut body=json!({"title":"Sproket · AnimationCraft","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}});
+    let mut body=json!({"title":"Sproket · Magic Studio","model":wanted,"location":{"directory":fs::canonicalize(&dir)?}});
     if image_task{body["permissions"]=image_task_permissions()?;}
     let response=api(&dir,"session.create",None,Some(body))?;
     let id=data(&response)["id"].as_str().filter(|id|id.starts_with("ses_")&&!id.chars().any(char::is_control)).ok_or_else(||invalid("OpenCode did not return a valid session ID; no prompt sent"))?;
@@ -304,7 +304,7 @@ pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
     let dir=crate::workshop::project_dir(s)?;let selection=selected(s,params)?;
     let agent=selection["agent"].as_str().ok_or_else(||invalid("No chat agent selected"))?;
     let mut said=params["message"].as_str().unwrap_or_default().trim().to_string();
-    for path in params["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {said.push_str(&format!("\n[AnimationCraft picture: {path}]"));}
+    for path in params["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {said.push_str(&format!("\n[Magic Studio picture: {path}]"));}
     if said.is_empty(){return Err(invalid("message is empty"));}
     let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/animationcraft-shell/agent.md")).unwrap_or_default();
     let fresh=params["new_chat"].as_bool().unwrap_or(true);

@@ -254,7 +254,7 @@ pub(crate) fn ensure_video_target_project(s: &Session, dir: &Path, target: &str)
                 if !index_ts.exists() {
                     std::fs::write(
                         &index_ts,
-                        "// Remotion project scaffolded by AnimationCraft\n",
+                        "// Remotion project scaffolded by Magic Studio\n",
                     )?;
                 }
                 remotion_root.join("src").join(&slug)

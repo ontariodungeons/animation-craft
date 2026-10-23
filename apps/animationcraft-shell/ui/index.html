@@ -8,10 +8,13 @@
 </head>
 <body>
   <header class="bar">
-    <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
-      <span id="project-name">Magic Studio</span>
+    <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects" aria-label="Magic Studio · Home">
+      <span class="brand-word" aria-hidden="true"><span class="brand-magic">Magic</span> <span class="brand-studio">Studio</span></span><span class="brand-spark" aria-hidden="true">✧</span>
     </div>
+    <span class="project-chip" title="Open project">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span id="project-name">No project</span>
+    </span>
     <nav class="tabs" role="tablist">
       <button class="tab active" data-view="project" role="tab" aria-selected="true">Project</button>
       <button class="tab" data-view="animation" role="tab" aria-selected="false" title="Animate objects and polish their motion">Animation</button>

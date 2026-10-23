@@ -234,7 +234,7 @@ async function agentSend() {
       deck: state.data?.storyboard?.deck,
       animation: { asset: motion.character, track: motion.track, time: motion.time },
     };
-    const message = `${text}\n\n[AnimationCraft context at send time: ${JSON.stringify(context)}]`;
+    const message = `${text}\n\n[Magic Studio context at send time: ${JSON.stringify(context)}]`;
     const reply = await motionCommand("agent.send", {
       message,
       new_chat: agent.newChat,

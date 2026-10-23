@@ -1,6 +1,6 @@
 [package]
 name = "animationcraft-engine"
-description = "AnimationCraft engine: command registry and session for 2D/3D turnaround animation"
+description = "Magic Studio engine: command registry and session for 2D/3D turnaround animation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

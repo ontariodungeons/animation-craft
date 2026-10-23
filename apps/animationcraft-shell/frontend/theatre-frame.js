@@ -67,14 +67,14 @@ window.addEventListener('message',async event=>{
    stop=object.onValuesChange(value=>{
     const prev=lastRotations.get(message.part);
     lastRotations.set(message.part,value.rotation);
-    if(prev===undefined||Math.abs((value.rotation||0)-prev)>1e-4)send('values',{part:message.part,rotation:value.rotation});
+    if(prev===undefined||Math.abs((value.rotation||0)-prev)>1e-4)send('values',{part:message.part,rotation:value.rotation,sync:synchronizing});
    });
    for(const [partId,partObj] of objects){
     if(partId===message.part)continue;
     partStops.push(partObj.onValuesChange(value=>{
      const prev=lastRotations.get(partId);
      lastRotations.set(partId,value.rotation);
-     if(prev===undefined?Math.abs(value.rotation||0)>1e-4:Math.abs((value.rotation||0)-prev)>1e-4)send('values',{part:partId,rotation:value.rotation});
+     if(prev===undefined?Math.abs(value.rotation||0)>1e-4:Math.abs((value.rotation||0)-prev)>1e-4)send('values',{part:partId,rotation:value.rotation,sync:synchronizing});
     }));
    }
    stopClock=onChange(sheet.sequence.pointer.position,time=>{if(!synchronizing&&Math.abs(time-mirroredPosition)>1e-7)send('seek',{time});});

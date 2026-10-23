@@ -1,4 +1,4 @@
-//! Session state for AnimationCraft.
+//! Session state for Magic Studio.
 //!
 //! Holds the current project/assets, loaded manifests, and verified measurements,
 //! and provides [`Session::execute`] for command dispatch.

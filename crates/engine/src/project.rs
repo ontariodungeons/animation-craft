@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
 
-/// Identifies an AnimationCraft project file (`.acproj`, JSON).
+/// Identifies a Magic Studio project file (`.acproj`, JSON).
 const PROJECT_FORMAT: &str = "animationcraft.project";
 
 /// Writes the open project's asset connections to its `.acproj` file.
@@ -161,7 +161,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
         .map_err(|e| EngineError::InvalidParams(format!("invalid project file: {e}")))?;
     if doc.get("format").and_then(Value::as_str) != Some(PROJECT_FORMAT) {
         return Err(EngineError::InvalidParams(format!(
-            "{} is not an AnimationCraft project",
+            "{} is not a Magic Studio project",
             path.display()
         )));
     }
@@ -440,7 +440,11 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
     }
     let first_load = !s.assets.contains_key(&entry.id);
     // Failed decoding/reloading must leave the previous active asset and its rig intact.
+    let theatre_state = s.theatre_state.take();
+    let last_result = s.last_result.take();
     let mut staged = s.clone();
+    s.theatre_state = theatre_state;
+    s.last_result = last_result;
     if let Some(preset) = &entry.preset {
         let mut loader = Session {
             cwd: s.cwd.clone(),
@@ -545,6 +549,8 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
             }
         }
     }
+    staged.theatre_state = s.theatre_state.take();
+    staged.last_result = s.last_result.take();
     *s = staged;
     Ok(json!({"ok": true, "asset_id": entry.id}))
 }

@@ -1,6 +1,6 @@
 ---
 name: asset-sheets
-description: Use whenever an agent must produce AnimationCraft asset sheets — a turnaround, a skeleton and limbs sheet, or a pose sheet — for an imported character. The exact canvas, layout, naming and background rules so every sheet is cut, registered and rigged the same way.
+description: Use whenever an agent must produce Magic Studio asset sheets — a turnaround, a skeleton and limbs sheet, or a pose sheet — for an imported character. The exact canvas, layout, naming and background rules so every sheet is cut, registered and rigged the same way.
 ---
 
 # Asset sheets (turnaround · skeleton & limbs · poses)

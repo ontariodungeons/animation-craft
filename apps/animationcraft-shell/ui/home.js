@@ -15,7 +15,7 @@ async function showHome() {
   state.data = null;
   document.body.classList.add("at-home");
   document.body.classList.remove("split");
-  $("project-name").textContent = "Magic Studio";
+  $("project-name").textContent = "No project";
   document.title = "Magic Studio";
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === "view-home"));
   await invoke("studio_hide").catch(() => {});
@@ -52,7 +52,7 @@ async function renderRecent() {
 }
 
 async function openDialog() {
-  const path = await dialog.open({ title: "Open project", filters: [{ name: "AnimationCraft project", extensions: ["acproj"] }] });
+  const path = await dialog.open({ title: "Open project", filters: [{ name: "Magic Studio project", extensions: ["acproj"] }] });
   if (path) openProject(path);
 }
 

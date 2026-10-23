@@ -1,5 +1,5 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
  theatreRequireSaved();
  animationPause();
@@ -79,7 +79,7 @@ function animationShell(){
   view.append(theatre);
   theatreMount(theatre);
  }
- new ResizeObserver(()=>animationDraw()).observe(stage);
+ motion.resizeObserver?.disconnect();motion.resizeObserver=new ResizeObserver(()=>animationDraw());motion.resizeObserver.observe(stage);
  $('motion-canvas').addEventListener('click',()=>{if(!motion.pen)$('motion-layers')?.setAttribute('open','');});
  setupPathPen($('motion-canvas'));
  $('motion-canvas').addEventListener('keydown',e=>{if(e.key===' '){e.preventDefault();animationPlay();}});
@@ -102,8 +102,8 @@ function animationControls(){
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
  updateMagicSelection();
- const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;animationControls();}await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
- const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{motion.track=t.id;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
+ const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
+ const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
  box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],motion.activeSection==='Action'));
  box.append(pathControls());
  box.append(motionSection('Motion & timing',[
@@ -257,15 +257,21 @@ async function animationSample(){
 }
 async function animationRefresh(){if(state.view!=='animation')return;motion.meta=await motionCommand('motion.tracks',{character:motion.character});motion.images=await Promise.all((motion.meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label}`));img.src=motionAssetUrl(l.file);})));animationControls();await animationSample();await refreshPartDrafts();}
 function animationPause(){
- if(motion.mode==='composite'){seqPause();return;}motion.playing=false;if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}}
+ if(motion.mode==='composite'){seqPause();return;}
+ const wasPlaying=motion.playing;motion.playing=false;motion.playId=(motion.playId||0)+1;
+ if(typeof cancelAnimationFrame==='function'&&motion.tick){cancelAnimationFrame(motion.tick);motion.tick=0;}
+ if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}
+ if(wasPlaying&&typeof theatreSeek==='function'&&motion.sample)theatreSeek(motion.time);
+}
 async function animationPlay(){
  if(motion.mode==='composite'){seqPlay();return;}
  if(motion.playing){animationPause();return;}
  if(motion.rest){motion.rest=false;motion.track=motion.track||motion.meta?.tracks?.[0]?.id;animationControls();await animationSample();}
  if(!motion.sample)return;
  if(motion.time>=motion.sample.duration)motion.time=0;
+ const runId=(motion.playId=(motion.playId||0)+1);
  motion.playing=true;$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.pause}</svg>`;$('motion-play').title='Pause motion';
- let last=performance.now();function tick(now){if(!motion.playing)return;motion.time+=(now-last)/1000*motion.speed;last=now;if(motion.time>=motion.sample.duration){if(motion.sample.loop)motion.time%=motion.sample.duration;else{motion.time=motion.sample.duration;animationPause();}}animationDraw();if(motion.playing)requestAnimationFrame(tick);}requestAnimationFrame(tick);
+ let last=performance.now();function tick(now){if(!motion.playing||motion.playId!==runId)return;motion.time+=(now-last)/1000*motion.speed;last=now;if(motion.time>=motion.sample.duration){if(motion.sample.loop)motion.time%=motion.sample.duration;else{motion.time=motion.sample.duration;animationPause();}}animationDraw();if(motion.playing&&motion.playId===runId)motion.tick=requestAnimationFrame(tick);}motion.tick=requestAnimationFrame(tick);
 }
 function animationDraw(){
  if(motion.mode==='composite'){seqDraw();return;}
@@ -278,12 +284,12 @@ function animationDraw(){
  ctx.translate(w/2,h/2);ctx.scale(scale,scale);ctx.translate(-(b[0]+b[2])/2,-(b[1]+b[3])/2);
  if(motion.grid){const gap=50;ctx.save();ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--line');ctx.lineWidth=1/scale;ctx.beginPath();const left=(b[0]+b[2])/2-w/(2*scale),top=(b[1]+b[3])/2-h/(2*scale);for(let x=Math.floor(left/gap)*gap;x<left+w/scale;x+=gap){ctx.moveTo(x,top);ctx.lineTo(x,top+h/scale);}for(let y=Math.floor(top/gap)*gap;y<top+h/scale;y+=gap){ctx.moveTo(left,y);ctx.lineTo(left+w/scale,y);}ctx.stroke();ctx.restore();}
  const frame=sample.frames[Math.min(sample.frames.length-1,Math.floor(motion.time*sample.fps))];
- frame.layers.forEach((l,i)=>{if(!l.opacity)return;ctx.save();ctx.transform(...l.matrix);theatreTransform(ctx,meta.layers[i]);ctx.globalAlpha=l.opacity;const crop=meta.layers[i].crop;ctx.drawImage(motion.images[i],crop[0],crop[1]);ctx.restore();});
+ frame.layers.forEach((l,i)=>{if(!l.opacity)return;ctx.save();ctx.transform(...l.matrix);theatreTransform(ctx,meta.layers[i],l.rotation);ctx.globalAlpha=l.opacity;const crop=meta.layers[i].crop;ctx.drawImage(motion.images[i],crop[0],crop[1]);ctx.restore();});
  drawMotionPath(ctx,scale);
  $('motion-caption').textContent=`${motion.character} · ${motion.rest?'Rest pose':(meta.tracks.find(t=>t.id===motion.track)?.label||motion.track.replaceAll('-',' '))}`;
  $('motion-time').textContent=`${Math.floor(motion.time/60)}:${(motion.time%60).toFixed(3).padStart(6,'0')}`;$('motion-scrub').value=motion.time;
  if($('motion-part-angle')&&document.activeElement!==$('motion-part-angle')){const deg=Math.round((magicTheatre.rotation||0)*10)/10;$('motion-part-angle').value=String(deg);if($('motion-part-angle-out'))$('motion-part-angle-out').textContent=`${deg}°`;}
- theatreSeek(motion.time);
+ if(!motion.playing||magicTheatre.interactionRevision>magicTheatre.savedRevision)theatreSeek(motion.time);
 }
 
 function pathControls(){

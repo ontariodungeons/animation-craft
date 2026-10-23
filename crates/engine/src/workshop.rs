@@ -1499,7 +1499,7 @@ pub fn cmd_assets_request_sheet(s: &mut Session, _: &Value) -> Result<Value> {
     if let Some(intent) = studio.intent {
         brief.push_str(&format!("Studio intent:\n{intent}\n\n"));
     }
-    brief.push_str("Make ONE asset sheet image containing every asset below, each separated on a plain background with space around it, so each can be cut out cleanly (AnimationCraft cuts them with PhotoCraft). Match each asset's reference exactly in character, colour and material. Keep every part whole: nothing touching the sheet edge or another asset. No text on the sheet.\n\n## Assets\n");
+    brief.push_str("Make ONE asset sheet image containing every asset below, each separated on a plain background with space around it, so each can be cut out cleanly (Magic Studio cuts them with PhotoCraft). Match each asset's reference exactly in character, colour and material. Keep every part whole: nothing touching the sheet edge or another asset. No text on the sheet.\n\n## Assets\n");
     for (n, i) in items.iter().enumerate() {
         brief.push_str(&format!(
             "{}. **{}** — problem: {}. Current file: {}. Reference: {}\n",

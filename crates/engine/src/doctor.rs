@@ -1,5 +1,5 @@
 //! `doctor` subcommand (`mc doctor [--clean]` and `app.doctor` command):
-//! checks for lingering AnimationCraft/Craft processes, stale bridge/dev-server ports,
+//! checks for lingering Magic Studio/Craft processes, stale bridge/dev-server ports,
 //! external tool availability, and source code smells worth running `/ponytail-review` on.
 
 use std::path::{Path, PathBuf};
@@ -202,7 +202,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     let mut recommendations = Vec::new();
     if lingering_gui_count > 1 {
         recommendations.push(format!(
-            "{lingering_gui_count} AnimationCraft GUI instances are running concurrently; run `mc doctor --clean` to close lingering instances."
+            "{lingering_gui_count} Magic Studio GUI instances are running concurrently; run `mc doctor --clean` to close lingering instances."
         ));
     } else if lingering_gui_count == 1 && !clean {
         if let Some(p) = processes.iter().find(|p| p["kind"] == "gui") {
@@ -211,7 +211,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
                 .map(|port| format!(" (`mc --bridge {port} app.quit`)"))
                 .unwrap_or_default();
             recommendations.push(format!(
-                "1 AnimationCraft GUI instance is running (pid {}){port_hint}. Pass `--clean` to close it.",
+                "1 Magic Studio GUI instance is running (pid {}){port_hint}. Pass `--clean` to close it.",
                 p["pid"]
             ));
         }

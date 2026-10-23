@@ -5,7 +5,7 @@ UI, engine, pipeline, and test work from overwriting one another.
 
 ## Canonical application
 
-The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell -p mc`; desktop menu **AnimationCraft Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
+The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
 
 ## Drive the app: CLI, MCP and skill
 

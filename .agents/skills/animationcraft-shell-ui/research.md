@@ -1,4 +1,4 @@
-# AnimationCraft shell research and proposed Animation workspace
+# Magic Studio shell research and proposed Animation workspace
 
 Research date: 2026-10-21. **Animation layout approved by the user on 2026-10-21; implementation is in progress.**
 Authority: user instructions and `apps/animationcraft-shell/HANDOFF.md` at `e1cac3a`.
@@ -155,7 +155,7 @@ being sent together. Each agent run has Undo. Desktop setup connects Claude Code
 Home supplies a first-video path and inspiration. Studio canvas documentation distinguishes visual
 stacking from timeline tracks and keeps canvas/inspector/timeline selection synchronized. Detailed
 controls are contextual; this is composition editing, not a character bone/pose system. Audio and
-beat landmarks belong to timing; AnimationCraft retains its own character motion authoring.
+beat landmarks belong to timing; Magic Studio retains its own character motion authoring.
 
 Adopt directing an agent on the frame, queued notes and run-level undo. Reject porting animation
 authoring into the video target, or assuming desktop and browser Studio layouts are identical.
@@ -174,7 +174,7 @@ Design and Prototype are distinct contexts; no selection exposes page-level prop
 inspected documentation does not establish character bones, performance tracks or song-scrubbing
 semantics. AI tools are available through Actions, while the current Design agent works on the
 canvas and in a rail, starting from a layer. This supports local creative collaboration rather
-than a disconnected assistant. Empty-canvas generation is possible, but AnimationCraft's imported
+than a disconnected assistant. Empty-canvas generation is possible, but Magic Studio's imported
 artwork needs a more specific preparation path.
 
 Adopt one selection model, inspectable output and contextual properties. Reject hiding essential

@@ -3,8 +3,8 @@
 
 Workflow:
   1. Runs PhotoCraft `select.subject` for automatic segmentation (zero hardcoded coordinates).
-  2. Runs AnimationCraft `vision.analyze` to verify coverage, alpha integrity, and fringe metrics.
-  3. If Option B passes: automatically confirms and loads into AnimationCraft.
+  2. Runs Magic Studio `vision.analyze` to verify coverage, alpha integrity, and fringe metrics.
+  3. If Option B passes: automatically confirms and loads into Magic Studio.
   4. If Option B fails/warns: falls back to Option A (interactive prompt with metrics).
 """
 import argparse
@@ -18,7 +18,7 @@ import sys
 
 
 def find_bridge_port() -> int | None:
-    """Find active AnimationCraft control port between 9888 and 9899."""
+    """Find active Magic Studio control port between 9888 and 9899."""
     for port in range(9888, 9900):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.1)
@@ -37,7 +37,7 @@ def main():
     parser.add_argument('source', type=Path, help='Path to source character image')
     parser.add_argument('--name', type=str, help='Character asset name (default: file stem)')
     parser.add_argument('--out', type=Path, help='Custom output path for transparent PNG')
-    parser.add_argument('--bridge', type=int, help='AnimationCraft control port (auto-detected if omitted)')
+    parser.add_argument('--bridge', type=int, help='Magic Studio control port (auto-detected if omitted)')
     parser.add_argument('--no-load', action='store_true', help='Only process and verify; do not load into live app')
     parser.add_argument('--force', action='store_true', help='Bypass confirmation prompt if checks fail')
     args = parser.parse_args()
@@ -137,7 +137,7 @@ def main():
         else:
             print("\n  >>> [Option A: Interactive Confirmation Fallback] <<<")
             print(f"      Review file: file://{out_path}")
-            choice = input("      Load this asset into AnimationCraft anyway? [y/N]: ").strip().lower()
+            choice = input("      Load this asset into Magic Studio anyway? [y/N]: ").strip().lower()
             if choice in ('y', 'yes'):
                 approved = True
             else:
@@ -154,10 +154,10 @@ def main():
     bridge_port = args.bridge or find_bridge_port()
     if not bridge_port:
         print(f"\nDone. Output saved to: {out_path}.")
-        print("Notice: No live AnimationCraft window found on control ports (9888–9899). Skipping GUI stage load.")
+        print("Notice: No live Magic Studio window found on control ports (9888–9899). Skipping GUI stage load.")
         return
 
-    print(f"\n[3/3] Loading asset into live AnimationCraft (port {bridge_port})...")
+    print(f"\n[3/3] Loading asset into live Magic Studio (port {bridge_port})...")
     add_cmd = [
         animcraft_bin, '--bridge', str(bridge_port), 'exec', 'project.add_asset',
         f'path={out_path}', f'name={name}', 'kind=image'
@@ -170,7 +170,7 @@ def main():
     ]
     code, stdout, stderr = run_cmd(load_cmd)
     if code == 0:
-        print(f"      Successfully loaded '{name}' ({asset_id}) onto active AnimationCraft stage!")
+        print(f"      Successfully loaded '{name}' ({asset_id}) onto active Magic Studio stage!")
     else:
         print(f"      Warning: failed to load asset onto stage: {stderr or stdout}")
 

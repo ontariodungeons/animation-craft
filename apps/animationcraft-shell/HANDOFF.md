@@ -1,4 +1,4 @@
-# AnimationCraft shell — handoff (2026-10-21)
+# Magic Studio shell — handoff (2026-10-21)
 
 **Historical checkpoint — not current operating instructions.** This records the 2026-10-21
 shell migration. Use [README](../../README.md), [AGENTS.md](../../AGENTS.md), and the current task
@@ -35,7 +35,7 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
 
 ## The user's rules (non-negotiable)
 
-- **Animation happens in AnimationCraft's Animation view, never in HyperFrames or Remotion.** Video targets
+- **Animation happens in Magic Studio's Animation view, never in HyperFrames or Remotion.** Video targets
   (HyperFrames/Remotion/FilmCraft) only assemble the final video.
 - Use the *craft tools and CLIs; no hand-rolled solutions, no silent fallbacks. A feature that isn't
   implemented gets researched, then built with the right tool. Fix the pipeline, never hand-patch outputs.

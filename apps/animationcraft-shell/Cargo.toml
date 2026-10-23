@@ -1,6 +1,6 @@
 [package]
 name = "animationcraft-shell"
-description = "AnimationCraft desktop shell: the project view in a webview, with video studios (HyperFrames, Remotion) as tabs"
+description = "Magic Studio desktop shell: the project view in a webview, with video studios (HyperFrames, Remotion) as tabs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
