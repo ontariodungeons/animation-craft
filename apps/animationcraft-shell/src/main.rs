@@ -412,6 +412,8 @@ fn open_path(path: String) -> Result<(), String> {
 
 /// Height of the project view's top bar (logical px).
 const BAR: f64 = 48.0;
+/// Height of the shell's unified footer, kept clear below the Studio webview (logical px).
+const FOOTER: f64 = 30.0;
 
 /// Which view is showing (`project`, `split` or `studio`) and, for split, the share of the
 /// window the project view takes (the frame between them is dragged in the project view).
@@ -425,7 +427,7 @@ impl Default for View {
 
 /// Native webviews share one allocation. Studio occupies the content rectangle;
 /// the shell remains full-height so its docked agent can sit beside Studio.
-fn place_webview(view: &tauri::Webview, top: i32, right: i32, is_studio: bool) {
+fn place_webview(view: &tauri::Webview, top: i32, right: i32, bottom: i32, is_studio: bool) {
     #[cfg(target_os = "linux")]
     let _ = view.with_webview(move |platform| {
         use gtk::prelude::*;
@@ -443,10 +445,10 @@ fn place_webview(view: &tauri::Webview, top: i32, right: i32, is_studio: bool) {
         widget.set_size_request(0,0);
         widget.set_hexpand(true); widget.set_vexpand(true);
         widget.set_halign(gtk::Align::Fill); widget.set_valign(gtk::Align::Fill);
-        widget.set_margin_top(top); widget.set_margin_end(right);
+        widget.set_margin_top(top); widget.set_margin_end(right); widget.set_margin_bottom(bottom);
     });
     #[cfg(not(target_os = "linux"))]
-    let _ = (view, top, right, is_studio);
+    let _ = (view, top, right, bottom, is_studio);
 }
 
 #[derive(Default)]
@@ -465,14 +467,14 @@ fn layout(app: &tauri::AppHandle) {
     let size = physical.to_logical::<f64>(scale);
     let (view, _) = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or(("project".into(),0.5));
     let dock = app.state::<AgentDock>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.width-240.0).max(0.0));
-    place_webview(&project,0,0,false);
+    place_webview(&project,0,0,0,false);
     #[cfg(not(target_os="linux"))]
     { let _=project.set_position(LogicalPosition::new(0.0,0.0)); let _=project.set_size(size); }
     if let Some(studio)=app.get_webview("studio") {
         if view=="studio" || view=="split" {
-            place_webview(&studio,BAR as i32,dock.round() as i32,true);
+            place_webview(&studio,BAR as i32,dock.round() as i32,FOOTER as i32,true);
             #[cfg(not(target_os="linux"))]
-            { let _=studio.set_position(LogicalPosition::new(0.0,BAR)); let _=studio.set_size(LogicalSize::new(size.width-dock,size.height-BAR)); }
+            { let _=studio.set_position(LogicalPosition::new(0.0,BAR)); let _=studio.set_size(LogicalSize::new(size.width-dock,size.height-BAR-FOOTER)); }
             let _=studio.show();
         } else { let _=studio.hide(); }
     }

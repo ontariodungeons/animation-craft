@@ -70,7 +70,7 @@ async function theatreSave(){
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during save; the previous project snapshot was saved');
   if(magicTheatre.interactionRevision===revision&&!magicTheatre.gestureActive)magicTheatre.savedRevision=revision;
   magicTheatre.savedAt=Date.now();magicTheatre.persistence='saved_snapshot';$('theatre-status').textContent=`${magicTheatre.part} · motion snapshot saved`;theatreEvent('saved',{project,saved_unix_ms:magicTheatre.savedAt});return result;
- }finally{if(frame===magicTheatre.frame)button.disabled=false;}
+ }finally{if(frame===magicTheatre.frame)button.disabled=false;if(typeof updateAppFooter==='function')updateAppFooter();}
 }
 function theatreSeek(time){
  theatreContext();

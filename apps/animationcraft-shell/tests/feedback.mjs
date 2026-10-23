@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const reports=[],native=[],frames=[],intervals=[],listeners={};
 const pane={textContent:'Rendered project',getBoundingClientRect:()=>({width:900,height:600})};
-const context=vm.createContext({console,state:{project:'/fixture/test.acproj',view:'project',page:0},
+const context=vm.createContext({console,updateAppFooter(){},state:{project:'/fixture/test.acproj',view:'project',page:0},
  document:{body:{classList:{contains:()=>false}},querySelectorAll:()=>[],querySelector:()=>pane,getElementById:()=>null,addEventListener:(event,fn)=>listeners[event]=fn},
  addEventListener:()=>{},getComputedStyle:()=>({display:'block'}),queueMicrotask,
  requestAnimationFrame:fn=>frames.push(fn),clearTimeout:()=>{},setTimeout:()=>1,setInterval:(fn,ms)=>intervals.push({fn,ms}),

@@ -100,11 +100,18 @@
       </div>
     </section>
   </main>
+  <!-- One footer for every tab: workflow stages · what the active tab shows · save and studio state. -->
+  <footer class="app-footer" id="app-footer" role="contentinfo" aria-label="Application status footer">
+    <nav class="footer-stages" id="footer-stages" aria-label="Workflow stages"></nav>
+    <div class="footer-context" id="footer-context" aria-live="polite"></div>
+    <div class="footer-status" id="footer-status">
+      <span class="footer-item" id="footer-save-state"></span>
+      <button class="footer-item" id="footer-server" title="Studio server · click to start or stop"></button>
+    </div>
+  </footer>
       <!-- The existing agent, image composer, and project parts share one right workstation. -->
       <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation">
-        <div class="magic-workstation-title">Magic Studio</div>
         <section class="magic-pane magic-chat-pane" id="magic-chat-pane" aria-label="Sproket chat">
-          <div id="magic-target-chat" class="magic-target">No part selected</div>
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
         <div class="agent-head">
           <span class="agent-title">Sproket <span class="agent-connection" id="agent-connection">· not configured</span></span>

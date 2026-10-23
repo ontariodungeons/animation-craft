@@ -70,7 +70,7 @@ function setupMagicSplitters() {
 }
 setupMagicSplitters();
 
-// The Generate card folds to its header; the choice is remembered per viewer.
+// The Generate card folds to its header (folded by default so Parts & assets gets the room).
 function setupGenerateToggle() {
   const toggle = $('magic-image-toggle');
   if (!toggle) return;
@@ -79,7 +79,7 @@ function setupGenerateToggle() {
     toggle.setAttribute('aria-expanded', String(open));
     localStorage.setItem('magic.generate-open', String(open));
   };
-  apply(localStorage.getItem('magic.generate-open') !== 'false');
+  apply(localStorage.getItem('magic.generate-open') === 'true');
   toggle.addEventListener('click', () => apply(toggle.getAttribute('aria-expanded') !== 'true'));
 }
 setupGenerateToggle();
@@ -87,7 +87,8 @@ setupGenerateToggle();
 function updateMagicSelection() {
   const layer = motion?.meta?.layers?.find((part) => part.id === motion.selected);
   const text = layer ? `${layer.label || layer.id} · ${layer.id}` : 'No part selected';
-  for (const id of ['magic-target-chat', 'magic-target-image', 'magic-target-parts']) {
+  updateAppFooter();
+  for (const id of ['magic-target-image', 'magic-target-parts']) {
     const node = $(id);
     if (node) { node.textContent = text; node.title = layer ? `Selected part ${layer.label || layer.id} (${layer.id}) on ${motion.character}` : 'Select a part to target image generation'; }
   }
@@ -99,20 +100,82 @@ function renderMagicAssetCatalog() {
   if (!slot) return;
   const assets = state.data?.assets?.assets || [];
   const draft = imageDrafts?.get(state.project);
-  slot.replaceChildren(el('div', { class: 'group-label' }, 'Project assets'));
+  slot.replaceChildren(el('div', { class: 'group-label' }, `Project assets (${assets.length})`));
   if (!assets.length) { slot.append(el('p', { class: 'why' }, 'Project parts and generated candidates will appear here.')); return; }
-  for (const asset of assets) {
-    const candidate = draft?.result?.asset_id === asset.id;
-    const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
-      ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
-      : el('span', { class: 'magic-asset-placeholder' }, 'PART');
-    const row = el('button', { class: `magic-asset-row${candidate ? ' candidate' : ''}`, id: `magic-asset-${asset.id}`,
-      title: candidate ? `${asset.name || asset.id} · generated candidate awaiting review` : `${asset.name || asset.id} · show its parts`,
-      onclick: () => openAnimation(asset.id) }, image, el('span', { class: 'magic-asset-name' }, asset.name || asset.id),
-      el('span', { class: 'muted' }, candidate ? 'Candidate' : asset.id));
-    slot.append(row);
-  }
+  slot.append(el('div', { class: 'magic-assets-grid' }, assets.map((asset) =>
+    magicAssetTile(asset, { candidate: draft?.result?.asset_id === asset.id, onclick: () => openAnimation(asset.id) }))));
 }
+
+// One compact tile per project asset: the Project/Studio catalog and the Animation Assets tab.
+function magicAssetTile(asset, { active = false, candidate = false, onclick }) {
+  const name = asset.name || asset.id;
+  const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
+    ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
+    : el('span', { class: 'magic-asset-placeholder' }, 'PART');
+  return el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `magic-asset-${asset.id}`,
+    title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · show its parts`, onclick },
+    image, el('span', { class: 'magic-asset-name' }, name),
+    candidate ? el('span', { class: 'magic-asset-badge' }, 'Candidate') : el('span', { class: 'magic-asset-id' }, asset.id));
+}
+
+// ---- Unified footer: workflow stages · what the active tab shows · save and studio state ----
+const FOOTER_STAGES = [['song', 'Song'], ['lyrics', 'Lyrics'], ['transcript', 'Transcript'], ['storyboard', 'Storyboard'], ['animate', 'Animate'], ['studio', 'Studio']];
+
+function footerStageState(id) {
+  if (id === 'storyboard') return state.data?.storyboard?.previews?.length ? 'ok' : 'warn';
+  if (id === 'studio') return serverUrl() ? 'ok' : videoProject() ? 'warn' : 'idle';
+  const seen = state.data?.monitoring?.prerequisites?.find((p) => p.id === id)?.state;
+  return seen === 'ready' ? 'ok' : seen ? 'warn' : 'idle';
+}
+
+async function footerGo(id) {
+  if (id === 'studio') return setView('studio');
+  if (state.view !== 'project' && await setView('project') === false) return;
+  if (id === 'storyboard') return;
+  state.open = id; state.blocksCollapsed = false; $('blocks').classList.remove('collapsed'); renderBlocks();
+}
+
+function footerContext() {
+  if (state.view === 'animation') {
+    const meta = motion.meta;
+    if (motion.mode === 'composite') return 'Composite · images arranged in time';
+    if (!meta) return motion.character ? `${motion.character} · loading…` : 'No object chosen';
+    const clips = (meta.tracks || []).filter((t) => !t.standard).length;
+    const track = motion.rest ? 'Rest pose' : (meta.tracks.find((t) => t.id === motion.track)?.label || motion.track.replaceAll('-', ' '));
+    const part = meta.layers.find((l) => l.id === motion.selected);
+    return `${motion.character} · ${meta.layers.length} layers / ${clips} clips · ${track} · Selected: ${part ? part.label || part.id : 'none'}`;
+  }
+  if (state.view === 'studio') { const project = videoProject(); return project ? `Video project: ${project}` : 'No video project yet'; }
+  const pages = state.data?.storyboard?.previews?.length || 0;
+  const objects = (state.data?.assets?.assets || []).length;
+  return [pages ? `Storyboard · Page ${state.page + 1} / ${pages}` : 'Storyboard · not built yet', pages ? state.pageTitles?.[state.page] : null,
+    `${objects} object${objects === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+}
+
+// Coalesces the many callers (renders, selection, Theatre messages) into one footer render.
+function updateAppFooter() {
+  if (updateAppFooter.queued) return;
+  updateAppFooter.queued = true;
+  queueMicrotask(() => { updateAppFooter.queued = false; renderAppFooter(); });
+}
+
+function renderAppFooter() {
+  if (!$('app-footer') || !state.data) return;
+  $('footer-stages').replaceChildren(...FOOTER_STAGES.map(([id, label]) => {
+    const tone = footerStageState(id);
+    return el('button', { class: 'footer-stage', id: `footer-stage-${id}`, title: `${label} · ${tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs work' : 'not started'}`,
+      onclick: () => footerGo(id).catch((e) => toast(String(e))) }, el('span', { class: `dot ${tone}` }), label);
+  }));
+  const context = footerContext();
+  $('footer-context').textContent = context; $('footer-context').title = context;
+  const unsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
+  $('footer-save-state').replaceChildren(el('span', { class: `dot ${unsaved ? 'warn' : 'ok'}` }), unsaved ? 'Unsaved edits' : 'Saved');
+  $('footer-save-state').title = unsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : 'No unsaved motion';
+  const url = serverUrl();
+  $('footer-server').replaceChildren(el('span', { class: `dot ${url ? 'ok' : 'off'}` }), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
+}
+// Theatre's own listener (theatre.js) updates its revisions first; render after it.
+window.addEventListener('message', (event) => { if (event.data?.magicTheatre && event.data.type !== 'values') setTimeout(updateAppFooter); });
 
 function toast(text) {
   const t = $("toast");
@@ -195,6 +258,7 @@ function objectCard(name, layers, stacked) {
 }
 
 function renderBlocks() {
+  updateAppFooter();
   const s = state.data?.status;
   const box = $("blocks");
   box.replaceChildren();
@@ -267,6 +331,7 @@ function renderBlocks() {
 // ---- Storyboard: title cards ------------------------------------------------------------
 
 function renderStoryboard() {
+  updateAppFooter();
   const sb = state.data?.storyboard;
   document.body.classList.toggle("movie-document",sb?.template==="backlot");
   const pages = sb?.previews || [];
@@ -307,6 +372,7 @@ function renderStoryboard() {
   const first = (sb.first_scene_page || 2) - 1;
   const nav = sb.page_titles?.length === pages.length ? sb.page_titles.map((title,i)=>[title,i]) : sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
     ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
+  state.pageTitles = Object.fromEntries(nav.map(([label, page]) => [page, label]));
   const isBacklot = sb.template === "backlot";
   const chapterCount = isBacklot ? first : 3;
   for (const [i, [label, page]] of nav.entries()) {
@@ -340,7 +406,7 @@ function renderStoryboard() {
       });
       wrap.append(page);
     });
-    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
+    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;updateAppFooter();};
   }
 
   renderStoryboardText();
@@ -395,6 +461,7 @@ async function setView(view, action) {
       $("studio-empty").classList.add("show");
     }
   }
+  updateAppFooter();
   if (action && feedbackSnapshot().rendered && acFeedback.errors.length === errors) {
     await acFeedback.report(null, null, {stage:"ui_navigation_applied",...action,view:state.view});
   }
@@ -420,6 +487,7 @@ function renderTarget() {
   const project = videoProject();
   $("target-name").textContent = `${s.video_target}${url ? " · " + url.replace(/^https?:\/\//, "").replace(/\/$/, "") : " · off"}`;
   $("server-dot").className = `dot ${url ? "ok" : "off"}`;
+  updateAppFooter();
   $("target").title = `${url ? `Studio running at ${url} · click to stop` : "Studio off · click to start"}\n${project ? `Video project: ${project}` : "No video project yet · starting the studio creates it"}`;
 }
 
@@ -504,6 +572,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   $("collapse-bottom").addEventListener("click", () => setView("project"));
 })();
 $("target").addEventListener("click", toggleServer);
+$("footer-server").addEventListener("click", toggleServer);
 $("studio-start").addEventListener("click", toggleServer);
 $("sb-prev").addEventListener("click", () => showPage(state.page - 1));
 $("sb-next").addEventListener("click", () => showPage(state.page + 1));

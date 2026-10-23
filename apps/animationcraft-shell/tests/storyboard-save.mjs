@@ -32,7 +32,7 @@ console.log("PASS: native Save acknowledges the rendered project revision");
 const scrolled=[],nodes=new Map();
 function dom(id){return {id,children:[],dataset:{},classList:{toggle(){},add(){}},replaceChildren(){this.children=[];},append(...n){this.children.push(...n);},querySelector(){return null;},addEventListener(){},remove(){},scrollIntoView(){scrolled.push(this.id);}};}
 const get=id=>{if(!nodes.has(id))nodes.set(id,dom(id));return nodes.get(id);};
-const renderContext=vm.createContext({state:{project:'/fixture/test.acproj',page:1,data:{storyboard:{template:'backlot',previews:['one','two','three'],scene_titles:['scene-1','scene-2'],first_scene_page:2}}},
+const renderContext=vm.createContext({updateAppFooter(){},state:{project:'/fixture/test.acproj',page:1,data:{storyboard:{template:'backlot',previews:['one','two','three'],scene_titles:['scene-1','scene-2'],first_scene_page:2}}},
  $:get,document:{body:{classList:{toggle(){}}}},el:(tag,attrs={})=>dom(attrs.id),convertFileSrc:p=>p,renderDesignPlacements(){},renderStoryboardText(){}});
 vm.runInContext(source.slice(source.indexOf('function renderStoryboard() {'),source.indexOf('function showPage(')),renderContext);
 vm.runInContext('renderStoryboard()',renderContext);

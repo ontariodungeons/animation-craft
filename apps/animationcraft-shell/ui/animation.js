@@ -115,47 +115,42 @@ function animationControls(){
  const selected=meta.layers.find(part=>part.id===motion.selected);
  const candidate=selected?partCandidate(selected.id):null;
  const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file),alt:''}),el('span',{},part.id))));
- const compare=selected?el('div',{class:'magic-part-compare',id:'magic-part-compare'},
-  el('div',{class:'magic-compare-title'},`${selected.label||selected.id} · ${selected.id}`),
-  el('div',{class:'magic-compare-grid'},
-   el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${selected.label||selected.id}`}),el('figcaption',{},'Original')),
-   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${selected.label||selected.id}` }):el('div',{class:'magic-compare-empty'},'Generate a candidate, or save an edit in PhotoCraft.'),el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'} · needs review`:'Candidate'))
-  ),
-  partsStrip,
-  el('div',{class:'magic-part-actions'},
-   el('span',{class:'magic-part-filename muted'},(selected.file||'').split('/').pop()||selected.id),
-   el('div',{class:'magic-part-links'},
-    el('button',{class:'ghost',id:'part-open-photocraft',title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${selected.label||selected.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(selected)},'Open in PhotoCraft'),
-    el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${selected.label||selected.id}`,onclick:()=>selected.file&&openPath(selected.file)},'Inspect original'),
-    el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${selected.label||selected.id}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy asset path')
-   )
-  ),
-  candidate?el('p',{class:'why'},'Original source remains unchanged until you explicitly replace it. Candidate dimensions must match the selected part exactly; motion, pivot, and timing stay in place.'):null
- ):el('div',{class:'magic-part-compare',id:'magic-part-compare'},el('p',{class:'why'},'Select a layer to compare its original with a generated candidate.'),partsStrip);
- if(selected){
-  const sourceSize=selected.source_size||[];const dimensionsMatch=!!candidate&&candidate.result.width===sourceSize[0]&&candidate.result.height===sourceSize[1];
-  const actionStatus=el('p',{class:'why',id:'part-image-status'},dimensionsMatch?'Candidate dimensions match the selected part.':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${selected.label||selected.id} requires ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}.`: 'Replacement requires a reviewed candidate for this captured part.');
+ const compare=el('div',{class:'magic-part-compare',id:'magic-part-compare'},partsStrip);
+ if(!selected)compare.append(el('p',{class:'why'},'Select a part to compare its original with a candidate.'));
+ else{
+  const name=selected.label||selected.id,sourceSize=selected.source_size||[];
+  const size=(w,h)=>w&&h?` · ${w}×${h}`:'';
+  const dimensionsMatch=!!candidate&&candidate.result.width===sourceSize[0]&&candidate.result.height===sourceSize[1];
+  compare.append(el('div',{class:'magic-compare-grid'},
+   el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${name}`}),el('figcaption',{},`Original${size(sourceSize[0],sourceSize[1])}`)),
+   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${name}`}):el('div',{class:'magic-compare-empty'},'No candidate yet'),
+    el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'}${size(candidate.result.width,candidate.result.height)}`:'Candidate'))));
+  const statusText=dimensionsMatch?'Sizes match · the original stays until you replace it':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${name} needs ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}`:'Generate a candidate or save an edit in PhotoCraft';
+  const actionStatus=el('p',{class:'magic-part-status',id:'part-image-status',title:statusText,role:'status'},statusText);
   const undoKey=`magic.part-image-undo.${state.project}.${motion.character}.${selected.id}`;
   const savedUndo=localStorage.getItem(undoKey);
-  const replaceButton=el('button',{class:'start',id:'part-image-replace','aria-label':`Replace ${selected.label||selected.id} with reviewed candidate`,title:!dimensionsMatch?'Candidate must have the same pixel dimensions as this part':'Replace only this captured part; motion and pivot are preserved',onclick:async()=>{
+  const replaceButton=el('button',{class:'start',id:'part-image-replace','aria-label':`Replace ${name} with reviewed candidate`,title:!dimensionsMatch?'Candidate must have the same pixel dimensions as this part':'Replace only this captured part; motion and pivot are preserved',onclick:async()=>{
    replaceButton.disabled=true;actionStatus.textContent='Replacing selected part…';
    try{const result=await motionCommand('part.replace_image',{asset:candidate.assetId,part:candidate.partId,candidate:candidate.image,expected_rig_sha256:candidate.rigSha256,expected_part_sha256:candidate.partSha256,expected_candidate_sha256:candidate.result.sha256,expected_revision:candidate.revision});
-    localStorage.setItem(undoKey,result.undo);actionStatus.textContent='Part replaced. Undo is available for this latest image change.';await animationRefresh();
+    localStorage.setItem(undoKey,result.undo);actionStatus.textContent='Part replaced · Undo restores the previous image';await animationRefresh();
    }catch(error){actionStatus.textContent=String(error);replaceButton.disabled=false;}
-  }},'Replace selected part');
+  }},'Replace');
   replaceButton.disabled=!dimensionsMatch||!candidate.rigSha256||!candidate.partSha256||!Number.isSafeInteger(candidate.revision)||candidate.revision!==meta.image_revision;
-  const undoButton=el('button',{class:'ghost',id:'part-image-undo','aria-label':`Undo image replacement for ${selected.label||selected.id}`,onclick:async()=>{
+  const undoButton=el('button',{class:'ghost',id:'part-image-undo','aria-label':`Undo image replacement for ${name}`,title:'Undo the latest image replacement',onclick:async()=>{
    undoButton.disabled=true;actionStatus.textContent='Restoring original part image…';
-   try{await motionCommand('part.undo_image',{asset:motion.character,undo:savedUndo});localStorage.removeItem(undoKey);actionStatus.textContent='Original part image restored.';await animationRefresh();}
+   try{await motionCommand('part.undo_image',{asset:motion.character,undo:savedUndo});localStorage.removeItem(undoKey);actionStatus.textContent='Original part image restored';await animationRefresh();}
    catch(error){actionStatus.textContent=String(error);undoButton.disabled=false;}
-  }},'Undo image replacement');
+  }},'Undo');
   undoButton.disabled=!savedUndo;
-  compare.append(actionStatus,replaceButton,undoButton);
+  compare.append(actionStatus,el('div',{class:'magic-part-actionbar'},
+   el('button',{class:'ghost',id:'part-open-photocraft',title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${name} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(selected)},'PhotoCraft'),
+   replaceButton,undoButton,
+   el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${name}`,onclick:()=>selected.file&&openPath(selected.file)},'Original'),
+   el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${name}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy path')));
  }
- const assetRows=(motion.assets||[]).map(asset=>el('button',{class:`magic-asset-row${asset.id===motion.character?' active':''}`,id:`magic-asset-${asset.id}`,title:`Show parts for ${asset.name||asset.id}`,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}},el('span',{},asset.name||asset.id),el('span',{class:'muted'},asset.id)));
- const assetsSection=motionSection('Project assets',assetRows.length?assetRows:el('p',{class:'why'},'No project assets are available yet.'));
+ const assetsGrid=(motion.assets||[]).length?el('div',{class:'magic-assets-grid'},motion.assets.map(asset=>magicAssetTile(asset,{active:asset.id===motion.character,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}}))):el('p',{class:'why'},'No project assets are available yet.');
  const partsSlot=$('magic-parts-slot');
- if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsSection));else box.append(section);
+ if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsGrid));else box.append(section);
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],motion.activeSection==='Expression & pose'));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),motion.activeSection==='Quality checks'));
@@ -199,27 +194,27 @@ function renderPartControlsBar(selected){
  bar.lastChild?.setAttribute('aria-pressed',String(shown));
 }
 // Compare | All parts: one tab at a time, remembered while the view is open.
-function partsDrawer(compare,assetsSection){
+function partsDrawer(compare,assetsGrid){
  const meta=motion.meta;
  const cards=(meta.layers||[]).map(part=>{
-  const shown=part.state?.visible!==false;
+  const shown=part.state?.visible!==false,name=part.label||part.id,picked=motion.selected===part.id;
   const candidate=partCandidate(part.id);
   const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
-  return el('article',{class:`magic-part-card${motion.selected===part.id?' active':''}`,id:`magic-part-card-${part.id}`},
-   el('button',{class:'magic-part-card-pick',title:`Select ${part.label||part.id} (${part.id})`,'aria-pressed':String(motion.selected===part.id),onclick:select},
-    el('img',{src:motionAssetUrl(part.file),alt:''}),
-    el('span',{class:'magic-part-card-name'},part.label||part.id),
-    el('span',{class:'muted'},part.id)),
-   el('div',{class:'magic-part-pills'},
-    el('button',{class:`pill ${shown?'ok':'off'}`,title:`${shown?'Hide':'Show'} ${part.label||part.id}`,'aria-pressed':String(shown),onclick:async()=>{await motionCommand('part.set_state',{part:part.id,visible:!shown});await animationRefresh();}},shown?'Visible':'Hidden'),
-    candidate?el('span',{class:'pill warn',title:candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'},'Candidate'):null,
-    motion.selected===part.id?el('span',{class:'pill accent'},'Selected'):null),
-   el('button',{class:'ghost magic-part-card-open',id:`part-open-photocraft-${part.id}`,title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${part.label||part.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'Open in PhotoCraft'));
+  const badge=candidate?el('span',{class:'magic-part-dot warn',title:candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'}):picked?el('span',{class:'magic-part-dot accent',title:'Selected'}):null;
+  const visible=motionButton(`magic-part-visible-${part.id}`,`${shown?'Hide':'Show'} ${name}`,'eye',async()=>{await motionCommand('part.set_state',{part:part.id,visible:!shown});await animationRefresh();});
+  visible.setAttribute('aria-pressed',String(shown));
+  return el('article',{class:`magic-part-card${picked?' active':''}${shown?'':' hidden-layer'}`,id:`magic-part-card-${part.id}`,title:`${name} (${part.id})`},
+   el('button',{class:'magic-part-card-thumb',tabindex:'-1','aria-hidden':'true',onclick:select},el('img',{src:motionAssetUrl(part.file),alt:''})),
+   el('button',{class:'magic-part-card-pick','aria-pressed':String(picked),'aria-label':`Select ${name} (${part.id})`,onclick:select},
+    el('span',{class:'magic-part-card-name'},name),part.label&&part.label!==part.id?el('span',{class:'magic-part-card-id'},part.id):null,badge),
+   el('div',{class:'magic-part-card-actions'},visible,
+    el('button',{class:'ghost magic-part-card-open',id:`part-open-photocraft-${part.id}`,title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${name} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'PhotoCraft')));
  });
- const panels={compare,parts:el('div',{class:'magic-part-cards'},cards.length?cards:el('p',{class:'why'},'This object has no rig parts.'),assetsSection)};
+ const panels={parts:cards.length?el('div',{class:'magic-part-cards'},cards):el('p',{class:'why'},'This object has no rig parts.'),compare,assets:assetsGrid};
  const body=el('div',{class:'magic-parts-panel',role:'tabpanel'},panels[motion.partsTab]||compare);
  const tab=(key,label)=>el('button',{class:`magic-parts-tab${motion.partsTab===key?' active':''}`,role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
- return el('div',{class:'magic-parts-drawer'},el('div',{class:'magic-parts-tabs',role:'tablist','aria-label':'Parts and assets'},tab('compare','Compare'),tab('parts',`All parts (${(meta.layers||[]).length})`)),body);
+ return el('div',{class:'magic-parts-drawer'},el('div',{class:'magic-parts-tabs',role:'tablist','aria-label':'Parts and assets'},
+  tab('parts',`Parts (${(meta.layers||[]).length})`),tab('compare','Compare'),tab('assets',`Assets (${(motion.assets||[]).length})`)),body);
 }
 // PhotoCraft edits a draft copy; the live layer only changes through part.replace_image.
 async function openPartInPhotoCraft(part){
