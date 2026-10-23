@@ -188,3 +188,5 @@ await import('./animation-refresh.mjs');
 await import('./animation-bridge.mjs');
 
 await import('./animation-transport.mjs');
+
+await import('./animation-native.mjs');

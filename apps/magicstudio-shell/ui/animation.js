@@ -63,7 +63,7 @@ function motionModeSwitch(){
    'aria-pressed':String(motion.mode===m),title:m==='subject'?'Subject authoring, parts and timeline':'Images arranged in time',
    onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;blenderDispose();motion.project=null;motion.meta=null;motion.request++;motion.mode=m;localStorage.setItem('animation.backendMode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
   },m==='subject'?'Subject':'Composite')),
-  el('button',{class:'motion-mode',id:'motion-mode-blender',title:'Open Blender rendering alongside this editor',onclick:async()=>{try{await blenderAnimationOpen();}catch(error){toast(String(error));}}},'Blender render'));
+  el('button',{class:'motion-mode',id:'motion-mode-blender',title:'Open Blender rendering alongside this editor',onclick:async()=>{try{await blenderAnimationOpen();}catch(error){toast(String(error));}}},'Blender render'),el('button',{class:'motion-mode',id:'motion-mode-native',title:'Saved Synfig sources and OpenToonz availability',onclick:()=>nativeAnimationOpen().catch(error=>toast(String(error)))},'Native tools'));
 }
 function animationShell(){
  theatreRequireSaved();

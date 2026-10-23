@@ -2,6 +2,7 @@
 let blenderViewRevision=0,blenderDialog=null;
 let blenderMediaUrl=null,blenderMediaFetch=null,blenderPollTimer=null;
 function blenderDispose(){
+ if(typeof nativeAnimationDispose==='function')nativeAnimationDispose();
  clearTimeout(blenderPollTimer);blenderPollTimer=null;
  ++blenderViewRevision;blenderMediaFetch?.abort();blenderMediaFetch=null;
  const dialog=blenderDialog;blenderDialog=null;
