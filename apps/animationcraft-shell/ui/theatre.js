@@ -45,6 +45,8 @@ async function theatreSave(){
    frame.contentWindow.postMessage({magicTheatre:true,type:'export',request,project},location.origin);
   });
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during export; no state saved');
+  // An untouched timeline exports no sheets; the engine only stores real Theatre state.
+  if(!Object.keys(exported.state?.sheetsById||{}).length){$('theatre-status').textContent=`${magicTheatre.part} · no Theatre edits to save`;return {saved:false,reason:'no Theatre edits'};}
   const result=await motionCommand('motion.theatre.save',{expected_project:project,state:exported.state});
   if(result.saved!==true||result.project!==project)throw new Error('Native Theatre save was not acknowledged');
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during save; the previous project snapshot was saved');
