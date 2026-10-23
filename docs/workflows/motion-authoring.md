@@ -50,10 +50,16 @@ Theatre state must match the engine snapshot; a stale session is refused.
 ## Sampled static pose
 
 `motion.pose.export` requires the same project/character/track/hash identity plus
-`time` within the action and `theatre_state`: the UI's CURRENT native save-file
+`time` within the action, optional `rest` (default false), optional `amount`
+(0–100, default100), and `theatre_state`: the UI's CURRENT native save-file
 JSON, or null when it has no Theatre state. Optionally pass `reference_asset`, a
 connected reference asset ID. A caller must capture current state at submission;
 passing an old saved snapshot would conceal its own unsaved edits.
+
+Native snapshots containing only recognized empty sheets normalize to null, so an
+untouched mounted editor can export. Any track/object entry or nonempty override
+(including a zero-valued override or generated seed) remains real state and is not
+normalized away. Unknown structures are not treated as empty.
 
 The command refuses a current/saved Theatre mismatch and relevant saved Theatre
 edits. It never pretends the shared sampler evaluated Theatre. UI must retain its
@@ -62,7 +68,8 @@ project save occurs automatically.
 
 The shared `motion.sample` now accepts optional `time` to return exactly one actual
 evaluation. Without time it retains the existing full-range behavior. Pose export
-uses those exact matrices, independent opacity, effective hierarchy and visibility,
+passes the captured rest/amount directly to that sampler and records both in the
+receipt. It uses those exact matrices, independent opacity, effective hierarchy and visibility,
 then rasterizes the cropped layer PNGs onto the saved transparent canvas. Output
 uses nearest-neighbor affine sampling (rough proof quality), is clipped to canvas,
 and is bounded to4096px per axis,4M output pixels and64M layer-pixel operations.

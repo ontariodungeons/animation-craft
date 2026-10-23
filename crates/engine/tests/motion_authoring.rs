@@ -183,3 +183,48 @@ fn exact_field_reset_and_action_metadata_keep_stable_ids_and_guards() {
     assert_eq!(track["authoring"]["part_set"], false);
     fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn untouched_empty_theatre_mount_exports_but_seeded_rotation_refuses() {
+    let (mut s, root, rig) = fixture();
+    let mut p = params(&s, &rig);
+    p["time"] = json!(0.5);
+    p["theatre_state"] = json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{
+        "subject / move":{"sequence":{"type":"PositionalSequence","length":10,"subUnitsPerUnit":30,"tracksByObject":{}},"staticOverrides":{"byObject":{}}}
+    }});
+    let pose = s
+        .execute("motion.pose.export", p.clone())
+        .expect("an untouched mounted editor must export");
+    assert_eq!(pose["approval"], "pending");
+    p["theatre_state"]["sheetsById"]["subject / move"]["staticOverrides"]["byObject"]["body"] =
+        json!({"rotation":0});
+    assert!(
+        s.execute("motion.pose.export", p).is_err(),
+        "even identity-looking actual overrides must not be discarded"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn pose_rest_and_amount_match_the_visible_shared_sample() {
+    let (mut s, root, rig) = fixture();
+    let mut edit = params(&s, &rig);
+    edit["position"] = json!([6, 4]);
+    s.execute("motion.part.set", edit).unwrap();
+    let mut p = params(&s, &rig);
+    p["time"] = json!(0.5);
+    p["theatre_state"] = Value::Null;
+    p["amount"] = json!(50);
+    let pose = s.execute("motion.pose.export", p.clone()).unwrap();
+    assert_eq!(
+        pose["sample"]["frames"][0]["layers"][0]["position"],
+        json!([3.0, 2.0])
+    );
+    p["rest"] = json!(true);
+    let rest = s.execute("motion.pose.export", p).unwrap();
+    let image = image::open(rest["path"].as_str().unwrap())
+        .unwrap()
+        .into_rgba8();
+    assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+    assert_eq!(rest["rest"], true);
+    assert_eq!(rest["amount"], 50.0);
+    fs::remove_dir_all(root).unwrap();
+}

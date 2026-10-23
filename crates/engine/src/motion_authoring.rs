@@ -51,17 +51,83 @@ pub(crate) fn project_guard(s: &Session, p: &Value) -> Result<PathBuf> {
     }
     Ok(selected)
 }
+// Mounting Theatre can create empty native sheets before any saved or visible edit.
+// Only recognized empty containers normalize to null; entries (including zero-valued
+// overrides and generated rotation seeds) are real state and must never be dropped.
+fn empty_theatre(state: &Value) -> bool {
+    if state.is_null() {
+        return true;
+    }
+    if state["definitionVersion"] != "0.4.0" {
+        return false;
+    }
+    let Some(root) = state.as_object() else {
+        return false;
+    };
+    if root
+        .keys()
+        .any(|k| !["definitionVersion", "revisionHistory", "sheetsById"].contains(&k.as_str()))
+    {
+        return false;
+    }
+    let Some(sheets) = state["sheetsById"].as_object() else {
+        return false;
+    };
+    sheets.values().all(|sheet| {
+        let Some(fields) = sheet.as_object() else {
+            return false;
+        };
+        if fields
+            .keys()
+            .any(|k| !["sequence", "staticOverrides"].contains(&k.as_str()))
+        {
+            return false;
+        }
+        if let Some(overrides) = sheet.get("staticOverrides") {
+            let Some(object) = overrides.as_object() else {
+                return false;
+            };
+            if object.keys().any(|k| k != "byObject")
+                || !overrides["byObject"]
+                    .as_object()
+                    .is_some_and(|o| o.is_empty())
+            {
+                return false;
+            }
+        }
+        if let Some(sequence) = sheet.get("sequence") {
+            let Some(object) = sequence.as_object() else {
+                return false;
+            };
+            if object.keys().any(|k| {
+                !["type", "length", "subUnitsPerUnit", "tracksByObject"].contains(&k.as_str())
+            }) || !sequence["tracksByObject"]
+                .as_object()
+                .is_some_and(|o| o.is_empty())
+            {
+                return false;
+            }
+        }
+        true
+    })
+}
+fn same_theatre(a: &Value, b: &Value) -> bool {
+    a == b || (empty_theatre(a) && empty_theatre(b))
+}
+
 fn theatre_guard(s: &Session, character: &str, track: Option<&str>) -> Result<()> {
     let disk: Value = serde_json::from_slice(&bytes(
         s.project_path.as_ref().ok_or_else(|| bad("No project"))?,
     )?)
     .map_err(|e| bad(e.to_string()))?;
-    if disk.get("theatre").filter(|v| !v.is_null())
-        != s.theatre_state.as_ref().filter(|v| !v.is_null())
-    {
+    let saved = s.theatre_state.as_ref().unwrap_or(&Value::Null);
+    if !same_theatre(&disk["theatre"], saved) {
         return Err(bad(
             "Theatre state changed on disk; refresh before authoring",
         ));
+    }
+    if !saved.is_null() && saved["definitionVersion"] != "0.4.0" {
+        return Err(bad("Unsupported saved Theatre state"));
     }
     if let Some(sheets) = s
         .theatre_state
@@ -454,7 +520,7 @@ pub fn pose_export(s: &mut Session, p: &Value) -> Result<Value> {
     let ui_state = p.get("theatre_state").ok_or_else(|| {
         bad("Capture current UI theatre_state (or null); required to detect unsaved edits")
     })?;
-    if *ui_state != s.theatre_state.clone().unwrap_or(Value::Null) {
+    if !same_theatre(ui_state, s.theatre_state.as_ref().unwrap_or(&Value::Null)) {
         return Err(bad(
             "Unsaved Theatre edits differ from saved state; pose export refused",
         ));
@@ -466,6 +532,16 @@ pub fn pose_export(s: &mut Session, p: &Value) -> Result<Value> {
         edit.raw["tracks"][ti]["duration"].as_f64().unwrap_or(0.),
         "time",
     )?;
+    let rest = p
+        .get("rest")
+        .map(|v| v.as_bool().ok_or_else(|| bad("rest must be boolean")))
+        .transpose()?
+        .unwrap_or(false);
+    let amount = p
+        .get("amount")
+        .map(|v| number(v, 0., 100., "amount"))
+        .transpose()?
+        .unwrap_or(100.);
     let canvas = edit.raw["canvas"]
         .as_array()
         .ok_or_else(|| bad("Saved canvas required"))?;
@@ -509,7 +585,7 @@ pub fn pose_export(s: &mut Session, p: &Value) -> Result<Value> {
     let meta = crate::motion::cmd_motion_tracks(s, &json!({"character":edit.character}))?;
     let sample = crate::motion::cmd_motion_sample(
         s,
-        &json!({"character":edit.character,"track":track,"time":time}),
+        &json!({"character":edit.character,"track":track,"time":time,"rest":rest,"amount":amount}),
     )?;
     let mut image = image::RgbaImage::new(w, h);
     for (layer, pose) in meta["layers"].as_array().into_iter().flatten().zip(
@@ -571,7 +647,7 @@ pub fn pose_export(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         &json!({"path":path,"id":id,"kind":"image","name":format!("{} · {} at {time}s (pending)",edit.character,track)}),
     )?;
-    let value = json!({"ok":true,"asset_id":registered["asset_id"],"path":path,"receipt":receipt,"approval":"pending","project_saved":false,"source_character":edit.character,"track":track,"time":time,"reference":reference,"rig_sha256":digest(&edit.before),"image_sha256":digest(&fs::read(&path)?),"sampler":"motion.sample","sampling":"nearest-neighbor affine PNG; saved canvas, clipped to canvas","canvas":[w,h],"theatre_applied":false,"sample":sample,"layers":meta["layers"]});
+    let value = json!({"ok":true,"asset_id":registered["asset_id"],"path":path,"receipt":receipt,"approval":"pending","project_saved":false,"source_character":edit.character,"track":track,"time":time,"rest":rest,"amount":amount,"reference":reference,"rig_sha256":digest(&edit.before),"image_sha256":digest(&fs::read(&path)?),"sampler":"motion.sample","sampling":"nearest-neighbor affine PNG; saved canvas, clipped to canvas","canvas":[w,h],"theatre_applied":false,"sample":sample,"layers":meta["layers"]});
     fs::write(
         &receipt,
         serde_json::to_vec_pretty(&value).map_err(|e| bad(e.to_string()))?,
