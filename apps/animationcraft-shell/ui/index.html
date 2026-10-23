@@ -107,18 +107,16 @@
           <div id="magic-target-chat" class="magic-target">No part selected</div>
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
         <div class="agent-head">
-          <span class="agent-title">Sproket</span>
+          <span class="agent-title">Sproket <span class="agent-connection" id="agent-connection">· not configured</span></span>
           <div class="agent-head-actions">
             <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
-            <button class="ghost" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
-            <button class="icon" id="agent-close" aria-label="Close the agent panel" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+            <button class="icon" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+            <button class="ghost" id="agent-config-toggle" aria-controls="anim-agent-settings" aria-expanded="false" title="Agent settings: agent, model, thinking">Settings</button>
+            <button class="ghost" id="agent-close" aria-label="Hide the agent panel" title="Hide">Hide</button>
           </div>
         </div>
-        <div class="agent-pickers">
+        <div class="agent-config" id="anim-agent-settings" hidden>
           <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
-          <button class="ghost" id="agent-config-toggle" title="Agent settings: agent, model, thinking">Settings</button>
-        </div>
-        <div class="agent-config" id="agent-config" hidden>
           <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
           <label>Provider<input id="agent-provider" list="agent-providers" placeholder="CLI default" title="Exact provider ID; choose from the installed catalog" /><datalist id="agent-providers"></datalist></label>
           <label>Model<input id="agent-model" list="agent-models" placeholder="CLI default" title="Exact model ID; saved for both app and CLI" /><datalist id="agent-models"></datalist></label>
@@ -146,7 +144,7 @@
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Sproket and image generation sections" data-splitter="chat"></div>
         <section class="magic-pane magic-image-pane" id="magic-image-pane" aria-label="Image generation">
-          <div class="magic-pane-head"><span>Image generation</span><span id="magic-target-image" class="magic-target">No part selected</span></div>
+          <button class="magic-pane-head magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Generate"><span>Generate</span><span id="magic-target-image" class="magic-target">No part selected</span></button>
           <div id="magic-image-tools" class="magic-image-tools"></div>
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize image generation and parts sections" data-splitter="image"></div>

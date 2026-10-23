@@ -558,3 +558,51 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
  line-height:1.2; box-shadow:none; outline:none; }
 .sb-text:hover { outline:1px dashed #D7B46A; }
 .sb-text:focus { outline:1px solid #D7B46A; background:var(--field-fill,#1B1D22); color:var(--field-ink,#B7B4AB); }
+
+/* Animation / timeline focus: selected-part controls live in Expression & pose; the bar stays hidden. */
+.motion-part-bar, .motion-part-bar[hidden] { display:none !important; }
+.anim-part-inspector { display:grid; gap:8px; }
+.anim-part-inspector:empty { display:none; }
+.anim-part-inspector .motion-part-title { flex-direction:row; align-items:baseline; justify-content:space-between; min-width:0; }
+.anim-part-inspector .motion-part-control, .anim-part-inspector .motion-range { max-width:none; min-width:0; }
+.anim-part-inspector > .icon { justify-self:start; }
+
+/* Sproket: one compact header bar; settings fold below it. */
+.agent-connection { color:var(--muted); font-weight:500; font-size:11px; }
+.agent-head-actions { align-items:center; }
+.agent-head-actions .ghost { padding:4px 9px; font-size:11px; }
+#agent-config-toggle[aria-expanded="true"] { border-color:var(--accent); color:var(--text); }
+.agent-config .agent-runtime { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.agent-config { display:grid; gap:7px; padding:8px 9px; border-bottom:1px solid var(--line); flex:none; max-height:45%; overflow-y:auto; font-size:11px; color:var(--muted); }
+.agent-config[hidden] { display:none; }
+.agent-config label { display:grid; gap:3px; }
+.agent-config input, .agent-config select { width:100%; min-width:0; box-sizing:border-box; }
+.agent-config .start { margin-top:2px; width:100%; }
+
+/* Generate folds to its header. */
+.magic-pane-toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--line); cursor:pointer; }
+.magic-pane-toggle:hover { color:var(--text); }
+.magic-pane-toggle::after { content:""; flex:none; width:6px; height:6px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); transition:transform var(--fast) var(--ease); }
+.magic-pane-toggle[aria-expanded="false"]::after { transform:rotate(-45deg); }
+.magic-workstation.generate-collapsed { grid-template-rows: 34px max(230px,min(var(--magic-chat-h,320px),36vh)) 8px 34px 8px minmax(100px,1fr); }
+.magic-workstation.generate-collapsed .magic-image-tools { display:none; }
+
+/* Parts & Assets drawer: Compare | All parts. */
+.magic-parts-tabs { display:flex; gap:4px; margin-bottom:8px; border-bottom:1px solid var(--line); }
+.magic-parts-tab { flex:1; padding:6px 8px; background:none; border:0; border-bottom:2px solid transparent; color:var(--muted); font-size:12px; }
+.magic-parts-tab.active { color:var(--text); border-bottom-color:var(--accent); }
+.magic-part-cards { display:grid; gap:7px; }
+.magic-part-card { display:grid; grid-template-columns:1fr auto; align-items:center; gap:5px 6px; padding:6px 7px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.magic-part-card-pick { grid-column:1 / -1; }
+.magic-part-card.active { border-color:var(--accent); }
+.magic-part-card-pick { display:grid; grid-template-columns:44px 1fr; grid-template-rows:auto auto; column-gap:8px; align-items:center; text-align:left; background:none; border:0; padding:0; color:var(--text); }
+.magic-part-card-pick img { grid-row:span 2; width:44px; height:36px; object-fit:contain; border-radius:4px; background-image:linear-gradient(45deg,#212631 25%,transparent 25%),linear-gradient(-45deg,#212631 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#212631 75%),linear-gradient(-45deg,transparent 75%,#212631 75%); background-size:12px 12px; background-position:0 0,0 6px,6px -6px,-6px 0; }
+.magic-part-card-name { font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.magic-part-card-pick .muted { font:10.5px ui-monospace,monospace; }
+.magic-part-pills { display:flex; flex-wrap:wrap; gap:4px; }
+.magic-part-pills .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--line); background:var(--bg); color:var(--muted); font-size:10.5px; }
+.magic-part-pills .pill.ok { color:var(--check-green); border-color:color-mix(in srgb,var(--check-green) 40%,transparent); }
+.magic-part-pills .pill.off { color:var(--faint); }
+.magic-part-pills .pill.warn { color:var(--amber); border-color:color-mix(in srgb,var(--amber) 40%,transparent); }
+.magic-part-pills .pill.accent { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,transparent); }
+.magic-part-card-open { justify-content:center; font-size:11px; padding:3px 8px; white-space:nowrap; }

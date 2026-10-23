@@ -21,6 +21,9 @@ function renderConfig() {
   runtime.textContent = c
     ? `${chosen || "no agent"}${isDefault ? " · system default" : ""}${c.provider ? ` · ${c.provider}` : ""}${c.model ? ` · ${c.model}` : " · CLI default (unverified)"}`
     : "agent not configured";
+  const ready = !!c && (c.agents || []).some((a) => a.installed && a.name === chosen);
+  $("agent-connection").textContent = ready ? "· connected" : "· not configured";
+  $("agent-connection").title = ready ? `${chosen} is installed and selected` : "Open Settings to choose an installed agent";
   runtime.title = c
     ? `Installed agents: ${(c.agents || []).filter((a) => a.installed).map((a) => a.name).join(", ")}\n` +
       `System default: ${c.default || "none"}\nInstructions: ${c.instructions}\nExtra arguments: ${(c.extra_args || []).join(" ") || "none"}`
@@ -58,7 +61,8 @@ async function configSave() {
   try {
     agent.config = await invoke("agent_config_save", { patch });
     renderConfig();
-    $("agent-config").hidden = true;
+    $("anim-agent-settings").hidden = true;
+    $("agent-config-toggle").setAttribute("aria-expanded", "false");
     agent.newChat = true;
     status("Chat selection saved · next message starts fresh");
     await refreshModels();
@@ -417,7 +421,12 @@ $("agent-float").addEventListener("click", toggleAgentFloat);
 $("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
 $("agent-point").addEventListener("click", pointStart);
-$("agent-config-toggle").addEventListener("click", () => { $("agent-config").hidden = !$("agent-config").hidden; if (!$("agent-config").hidden) refreshModels(); });
+$("agent-config-toggle").addEventListener("click", () => {
+  const settings = $("anim-agent-settings");
+  settings.hidden = !settings.hidden;
+  $("agent-config-toggle").setAttribute("aria-expanded", String(!settings.hidden));
+  if (!settings.hidden) refreshModels();
+});
 $("agent-catalog-refresh").addEventListener("click", refreshModels);
 $("agent-command").addEventListener("change", refreshModels);
 $("agent-provider").addEventListener("input", renderModelOptions);

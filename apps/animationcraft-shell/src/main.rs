@@ -96,6 +96,7 @@ async fn execute_engine_command(app: tauri::AppHandle, id: String, params: Value
         shared.last_result = finished.last_result;
         shared.draft_approved = finished.draft_approved;
         shared.video_target = finished.video_target;
+        shared.video_project_path = finished.video_project_path;
         shared.song_audio = finished.song_audio;
     }
     result

@@ -61,6 +61,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             let is_ac = matches!(
                 exe_name,
                 "animationcraft"
+                    | "animationcraft-shell"
                     | "mc"
                     | "photocraft-cli"
                     | "effectcraft-cli"
@@ -76,16 +77,17 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
                 .and_then(|w| w[1].parse::<u16>().ok());
             let bridge_alive = control_port.map(port_open);
             let is_mcp = args.iter().any(|a| a == "mcp");
-            let kind = if exe_name == "animationcraft" {
+            let is_gui = matches!(exe_name, "animationcraft" | "animationcraft-shell");
+            let kind = if is_gui {
                 "gui"
             } else if is_mcp {
                 "mcp_server"
             } else {
                 "cli_worker"
             };
+            let (rss_mb, ppid) = read_proc_status(pid);
             let should_clean = clean
-                && ((exe_name == "animationcraft"
-                    && keep_port.is_none_or(|kp| control_port != Some(kp)))
+                && ((is_gui && keep_port.is_none_or(|kp| control_port != Some(kp)))
                     || ((exe_name == "mc" || exe_name.ends_with("-cli")) && !is_mcp));
             let mut action = "running";
             if should_clean {
@@ -98,13 +100,51 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             }
             processes.push(json!({
                 "pid": pid,
+                "ppid": ppid,
                 "exe": exe_name,
                 "kind": kind,
+                "rss_mb": rss_mb,
                 "control_port": control_port,
                 "bridge_alive": bridge_alive,
                 "cmdline": args.join(" "),
                 "status": action,
             }));
+        }
+    }
+
+    // Identify duplicate MCP server instances per executable (keep the newest PID per exe).
+    let mut newest_mcp_by_exe = std::collections::HashMap::<String, u32>::new();
+    for p in &processes {
+        if p["kind"] == "mcp_server" && p["status"] == "running" {
+            if let (Some(exe), Some(pid)) = (p["exe"].as_str(), p["pid"].as_u64()) {
+                let pid = pid as u32;
+                newest_mcp_by_exe
+                    .entry(exe.to_string())
+                    .and_modify(|max_pid| *max_pid = (*max_pid).max(pid))
+                    .or_insert(pid);
+            }
+        }
+    }
+    let mut duplicate_mcp_count = 0usize;
+    for p in &mut processes {
+        if p["kind"] == "mcp_server" && p["status"] == "running" {
+            let exe = p["exe"].as_str().unwrap_or_default().to_string();
+            let pid = p["pid"].as_u64().unwrap_or(0) as u32;
+            let ppid = p["ppid"].as_u64().unwrap_or(0) as u32;
+            let is_dup = newest_mcp_by_exe.get(&exe).is_some_and(|&newest| pid < newest) || ppid == 1;
+            if is_dup {
+                duplicate_mcp_count += 1;
+                if clean {
+                    if stop_process(pid, None) {
+                        cleaned_pids.push(pid);
+                        p["status"] = json!("stopped_duplicate");
+                    } else {
+                        p["status"] = json!("stop_failed");
+                    }
+                } else {
+                    p["duplicate"] = json!(true);
+                }
+            }
         }
     }
 
@@ -176,6 +216,11 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             ));
         }
     }
+    if duplicate_mcp_count > 0 && !clean {
+        recommendations.push(format!(
+            "{duplicate_mcp_count} duplicate Craft MCP server processes are running; run `mc doctor --clean` to stop duplicates."
+        ));
+    }
     if video_server_state.get("stale") == Some(&json!(true)) {
         recommendations.push(
             "Stale `.video-server.json` found for a stopped dev server; run `mc doctor --clean`."
@@ -236,6 +281,29 @@ mod mc_process_tests {
         assert!(!matching_mc_process(&link, Some(&expected)));
         std::fs::remove_dir_all(root).unwrap();
     }
+}
+
+fn read_proc_status(pid: u32) -> (Option<u64>, Option<u32>) {
+    let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+        return (None, None);
+    };
+    let mut rss_mb = None;
+    let mut ppid = None;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmRSS:") {
+            let kb = rest
+                .split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<u64>().ok());
+            rss_mb = kb.map(|v| (v + 512) / 1024);
+        } else if let Some(rest) = line.strip_prefix("PPid:") {
+            ppid = rest
+                .split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<u32>().ok());
+        }
+    }
+    (rss_mb, ppid)
 }
 
 fn port_open(port: u16) -> bool {

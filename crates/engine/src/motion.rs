@@ -574,6 +574,195 @@ fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
     Ok(rig)
 }
 
+fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
+    let Some(map) = motion_obj.as_object() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (layer, props_val) in map {
+        let Some(props_obj) = props_val.as_object() else {
+            continue;
+        };
+        let mut properties = Vec::new();
+        let mut hz_list = Vec::new();
+        let mut has_follow = false;
+        let mut has_keys = false;
+        for (prop_name, terms_val) in props_obj {
+            properties.push(prop_name.clone());
+            if let Some(terms) = terms_val.as_array() {
+                for term in terms {
+                    match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                        "oscillate" => {
+                            if let Some(hz) = term.get("hz").and_then(Value::as_f64) {
+                                let label = format!("{:.1} Hz", hz).replace(".0 Hz", " Hz");
+                                if !hz_list.contains(&label) {
+                                    hz_list.push(label);
+                                }
+                            }
+                        }
+                        "follow" => has_follow = true,
+                        "keys" | "ellipse" => has_keys = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        if has_keys {
+            parts.push("keys".to_string());
+        }
+        if let Some(first_hz) = hz_list.first() {
+            parts.push(first_hz.clone());
+        }
+        if has_follow {
+            parts.push("follow".to_string());
+        }
+        let summary = if parts.is_empty() {
+            "static".to_string()
+        } else {
+            parts.join(" + ")
+        };
+        out.push(json!({
+            "layer": layer,
+            "properties": properties,
+            "summary": summary,
+            "rotation_bound": props_obj.contains_key("rotation"),
+        }));
+    }
+    out
+}
+
+fn short_theatre_id(seed: &str) -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let digest = Sha256::digest(seed.as_bytes());
+    (0..10)
+        .map(|i| ALPHABET[(digest[i] as usize) % ALPHABET.len()] as char)
+        .collect()
+}
+
+/// Convert authored rig rotation tracks into Theatre `tracksByObject` entries per clip.
+pub(crate) fn convert_clip_rotation_tracks(
+    s: &mut Session,
+    params: &Value,
+) -> Result<BTreeMap<String, BTreeMap<String, Value>>> {
+    let id = load_character(s, params)?;
+    let asset = s
+        .assets
+        .get(&id)
+        .ok_or_else(|| invalid("Asset not loaded"))?;
+    let rig = preview_rig(asset)?;
+    let rig = &rig;
+    validate(rig)?;
+    let mut by_clip = BTreeMap::new();
+    for track in rig.effectcraft["tracks"].as_array().into_iter().flatten() {
+        let Some(clip_id) = track["id"].as_str() else {
+            continue;
+        };
+        let duration = track["duration"].as_f64().unwrap_or(1.0).max(0.1);
+        let motion_obj = track.get("motion").unwrap_or(&Value::Null);
+        let mut objects = BTreeMap::new();
+        for part in &rig.parts {
+            let lid = part.id.as_str();
+            let Some(rot_terms) = motion_obj
+                .get(lid)
+                .and_then(|m| m.get("rotation"))
+                .and_then(Value::as_array)
+                .filter(|a| !a.is_empty())
+            else {
+                continue;
+            };
+            let mut max_hz = 0.0_f64;
+            let mut key_times = vec![0.0_f64, (duration * 1000.0).round() / 1000.0];
+            for term in rot_terms {
+                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                    "oscillate" => {
+                        let hz = term.get("hz").and_then(Value::as_f64).unwrap_or(1.0);
+                        max_hz = max_hz.max(hz);
+                    }
+                    "follow" => {
+                        max_hz = max_hz.max(1.2);
+                        let target_lid = term.get("layer").and_then(Value::as_str).unwrap_or(lid);
+                        if let Some(pos_terms) = motion_obj
+                            .get(target_lid)
+                            .and_then(|m| m.get("position"))
+                            .and_then(Value::as_array)
+                        {
+                            for pt in pos_terms {
+                                if let Some(ks) = pt.get("keys").and_then(Value::as_array) {
+                                    for k in ks {
+                                        if let Some(kt) = k.as_array().and_then(|a| a.first()).and_then(Value::as_f64) {
+                                            key_times.push(kt.clamp(0.0, duration));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "keys" => {
+                        if let Some(ks) = term.get("keys").and_then(Value::as_array) {
+                            for k in ks {
+                                if let Some(kt) = k.as_array().and_then(|a| a.first()).and_then(Value::as_f64) {
+                                    key_times.push(kt.clamp(0.0, duration));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if max_hz > 0.0 {
+                let raw_step = (1.0 / (max_hz * 2.0)).clamp(0.18, 0.45);
+                let steps = ((duration / raw_step).ceil() as usize).clamp(4, 20);
+                for i in 1..steps {
+                    let t = duration * (i as f64) / (steps as f64);
+                    key_times.push((t * 1000.0).round() / 1000.0);
+                }
+            }
+            key_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            key_times.dedup_by(|a, b| (*a - *b).abs() < 0.02);
+
+            let mut keyframes = Vec::with_capacity(key_times.len());
+            for (idx, &t) in key_times.iter().enumerate() {
+                let eval = evaluate_layered_motion_spec(rig, track, t, false, 1.0);
+                let deg = eval
+                    .angles_deg
+                    .get(lid)
+                    .copied()
+                    .unwrap_or(0.0)
+                    .clamp(-45.0, 45.0);
+                let deg_rounded = (deg * 100.0).round() / 100.0;
+                let kf_id = short_theatre_id(&format!("kf:{clip_id}:{lid}:{idx}"));
+                keyframes.push(json!({
+                    "id": kf_id,
+                    "position": (t * 1000.0).round() / 1000.0,
+                    "value": deg_rounded,
+                    "type": "bezier",
+                    "handles": [0.5, 1.0, 0.5, 0.0],
+                    "connectedRight": idx + 1 < key_times.len(),
+                }));
+            }
+            let track_id = short_theatre_id(&format!("track:{clip_id}:{lid}:rotation"));
+            objects.insert(
+                lid.to_string(),
+                json!({
+                    "trackData": {
+                        track_id.clone(): {
+                            "type": "BasicKeyframedTrack",
+                            "__debugName": format!("{lid}:[\"rotation\"]"),
+                            "keyframes": keyframes,
+                        }
+                    },
+                    "trackIdByPropPath": {
+                        "[\"rotation\"]": track_id,
+                    }
+                }),
+            );
+        }
+        by_clip.insert(clip_id.to_string(), objects);
+    }
+    Ok(by_clip)
+}
+
 pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let id = load_character(s, params)?;
     let asset = s
@@ -583,7 +772,15 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let rig = preview_rig(asset)?;
     let rig = &rig;
     validate(rig)?;
-    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false),"path":t["path"],"standard":t["standard"].as_bool().unwrap_or(false),"label":t["label"]})).collect();
+    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({
+        "id":t["id"],
+        "duration":t["duration"],
+        "loop":t["loop"].as_bool().unwrap_or(false),
+        "path":t["path"],
+        "standard":t["standard"].as_bool().unwrap_or(false),
+        "label":t["label"],
+        "channels":summarize_track_channels(&t["motion"]),
+    })).collect();
     // Plain image previews use a synthesized rig with no manifest path. Keep
     // replacement capture metadata absent there; normal animation inspection
     // must continue to work without a layered-rig source document.

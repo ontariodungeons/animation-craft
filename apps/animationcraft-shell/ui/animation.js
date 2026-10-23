@@ -1,5 +1,5 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
  theatreRequireSaved();
  animationPause();
@@ -7,7 +7,7 @@ function animationReset(){
  $('view-animation').replaceChildren();
 }
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
-const motionAssetUrl = path => `${convertFileSrc(path)}${String(convertFileSrc(path)).includes('?')?'&':'?'}v=${Date.now()}`;
+const motionAssetUrl = path => `${convertFileSrc(path)}${String(convertFileSrc(path)).includes('?')?'&':'?'}v=${motion.meta?.image_revision??0}`;
 const MOTION_ICONS = {
  pen:'<path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/>', grid:'<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>',
  play:'<path d="m8 5 11 7-11 7z"/>', pause:'<path d="M8 5v14M16 5v14"/>',
@@ -20,7 +20,14 @@ function motionSection(title,body,open=false,toneOverride=null){
  const groups={Action:['motion','play'],'Path & depth':['depth','pen'],'Motion & timing':['motion','step'],Layers:['layers','layers'],'Expression & pose':['pose','eye'],'Quality checks':['check','fit'],'Export & integrations':['export','export']};
  const [tone,icon]=groups[title]||[toneOverride||'layers','layers'];
  const heading=el('summary',{},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`}),el('span',{},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
- const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));node.open=open;return node;
+ const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));
+ node.open=open;
+ node.addEventListener('toggle',()=>{
+  if(!node.open||node.parentElement?.id!=='motion-inspector')return;
+  motion.activeSection=title;
+  for(const sib of node.parentElement.querySelectorAll('details.motion-section')){if(sib!==node)sib.open=false;}
+ });
+ return node;
 }
 function motionRange(id,label,min,max,step,value,unit,change){
  const out=el('output',{},`${Number(Number(value).toFixed(2))}${unit}`);
@@ -65,7 +72,7 @@ function animationShell(){
   el('button',{class:'icon',id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
  const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step','Next frame','step',()=>{animationPause();motion.time=Math.min(motion.sample?.duration||0,motion.time+1/(motion.sample?.fps||30));animationDraw();}),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>{animationPause();motion.time=Number(e.target.value);animationDraw();}}));
- const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar','aria-label':'Selected part controls'});
+ const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar',hidden:''});
  view.append(inspector,el('div',{class:'motion-main'},toolbar,stage,transport,partBar));
  if(motion.mode!=='composite'){
   const theatre=el('section',{class:'motion-theatre','aria-label':'Theatre timeline'});
@@ -93,11 +100,11 @@ function animationControls(){
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;animationControls();}await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{motion.track=t.id;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
- box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
+ box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],motion.activeSection==='Action'));
  box.append(pathControls());
  box.append(motionSection('Motion & timing',[
  motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>motion.speed=v),
- motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],true));
+ motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],motion.activeSection==='Motion & timing'));
  const layers=el('div',{class:'motion-layers'});
  for(const l of [...meta.layers].reverse()){
   const row=el('div',{class:`motion-layer${motion.selected===l.id?' selected':''}`,id:`motion-layer-${l.id}`,title:l.id});const shown=l.state?.visible!==false;
@@ -118,6 +125,7 @@ function animationControls(){
   el('div',{class:'magic-part-actions'},
    el('span',{class:'magic-part-filename muted'},(selected.file||'').split('/').pop()||selected.id),
    el('div',{class:'magic-part-links'},
+    el('button',{class:'ghost',id:'part-open-photocraft',title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${selected.label||selected.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(selected)},'Open in PhotoCraft'),
     el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${selected.label||selected.id}`,onclick:()=>selected.file&&openPath(selected.file)},'Inspect original'),
     el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${selected.label||selected.id}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy asset path')
    )
@@ -147,10 +155,10 @@ function animationControls(){
  const assetRows=(motion.assets||[]).map(asset=>el('button',{class:`magic-asset-row${asset.id===motion.character?' active':''}`,id:`magic-asset-${asset.id}`,title:`Show parts for ${asset.name||asset.id}`,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}},el('span',{},asset.name||asset.id),el('span',{class:'muted'},asset.id)));
  const assetsSection=motionSection('Project assets',assetRows.length?assetRows:el('p',{class:'why'},'No project assets are available yet.'));
  const partsSlot=$('magic-parts-slot');
- if(partsSlot)partsSlot.replaceChildren(assetsSection,section,compare);else box.append(section);
+ if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsSection));else box.append(section);
  const controls=meta.controls?.joints||[];
- box.append(motionSection('Expression & pose',el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')));
- box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`)));
+ box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],motion.activeSection==='Expression & pose'));
+ box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),motion.activeSection==='Quality checks'));
  const exportStatus=el('div',{class:'why'});
  const exportButton=el('button',{class:'start',id:'motion-export',title:'Export this action as a transparent video track',onclick:async()=>{
   exportButton.disabled=true;exportStatus.textContent='Rendering transparent track…';
@@ -158,7 +166,7 @@ function animationControls(){
    const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
   }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
  }},'Export track');
- box.append(motionSection('Export & integrations',[exportButton,exportStatus]));
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus],motion.activeSection==='Export & integrations'));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.character} · ${meta.layers.length} layers / ${authoredCount} authored clips`),
@@ -168,9 +176,8 @@ function animationControls(){
  if(typeof theatreSyncClips==='function')theatreSyncClips();
 }
 function renderPartControlsBar(selected){
- const bar=$('motion-part-bar');if(!bar||typeof bar.replaceChildren!=='function')return;
- if(motion.mode==='composite'||!motion.meta){bar.replaceChildren();bar.hidden=true;return;}
- bar.hidden=false;
+ const bar=$('anim-selected-part-inspector');if(!bar||typeof bar.replaceChildren!=='function')return;
+ if(motion.mode==='composite'||!motion.meta){bar.replaceChildren();return;}
  const activePart=selected||motion.meta.layers?.[0];
  if(!activePart){bar.replaceChildren(el('span',{class:'muted'},'No rig layers available'));return;}
  const shown=activePart.state?.visible!==false;
@@ -190,6 +197,36 @@ function renderPartControlsBar(selected){
   motionButton('motion-bar-visible',`${shown?'Hide':'Show'} ${activePart.label||activePart.id}`,'eye',async()=>{await motionCommand('part.set_state',{part:activePart.id,visible:!shown});await animationRefresh();})
  );
  bar.lastChild?.setAttribute('aria-pressed',String(shown));
+}
+// Compare | All parts: one tab at a time, remembered while the view is open.
+function partsDrawer(compare,assetsSection){
+ const meta=motion.meta;
+ const cards=(meta.layers||[]).map(part=>{
+  const shown=part.state?.visible!==false;
+  const candidate=typeof imageCandidateForPart==='function'?imageCandidateForPart(motion.character,part.id):null;
+  const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
+  return el('article',{class:`magic-part-card${motion.selected===part.id?' active':''}`,id:`magic-part-card-${part.id}`},
+   el('button',{class:'magic-part-card-pick',title:`Select ${part.label||part.id} (${part.id})`,'aria-pressed':String(motion.selected===part.id),onclick:select},
+    el('img',{src:motionAssetUrl(part.file),alt:''}),
+    el('span',{class:'magic-part-card-name'},part.label||part.id),
+    el('span',{class:'muted'},part.id)),
+   el('div',{class:'magic-part-pills'},
+    el('button',{class:`pill ${shown?'ok':'off'}`,title:`${shown?'Hide':'Show'} ${part.label||part.id}`,'aria-pressed':String(shown),onclick:async()=>{await motionCommand('part.set_state',{part:part.id,visible:!shown});await animationRefresh();}},shown?'Visible':'Hidden'),
+    candidate?el('span',{class:'pill warn',title:'A generated candidate awaits review'},'Candidate'):null,
+    motion.selected===part.id?el('span',{class:'pill accent'},'Selected'):null),
+   el('button',{class:'ghost magic-part-card-open',id:`part-open-photocraft-${part.id}`,title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${part.label||part.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'Open in PhotoCraft'));
+ });
+ const panels={compare,parts:el('div',{class:'magic-part-cards'},cards.length?cards:el('p',{class:'why'},'This object has no rig parts.'),assetsSection)};
+ const body=el('div',{class:'magic-parts-panel',role:'tabpanel'},panels[motion.partsTab]||compare);
+ const tab=(key,label)=>el('button',{class:`magic-parts-tab${motion.partsTab===key?' active':''}`,role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
+ return el('div',{class:'magic-parts-drawer'},el('div',{class:'magic-parts-tabs',role:'tablist','aria-label':'Parts and assets'},tab('compare','Compare'),tab('parts',`All parts (${(meta.layers||[]).length})`)),body);
+}
+// PhotoCraft edits a draft copy; the live layer only changes through part.replace_image.
+async function openPartInPhotoCraft(part){
+ try{
+  const result=await motionCommand('part.open_photocraft',{asset:motion.character,part:part.id,spawn:true});
+  toast(`PhotoCraft: ${(result.draft?.file||result.file).split('/').pop()} · keep it ${result.width}×${result.height}`);
+ }catch(error){toast(String(error));}
 }
 async function animationSample(){
  if(!motion.meta?.tracks?.length)return;
@@ -237,7 +274,7 @@ function pathControls(){
   motionRange('motion-size-start','Start size',1,Math.max(200,motion.startSize),1,motion.startSize,'%',v=>motion.startSize=v),
   motionRange('motion-size-end','End size',1,Math.max(200,motion.endSize),1,motion.endSize,'%',v=>motion.endSize=v),
   el('div',{class:'motion-path-actions'},motionButton('motion-path-clear','Clear the drawn line','reset',()=>{motion.points=[];$('motion-path-apply').disabled=true;animationDraw();}),undo,apply)
- ],false);section.id='motion-path-section';return section;
+ ],motion.activeSection==='Path & depth');section.id='motion-path-section';return section;
 }
 function setupPathPen(canvas){
  let drawing=false;

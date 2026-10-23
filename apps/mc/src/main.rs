@@ -860,10 +860,14 @@ fn main() {
                 run("motion.clips.convert").unwrap_or_else(|e| fail(format!("motion.clips.convert: {e}")));
             }
             let v = run("motion.clips").unwrap_or_else(|e| fail(format!("motion.clips: {e}")));
-            outln!("{:<30} {:<36} {:>8}  STATUS", "CLIP", "SHEET", "SECONDS");
+            outln!("{:<30} {:<36} {:>8}  {:<10}  PARTS", "CLIP", "SHEET", "SECONDS", "STATUS");
             for c in v["clips"].as_array().into_iter().flatten() {
                 let seconds = c["duration"].as_f64().map(|d| format!("{d:.2}")).unwrap_or_else(|| "-".into());
-                outln!("{:<30} {:<36} {:>8}  {}", c["clip"].as_str().unwrap_or("?"), c["sheet"].as_str().unwrap_or("?"), seconds, c["status"].as_str().unwrap_or("?"));
+                let parts = c["keyframed_parts"].as_array().map(|a| {
+                    let names: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+                    if names.is_empty() { "-".to_string() } else { format!("{} ({})", names.len(), names.join(", ")) }
+                }).unwrap_or_else(|| "-".into());
+                outln!("{:<30} {:<36} {:>8}  {:<10}  {}", c["clip"].as_str().unwrap_or("?"), c["sheet"].as_str().unwrap_or("?"), seconds, c["status"].as_str().unwrap_or("?"), parts);
             }
             if let Some(legacy) = v["legacy_sheet"].as_str() {
                 outln!("legacy per-character sheet kept: {legacy}");

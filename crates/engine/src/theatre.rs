@@ -72,13 +72,19 @@ fn clips(s: &mut Session, params: &Value) -> Result<(String, Vec<Value>)> {
     let tracks=crate::motion::cmd_motion_tracks(s,params)?;
     let asset=tracks["character"].as_str().ok_or_else(||invalid("No character loaded"))?.to_string();
     let mut clips:Vec<Value>=tracks["tracks"].as_array().into_iter().flatten()
-        .map(|t|json!({"clip":t["id"],"label":t["label"],"duration":t["duration"],"standard":t["standard"]})).collect();
-    clips.push(json!({"clip":"@rest","label":"Rest","duration":null,"standard":true}));
+        .map(|t|json!({"clip":t["id"],"label":t["label"],"duration":t["duration"],"standard":t["standard"],"channels":t["channels"]})).collect();
+    clips.push(json!({"clip":"@rest","label":"Rest","duration":null,"standard":true,"channels":[]}));
     for clip in &mut clips {
         let sheet=clip_sheet_id(&asset,clip["clip"].as_str().unwrap_or_default());
-        let converted=s.theatre_state.as_ref().is_some_and(|state|state["sheetsById"].get(&sheet).is_some());
+        let sheet_val=s.theatre_state.as_ref().and_then(|state|state["sheetsById"].get(&sheet));
+        let converted=sheet_val.is_some();
+        let keyframed_parts:Vec<String>=sheet_val
+            .and_then(|sh|sh["sequence"]["tracksByObject"].as_object())
+            .map(|objs|objs.keys().cloned().collect())
+            .unwrap_or_default();
         clip["sheet"]=json!(sheet);
         clip["status"]=json!(if converted {"converted"} else {"pending"});
+        clip["keyframed_parts"]=json!(keyframed_parts);
     }
     Ok((asset,clips))
 }
@@ -122,13 +128,39 @@ fn add_clip_sheets(state: &mut Value, asset: &str, clips: &[Value]) -> Vec<Value
 pub fn convert(s: &mut Session, params: &Value) -> Result<Value> {
     selected_project(s,params,false)?;
     let (asset,clips)=clips(s,params)?;
+    let authored_by_clip=crate::motion::convert_clip_rotation_tracks(s,params).unwrap_or_default();
     let pending:Vec<&Value>=clips.iter().filter(|c|c["status"]!="converted").collect();
     if s.record_user_state { for clip in &pending { clip_event(s,"clip_sheet_started",clip,None); } }
     let mut state=s.theatre_state.clone().unwrap_or_else(||json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{}}));
     let legacy_kept=state["sheetsById"].get(&asset).is_some();
-    let results=add_clip_sheets(&mut state,&asset,&clips);
+    let mut results=add_clip_sheets(&mut state,&asset,&clips);
+    let mut seeded_tracks=0usize;
+    for res in &mut results {
+        let clip_id=res["clip"].as_str().unwrap_or_default().to_string();
+        let sheet_id=res["sheet"].as_str().unwrap_or_default().to_string();
+        let mut clip_seeded=Vec::new();
+        if let Some(authored_objs)=authored_by_clip.get(&clip_id) {
+            if let Some(tracks_by_obj)=state["sheetsById"][&sheet_id]["sequence"]["tracksByObject"].as_object_mut() {
+                for (part_id,track_obj) in authored_objs {
+                    let has_existing=tracks_by_obj.get(part_id).is_some_and(|existing| {
+                        existing["trackData"].as_object().is_some_and(|td|!td.is_empty())
+                            || existing.as_object().is_some_and(|o|!o.is_empty() && !o.contains_key("trackData"))
+                    });
+                    if !has_existing {
+                        tracks_by_obj.insert(part_id.clone(),track_obj.clone());
+                        clip_seeded.push(part_id.clone());
+                        seeded_tracks+=1;
+                    }
+                }
+            }
+        }
+        res["seeded_parts"]=json!(clip_seeded);
+    }
     let created=results.iter().filter(|r|r["created"]==true).count();
-    if created>0 {
+    if created>0 || seeded_tracks>0 {
+        if state["revisionHistory"].as_array().is_some_and(|r|r.is_empty()) {
+            state["revisionHistory"]=json!(["mc-clips-convert-0"]);
+        }
         let previous=s.theatre_state.replace(state);
         if let Err(error)=crate::project::write_project_file(s) {
             s.theatre_state=previous;
@@ -137,7 +169,7 @@ pub fn convert(s: &mut Session, params: &Value) -> Result<Value> {
         }
     }
     if s.record_user_state { for clip in &pending { clip_event(s,"clip_sheet_converted",clip,None); } }
-    Ok(json!({"ok":true,"character":asset,"created":created,"clips":results,"legacy_sheet_kept":legacy_kept}))
+    Ok(json!({"ok":true,"character":asset,"created":created,"seeded_tracks":seeded_tracks,"clips":results,"legacy_sheet_kept":legacy_kept}))
 }
 
 #[cfg(test)]

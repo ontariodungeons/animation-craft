@@ -70,6 +70,20 @@ function setupMagicSplitters() {
 }
 setupMagicSplitters();
 
+// The Generate card folds to its header; the choice is remembered per viewer.
+function setupGenerateToggle() {
+  const toggle = $('magic-image-toggle');
+  if (!toggle) return;
+  const apply = (open) => {
+    $('magic-workstation').classList.toggle('generate-collapsed', !open);
+    toggle.setAttribute('aria-expanded', String(open));
+    localStorage.setItem('magic.generate-open', String(open));
+  };
+  apply(localStorage.getItem('magic.generate-open') !== 'false');
+  toggle.addEventListener('click', () => apply(toggle.getAttribute('aria-expanded') !== 'true'));
+}
+setupGenerateToggle();
+
 function updateMagicSelection() {
   const layer = motion?.meta?.layers?.find((part) => part.id === motion.selected);
   const text = layer ? `${layer.label || layer.id} · ${layer.id}` : 'No part selected';
@@ -393,13 +407,20 @@ function serverUrl() {
   return state.studioUrl || (server.running ? server.url : null);
 }
 
+// The video project lives in the engine session (workshop.status / video.init); the UI keeps no copy.
+function videoProject() {
+  const s = state.data?.status;
+  return s?.video_project_path || s?.video_project || null;
+}
+
 function renderTarget() {
   const s = state.data?.status;
   if (!s) return;
   const url = serverUrl();
+  const project = videoProject();
   $("target-name").textContent = `${s.video_target}${url ? " · " + url.replace(/^https?:\/\//, "").replace(/\/$/, "") : " · off"}`;
   $("server-dot").className = `dot ${url ? "ok" : "off"}`;
-  $("target").title = url ? `Studio running at ${url} · click to stop` : "Studio off · click to start";
+  $("target").title = `${url ? `Studio running at ${url} · click to stop` : "Studio off · click to start"}\n${project ? `Video project: ${project}` : "No video project yet · starting the studio creates it"}`;
 }
 
 async function toggleServer() {
@@ -407,6 +428,11 @@ async function toggleServer() {
   const on = !serverUrl();
   $("server-dot").className = "dot busy";
   try {
+    // A target without its project gets one from the engine first (video.init reuses an existing one).
+    if (on && state.data?.status?.video_target && !state.data.status.video_project_path) {
+      await motionCommand("video.init", {});
+      state.data = await invoke("project_state", { path: state.project });
+    }
     state.data = await invoke("studio_server", { path: state.project, on });
     if (!on) state.studioUrl = null;
     toast(on ? "Studio started" : "Studio stopped");
