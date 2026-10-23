@@ -18,13 +18,17 @@ function theatreSeek(time){
  theatreContext();
  if(magicTheatre.ready&&!magicTheatre.syncing)magicTheatre.frame.contentWindow.postMessage({magicTheatre:true,type:'seek',time},location.origin);
 }
+function theatreRender(){
+ const previous=magicTheatre.syncing;magicTheatre.syncing=true;
+ try{animationDraw();}finally{magicTheatre.syncing=previous;}
+}
 window.addEventListener('message',event=>{
  if(event.source!==magicTheatre.frame?.contentWindow||!event.data?.magicTheatre)return;
  const message=event.data;
  if(message.type==='loaded'){magicTheatre.ready=true;theatreContext();}
  if(message.type==='ready')$('theatre-status').textContent=`${message.part} · local edits not saved`;
- if(message.type==='values'&&message.part===magicTheatre.part){magicTheatre.rotation=message.rotation;animationDraw();}
- if(message.type==='seek'&&motion.sample){animationPause();magicTheatre.syncing=true;motion.time=Math.max(0,Math.min(message.time,motion.sample.duration));animationDraw();magicTheatre.syncing=false;}
+ if(message.type==='values'&&message.part===magicTheatre.part){magicTheatre.rotation=message.rotation;theatreRender();}
+ if(message.type==='seek'&&motion.sample){animationPause();motion.time=Math.max(0,Math.min(message.time,motion.sample.duration));theatreRender();}
  if(message.type==='error')$('theatre-status').textContent=`Theatre failed: ${message.error}`;
 });
 function theatreTransform(ctx,layer){

@@ -22,7 +22,10 @@ listeners.message({source:frameWindow,data:{magicTheatre:true,type:'seek',time:1
 assert.equal(context.motion.time,5,'Theatre seek clamps to actual native track duration');
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'other',rotation:30}});
 assert.equal(vm.runInContext('magicTheatre.rotation',context),0,'stale selected-part values cannot edit another part');
+messages.length=0;
+context.animationDraw=()=>vm.runInContext('theatreSeek(motion.time)',context);
 listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'antenna',rotation:30}});
+assert.equal(messages.filter(m=>m.type==='seek').length,0,'Theatre value redraw must not send an old native time back and pause Theatre playback');
 const operations=[];context.ctx={translate:(...v)=>operations.push(['translate',...v]),rotate:v=>operations.push(['rotate',v])};
 vm.runInContext('theatreTransform(ctx,{id:"antenna",pivot:[12,24]})',context);
 assert.deepEqual(operations,[['translate',12,24],['rotate',Math.PI/6],['translate',-12,-24]]);
