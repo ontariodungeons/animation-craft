@@ -9,15 +9,20 @@ if [ -n "$FORBIDDEN_STAGED" ]; then
     exit 1
 fi
 
+# Constrain parallel rustc/linker jobs and test threads so pre-commit never
+# spikes the Hyprland terminal scope memory and triggers systemd-oomd.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-4}"
+
 # Offline authentication/selection security regression tests run on every commit.
 # Dummy process fixtures only: no login, live credentials, provider calls or network.
-cargo test --offline -p animationcraft-engine --test agent_security --quiet
+cargo test --offline -p animationcraft-engine --test agent_security --quiet -- --test-threads=1
 node apps/animationcraft-shell/tests/agent-selection.mjs
 
 # 2. If Rust files are staged, run workspace compile check + test suite on commit
 RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
 if [ -n "$RUST_STAGED" ]; then
-    echo "[pre-commit] Rust changes staged — running cargo check & cargo test..."
+    echo "[pre-commit] Rust changes staged — running cargo check & cargo test (jobs=$CARGO_BUILD_JOBS)..."
     cargo check --workspace --all-targets --quiet
     cargo test --workspace --quiet
 fi

@@ -330,6 +330,8 @@ function agentToggle(open = !agent.open) {
   $("agent").classList.toggle("open", open);
   $("agent").setAttribute("aria-hidden", String(!open));
   $("agent-toggle").classList.toggle("on", open);
+  $("agent-toggle").setAttribute("aria-pressed", String(open));
+  $("agent-toggle-label").textContent = open ? "Hide panel ▸" : "◂ Show panel";
   clearInterval(agent.timer);
   if (!open) return;
   if (agent.loaded) agentReloadLog();
@@ -417,6 +419,7 @@ $("agent").addEventListener("drop", (e) => {
   attachFiles([...(e.dataTransfer?.files || [])]);
 });
 $("agent-toggle").addEventListener("click", () => agentToggle());
+$("magic-workstation-toggle").addEventListener("click", () => agentToggle(true));
 $("agent-float").addEventListener("click", toggleAgentFloat);
 $("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
@@ -440,7 +443,7 @@ $("agent-input").addEventListener("keydown", (e) => {
   agentSend();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
+  if ((e.key === "/" || e.key === "\\") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
   if (e.key === "Escape" && agent.open && !$("point-overlay").classList.contains("on")) agentToggle(false);
 });
 

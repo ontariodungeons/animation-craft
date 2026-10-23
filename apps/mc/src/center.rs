@@ -86,9 +86,28 @@ impl Center {
                 let cursor=value["activity"]["next_cursor"].as_u64().unwrap_or(0);
                 if self.seen_cursor>0&&cursor>self.seen_cursor{self.flash_after=self.seen_cursor;self.flash_started=Some(std::time::Instant::now());}
                 self.seen_cursor=cursor;self.state=value;
-                if self.agent_gang_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true) {
+                if self.agent_gang_at.map(|t|t.elapsed().as_secs()>=3).unwrap_or(true) {
                     if let Ok(out)=std::process::Command::new("herdr").args(["agent","list"]).output() {
-                        if let Ok(v)=serde_json::from_slice::<Value>(&out.stdout) { self.agent_gang=v["result"]["agents"].clone(); self.agent_gang_at=Some(std::time::Instant::now()); }
+                        if let Ok(v)=serde_json::from_slice::<Value>(&out.stdout) {
+                            let mut agents=v["result"]["agents"].as_array().cloned().unwrap_or_default();
+                            if agents.iter().any(|a|!a["name"].is_string()) {
+                                if let Ok(pout)=std::process::Command::new("herdr").args(["pane","list"]).output()
+                                    && let Ok(pv)=serde_json::from_slice::<Value>(&pout.stdout)
+                                    && let Some(panes)=pv["result"]["panes"].as_array()
+                                {
+                                    for a in &mut agents {
+                                        if !a["name"].is_string()
+                                            && let Some(pid)=a["pane_id"].as_str()
+                                            && let Some(lbl)=panes.iter().find(|p|p["pane_id"].as_str()==Some(pid)).and_then(|p|p["label"].as_str())
+                                        {
+                                            a["name"]=json!(lbl);
+                                        }
+                                    }
+                                }
+                            }
+                            self.agent_gang=json!(agents);
+                            self.agent_gang_at=Some(std::time::Instant::now());
+                        }
                     }
                 }
                 self.state["agent_gang"]=self.agent_gang.clone();
@@ -754,8 +773,9 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
- let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|format!("{}:{} {}",g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?"),g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"})).collect::<Vec<_>>().join("  ")).unwrap_or_default();
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
+ let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|{let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?");let task=g["terminal_title_stripped"].as_str().unwrap_or("");let cwd=g["cwd"].as_str().or(g["foreground_cwd"].as_str()).unwrap_or("");let proj=cwd.split('/').last().unwrap_or(cwd);format!("{}:{}{} {} @{}",name,g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"},task,proj)}).collect::<Vec<_>>().join("  |  ")).unwrap_or_default();
+ let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BOOTH ● open"}else{"BOOTH ○ off"};
+ let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("{}  ·  GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",booth_light,if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
 
 fn render(f: &mut Frame,c: &Center) {

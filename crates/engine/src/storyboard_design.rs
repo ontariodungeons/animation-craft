@@ -24,11 +24,24 @@ pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
 fn pdf_run(s:&Session,steps:Value)->Result<Value>{
  let dir=crate::workshop::project_dir(s)?;let folder=dir.join("storyboard/.pdfcraft");std::fs::create_dir_all(&folder)?;
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
- let script=folder.join(format!("{stamp}.json"));write(&script,&steps)?;
- let output=crate::workspace::run_tool_in(&dir,"pdfcraft-cli",&["run".into(),"--script".into(),script.to_string_lossy().into_owned(),"--report".into()])?;
+ let script=folder.join(format!("{stamp}-{}.json",std::process::id()));write(&script,&steps)?;
+ let output=crate::workspace::run_tool_in(&dir,"pdfcraft-cli",&["run".into(),"--script".into(),script.to_string_lossy().into_owned(),"--report".into()]);
+ let _=std::fs::remove_file(&script);
+ let output=output?;
  let report:Value=serde_json::from_str(&output).map_err(|e|invalid(&format!("Invalid PDFCraft report: {e}")))?;
  if report["ok"]!=true{return Err(invalid(&format!("PDFCraft failed: {report}")));}
  Ok(report)
+}
+
+fn file_cache_key(path:&str,extra:&str)->Option<(String,u128,u64,String)>{
+ let meta=std::fs::metadata(path).ok()?;
+ let mtime=meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+ Some((path.to_owned(),mtime,meta.len(),extra.to_owned()))
+}
+
+fn native_fields_cache()->&'static std::sync::Mutex<std::collections::HashMap<(String,u128,u64,String),Value>>{
+ static CACHE:std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String,u128,u64,String),Value>>>=std::sync::OnceLock::new();
+ CACHE.get_or_init(||std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 fn pdf_previews(s:&Session,pdf:&Path,folder:&Path,count:usize)->Result<Vec<std::path::PathBuf>>{
  std::fs::create_dir_all(folder)?;let mut paths=Vec::new();
@@ -56,15 +69,26 @@ fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
 pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
  if let Some(fields)=board["pdf_fields"].as_array(){
   let pdf=board["pdf"].as_str().ok_or_else(||invalid("Editable PDF is missing"))?;
+  let key=file_cache_key(pdf,&board["pdf_fields"].to_string());
+  if let Some(ref k)=key && let Ok(guard)=native_fields_cache().lock() && let Some(cached)=guard.get(k){
+   return Ok(cached.clone());
+  }
   let report=pdf_run(s,json!([{"tool":"doc_open","args":{"path":pdf}},{"tool":"form_fields","args":{"doc":1}}]))?;
   let actual=report["steps"][1]["result"][0]["fields"].as_array().ok_or_else(||invalid("PDFCraft returned no form fields"))?;
   let mut result=Vec::new();for metadata in fields{let field=actual.iter().find(|f|f["name"]==metadata["name"]).ok_or_else(||invalid("Saved PDF field missing; refusing stale metadata"))?;let mut item=metadata.clone();item["value"]=field["value"].clone();result.push(item);}
-  return Ok(json!(result));
+  let val=json!(result);
+  if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
+  return Ok(val);
  }
 
  let Some(deck)=board["deck"].as_str().filter(|p|Path::new(p).is_file()) else{return Ok(json!([]));};
- let dir=crate::workshop::project_dir(s)?;
  let count=board["previews"].as_array().map_or(0,Vec::len);
+ let first_scene=board["first_scene_page"].as_u64().unwrap_or(u64::MAX);
+ let key=file_cache_key(deck,&format!("{count}:{first_scene}"));
+ if let Some(ref k)=key && let Ok(guard)=native_fields_cache().lock() && let Some(cached)=guard.get(k){
+  return Ok(cached.clone());
+ }
+ let dir=crate::workshop::project_dir(s)?;
  let mut args=vec!["run".into(),"--in".into(),deck.into()];
  for i in 0..count{args.extend(["--cmd".into(),format!("slide.inspect={}",json!({"index":i}))]);}
  args.push("--print".into());
@@ -78,13 +102,15 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
    let role=shape["altText"].as_str().unwrap_or_default();
    let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user.")).or_else(||(role=="auto.scene.lyrics").then_some("lyrics"));
    if let Some(field)=field{
-    let scene=page.checked_sub(board["first_scene_page"].as_u64().unwrap_or(u64::MAX)).map(|n|n+1);
+    let scene=page.checked_sub(first_scene).map(|n|n+1);
     fields.push(json!({"page":page,"scene":scene,"field":field,"role":role,"id":shape["id"],"rect":shape["box"],"value":shape["text"].as_str().unwrap_or_default()}));
    }
   }
  }
  if count>0 && fields.is_empty(){return Err(invalid("Native storyboard has no recognized editable text fields"));}
- Ok(json!(fields))
+ let val=json!(fields);
+ if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
+ Ok(val)
 }
 
 /// Stage a native text replacement in the existing design draft, then use its Save path.

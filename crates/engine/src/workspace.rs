@@ -118,8 +118,40 @@ pub fn build_blender_check_args(
     args
 }
 
+pub(crate) struct ToolSlotGuard;
+impl Drop for ToolSlotGuard {
+    fn drop(&mut self) {
+        let (lock, cvar) = tool_limiter();
+        if let Ok(mut active) = lock.lock() {
+            *active = active.saturating_sub(1);
+            cvar.notify_one();
+        }
+    }
+}
+
+fn tool_limiter() -> &'static (std::sync::Mutex<usize>, std::sync::Condvar) {
+    static LIMITER: std::sync::OnceLock<(std::sync::Mutex<usize>, std::sync::Condvar)> =
+        std::sync::OnceLock::new();
+    LIMITER.get_or_init(|| (std::sync::Mutex::new(0), std::sync::Condvar::new()))
+}
+
+pub(crate) fn acquire_tool_slot() -> ToolSlotGuard {
+    let (lock, cvar) = tool_limiter();
+    if let Ok(mut active) = lock.lock() {
+        while *active >= 4 {
+            active = match cvar.wait(active) {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+        }
+        *active += 1;
+    }
+    ToolSlotGuard
+}
+
 /// Run an external command-line tool in `cwd`, capturing stdout as a String.
 pub(crate) fn run_tool_in(cwd: &Path, tool: &str, args: &[String]) -> Result<String> {
+    let _slot = acquire_tool_slot();
     let output = std::process::Command::new(tool)
         .current_dir(cwd)
         .args(args)

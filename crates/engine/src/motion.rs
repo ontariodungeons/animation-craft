@@ -504,14 +504,26 @@ fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
         ("run", "Run", 2.0, true),
         ("wave", "Wave", 3.0, true),
         ("talk", "Talk", 3.0, true),
+        ("sway", "Sway", 4.0, true),
     ];
+    // Sway: the largest part (by pixels, never by name) only bobs; every other part also turns
+    // on its own pivot, phased by where that pivot sits so the motion ripples across the rig.
+    let anchor = rig.parts.iter().max_by_key(|p| u64::from(p.crop_size[0]) * u64::from(p.crop_size[1])).map(|p| p.id.as_str());
     definitions.into_iter().map(|(id,label,duration,repeat)|{
         let mut motion=json!({});
         for part in &rig.parts {
             // Preserve the actual rest visibility, never infer anatomy from a name.
             motion[&part.id]=json!({"opacity":[{"kind":"keys","keys":[[0.0,100.0*(rest.opacity.get(&part.id).copied().unwrap_or(1.0)-1.0)]]}]});
-            if part.parent.is_some() {continue;}
             let bounce=|amplitude:f64,hz:f64|json!([{"kind":"oscillate","amplitude":amplitude,"hz":hz,"axis":1}]);
+            if id=="sway" {
+                if part.parent.is_none() {motion[&part.id]["position"]=bounce(height*0.015,0.5);}
+                if Some(part.id.as_str())!=anchor {
+                    let phase=std::f64::consts::TAU*(f64::from(part.pivot[0])-f64::from(b[0]))/width;
+                    motion[&part.id]["rotation"]=json!([{"kind":"oscillate","amplitude":8.0,"hz":1.0,"phase":phase}]);
+                }
+                continue;
+            }
+            if part.parent.is_some() {continue;}
             match id {
                 "idle"=>motion[&part.id]["position"]=bounce(height*0.012,0.25),
                 "move"=>motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration,[width*1.2,0]]]}]),
@@ -1238,4 +1250,34 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     result["margin"] = json!(margin);
     result["asset"] = json!(id);
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::CutoutRigPart;
+
+    fn part(id: &str, size: [u32; 2], pivot: [f32; 2]) -> CutoutRigPart {
+        CutoutRigPart { id: id.into(), label: id.into(), crop_size: size, pivot, ..CutoutRigPart::default() }
+    }
+
+    #[test]
+    fn sway_turns_every_part_but_the_largest_and_keeps_flat_rigs_together() {
+        let rig = LoadedCutoutRigPlan {
+            character_bbox: [0, 0, 400, 200],
+            parts: vec![part("a", [300, 150], [200.0, 100.0]), part("b", [40, 30], [20.0, 90.0]), part("c", [50, 20], [380.0, 60.0])],
+            ..LoadedCutoutRigPlan::default()
+        };
+        let tracks = standard_tracks(&rig);
+        let sway = tracks.iter().find(|t| t["id"] == "@sway").expect("sway is a standard action");
+        assert_eq!((sway["loop"].as_bool(), sway["duration"].as_f64()), (Some(true), Some(4.0)));
+        let motion = &sway["motion"];
+        assert!(motion["a"]["rotation"].is_null(), "the largest part only bobs");
+        for id in ["a", "b", "c"] {
+            assert_eq!(motion[id]["position"], motion["a"]["position"], "{id} bobs with the rest of a flat rig");
+        }
+        let at = evaluate_layered_motion_spec(&rig, sway, 0.25, false, 1.0);
+        assert!(at.angles_deg["b"].abs() > 1.0 && at.angles_deg["c"].abs() > 1.0, "{:?}", at.angles_deg);
+        assert_ne!(motion["b"]["rotation"][0]["phase"], motion["c"]["rotation"][0]["phase"], "pivots at different places ripple");
+    }
 }

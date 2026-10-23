@@ -18,8 +18,8 @@
       <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
       <span class="tab-ink" aria-hidden="true"></span>
     </nav>
-    <button class="icon agent-toggle" id="agent-toggle" aria-label="Agent" title="Agent · chat, point at anything (Ctrl+/)">
-      <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>
+    <button class="ghost agent-toggle" id="agent-toggle" aria-controls="magic-workstation" aria-pressed="false" title="Show or hide the right panel: Sproket, Generate, Parts &amp; assets (Ctrl+\)">
+      <span id="agent-toggle-label">◂ Show panel</span>
     </button>
     <button class="target" id="target" aria-label="Studio server: click to start or stop" title="Studio server · click to start or stop">
       <span class="dot off" id="server-dot"></span><span id="target-name">—</span>
@@ -160,6 +160,7 @@
           <div id="magic-parts-slot" class="magic-parts-slot"></div>
         </section>
       </aside>
+  <button class="magic-workstation-reopen" id="magic-workstation-toggle" aria-controls="magic-workstation" title="Show the right panel (Ctrl+\)">◂ Parts &amp; Assets</button>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="feedback.js"></script>

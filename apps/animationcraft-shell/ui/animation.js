@@ -90,7 +90,11 @@ async function animationLoad(){
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
   motion.meta=meta;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=meta.tracks?.[0]?.id||'';motion.time=0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file);})));if(request!==motion.request)return;
+  // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
+  const opening=motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
+  if(opening){motion.track=opening.id;motion.rest=false;}
   animationControls();await animationSample();refreshPartDrafts();
+  if(opening&&motion.meta===meta&&!motion.playing)await animationPlay();
  }catch(e){animationEmpty('Artwork needs preparation',String(e));}finally{motion.loading=false;}
 }
 function animationControls(){

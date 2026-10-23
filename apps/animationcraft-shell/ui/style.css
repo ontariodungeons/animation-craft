@@ -167,6 +167,12 @@ main { flex: 1; min-height: 0; position: relative; }
 /* Agent rail: docked right panel (not a slide-over drawer) */
 .agent-toggle { margin-left: auto; }
 .agent-toggle.on { color: var(--accent); background: var(--surface-2); }
+.agent-toggle { padding: 5px 11px; font-size: 12px; font-weight: 600; color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.agent-toggle:not(.on) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* While the right panel is hidden, an edge tab brings it back from any tab. */
+.magic-workstation-reopen { display: none; position: fixed; z-index: 14; right: 0; top: 60px; padding: 8px 12px 8px 14px; border-radius: 10px 0 0 10px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; box-shadow: 0 6px 20px #0008; }
+.magic-workstation-reopen:hover { padding-right: 16px; }
+body.workstation-collapsed:not(.at-home) .magic-workstation-reopen { display: block; }
 .target { margin-left: 0; }
 .agent { position: fixed; top: 48px; right: 0; bottom: 0; width: min(400px, 92vw); display: flex; flex-direction: column; gap: 0; padding: 0;
   background: var(--surface); border-left: 1px solid var(--line);

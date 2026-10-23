@@ -254,6 +254,7 @@ pub fn run_photocraft_transparent_step1(
         "--out".to_string(),
         output_path.to_string_lossy().into_owned(),
     ];
+    let _slot = super::workspace::acquire_tool_slot();
     let out = std::process::Command::new(&bin)
         .args(&args)
         .output()

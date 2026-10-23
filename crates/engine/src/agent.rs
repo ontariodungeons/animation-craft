@@ -83,6 +83,7 @@ pub fn opencode_program() -> Result<std::path::PathBuf> {
 
 /// Never propagate raw child output into UI, journal or logs on failure: it can contain credentials.
 fn run(dir:&Path, tool:&str, args:&[String]) -> Result<String> {
+    let _slot = crate::workspace::acquire_tool_slot();
     let program = if tool == "opencode" { opencode_program()? } else { tool.into() };
     let reply=std::env::temp_dir().join(format!("ac-agent-{}-{}.reply",std::process::id(),stamp()));
     let mut options=fs::OpenOptions::new();options.write(true).create_new(true);
