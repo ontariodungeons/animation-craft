@@ -20,6 +20,7 @@ mod logo;
 mod local_ui;
 mod snapshot;
 mod telemetry;
+mod worker;
 
 use magicstudio_engine::Session;
 use serde_json::{Value, json};

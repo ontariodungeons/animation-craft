@@ -90,6 +90,7 @@ impl Center {
                 value["ui"]=ui;
                 if self.pinned_instance.is_none(){self.pinned_instance=value["ui"]["instance"].as_str().map(str::to_owned);}
                 value["catalog"]=self.session.execute("project.catalog",json!({})).unwrap_or_else(|e|json!({"error":e.to_string()}));
+                value["animation_worker"]=self.state["animation_worker"].clone();
                 let live=crate::snapshot::live(&value["ui"],&self.state["snapshot"]);
                 value["snapshot"]=crate::snapshot::build(value["project"].as_str(),&value["ui"],&live,&value["activity"]);
                 value["tail"]=merge_tail(&self.state["tail"],crate::snapshot::tail(&value["activity"],value["snapshot"]["project"].as_str()));
@@ -455,7 +456,12 @@ fn styled(value:impl Into<String>,color:Color)->Line<'static>{Line::styled(value
 impl Center{
  fn copy_commands(&self)->Vec<(&str,String)>{
   let exe=shell_quote(&std::env::current_exe().map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(|_|"mc".into()));
-  let project=self.state["project"].as_str().unwrap_or("");
+   let project=self.state["project"].as_str().unwrap_or("");
+   if project.is_empty(){return vec![("List projects to observe in WORKSHOP",format!("{exe} exec project.catalog"))];}
+   if let Some(worker)=worker_observation(self).filter(|v|v["state"]=="failed" || v["state"]=="cancelling" || v["observation_error"].is_string())
+       && let Some(job)=worker["job"].as_str(){
+       return vec![("Inspect this render's authoritative status and receipt",format!("{exe} exec blender.status {} {}",shell_quote(&format!("project={project}")),shell_quote(&format!("job={job}"))))];
+   }
   let cursor=self.state["activity"]["next_cursor"].as_u64().unwrap_or(0);
   let inspection=if let (Some(endpoint),Some(instance))=(self.state["ui"]["endpoint"].as_str(),self.pinned_instance.as_deref()){
    format!("{exe} --bridge {} exec workshop.status {} {}",shell_quote(endpoint),shell_quote(&format!("_expected_project={project}")),shell_quote(&format!("_expected_instance={instance}")))
@@ -571,7 +577,9 @@ fn top_bar(c:&Center,width:usize,control:bool)->Line<'static>{
     let left=fit_text(&metrics,room);
     let ui=&c.state["ui"];
     let matched=ui["connection"]=="connected" && c.state["project"].is_string() && ui["active_project"]==c.state["project"];
-    let (status,colour)=if c.state["snapshot"]["last_error"].as_str().is_some_and(|s|!s.is_empty()){
+    let (status,colour)=if !control && let Some(worker)=worker_observation(c).filter(|v|v["state"]!="not_started"){
+        (crate::worker::headline(worker),worker_colour(worker))
+    }else if c.state["snapshot"]["last_error"].as_str().is_some_and(|s|!s.is_empty()){
         ("! ERROR · D PULSE".into(),RED)
     }else if matched{
         let snap=&c.state["snapshot"];
@@ -818,6 +826,7 @@ fn doctor_badge(c:&Center)->(&'static str,Color){
  if c.doctor_receiver.is_some(){("● Checking",GREEN)}else if c.doctor_error.is_some(){("● Check failed",RED)}else if d.is_null(){("● Not checked",BLUE)}else if d["stale"]==true{("● Needs review · stale",AMBER)}else if d["healthy"]==true{("✓ Checked · section boundary only",DESK_FG)}else{("● Needs review",AMBER)}
 }
 fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+  if let Some(worker)=worker_observation(c){render_worker(f,worker,area);return;}
  let mut lines=if area.height<4{vec![styled(activity_wave(c),MUTED)]}else{vec![styled(selected_reason(c),DESK_FG),styled(activity_wave(c),MUTED)]};
  if c.stage_selected==STORYBOARD_STAGE{
     let(mark,color)=doctor_badge(c);lines.insert(0,styled(format!("F10 🩺 [+] Storyboard Doctor · {mark}"),color));
@@ -841,6 +850,41 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if let Some(r)=c.state["chat"]["request"].as_object().filter(|r|r.get("status").is_some_and(|v|v=="running")){let elapsed=r.get("sent_at").and_then(Value::as_u64).map(|ms|std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_secs().saturating_sub(ms/1000)).unwrap_or(0));lines.push(styled(format!("● agent.send working · {} · {}s elapsed",c.state["chat"]["selection"]["model"].as_str().unwrap_or("model unknown"),elapsed.map(|v|v.to_string()).unwrap_or_else(||"?".into())),GREEN));}
  if c.details_open{lines.push(styled(format!("Project: {}",c.state["project"].as_str().unwrap_or("unknown")),MUTED));lines.push(styled(format!("Session: {} · request {} · engine/ack {}/{} · DOM {}ms",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["request"]["request_id"].as_str().unwrap_or("none"),revision(&c.state["ui"]["engine_revision"]),revision(&c.state["ui"]["ack_engine_revision"]),c.state["ui"]["frontend_report_age_ms"]),MUTED));}
  f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==STORYBOARD_STAGE{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),BLUE,false)),area);
+}
+fn worker_observation(c:&Center)->Option<&Value>{
+    let value=&c.state["animation_worker"];
+    (c.state["project"].is_string() && value["project"]==c.state["project"]).then_some(value)
+}
+fn worker_colour(value:&Value)->Color{
+    if value["observation_error"].is_string() || value["state"]=="failed" {RED}
+    else if crate::worker::stale(value) || matches!(value["state"].as_str(),Some("running"|"cancelling")){AMBER}
+    else if value["state"]=="completed"{GREEN}else{MUTED}
+}
+fn render_worker(f:&mut Frame,value:&Value,area:ratatui::layout::Rect){
+    let mut lines=vec![styled(crate::worker::headline(value),worker_colour(value))];
+    if value["state"]=="not_started"{
+        lines.push(styled("Waiting for a render submission · Backstage never starts one by polling",MUTED));
+        if let Some(owner)=value["worker_owner"]["job"].as_str(){lines.push(styled(format!("Global worker busy: {owner}"),AMBER));}
+        f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel("ARTWORK IN MOTION",TEAL,false)),area);
+        return;
+    }
+    let selection=&value["selection"];
+    let identity=format!("{} · {} · {}",selection["character"].as_str().unwrap_or("character ?"),selection["track"].as_str().unwrap_or("action ?"),value["job"].as_str().unwrap_or("job ?"));
+    lines.push(styled(fit_text(&identity,area.width.saturating_sub(2) as usize),DESK_FG));
+    if let Some(error)=value["observation_error"].as_str().or(value["error"].as_str()).or(value["detail"].as_str()){
+        lines.push(styled(fit_text(error,area.width.saturating_sub(2) as usize),RED));
+    }else{lines.push(styled(fit_text(&crate::worker::resource_line(value),area.width.saturating_sub(2) as usize),MUTED));}
+    if area.height>=6{
+        let source=if value["telemetry_source"]=="terminal_receipt" || matches!(value["state"].as_str(),Some("completed"|"cancelled"|"failed")){"saved receipt"}else{"worker service"};
+        let age=crate::worker::age_ms(value,"updated_at").map(|ms|format!("{:.1}s",ms as f64/1000.0)).unwrap_or_else(||"?".into());
+        lines.push(styled(format!("{source} · recorded {age} ago{} · D PULSE details",if crate::worker::stale(value){" · STALE"}else{""}),MUTED));
+    }
+    if area.height>=7{
+        let owner=&value["worker_owner"];
+        let owner_line=if owner.is_object(){format!("Global worker: {} · {}",owner["job"].as_str().unwrap_or("?"),owner["project"].as_str().unwrap_or("project unknown"))}else{format!("Global worker owner: {}",value["worker_owner_status"].as_str().unwrap_or("unavailable"))};
+        lines.push(styled(fit_text(&owner_line,area.width.saturating_sub(2) as usize),MUTED));
+    }
+    f.render_widget(Paragraph::new(lines).block(round_panel("ARTWORK IN MOTION",worker_colour(value),false)),area);
 }
 fn conversation_text(text:&str)->&str{
     let text=text.split("\n\n[Magic Studio context at send time:").next().unwrap_or("");
@@ -870,8 +914,10 @@ fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 fn render_next(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let commands=c.copy_commands();let Some((effect,literal))=commands.get(c.command_selected%commands.len().max(1))else{return;};
  let reason=c.state["next_commands"].as_array().into_iter().flatten().find(|v|v["label"].as_str()==Some(*effect)).and_then(|v|v["reason"].as_str()).unwrap_or(effect);
- let lines=vec![styled(format!("> {effect}"),DESK_FG),styled(reason,MUTED),styled(literal.clone(),BLUE)];
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel("NEXT STEP · C copies literal · Pg scroll",TEAL,true)),area);
+  let blocker=worker_observation(c).filter(|v|v["state"]=="failed" || v["observation_error"].is_string());
+  let mut lines=vec![styled(format!("> {effect}"),DESK_FG),styled(reason,MUTED),styled(literal.clone(),BLUE)];
+  if let Some(worker)=blocker{lines.insert(0,styled(format!("{} · D opens PULSE",crate::worker::headline(worker)),RED));}
+  f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel(if blocker.is_some(){"ATTENTION · D PULSE · C copies inspection"}else{"NEXT STEP · C copies literal · Pg scroll"},if blocker.is_some(){RED}else{TEAL},true)),area);
 }
 /// The multiview: one tally tile per member of the gang, plus Sprocket in the app.
 /// Broadcast rule: the colour never travels alone — the word is always on the tile.
@@ -927,7 +973,31 @@ fn gang_tally_spans(c: &Center, compact: bool)->Vec<Span<'static>>{
 
 /// PULSE: the Studio's own health — memory, CPU and the recent error tail, from `/proc`.
 fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
- let mut lines:Vec<Line<'static>>=Vec::new();
+  let mut lines:Vec<Line<'static>>=Vec::new();
+  if let Some(worker)=worker_observation(c){
+   lines.push(styled(format!("ARTWORK IN MOTION · {}",crate::worker::headline(worker)),worker_colour(worker)));
+   for (label,key) in [("Job","job"),("Project","project"),("Unit","unit"),("Invocation","invocation_id")]{lines.push(styled(format!("{label}: {}",worker[key].as_str().unwrap_or("?")),MUTED));}
+   lines.push(styled(crate::worker::resource_line(worker),DESK_FG));
+   let cpu=worker["telemetry"]["cpu_usage_ns"].as_u64().map(|ns|format!("{:.2}s",ns as f64/1e9)).unwrap_or_else(||"?".into());
+   let quota=worker["limits"]["cpu_quota_percent"].as_u64().map(|v|format!("{v}%")).unwrap_or_else(||"?".into());
+   let timeout=worker["limits"]["timeout_seconds"].as_u64().map(|v|format!("{v}s")).unwrap_or_else(||"?".into());
+   lines.push(styled(format!("CPU time {cpu} · quota {quota} · timeout {timeout}"),DESK_FG));
+   let origin=worker["started_at"].as_str().or(worker["submitted_at"].as_str());
+   let elapsed=origin.and_then(|s|s.parse::<u64>().ok()).and_then(|ms|crate::worker::now_ms().checked_sub(ms)).map(|ms|format!("{:.1}s since recorded start/submission",ms as f64/1000.0)).unwrap_or_else(||"elapsed ?".into());
+   lines.push(styled(elapsed,MUTED));
+   let show=|key:&str|worker.get(key).filter(|v|!v.is_null()).map(|v|v.as_str().map(str::to_owned).unwrap_or_else(||v.to_string())).unwrap_or_else(||"?".into());
+   lines.push(styled(format!("Service result {} · exec status {} · exit {} / {} · reason {}",show("service_result"),show("exec_main_status"),show("exit_code"),show("exit_status"),show("termination_reason")),MUTED));
+   lines.push(styled(format!("Cancellation requested: {} · observed state {}",show("cancellation_requested_at"),show("state")),MUTED));
+   let owner=&worker["worker_owner"];
+   lines.push(styled(if owner.is_object(){format!("Global slot: {} · {} · {}",owner["job"].as_str().unwrap_or("?"),owner["project"].as_str().unwrap_or("project ?"),owner["state"].as_str().unwrap_or("state ?"))}else{format!("Global slot: {}",worker["worker_owner_status"].as_str().unwrap_or("unavailable"))},MUTED));
+   if let Some(error)=worker["worker_owner_error"].as_str(){lines.push(styled(format!("Global owner observation: {error}"),AMBER));}
+   let source=worker["telemetry_source"].as_str().unwrap_or(if matches!(worker["state"].as_str(),Some("completed"|"cancelled"|"failed")){"saved terminal receipt"}else{"worker service via blender.status"});
+   let age=crate::worker::age_ms(worker,"updated_at").map(|ms|format!("{:.1}s",ms as f64/1000.0)).unwrap_or_else(||"?".into());
+   lines.push(styled(format!("Source {source} · recorded {age} ago{}",if crate::worker::stale(worker){" · STALE / not live"}else{""}),AMBER));
+   for key in ["observation_error","service_error","error","detail","log","clip"]{if let Some(text)=worker[key].as_str(){lines.push(styled(format!("{key}: {text}"),if key.contains("error"){RED}else{MUTED}));}}
+   if let Some(rss)=worker["worker_peak_rss_kib"].as_u64(){lines.push(styled(format!("Blender self-reported peak RSS: {:.0}MiB (not cgroup peak)",rss as f64/1024.0),MUTED));}
+   lines.push(Line::raw(""));
+  }
   match c.studio_sample(){
    Some(sample)=>{
     let procs=&sample.procs;
@@ -949,7 +1019,7 @@ fn render_pulse(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let errors=errors.iter().rev().take(5).collect::<Vec<_>>();
  lines.push(styled(if errors.is_empty(){"no errors in the journal".to_string()}else{format!("{} error event(s) in the journal",errors.len())},if errors.is_empty(){GREEN}else{RED}));
  for e in errors{lines.push(styled(format!("  {} {}",e["command"].as_str().unwrap_or("?"),e["error"].as_str().unwrap_or("failed")),RED));}
- f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel("PULSE · studio health · D closes",BLUE,false)),area);
+  f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)).block(round_panel("PULSE · worker / Studio · Pg scroll · D closes",BLUE,false)),area);
 }
 
 /// MAPPETS: every agent in the gang, what it is building, and whether it is free.
@@ -995,7 +1065,8 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
   Line::from(vec![light(matched,"studio"),Span::raw("  "),light(ui["engine_unsaved"]!=true,"saved"),Span::raw("  "),light(!chat_status.contains("?"),"chat"),Span::raw("  "),Span::styled(crate::snapshot::status_strip(&c.state["snapshot"]),TEAL)]),
  ];
  f.render_widget(Paragraph::new(header).block(round_panel(if control{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS"}else{"🎬 F1 WORKSHOP | F2 BOOTH | F3 MOPPETS · D PULSE"},if control{DESK_LINE}else if matched{GREEN}else{AMBER},true)),chunks[1]);
- if c.muppets_view{render_muppets(f,c,chunks[2]);}
+  if c.details_open{render_pulse(f,c,chunks[2]);}
+  else if c.muppets_view{render_muppets(f,c,chunks[2]);}
   else if control{let p=Layout::vertical([Constraint::Min(5),Constraint::Length(11)]).split(chunks[2]);
    render_catalog(f,c,p[0]);render_commands(f,c,p[1],true);}else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
@@ -1051,9 +1122,11 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
         let mut refreshed=std::time::Instant::now();
+        let mut worker=crate::worker::Poller::default();
         loop {
             c.poll_chat();c.poll_doctor();
             if refreshed.elapsed()>Duration::from_secs(1){c.refresh();refreshed=std::time::Instant::now();}
+            if let Some(observation)=worker.poll(c.state["project"].as_str()){c.state["animation_worker"]=observation;}
             terminal.draw(|f| render(f, &c))?;
             if !event::poll(Duration::from_millis(120))? {
                 continue;
@@ -1223,6 +1296,49 @@ mod feedback_tests {
             assert!(stored.contains("private context"),"rendering must not mutate stored history");
         }
         assert_eq!(conversation_text("A historical AnimationCraft filename"),"A historical AnimationCraft filename");
+    }
+    #[test]
+    fn pulse_retains_terminal_failure_facts_when_service_is_unavailable(){
+        let mut c=fixture();c.details_open=true;
+        c.state["animation_worker"]=json!({"project":"/fixture.magic","job":"magicstudio-blender-test","state":"failed","phase":"rendering","termination_reason":"timeout","telemetry_stale":true,"telemetry_source":"terminal_receipt","updated_at":"1","observed_at_ms":crate::worker::now_ms().to_string(),"service_error":"user bus disconnected","service_state":null,"exit_status":15,"telemetry":{"memory_peak_bytes":269307904,"swap_current_bytes":0}});
+        for (w,h) in [(90,38),(140,44)]{
+            let backend=ratatui::backend::TestBackend::new(w,h);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f|render_desk(f,&c,false)).unwrap();
+            let b=terminal.backend().buffer();
+            let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");
+            for label in ["BLOCKED · timeout","terminal_receipt","STALE / not live","user bus disconnected","CPU time ?","Selected Studio metrics unavailable"]{
+                assert!(screen.contains(label),"{w}: missing {label}\n{screen}");
+            }
+        }
+    }
+    #[test]
+    fn failed_worker_attention_has_safe_project_and_job_scoped_inspection(){
+        let mut c=fixture();
+        c.state["animation_worker"]=json!({"project":"/fixture.magic","job":"magicstudio-blender-test","state":"failed","termination_reason":"timeout"});
+        let commands=c.copy_commands();
+        assert_eq!(commands.len(),1);
+        assert!(commands[0].1.contains("blender.status"));
+        assert!(commands[0].1.contains("project=/fixture.magic"));
+        assert!(commands[0].1.contains("job=magicstudio-blender-test"));
+        assert!(!commands[0].1.contains("blender.start"));
+        c.state["project"]=Value::Null;
+        assert!(c.copy_commands()[0].1.ends_with("project.catalog"));
+        assert!(!c.copy_commands()[0].1.contains("project="));
+    }
+    #[test]
+    fn booth_leads_with_actual_worker_progress_not_a_fake_idle_reel(){
+        let mut c=fixture();
+        c.state["animation_worker"]=json!({"job":"magicstudio-blender-test","project":"/fixture.magic","state":"running","phase":"rendering","frames_completed":42,"frames_total":180,"telemetry":{"memory_current_bytes":419430400,"memory_max_bytes":4294967296u64}});
+        for (w,h) in [(90,38),(140,44)]{
+            let backend=ratatui::backend::TestBackend::new(w,h);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            terminal.draw(|f|render_desk(f,&c,false)).unwrap();
+            let b=terminal.backend().buffer();
+            let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");
+            assert!(screen.contains("42/180"),"{w}: actual frame progress must be visible");
+            assert!(screen.contains("ARTWORK IN MOTION"),"{w}: creation should lead the panel");
+        }
     }
     #[test]
     fn top_bar_centres_project_and_keeps_unknown_metrics_explicit(){
