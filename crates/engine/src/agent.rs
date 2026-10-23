@@ -116,8 +116,36 @@ fn models(dir:&Path)->Result<Vec<Value>> {
     let list=data(&response).as_array().ok_or_else(||invalid("OpenCode model.list did not return a model array; no inference attempted"))?;
     Ok(list.iter().map(|m|json!({"providerID":m["providerID"],"id":m["id"],"name":m["name"],"enabled":m["enabled"],"capabilities":m["capabilities"],"cost":m["cost"]})).collect())
 }
-pub fn cmd_agent_models(s:&mut Session, p: &Value)->Result<Value> {
+/// Sprocket: the app's own in-app agent, reachable from the CLI and the booth.
+/// A stale (disabled) model selection is repaired in the shared app selection and the
+/// repair is reported in the receipt; nothing is silently overridden per request.
+pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
     let mut selection=cmd_agent_config(s,&json!({}))?;
+    let mut repaired=Value::Null;
+    if selection["agent"]=="opencode" {
+        let catalog=models(&crate::workshop::project_dir(s)?)?;
+        let provider=selection["provider"].as_str().unwrap_or_default().to_string();
+        let model=selection["model"].as_str().unwrap_or_default().to_string();
+        let live=catalog.iter().any(|m|m["providerID"]==json!(provider)&&m["id"]==json!(model)&&m["enabled"]==true);
+        if !live {
+            fn zero(v:&Value)->bool{v.as_f64()==Some(0.0)||v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
+            let free=|m:&Value|->bool{m["cost"].as_array().filter(|a|!a.is_empty()).map(|c|c.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"]))).unwrap_or(false)};
+            let pick=catalog.iter().find(|m|m["enabled"]==true&&free(m)).or_else(||catalog.iter().find(|m|m["enabled"]==true));
+            if let Some(m)=pick{
+                cmd_agent_config(s,&json!({"selection":{"agent":"opencode","provider":m["providerID"],"model":m["id"]}}))?;
+                repaired=json!({"from":{"provider":provider,"model":model},"to":{"provider":m["providerID"],"model":m["id"]},"reason":"the selected model is no longer enabled in agent.models; the shared app selection was moved to an enabled model"});
+                selection=cmd_agent_config(s,&json!({}))?;
+            }
+        }
+    }
+    let mut send=params.clone();
+    if !send.get("free_only").is_some(){send["free_only"]=json!(true);}
+    let mut result=cmd_agent_send(s,&send)?;
+    result["sprocket"]=json!({"name":"Sprocket","role":"the app's own in-app agent","selection":selection,"selection_repaired":repaired});
+    Ok(result)
+}
+
+pub fn cmd_agent_models(s:&mut Session, p: &Value)->Result<Value> {    let mut selection=cmd_agent_config(s,&json!({}))?;
     if let Some(agent)=p["agent"].as_str(){selection["agent"]=json!(agent);}
     if selection["agent"]!="opencode" {return Ok(json!({"agent":selection["agent"],"models":[],"available":false,"reason":"Catalog discovery is supported by the existing OpenCode API route"}));}
     Ok(json!({"agent":"opencode","models":models(&crate::workshop::project_dir(s)?)?,"available":true}))
@@ -170,7 +198,14 @@ fn refresh_reply(s:&Session)->Result<Value>{
  let text=recent.iter().filter(|m|m["type"]=="assistant").flat_map(|m|m["content"].as_array().into_iter().flatten()).filter(|v|v["type"]=="text").filter_map(|v|v["text"].as_str()).collect::<Vec<_>>().join("\n");
  if pending {r["status"]=json!("stalled");r["reason"]=json!("Existing OpenCode permission or question requires attention; no automatic approval");}
  else if recent.iter().any(|m|m["type"]=="idle") {
-  if text.trim().is_empty(){r["status"]=json!("error");r["error"]=json!("OpenCode became idle without a retrievable text reply");}
+  let failure=recent.iter().filter(|m|m["type"]=="assistant").find_map(|m|m["error"].as_object().map(|e|(e["message"].as_str().unwrap_or("the provider returned an error").to_string(),e["type"].as_str().unwrap_or("provider_error").to_string(),e["status"].as_u64())));
+  if text.trim().is_empty(){
+   r["status"]=json!("error");
+   match failure{
+    Some((message,kind,status))=>{r["error"]=json!(message);r["error_type"]=json!(kind);if let Some(status)=status{r["provider_status"]=json!(status);}}
+    None=>{r["error"]=json!("OpenCode became idle without a retrievable text reply");}
+   }
+  }
   else {verify_model(&dir,id,&r["model_ref"])?;log_push(s,json!({"role":"assistant","text":text,"request_id":r["request_id"],"project":r["project"],"session":id,"agent":"opencode","provider":r["provider"],"model":r["model"]}))?;r["text"]=json!(text);r["status"]=json!("replied");}
  }
  r["checked_at"]=json!(stamp());request_write(s,&r)?;

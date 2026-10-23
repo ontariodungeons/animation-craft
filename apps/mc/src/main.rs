@@ -78,18 +78,20 @@ OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
 
 SUBCOMMANDS
-  center [project=<file>]             interactive Command Center (no automatic Studio launch)
+  booth [project=<file>]              interactive The Booth (no automatic Studio launch)
+                                      F1 GREEN ROOM · F2 ON AIR · F4 ROLL CALL · D details
                                       optional root= name= audio= transcript= captions= audiomap=
                                       --print prints current state without entering terminal UI
+  center                             alias of `booth`
   exec ui.feedback                    discover canonical Studio identity, readiness, unsaved and ack state
   exec ui.components region=#view-project limit=30
                                       bounded actual DOM geometry/style/state; no input values
-  exec center.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
-  exec center.snapshot [project=<file>]
+  exec booth.events after=0 limit=20  bounded activity journal; use next_cursor for later reads
+  exec booth.snapshot [project=<file>]
                                       one JSON object with stable keys: project, subject, clip,
                                       playhead_sec, selected_part, unsaved_edits, hyperframes, fps,
-                                      last_error (null = not observed); the Command Center status line
-  exec center.tail [last=20] [project=<file>]
+                                      last_error (null = not observed); the Booth status line
+  exec booth.tail [last=20] [project=<file>]
                                       last N typed events: saved, generation_started/finished,
                                       keyframe_added/removed (Theatre), motion_path_drawn/undone,
                                       selection_changed, clip_switched, clip_sheet_*, error
@@ -644,8 +646,8 @@ pub(crate) fn dispatch(session:&mut Session,id:&str,mut params:Value)->Result<Va
 fn center_observation(id: &str, params: &Value, bridge: Option<&str>) -> Option<Value> {
     let project = params["project"].as_str();
     match id {
-        "center.snapshot" => Some(snapshot::collect(project, bridge).0),
-        "center.tail" => {
+        "center.snapshot" | "booth.snapshot" => Some(snapshot::collect(project, bridge).0),
+        "center.tail" | "booth.tail" => {
             let last = params["last"].as_u64().unwrap_or(20).clamp(1, 192) as usize;
             let (state, activity) = snapshot::collect(project, bridge);
             let events = snapshot::tail(&activity, state["project"].as_str());
@@ -673,7 +675,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "center", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -768,8 +770,44 @@ fn main() {
             let status = command.status().unwrap_or_else(|_| fail("Cannot start installed OpenCode"));
             std::process::exit(status.code().unwrap_or(1));
         }
-        "center" => {
-            if a.bridge_addr().is_some(){usage("Command Center currently uses an explicit headless project; --bridge is reserved for existing live command access");}
+        "sprocket" => {
+            let raw=cli_args().iter().cloned().skip(1).collect::<Vec<_>>();
+            let wants=|flag:&str|raw.iter().any(|v|v==flag);
+            let message=raw.iter().skip(1).filter(|v|!v.starts_with("--")&&!v.contains('=')).cloned().collect::<Vec<_>>().join(" ").trim().to_string();
+            let mut params=a.params_from(1).unwrap_or_else(|e|usage(e));
+            params["_origin"]=json!("CLI");
+            let read_only=wants("--status")||wants("--log");
+            if !read_only{
+                if message.is_empty(){usage("mc sprocket <message...>   talk to Sprocket, the app's own agent\n       mc sprocket --status    show the Sprocket session\n       mc sprocket --log       show the Sprocket transcript\n       mc sprocket --continue  keep the current Sprocket chat instead of starting a new one");}
+                params["message"]=json!(message);
+                if wants("--continue"){params["new_chat"]=json!(false);}
+            }else{
+                let id=if wants("--log"){"sprocket.log"}else{"sprocket.status"};
+                if wants("--log"){params["refresh"]=json!(true);}
+                let result=if let Some(addr)=a.bridge_addr(){bridge_call(&addr,id,params)}else{
+                    let mut s=Session::user_session();
+                    if let Some(project)=params["project"].as_str(){s.execute("project.attach",json!({"path":project})).unwrap_or_else(|e|fail(format!("{id}: {e}")));}
+                    dispatch(&mut s,id,params)
+                };
+                outln!("{}",serde_json::to_string_pretty(&result.unwrap_or_else(|e|fail(e))).unwrap_or_default());
+                std::process::exit(0);
+            }
+            let result=if let Some(addr)=a.bridge_addr(){bridge_call(&addr,"sprocket.send",params)}else{
+                let mut s=Session::user_session();
+                if let Some(project)=params["project"].as_str(){s.execute("project.attach",json!({"path":project})).unwrap_or_else(|e|fail(format!("sprocket.send: {e}")));}
+                dispatch(&mut s,"sprocket.send",params)
+            };
+            let result=result.unwrap_or_else(|e|fail(e));
+            if let Some(repaired)=result["sprocket"]["selection_repaired"].as_object(){
+                outln!("Sprocket: selection moved from {}/{} to {}/{} (the old model is no longer enabled).",repaired["from"]["provider"].as_str().unwrap_or("?"),repaired["from"]["model"].as_str().unwrap_or("?"),repaired["to"]["provider"].as_str().unwrap_or("?"),repaired["to"]["model"].as_str().unwrap_or("?"));
+            }
+            let reply=result["text"].as_str().unwrap_or_default().trim().to_string();
+            if reply.is_empty(){outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());std::process::exit(0);}
+            outln!("{reply}");
+            if result["status"].as_str()==Some("running"){outln!("(still running — mc sprocket --log for the reply)");}
+        }
+        "booth" | "center" => {
+            if a.bridge_addr().is_some(){usage("The Booth currently uses an explicit headless project; --bridge is reserved for existing live command access");}
             if let Err(e)=center::start(a.params_from(1).unwrap_or_else(|e|usage(e)),cli_args().iter().cloned().any(|a|a=="--print")){fail(e);}
         }
         "info" => {
