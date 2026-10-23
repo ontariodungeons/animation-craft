@@ -123,3 +123,18 @@ identifies its arrays' order. The loader, sampler, pose compositor and Blender's
 existing positive-Z painter stack consume the same saved array; no hierarchy sort
 or backend-specific order is introduced. Generic overlapping-color pose/undo checks
 and one actual tiny Blender render verify front/back parity.
+
+## Action export preview parity
+
+`motion.export_track` now uses the same relevant saved-Theatre refusal guard as
+pose export, before sampling or renderer/output work. Empty/missing track selection
+checks the whole character conservatively. Unsupported saved Theatre edits are
+never silently replaced with raw rig motion. The UI must require its current
+Theatre changes to be saved before submission; this command cannot observe an
+unsent browser draft. No Theatre evaluator or fallback is introduced.
+
+Optional `rest` (default false) is documented in the registry. The entire request,
+including rest and amount, still goes directly to the existing sampler. Rest bakes
+its single sampled resting transform into a static-duration export; it does not
+export the moving action. Successful export responses report actual sampler `rest`
+and requested `amount`. No additional renderer run is needed for the refusal test.

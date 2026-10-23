@@ -251,7 +251,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("agent.config", "Current Window Chat Selection", "{\"selection\":{\"model\":\"optional active model; shared defaults unchanged\"}}", cmd_agent_config),
         query!("agent.models", "Available Chat Models", "{\"agent\":\"optional catalog adapter: opencode\"}", cmd_agent_models),
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{\"free_only\":false,\"image_task\":false}", always, cmd_agent_new_chat),
-        cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
+        cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"rest\":false,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100,\"time\":0}", crate::motion::cmd_motion_sample),
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),

@@ -303,3 +303,18 @@ fn stacking_order_changes_pixels_not_parent_transforms_and_has_guarded_undo() {
     assert_eq!(image.get_pixel(2, 2).0, [0, 0, 255, 255]);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn action_export_refuses_saved_theatre_before_sampling_or_renderer_work() {
+    let (mut s,root,_)=fixture();
+    let state=json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{
+        "subject / move":{"sequence":{"tracksByObject":{"body":{"trackData":{"rotation":{"keyframes":[{"position":0,"value":15}]}}}}},"staticOverrides":{"byObject":{}}}
+    }});
+    fs::write(s.project_path.as_ref().unwrap(),json!({"theatre":state}).to_string()).unwrap();
+    s.theatre_state=Some(state);
+    // Invalid duration guarantees the old path cannot launch a renderer during this regression.
+    let error=s.execute("motion.export_track",json!({"character":"subject","track":"move","rest":true,"duration":0})).unwrap_err().to_string();
+    assert!(error.contains("Relevant Theatre edits"),"must refuse the unsupported preview before export processing: {error}");
+    assert!(!root.join("tracks").exists());
+    fs::remove_dir_all(root).unwrap();
+}

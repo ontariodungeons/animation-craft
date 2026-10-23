@@ -115,7 +115,7 @@ fn same_theatre(a: &Value, b: &Value) -> bool {
     a == b || (empty_theatre(a) && empty_theatre(b))
 }
 
-fn theatre_guard(s: &Session, character: &str, track: Option<&str>) -> Result<()> {
+pub(crate) fn theatre_guard(s: &Session, character: &str, track: Option<&str>) -> Result<()> {
     let disk: Value = serde_json::from_slice(&bytes(
         s.project_path.as_ref().ok_or_else(|| bad("No project"))?,
     )?)

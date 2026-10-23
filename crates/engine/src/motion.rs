@@ -1189,8 +1189,10 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
 
 /// Bake the existing engine samples into exporter keys. No second evaluator.
 pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
-    let sample = cmd_motion_sample(s, p)?;
     let id = load_character(s, p)?;
+    crate::motion_authoring::theatre_guard(s, &id, p["track"].as_str().filter(|id| !id.is_empty()))?;
+    // Preserve all sampler preview parameters, including rest and amount.
+    let sample = cmd_motion_sample(s, p)?;
     let rig = preview_rig(
         s.assets
             .get(&id)
@@ -1269,6 +1271,8 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     result["duration"] = json!(duration);
     result["margin"] = json!(margin);
     result["asset"] = json!(id);
+    result["rest"] = sample["rest"].clone();
+    result["amount"] = json!(p["amount"].as_f64().unwrap_or(100.0));
     Ok(result)
 }
 
