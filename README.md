@@ -28,7 +28,55 @@ A Studio window must have been started with `magicstudio-shell --control <port>`
 
 ## Command Center
 
-`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.magic` resumes inspection; `center --print project=...` prints its state. F1/F2 switch Control/Booth monitoring views; F4 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+`mc center` opens the native Ratatui Command Center. `center project=/absolute/project.magic` resumes inspection; `center --print project=...` prints its state. F1/F2/F3/F4 switch the Workshop, Booth, Muppets and Telemetry tabs; F6 shows intake. F3 opens, F5 creates, F6 explicitly resumes intake, F7 populates the editable DeckCraft template (or reopens the existing document), F8 refreshes; Ctrl+S saves and Ctrl+Q exits without losing saved state. Inputs can also be supplied as `root= name= audio= transcript= captions= audiomap=` arguments. Studio never launches automatically.
+
+The Telemetry tab (F4) is read-only and on demand: while it is open it samples
+host CPU, memory and swap, the busiest processes, the Blender worker log, the
+Studio's own activity journal, the Omarchy user journal and each coding agent's
+recorded quota (`omarchy agent usage`); closing the tab stops all of it. The
+gang strip selects an agent with `,` and `.`; `P` pokes the selected idle or
+stalled agent with a status request and `p` opens the composer to write your
+own message. A working agent is never interrupted, and a refusal from the
+multiplexer is reported as a refusal.
+
+Live TUI control uses `mc tui`, which talks to the running terminal instance rather than constructing a separate headless session. `mc tui look` returns the actual rendered rows, selected controls, agent identities/activity, events, project catalog, render-worker receipt, telemetry and input drafts as JSON. Every response follows a completed frame and carries its instance, generation and frame number. `mc tui read` prints only that screen text; `mc tui controls` lists all named controls and keyboard equivalents. Indices are zero-based. The numbered agent cards and MOPS agent tabs are clickable; `G` opens MOPS, `1`–`9`/`0` select its agents and left/right cycle them. `mc tui click id=<id>` follows the same hit target as a mouse click. With several TUIs open, use `mc tui instances` and add `instance=<pid>`; the CLI refuses to guess.
+
+Booth aligns stage labels and status lights in fixed columns. Its middle panel shows project/Studio/save/selection/media facts from cached observations. `F9` or the Sproket title button opens project chat; F9/Escape closes it while retaining the draft. Drafts stay bound to their originating project; selecting another project cannot redirect them. Enter sends only from that window. Offline or mismatched Studio connections stay unavailable and retain drafts; the TUI does not launch an app to send. CLI equivalents are `mc tui chat`, `mc tui chat text=...`, `mc tui chat.send`, and `mc tui chat.close`. `mc tui look section=project_overview` exposes the same facts. Artwork borders animate at most four times per second only while a fresh worker observation says running; completed, stale and unavailable observations remain static. Green is limited to status lights in that panel; its frame and low-memory bars use blue.
+
+Jesse and Gonzo use the master **WORKSHOP** (`mc workshop`, or F1). **ANIMAL** is the F4 telemetry view; `view name=telemetry` remains an alias for `animal`. The master shows host dials and all projects. An assigned agent sees only BOOTH, project MOPS, and project ANIMAL.
+
+Select a Workshop card and press **B / Agent B** to prepare an assignment without launching or messaging an agent. To explicitly assign one teammate and its task, use:
+
+```bash
+mc tui booth.prepare project=/absolute/song.magic pane=<pane-id> name=<agent-name> task='The assigned task'
+# Optional explicit additional project commands: allow=project.save,motion.sample
+```
+
+The response contains `onboarding.assignment`, `onboarding.launch`, and `onboarding.environment`. Put `MAGICSTUDIO_ASSIGNMENT=<that assignment file>` in the **agent process environment**, including its MCP configuration; each child `mc` command then inherits the scope. To inspect its Booth manually, run the returned launch command. Do not give it a master TUI instance ID. By default the scope permits project inspection and notes to explicitly assigned teammates; additional engine commands require a master grant. Sproket history can be read, while sending requires `allow=agent.send`. Reprepare the same project to add a teammate or replace grants, then reload its Booth/MCP session.
+
+This context filters CLI/MCP command discovery, validates project identity before dispatch, prevents save-as into another project, and keeps native TUI endpoints in a project-specific namespace. Project MOPS uses Workshop assignment tasks and project receipts; it never reads a teammate's unrelated terminal history. Project ANIMAL excludes host processes, host logs and other projects' worker ownership. These are workflow permissions under the shared Linux account, not an OS/filesystem sandbox; the assigned environment must stay configured.
+
+Workshop uses responsive project cards (one to four columns), with observed active projects first and an `I` toggle for inactive projects. Unknown discovery stays `Unknown`; a frame meter appears only for an observed project-matched worker receipt. Arrows or `j`/`k` select without attaching; click selects a card, and Enter/Open or F2 enters its Booth. `D` opens selected-project details, including the full path and copyable CLI commands; `C` copies the selected command without executing it. Repeated names include a short folder label. The Workshop film header reports fleet counts rather than another project's render.
+
+`mc tui project.select index=0` selects without attaching; `mc tui project.open-selected` opens Booth; `mc tui project.inactive show=true` expands inactive projects. `mc tui look section=workshop` returns selected-project data, card observations, visible ordering and column count. Project indices refer to the shared catalog, not their sorted screen positions.
+
+```bash
+mc tui look
+mc tui look section=worker
+mc tui view name=mops
+mc tui agent name=gonzo           # use pane=<id> when names repeat
+mc tui look section=elements      # visible button IDs and terminal-cell rectangles
+mc tui click id=agent-card-wG:p7
+mc tui event index=0
+mc tui note text='Additional details for the selected agent'
+mc tui note.send                  # explicit submission; working/unavailable recipients refuse
+mc tui view name=telemetry
+mc tui look section=telemetry
+mc tui key key=F8                 # same handler as the keyboard, including all form controls
+mc tui reload                    # same foreground process; waits for a fresh generation/frame
+```
+
+Reading never submits a note or project chat. Composing and sending are separate actions; refused submissions retain the note draft. `task_source` distinguishes a terminal title from a recorded assignment. Telemetry reports its sampling state and age; unavailable values remain null. `mc tui input field=audio value=/path/song.wav` edits the intake form; `intake.create`, `intake.resume`, `project.open`, `project.save`, `storyboard.open` and `doctor` invoke the same guarded operations as their keys. `mc tui key` and `mc tui text` expose every remaining keyboard and text-input control without synthetic input into another terminal pane. Full CLI parity does not imply an automatic agent follow-up queue or a complete filesystem project inventory.
 
 Scripted clients use the same `project.intake` and `center.status` engine commands. UI and CLI share the production root `/run/media/jesse/Speedy/media`, stored as `projects_root` in `$XDG_CONFIG_HOME/magicstudio/settings.json` (or `~/.config/magicstudio/settings.json`). Inspect it with `mc exec project.root`; persist it with `mc exec project.root root=/run/media/jesse/Speedy/media`. `project.intake name=...` resolves `<root>/<song-slug>/project/<Name>.magic`. Explicit `root=...` or `path=...` choices apply only to that request, appear in the intake receipt, and never change the production setting. Recent history never determines the root. Existing projects require `resume=true`; changed transcript replacement requires explicit `replace_transcript=true`. Received bytes and errors persist in the project even when validation fails. The transcript importer accepts native HyperFrames word arrays, with original SRT when supplied or an explicitly provisional word-by-word fallback using existing timestamps. Recording duration is probed without transcription or imported from an audiomap. Raw text/IDs/timing are preserved.
 
