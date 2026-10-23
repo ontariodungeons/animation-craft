@@ -113,11 +113,11 @@ impl Session {
         let record=self.record_user_state&&commands::find(id).is_none_or(|c|c.journal);
         if record{activity::command(self.project_path.as_deref(),id,&params,"dispatch_running",None);}
         let started=std::time::Instant::now();
-        let (saves_before,project_before)=(self.project_saves.get(),self.project_path.clone());
+        let (saves_before,project_before)=(self.project_saves.load(std::sync::atomic::Ordering::Relaxed),self.project_path.clone());
         let result=self.execute_inner(id,params.clone());
         // An edit is a successful journaled command that left the project file unwritten.
         if result.as_ref().is_ok_and(|v|v["ok"]!=false) && commands::find(id).is_some_and(|c|c.journal) {
-            if self.project_saves.get()!=saves_before || self.project_path!=project_before {self.edits_since_save=0;}
+            if self.project_saves.load(std::sync::atomic::Ordering::Relaxed)!=saves_before || self.project_path!=project_before {self.edits_since_save=0;}
             else {self.edits_since_save+=1;}
         }
         if record{if let Ok(value)=&result{activity::result(self.project_path.as_deref(),id,value,started.elapsed().as_millis());}}

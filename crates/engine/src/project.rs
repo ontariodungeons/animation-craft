@@ -26,7 +26,7 @@ pub fn write_project_file(s: &Session) -> Result<()> {
         })
         .collect();
     let mut doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": assets,
-        "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target}});
+        "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target, "video_project": s.video_project_path}});
     if let Some(state) = &s.theatre_state { doc["theatre"] = state.clone(); }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -34,7 +34,7 @@ pub fn write_project_file(s: &Session) -> Result<()> {
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| EngineError::InvalidParams(format!("cannot encode project: {e}")))?;
     write_preserving_lease(path, text.as_bytes())?;
-    s.project_saves.set(s.project_saves.get() + 1);
+    s.project_saves.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if s.record_user_state{crate::activity::stored(path,text.len());}
     Ok(())
 }
@@ -183,6 +183,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
         s.video_target = target.into();
     }
+    s.video_project_path = doc.pointer("/workshop/video_project").and_then(Value::as_str).map(PathBuf::from);
     let warnings=recent_warning(s,&path,params["record_recent"]!=false);
     Ok(json!({"ok": true, "project": path,"warnings":warnings,"assets": s.project_assets, "missing": missing, "workshop": super::workshop::workshop_status(s)?}))
 }

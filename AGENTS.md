@@ -1,4 +1,4 @@
-# Working on AnimationCraft with concurrent agents
+# Working on Magic Studio with concurrent agents
 
 Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
 UI, engine, pipeline, and test work from overwriting one another.
