@@ -108,3 +108,15 @@ Frozen rerender root is now explicit: `source_bundle.bundle` is the actual froze
 bundle directory, while `source_bundle.path` is its scene entry point (possibly
 nested under scenes/). Pass both verbatim; never infer bundle from path.parent.
 The same fields are supplied by the Synfig snapshot receipt.
+
+### Readiness preflight
+
+`render_capable` requires an executable renderer, a readable nonempty stuff directory,
+executable adjacent `mc`, FFmpeg on PATH, and a successful Pillow import in the worker's
+`/usr/bin/python3`. Invalid explicit renderer/resource overrides never fall back to
+another installation. Start uses this same preflight and pins resolved tool paths.
+Discovery does not render; `native_render_verified:null` explicitly separates this
+prerequisite check from native source/plugin compatibility. `prerequisites` reports
+mc/ffmpeg paths and Python/Pillow checked/available/error; Python is unprobed/null
+when another prerequisite is already missing. Its import-only probe is limited to
+five seconds. Current native jobs remain the authority for actual render success.

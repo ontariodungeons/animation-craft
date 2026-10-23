@@ -20,28 +20,52 @@ const ALIASES: &[&str] = &["drawings", "extras", "inputs", "outputs", "scenes", 
 
 fn invalid(message: impl Into<String>) -> EngineError { EngineError::InvalidParams(message.into()) }
 
-/// Resolve tcomposer from an explicit path, then `PATH`. Never installs or guesses further.
+fn executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.is_file() && path.metadata().is_ok_and(|m|m.permissions().mode() & 0o111 != 0)
+}
+fn find_executable(name: &str, path_var: Option<OsString>) -> Option<PathBuf> {
+    path_var.and_then(|v| std::env::split_paths(&v).map(|d| d.join(name)).find(|p| executable(p)))
+        .and_then(|p| p.canonicalize().ok())
+}
+/// Explicit invalid overrides never fall back to another installed renderer.
 fn find_tcomposer(explicit: Option<OsString>, path_var: Option<OsString>) -> Result<PathBuf> {
     if let Some(path) = explicit.map(PathBuf::from) {
-        if path.is_absolute() && path.is_file() { return Ok(path); }
-        return Err(invalid(format!("OPENTOONZ_TCOMPOSER must be an existing absolute file: {}", path.display())));
+        if path.is_absolute() && executable(&path) { return Ok(path.canonicalize()?); }
+        return Err(invalid(format!("OPENTOONZ_TCOMPOSER must be an existing absolute executable: {}", path.display())));
     }
-    path_var.and_then(|v| std::env::split_paths(&v).map(|d| d.join("tcomposer")).find(|p| p.is_file()))
-        .ok_or_else(|| invalid(MISSING_TOOL))
+    find_executable("tcomposer",path_var).ok_or_else(|| invalid(MISSING_TOOL))
 }
-
 fn tcomposer() -> Result<PathBuf> {
     find_tcomposer(std::env::var_os("OPENTOONZ_TCOMPOSER"), std::env::var_os("PATH"))
 }
-
-/// tcomposer needs the OpenToonz "stuff" resource folder (passed as `-TOONZROOT`).
+fn usable_stuff(path: &Path) -> bool {
+    path.is_absolute() && path.is_dir() && fs::read_dir(path).is_ok_and(|mut entries|entries.next().is_some_and(|e|e.is_ok()))
+}
+fn find_stuff(explicit: Option<OsString>, candidates: impl Iterator<Item=PathBuf>) -> Option<PathBuf> {
+    let path=if let Some(path)=explicit.map(PathBuf::from) { usable_stuff(&path).then_some(path) }
+        else { candidates.into_iter().find(|p|usable_stuff(p)) };
+    path.and_then(|p|p.canonicalize().ok())
+}
+/// tcomposer resources must be readable and nonempty; an invalid override is an error.
 fn stuff_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/OpenToonz/stuff"));
-    std::env::var_os("OPENTOONZ_STUFF").map(PathBuf::from)
-        .into_iter()
-        .chain(STUFF_CANDIDATES.iter().map(PathBuf::from))
-        .chain(home)
-        .find(|p| p.is_dir())
+    find_stuff(std::env::var_os("OPENTOONZ_STUFF"), STUFF_CANDIDATES.iter().map(PathBuf::from).chain(home))
+}
+fn pillow_error() -> Option<String> {
+    use std::{process::Stdio,time::{Duration,Instant}};
+    let mut child=match Command::new("/usr/bin/python3").args(["-c","from PIL import Image"])
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        Ok(child)=>child,Err(error)=>return Some(format!("Python/Pillow probe could not start: {error}")),
+    };
+    let deadline=Instant::now()+Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status))=>return (!status.success()).then(||"Python Pillow unavailable in /usr/bin/python3; install python-pillow".into()),
+            Ok(None) if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(10)),
+            result=>{let _=child.kill();let _=child.wait();return Some(match result {Err(error)=>format!("Python/Pillow probe failed: {error}"),_=>"Python/Pillow readiness probe timed out after 5 seconds".into()});}
+        }
+    }
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -293,26 +317,40 @@ fn collect(plan: &Value) -> Result<Value> {
 
 /// Public submission only: the existing worker owns validation/snapshot/render/encode.
 pub fn cmd_opentoonz_start(s: &mut Session, p: &Value) -> Result<Value> {
-    let tool=tcomposer()?;
-    let stuff=stuff_dir().ok_or_else(||invalid("OpenToonz stuff directory unavailable; install OpenToonz resources or set OPENTOONZ_STUFF"))?.canonicalize()?;
+    let readiness=cmd_opentoonz_discover(s,&json!({}))?;
+    if readiness["render_capable"]!=true {return Err(invalid(readiness["render_reason"].as_str().unwrap_or("OpenToonz prerequisites unavailable")));}
+    let tool=&readiness["tcomposer"];let stuff=&readiness["stuff"];
     let scene=crate::workspace::resolve_workspace_path(s,p["scene"].as_str().ok_or_else(||invalid("scene is required"))?).canonicalize()?;
     if scene.extension().is_none_or(|e|e!="tnz") {return Err(invalid("scene must be .tnz"));}
     let bundle=p["bundle"].as_str().map(|v|crate::workspace::resolve_workspace_path(s,v)).or_else(||project_root(&scene)).or_else(||scene.parent().map(Path::to_path_buf)).ok_or_else(||invalid("bundle required"))?.canonicalize()?;
     if !scene.starts_with(&bundle){return Err(invalid("scene must be inside bundle"));}
     if ["fps","width","height"].iter().any(|k|p.get(*k).is_some()){return Err(invalid("Use saved scene fps/size; overrides unsupported"));}
-    let mc=std::env::current_exe()?.with_file_name("mc");if !mc.is_file(){return Err(invalid("Install adjacent mc for bounded OpenToonz helper"));}
-    let mut request=p.clone();request["scene"]=json!(scene);request["bundle"]=json!(bundle);request["stuff"]=json!(stuff);request["tcomposer"]=json!(tool);request["mc"]=json!(mc);request["ffmpeg"]=json!("ffmpeg");
+    let mc=&readiness["prerequisites"]["mc"]["path"];
+    let mut request=p.clone();request["scene"]=json!(scene);request["bundle"]=json!(bundle);request["stuff"]=json!(stuff);request["tcomposer"]=json!(tool);request["mc"]=json!(mc);request["ffmpeg"]=readiness["prerequisites"]["ffmpeg"]["path"].clone();
     crate::blender::submit(s,p,request,"opentoonz")
 }
 
 /// `opentoonz.discover`: tool availability and, given a scene, what would render. No rendering.
 pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer();
-    let render_reason=tool.as_ref().err().map(|e|e.to_string()).or_else(||stuff_dir().is_none().then(||"OpenToonz stuff directory required (OPENTOONZ_STUFF)".to_string()));
-    let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"tcomposer":tool.as_ref().ok(),
+    let stuff=stuff_dir();
+    let helper=std::env::current_exe().ok().map(|p|p.with_file_name("mc")).filter(|p|executable(p));
+    let ffmpeg=find_executable("ffmpeg",std::env::var_os("PATH"));
+    let mut missing=Vec::new();
+    if let Err(error)=&tool { missing.push(error.to_string()); }
+    if stuff.is_none() { missing.push("Readable nonempty OpenToonz stuff directory required; check OPENTOONZ_STUFF (invalid overrides do not fall back)".into()); }
+    if helper.is_none() { missing.push("Executable mc must be installed beside the caller for bounded native preparation".into()); }
+    if ffmpeg.is_none() { missing.push("FFmpeg executable not found on PATH; required for alpha encoding".into()); }
+    let python_checked=missing.is_empty();
+    let python_error=if python_checked {pillow_error()}else{None};
+    if let Some(error)=&python_error {missing.push(error.clone());}
+    let render_reason=(!missing.is_empty()).then(||missing.join("; "));
+    let prerequisites=json!({"mc":{"path":helper,"available":helper.is_some()},"ffmpeg":{"path":ffmpeg,"available":ffmpeg.is_some()},
+        "python_pillow":{"path":"/usr/bin/python3","checked":python_checked,"available":if python_checked {json!(python_error.is_none())}else{Value::Null},"error":python_error}});
+    let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"prerequisites":prerequisites,"native_render_verified":Value::Null,"tcomposer":tool.as_ref().ok(),
         "tcomposer_sha256":match &tool { Ok(path) => json!(sha256_file(path)?), Err(_) => Value::Null },
         "version":Value::Null,"version_note":"tcomposer has no version flag; record the package or build version at deployment",
-        "stuff":stuff_dir(),"reason":tool.as_ref().err().map(|e| e.to_string()),
+        "stuff":stuff,"reason":tool.as_ref().err().map(|e| e.to_string()),
         "controls":["first","last","step","shrink","nthreads"],
         "unsupported":["fps, width and height overrides (use the scene's output settings)","rig, bone or Plastic authoring","action names"]});
     if p["scene"].is_string() {
@@ -494,8 +532,22 @@ mod tests {
         assert!(error.contains("not installed") && error.contains("OPENTOONZ_TCOMPOSER"), "{error}");
         assert!(find_tcomposer(Some("relative/tcomposer".into()), None).is_err());
         fs::write(empty.join("tcomposer"), "").unwrap();
+        assert!(find_tcomposer(None, Some(empty.clone().into_os_string())).is_err());
+        assert!(find_tcomposer(Some(empty.join("tcomposer").into_os_string()), None).is_err());
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(empty.join("tcomposer"),fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(find_tcomposer(None, Some(empty.clone().into_os_string())).unwrap(), empty.join("tcomposer"));
         assert_eq!(exit_meaning(Some(255)), "one or more frames failed to render");
         assert_eq!(exit_meaning(Some(254)), "scene or project could not be loaded");
     }
+    #[test]
+    fn invalid_stuff_override_does_not_fall_back_and_empty_resources_are_unavailable() {
+        let root=temp("stuff-readiness");let valid=root.join("valid");let empty=root.join("empty");
+        fs::create_dir_all(&valid).unwrap();fs::create_dir_all(&empty).unwrap();fs::write(valid.join("resource"),"fixture").unwrap();
+        assert!(find_stuff(Some(empty.into_os_string()),std::iter::once(valid.clone())).is_none());
+        assert!(find_stuff(Some(root.join("missing").into_os_string()),std::iter::once(valid.clone())).is_none());
+        assert_eq!(find_stuff(None,std::iter::once(valid.clone())),Some(valid));
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
