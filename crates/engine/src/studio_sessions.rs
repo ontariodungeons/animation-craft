@@ -33,6 +33,12 @@ fn connect_with_retry(path: &Path) -> Result<std::os::unix::net::UnixStream, Str
 pub fn request(path: &Path, id: &str, params: Value) -> Result<Value, String> {
     request_within(path, id, params, 3)
 }
+
+/// A command can take a while (a model turn, an import). Give it room, and say plainly
+/// that the Studio was busy instead of reporting a bare socket timeout.
+pub fn request_slow(path: &Path, id: &str, params: Value) -> Result<Value, String> {
+    request_within(path, id, params, 60)
+}
 #[cfg(unix)]
 pub fn request_within(path: &Path, id: &str, params: Value, timeout_seconds: u64) -> Result<Value, String> {
     crate::local_ipc::private_path(path.parent().ok_or("Endpoint directory missing")?, true)?;
@@ -60,7 +66,11 @@ pub fn request_within(path: &Path, id: &str, params: Value, timeout_seconds: u64
             {
                 std::thread::sleep(Duration::from_millis(100));
             }
-            Err(e) => return Err(e.to_string()),
+            Err(e) => {
+                return Err(format!(
+                    "The Studio did not answer within {timeout_seconds}s ({e}); it is busy or the request is still running. Inspect the Studio before retrying — no duplicate request was sent."
+                ))
+            }
         }
     }
     let reply: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
