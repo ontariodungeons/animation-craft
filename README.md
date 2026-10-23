@@ -17,7 +17,7 @@ The Omarchy menu entry is **AnimationCraft Studio**. Rebuild the shell after cha
 
 `mc exec <id> key=value` executes one command. `mc run <file.jsonl|->` keeps one headless session across JSONL commands with `id` and `params`. Separate `exec` calls do not share the open project.
 
-Register one AnimationCraft MCP server per client: command `mc`, args `["mcp"]`. It uses a headless engine session. To use an already configured live Studio bridge, explicitly select its port:
+Register one Magic Studio MCP server per client: command `mc`, args `["mcp"]`. It uses a headless engine session. To use an already configured live Studio bridge, explicitly select its port:
 
 ```bash
 mc --bridge <port> exec ui.state

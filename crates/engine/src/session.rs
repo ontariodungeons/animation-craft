@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::{EngineError, Result};
 
 /// The engine session. All project changes go through [`Session::execute`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Session {
     /// Current working directory for relative asset paths.
     pub cwd: PathBuf,
@@ -22,6 +22,8 @@ pub struct Session {
     pub project_assets: Vec<ProjectAsset>,
     /// The open `.acproj` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
+    /// Where the final video project lives (HyperFrames/Remotion/FilmCraft). Single source of truth.
+    pub video_project_path: Option<PathBuf>,
     /// Opaque native Theatre save-file state; absent on projects that have never saved Theatre edits.
     pub theatre_state: Option<Value>,
     /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
@@ -49,7 +51,7 @@ pub struct Session {
     /// Whether Blender 5.3 is reachable at 127.0.0.1:9876.
     pub blender_available: bool,
     /// Project-file writes; `write_project_file` takes `&Session`, hence the cell.
-    pub project_saves: std::cell::Cell<u64>,
+    pub project_saves: std::sync::atomic::AtomicU64,
     /// Successful journaled commands since the project file was last written.
     pub edits_since_save: u64,
 }
@@ -62,6 +64,7 @@ impl Default for Session {
             assets: HashMap::new(),
             project_assets: Vec::new(),
             project_path: None,
+            video_project_path: None,
             theatre_state: None,
             record_user_state: false,
             agent_selection: None,
@@ -75,8 +78,35 @@ impl Default for Session {
             preview_range: (0, 72),
             last_result: None,
             blender_available: false,
-            project_saves: std::cell::Cell::new(0),
+            project_saves: std::sync::atomic::AtomicU64::new(0),
             edits_since_save: 0,
+        }
+    }
+}
+
+impl Clone for Session {
+    fn clone(&self) -> Self {
+        Self {
+            cwd: self.cwd.clone(),
+            assets: self.assets.clone(),
+            project_assets: self.project_assets.clone(),
+            project_path: self.project_path.clone(),
+            video_project_path: self.video_project_path.clone(),
+            theatre_state: self.theatre_state.clone(),
+            record_user_state: self.record_user_state,
+            agent_selection: self.agent_selection.clone(),
+            project_owner: self.project_owner.clone(),
+            song_audio: self.song_audio.clone(),
+            draft_approved: self.draft_approved,
+            video_target: self.video_target.clone(),
+            active_asset: self.active_asset.clone(),
+            preview_mode: self.preview_mode.clone(),
+            preview_speed: self.preview_speed,
+            preview_range: self.preview_range,
+            last_result: self.last_result.clone(),
+            blender_available: self.blender_available,
+            project_saves: std::sync::atomic::AtomicU64::new(self.project_saves.load(std::sync::atomic::Ordering::Relaxed)),
+            edits_since_save: self.edits_since_save,
         }
     }
 }
