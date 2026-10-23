@@ -86,6 +86,16 @@ fn active(start: f64, end: f64, at: f64) -> bool {
     start <= at && at < end
 }
 
+/// How a clip sits against the scene it starts in; scene times are the truth and nothing is changed.
+fn fit(c: &Clip, scenes: &[Scene]) -> Value {
+    let (Some(first), Some(last)) = (scenes.first(), scenes.last()) else { return Value::Null };
+    if c.start <= first.start && c.end >= last.end { return json!("whole song"); }
+    let Some(sc) = scenes.iter().find(|sc| active(sc.start, sc.end, c.start)) else { return json!("outside every scene") };
+    if c.end > sc.end { json!({"over_run": ms(c.end - sc.end), "scene": sc.id}) }
+    else if c.end < sc.end { json!({"under_run": ms(sc.end - c.end), "scene": sc.id}) }
+    else { json!("fits scene") }
+}
+
 fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, Vec<Scene>)> {
     let raw = params.get("project").and_then(Value::as_str).filter(|p| !p.trim().is_empty())
         .ok_or_else(|| invalid("missing 'project' (.acproj path)"))?;
@@ -112,7 +122,7 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
             let scene_id = scene.map(|sc| sc.id.as_str());
             let mut cues: Vec<Value> = clips.iter().filter(|c| active(c.start, c.end, at)).map(|c| json!({
                 "kind": "clip", "id": c.id, "scene": scene_id,
-                "start": ms(c.start), "end": ms(c.end), "local": ms(at - c.start),
+                "start": ms(c.start), "end": ms(c.end), "local": ms(at - c.start), "fit": fit(c, &scenes),
             })).collect();
             for sc in &scenes {
                 for a in &sc.actions {
@@ -137,7 +147,7 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
             let uses: Vec<Value> = clips.iter()
                 .filter(|c| c.id == id || (clip.src.is_some() && c.src == clip.src))
                 .map(|c| json!({
-                    "id": c.id, "start": ms(c.start), "end": ms(c.end),
+                    "id": c.id, "start": ms(c.start), "end": ms(c.end), "fit": fit(c, &scenes),
                     "scenes": scenes.iter().filter(|sc| sc.start < c.end && c.start < sc.end).map(|sc| sc.id.as_str()).collect::<Vec<_>>(),
                 })).collect();
             Ok(json!({"ok": true, "project": project, "clip": id, "src": clip.src, "uses": uses}))
@@ -179,6 +189,8 @@ mod tests {
         let uses = s.execute("studio.cues", json!({"project": &project, "clip": "sea"})).unwrap();
         assert_eq!(uses["uses"].as_array().unwrap().len(), 2);
         assert_eq!(uses["uses"][1]["scenes"], json!(["s02"]));
+        assert_eq!(uses["uses"][0]["fit"], json!({"under_run": 2.0, "scene": "s01"}));
+        assert_eq!(uses["uses"][1]["fit"], json!({"under_run": 4.0, "scene": "s02"}));
         assert!(s.execute("studio.cues", json!({"project": &project, "clip": "missing"})).is_err());
         assert!(s.execute("studio.cues", json!({"project": &project})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
