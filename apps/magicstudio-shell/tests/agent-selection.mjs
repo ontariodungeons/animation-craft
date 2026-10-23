@@ -186,3 +186,5 @@ await import('./blender-placement.mjs');
 await import('./animation-refresh.mjs');
 
 await import('./animation-bridge.mjs');
+
+await import('./animation-transport.mjs');

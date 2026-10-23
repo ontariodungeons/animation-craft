@@ -1,5 +1,5 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
 function animationFeedback(){
  return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null};
 }
@@ -7,7 +7,7 @@ function animationReset(){
  theatreRequireSaved();
  blenderDispose();
  animationPause();
- Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
+ Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,photoDrafts:{},loading:false,request:motion.request+1,points:[],pathUndo:null,pathLayer:null,previewLoop:null,pen:false,fit:true,zoom:1});
  $('view-animation').replaceChildren();
 }
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
@@ -75,7 +75,7 @@ function animationShell(){
   motionButton('motion-pen','Pen · draw a motion path','pen',()=>{animationPause();motion.pen=!motion.pen;$('motion-pen').setAttribute('aria-pressed',String(motion.pen));$('motion-canvas').classList.toggle('drawing',motion.pen);$('motion-path-section')?.setAttribute('open','');}), motionButton('motion-path-visible','Show or hide the motion path','eye',()=>{motion.pathVisible=!motion.pathVisible;$('motion-path-visible').setAttribute('aria-pressed',String(motion.pathVisible));animationDraw();}), grid, motionButton('motion-fit','Fit artwork','fit',()=>{motion.fit=true;motion.zoom=1;animationDraw();}),
   el('button',{class:'icon',id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
- const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step','Next frame','step',()=>{animationPause();motion.time=Math.min(motion.sample?.duration||0,motion.time+1/(motion.sample?.fps||30));animationDraw();}),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>{animationPause();motion.time=Number(e.target.value);animationDraw();}}));
+ const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step-back','Previous frame','step',()=>animationStep(-1)),motionButton('motion-step','Next frame','step',()=>animationStep(1)),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>animationSeek(Number(e.target.value))}));
  const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar',hidden:''});
  view.append(inspector,el('div',{class:'motion-main'},toolbar,stage,transport,partBar));
  if(motion.mode!=='composite'){
@@ -106,11 +106,12 @@ function animationControls(){
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker));
  updateMagicSelection();
- const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
- const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
+ const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
+ const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
  box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
  box.append(pathControls());
- box.append(motionSection('Motion & timing',[
+ const loop=el('input',{id:'motion-preview-loop',type:'checkbox',onchange:e=>{motion.previewLoop=e.target.checked;}});loop.checked=motion.previewLoop??meta.tracks.find(t=>t.id===motion.track)?.loop??false;
+ box.append(motionSection('Motion & timing',[el('label',{},loop,'Loop preview'),
  motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>motion.speed=v),
  motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],false));
  const layers=el('div',{class:'motion-layers'});
@@ -172,7 +173,7 @@ function animationControls(){
  box.append(motionSection('Export & integrations',[exportButton,exportStatus],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
-  el('strong',{},`${motion.character} · ${meta.layers.length} layers / ${authoredCount} authored clips`),
+  el('strong',{},`${motion.assets?.find(a=>a.id===motion.character)?.name||motion.character} · Subject / shared engine · ${meta.layers.length} layers / ${authoredCount} authored clips`),
   el('span',{class:'muted'},selected?`Selected: ${selected.label||selected.id}`:'Select a part in Layers or Parts & assets')
  ));
  renderPartControlsBar(selected);
@@ -281,11 +282,16 @@ async function animationRefresh(){
  animationControls();await animationSample();await refreshPartDrafts();
 }
 
+function animationSeek(time){
+ if(!Number.isFinite(time))return;
+ animationPause();motion.time=Math.max(0,Math.min(motion.sample?.duration||0,time));animationDraw();
+}
+function animationStep(direction){animationSeek(motion.time+direction/(motion.sample?.fps||30));}
 function animationPause(){
  if(motion.mode==='composite'){seqPause();return;}
  const wasPlaying=motion.playing;motion.playing=false;motion.playId=(motion.playId||0)+1;
  if(typeof cancelAnimationFrame==='function'&&motion.tick){cancelAnimationFrame(motion.tick);motion.tick=0;}
- if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';}
+ if($('motion-play')){$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.play}</svg>`;$('motion-play').title='Play motion';$('motion-play').setAttribute('aria-label','Play motion');}
  if(wasPlaying&&typeof theatreSeek==='function'&&motion.sample)theatreSeek(motion.time);
 }
 async function animationPlay(){
@@ -295,8 +301,8 @@ async function animationPlay(){
  if(!motion.sample)return;
  if(motion.time>=motion.sample.duration)motion.time=0;
  const runId=(motion.playId=(motion.playId||0)+1);
- motion.playing=true;$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.pause}</svg>`;$('motion-play').title='Pause motion';
- let last=performance.now();function tick(now){if(!motion.playing||motion.playId!==runId)return;motion.time+=(now-last)/1000*motion.speed;last=now;if(motion.time>=motion.sample.duration){if(motion.sample.loop)motion.time%=motion.sample.duration;else{motion.time=motion.sample.duration;animationPause();}}animationDraw();if(motion.playing&&motion.playId===runId)motion.tick=requestAnimationFrame(tick);}motion.tick=requestAnimationFrame(tick);
+ motion.playing=true;$('motion-play').innerHTML=`<svg viewBox="0 0 24 24">${MOTION_ICONS.pause}</svg>`;$('motion-play').title='Pause motion';$('motion-play').setAttribute('aria-label','Pause motion');
+ let last=performance.now();function tick(now){if(!motion.playing||motion.playId!==runId)return;motion.time+=(now-last)/1000*motion.speed;last=now;if(motion.time>=motion.sample.duration){if(motion.previewLoop??motion.sample.loop)motion.time%=motion.sample.duration;else{motion.time=motion.sample.duration;animationPause();}}animationDraw();if(motion.playing&&motion.playId===runId)motion.tick=requestAnimationFrame(tick);}motion.tick=requestAnimationFrame(tick);
 }
 function animationDraw(){
  if(motion.mode==='composite'){seqDraw();return;}
@@ -321,11 +327,22 @@ function animationDraw(){
 function pathControls(){
  const apply=el('button',{id:'motion-path-apply',class:'start',onclick:applyMotionPath},'Apply path');apply.disabled=motion.points.length<2;
  const undo=motionButton('motion-path-undo','Undo the last drawn path','reset',async()=>{if(!motion.pathUndo)return;try{await motionCommand('motion.undo_path',{character:motion.character,undo:motion.pathUndo});motion.pathUndo=null;motion.points=[];await animationLoad();}catch(e){toast(String(e));}});undo.disabled=!motion.pathUndo;
+ const roots=(motion.meta?.layers||[]).filter(l=>!l.parent);
+ if(!roots.some(l=>l.id===motion.pathLayer))motion.pathLayer=roots[0]?.id||null;
+ const target=el('select',{id:'motion-path-layer','aria-label':'Root layer moved by path',onchange:()=>{motion.pathLayer=target.value;}},...roots.map(l=>el('option',{value:l.id},l.label||l.id)));target.value=motion.pathLayer||'';
+ const point=el('select',{id:'motion-path-point','aria-label':'Edit path point'},...motion.points.map((p,i)=>el('option',{value:String(i)},`${i+1} · ${p.map(v=>Number(v.toFixed(1))).join(', ')}`)));
+ const x=el('input',{id:'motion-path-x',type:'number',step:'any','aria-label':'Path point X'}),y=el('input',{id:'motion-path-y',type:'number',step:'any','aria-label':'Path point Y'});
+ const read=()=>{const p=motion.points[Number(point.value)];x.disabled=y.disabled=!p;if(p){x.value=p[0];y.value=p[1];}};
+ point.onchange=read;
+ for(const [input,index]of [[x,0],[y,1]])input.onchange=()=>{const p=motion.points[Number(point.value)],value=Number(input.value);if(p&&String(input.value).trim()&&Number.isFinite(value)){p[index]=value;animationDraw();}else read();};
+ read();
  const section=motionSection('Path & depth',[
+  el('label',{},'Path root',target),
+  el('label',{},'Edit point',point),el('div',{class:'motion-coordinate-row'},el('label',{},'X',x),el('label',{},'Y',y)),
   el('p',{class:'motion-help',title:'Select Pen above the stage, then draw. Playback moves from the first point at zero to the last point at the chosen duration.'},'Draw a route. Set its timing.'),
-  motionRange('motion-path-duration','Duration',0.1,Math.max(60,motion.pathDuration),0.1,motion.pathDuration,'s',v=>{motion.pathDuration=v;animationDraw();}),
-  motionRange('motion-size-start','Start size',1,Math.max(200,motion.startSize),1,motion.startSize,'%',v=>motion.startSize=v),
-  motionRange('motion-size-end','End size',1,Math.max(200,motion.endSize),1,motion.endSize,'%',v=>motion.endSize=v),
+  motionRange('motion-path-duration','Duration',0.1,Math.max(600,motion.pathDuration),0.1,motion.pathDuration,'s',v=>{motion.pathDuration=v;animationDraw();}),
+  motionRange('motion-size-start','Start size',1,Math.max(1000,motion.startSize),1,motion.startSize,'%',v=>motion.startSize=v),
+  motionRange('motion-size-end','End size',1,Math.max(1000,motion.endSize),1,motion.endSize,'%',v=>motion.endSize=v),
   el('div',{class:'motion-path-actions'},motionButton('motion-path-clear','Clear the drawn line','reset',()=>{motion.points=[];$('motion-path-apply').disabled=true;animationDraw();}),undo,apply)
  ],false);section.id='motion-path-section';return section;
 }
@@ -334,7 +351,7 @@ function setupPathPen(canvas){
  const point=e=>{const v=motion.viewTransform;if(!v)return;const r=canvas.getBoundingClientRect();const p=[(e.clientX-r.left-v.w/2)/v.scale+v.cx,(e.clientY-r.top-v.h/2)/v.scale+v.cy];const last=motion.points.at(-1);if(!last||Math.hypot(p[0]-last[0],p[1]-last[1])*v.scale>4){if(motion.points.length<512)motion.points.push(p);$('motion-path-apply').disabled=motion.points.length<2;animationDraw();}};
  canvas.addEventListener('pointerdown',e=>{if(!motion.pen)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);drawing=true;point(e);});
  canvas.addEventListener('pointermove',e=>{if(drawing)point(e);});
- canvas.addEventListener('pointerup',e=>{if(drawing){point(e);drawing=false;}});
+ canvas.addEventListener('pointerup',e=>{if(drawing){point(e);drawing=false;const section=$('motion-path-section');if(section)section.replaceWith(pathControls());}});
  canvas.addEventListener('pointercancel',()=>drawing=false);
 }
 function drawMotionPath(ctx,scale){
@@ -342,8 +359,9 @@ function drawMotionPath(ctx,scale){
  for(const i of [0,motion.points.length-1]){const p=motion.points[i];ctx.beginPath();ctx.arc(...p,4/scale,0,Math.PI*2);ctx.fill();ctx.font=`${12/scale}px system-ui`;ctx.fillText(i===0?'0':`${motion.pathDuration}s`,p[0]+8/scale,p[1]-8/scale);}ctx.restore();
 }
 async function applyMotionPath(){
+ if(!theatreCanLeave())return;
  animationPause();const button=$('motion-path-apply');button.disabled=true;
- try{const result=await motionCommand('motion.path',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,points:motion.points,duration:motion.pathDuration,start_size:motion.startSize,end_size:motion.endSize});
- motion.pathUndo=result.undo;motion.track=result.track;motion.rest=false;motion.pen=false;motion.time=0;motion.meta=await motionCommand('motion.tracks',{character:motion.character});animationControls();$('motion-pen').setAttribute('aria-pressed','false');$('motion-canvas').classList.remove('drawing');await animationSample();toast('Path ready · play to review');
+ try{const result=await motionCommand('motion.path',{character:motion.character,track:motion.track||motion.meta.tracks[0].id,layer:motion.pathLayer,points:motion.points,duration:motion.pathDuration,start_size:motion.startSize,end_size:motion.endSize});
+ motion.pathUndo=result.undo;motion.sample=null;motion.track=result.track;motion.rest=false;motion.pen=false;motion.time=0;motion.meta=await motionCommand('motion.tracks',{character:motion.character});animationControls();$('motion-pen').setAttribute('aria-pressed','false');$('motion-canvas').classList.remove('drawing');await animationSample();toast('Path ready · play to review');
  }catch(e){toast(String(e));}finally{if($('motion-path-apply'))$('motion-path-apply').disabled=motion.points.length<2;}
 }
