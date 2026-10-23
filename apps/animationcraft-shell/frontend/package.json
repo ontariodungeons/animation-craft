@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "build": "bun build theatre-frame.js --target browser --format iife --outfile ../ui/vendor/theatre.bundle.js"
+    "build": "bun build theatre-frame.js --target browser --format iife --banner 'var __require;' --outfile ../ui/vendor/theatre.bundle.js"
   },
   "dependencies": {
     "@theatre/core": "0.7.0",

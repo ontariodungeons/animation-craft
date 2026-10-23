@@ -4,6 +4,6 @@
 <body><p>Theatre timeline · select a property to animate it. Local evaluation: edits are not saved to the project yet.</p>
 <script>
 function reportTheatreError(error){document.body.dataset.error=String(error);parent.postMessage({magicTheatre:true,type:'error',error:String(error)},location.origin);}
-addEventListener('error',event=>reportTheatreError(event.error?.stack||event.message));
+addEventListener('error',event=>reportTheatreError(`${event.message}\n${event.error?.stack||''}`));
 addEventListener('unhandledrejection',event=>reportTheatreError(event.reason?.stack||event.reason));
 </script><script src="vendor/theatre.bundle.js"></script></body></html>
