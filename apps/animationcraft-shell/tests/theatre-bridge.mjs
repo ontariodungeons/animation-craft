@@ -89,7 +89,16 @@ const animationSource=readFileSync(new URL('../ui/animation.js',import.meta.url)
 vm.runInContext(animationSource.slice(animationSource.indexOf('function animationReset(){'),animationSource.indexOf('const motionCommand')),context);
 assert.throws(()=>vm.runInContext('animationReset()',context),/Save motion/,'reset must protect the existing iframe before clearing it');
 vm.runInContext(animationSource.slice(animationSource.indexOf('async function openAnimation('),animationSource.indexOf('async function animationOpen(')),context);
-await assert.rejects(vm.runInContext('openAnimation("another-character")',context),/Save motion/,'asset navigation must not destroy unsaved Theatre history');
+context.toast=message=>context.lastToast=message;
+assert.equal(await vm.runInContext('openAnimation("another-character")',context),false,'blocked UI navigation must return without an unhandled exception');
+assert.match(context.lastToast,/Save motion/);
+assert.equal(context.motion.character,'bee','refused UI navigation preserves selected subject');
 vm.runInContext(animationSource.slice(animationSource.indexOf('function animationShell(){'),animationSource.indexOf('async function animationLoad(')),context);
 assert.throws(()=>vm.runInContext('animationShell()',context),/Save motion/,'direct shell remount must also be guarded');
 console.log('PASS: reset, asset navigation and iframe remount reject before mutation');
+
+const recover=vm.runInContext('theatreSave()',context);const recoverExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:recoverExport.request,project:'/project/Bee.acproj',state:nativeState}});
+await recover;
+assert.equal(vm.runInContext('theatreCanLeave()',context),true,'saving recovers from an expected navigation refusal without a persistent frontend error');
+console.log('PASS: expected navigation refusal is recoverable after Save motion');

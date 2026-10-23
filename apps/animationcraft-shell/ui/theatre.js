@@ -10,6 +10,9 @@ function theatreEvent(stage,detail={}){
 function theatreRequireSaved(){
  if(magicTheatre.interactionRevision>magicTheatre.savedRevision||magicTheatre.gestureActive)throw new Error('Save motion before changing the animation workspace; Theatre interactions may contain unsaved keyframes.');
 }
+function theatreCanLeave(){
+ try{theatreRequireSaved();return true;}catch(error){if(typeof toast==='function')toast(String(error));return false;}
+}
 function theatreMount(container){
  theatreRequireSaved();
  const status=el('span',{id:'theatre-status',class:'muted'},'Loading Theatre…');

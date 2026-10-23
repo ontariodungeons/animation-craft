@@ -29,7 +29,7 @@ function motionRange(id,label,min,max,step,value,unit,change){
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
  return el('label',{class:'motion-range'},el('span',{},label,out),input);
 }
-async function openAnimation(character){theatreRequireSaved();motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
+async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
 async function animationOpen(){
  if(motion.mode==='composite'){theatreRequireSaved();const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
@@ -51,7 +51,7 @@ function motionModeSwitch(){
   ...['subject','composite'].map(m=>el('button',{
    class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,role:'tab','data-mode':m,
    'aria-selected':String(motion.mode===m),title:m==='subject'?'A subject: its rig, parts and action tracks':'A composite: images arranged in time',
-   onclick:async()=>{if(motion.mode===m)return;theatreRequireSaved();motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
+   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
   },m==='subject'?'Subject':'Composite')));
 }
 function animationShell(){
