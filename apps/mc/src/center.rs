@@ -524,9 +524,9 @@ fn timecode(seconds: f64, fps: f64) -> String {
 /// Broadcast tally: the word always travels with the colour.
 fn tally(status:&str)->(Color,&'static str){
     match status{
-        "working"|"busy"=> (RED,"WORKING"),
-        "stalled"|"blocked"=> (AMBER,"STALLED"),
-        "idle"|"done"=> (GREEN,"AVAILABLE"),
+        "working"|"busy"=> (AMBER,"WORKING"),
+        "stalled"|"blocked"|"error"=> (RED,"STALLED"),
+        "idle"|"done"=> (GREEN,"IDLE"),
         _=> (MUTED,"UNKNOWN"),
     }
 }
@@ -803,12 +803,13 @@ fn render_gang(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
   let kind=g["agent"].as_str().unwrap_or("?").to_string();
   let cwd=g["cwd"].as_str().or(g["foreground_cwd"].as_str()).unwrap_or("");
   let project=cwd.split('/').last().unwrap_or(cwd).to_string();
+  let task=g["terminal_title_stripped"].as_str().unwrap_or("").to_string();
   let (colour,word)=tally(g["agent_status"].as_str().unwrap_or(""));
-  tiles.push((name,kind,project,colour,word));
+  tiles.push((name,kind,if task.is_empty(){project.clone()}else{task},colour,word));
  }
  // Sprocket is the app's own agent: always on the wall, even when no agent session is running.
  let sprocket_state=c.state["chat"]["request"]["status"].as_str().unwrap_or("");
- let (sprocket_colour,sprocket_word)=match sprocket_state{"replied"=> (GREEN,"REPLIED"),"running"|"queued"=> (RED,"WORKING"),"error"=> (AMBER,"ERROR"),_=> (MUTED,"IDLE")};
+ let (sprocket_colour,sprocket_word)=match sprocket_state{"replied"=> (GREEN,"REPLIED"),"running"|"queued"=> (AMBER,"WORKING"),"error"=> (RED,"ERROR"),_=> (MUTED,"IDLE")};
  tiles.push(("Sprocket".into(),"in-app".into(),"the app".into(),sprocket_colour,sprocket_word));
  if tiles.is_empty(){return;}
  let each=(area.width as usize)/tiles.len().max(1);
@@ -820,7 +821,7 @@ fn render_gang(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
    .title(Span::styled(format!(" {} ",name),Style::default().fg(*colour).add_modifier(Modifier::BOLD)));
   let inner=block.inner(columns[index]);
   let width=inner.width as usize;
-  let lines=vec![styled(format!("{kind}"),MUTED),styled(format!("{} {word}",if *word=="WORKING"||*word=="REPLIED"||*word=="ERROR"{"●"}else{"○"}),*colour),styled(format!("@{}",project),DIM)];
+  let lines=vec![styled(format!("{kind}"),MUTED),styled(format!("{} {word}",if *word=="WORKING"||*word=="REPLIED"||*word=="ERROR"{"●"}else{"○"}),*colour),styled(fit_text(project,26),DIM)];
   f.render_widget(Paragraph::new(lines).block(block),columns[index]);
   let _=width;
  }

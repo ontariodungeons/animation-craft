@@ -58,17 +58,22 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             if exe_name == "mc" && !matching_mc_process(&entry.path().join("exe"), mc_program.as_deref()) {
                 continue;
             }
-            let is_ac = matches!(
+            // Magic Studio is the app being audited. The Craft CLIs are the strangers it hosts.
+            // Both are reported; only the Craft strangers are ever stopped by `--clean`.
+            let is_studio = matches!(exe_name, "magicstudio" | "magicstudio-shell" | "mc");
+            let is_craft = matches!(
                 exe_name,
-                "magicstudio"
-                    | "magicstudio-shell"
-                    | "mc"
-                    | "photocraft-cli"
+                "photocraft-cli"
                     | "effectcraft-cli"
                     | "filmcraft-cli"
                     | "pdfcraft-cli"
+                    | "vectorcraft-cli"
+                    | "figcraft-cli"
+                    | "cadcraft-cli"
+                    | "deckcraft-cli"
+                    | "gridcraft-cli"
             );
-            if !is_ac {
+            if !is_studio && !is_craft {
                 continue;
             }
             let control_port = args
@@ -86,9 +91,11 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
                 "cli_worker"
             };
             let (rss_mb, ppid) = read_proc_status(pid);
+            // Only the Craft strangers are swept. The Studio app and its own CLI are audited,
+            // never stopped by a blanket clean — an agent may be driving them.
             let should_clean = clean
-                && ((is_gui && keep_port.is_none_or(|kp| control_port != Some(kp)))
-                    || ((exe_name == "mc" || exe_name.ends_with("-cli")) && !is_mcp));
+                && is_craft
+                && (is_mcp || keep_port.is_none_or(|kp| control_port != Some(kp)));
             let mut action = "running";
             if should_clean {
                 action = if stop_process(pid, control_port) {
@@ -132,6 +139,8 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
             let pid = p["pid"].as_u64().unwrap_or(0) as u32;
             let ppid = p["ppid"].as_u64().unwrap_or(0) as u32;
             let is_dup = newest_mcp_by_exe.get(&exe).is_some_and(|&newest| pid < newest) || ppid == 1;
+            // The Studio's own `mc mcp` server is the one agents talk to; a duplicate of it is
+            // still a stray, but the newest one is kept and the older ones are reported.
             if is_dup {
                 duplicate_mcp_count += 1;
                 if clean {
