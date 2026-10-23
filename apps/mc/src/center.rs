@@ -842,11 +842,16 @@ fn render_stage_activity(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if c.details_open{lines.push(styled(format!("Project: {}",c.state["project"].as_str().unwrap_or("unknown")),MUTED));lines.push(styled(format!("Session: {} · request {} · engine/ack {}/{} · DOM {}ms",c.state["chat"]["session"].as_str().unwrap_or("none"),c.state["chat"]["request"]["request_id"].as_str().unwrap_or("none"),revision(&c.state["ui"]["engine_revision"]),revision(&c.state["ui"]["ack_engine_revision"]),c.state["ui"]["frontend_report_age_ms"]),MUTED));}
  f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).block(round_panel(&format!("{} · ACTIVITY{}",if c.stage_selected==STORYBOARD_STAGE{"▰ ▰  STORYBOARD REVIEW  ▰ ▰"}else{PROJECT_STAGES[c.stage_selected].0},if c.details_open{" / DETAILS"}else{""}),BLUE,false)),area);
 }
+fn conversation_text(text:&str)->&str{
+    let text=text.split("\n\n[Magic Studio context at send time:").next().unwrap_or("");
+    // Migration-only: hide injected context in old stored turns; never emit the old branding.
+    text.split("\n\n[AnimationCraft context at send time:").next().unwrap_or("")
+}
 fn render_conversation(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let r=&c.state["chat"]["request"];let (mark,color)=state_badge(r["status"].as_str());let mut lines=vec![styled(format!("{mark} · {}",r["error"].as_str().or(r["reason"].as_str()).unwrap_or(if r["status"]=="replied"{"reply received"}else{"no completed reply yet"})),color)];
- if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=t["text"].as_str().unwrap_or("").split("\n\n[Magic Studio context at send time:").next().unwrap_or("").split("\n\n[AnimationCraft context at send time:").next().unwrap_or("");if lines.len()>1{lines.push(Line::raw(""));}lines.push(styled(format!("{}: {text}",if t["role"]=="user"{"You"}else{"Agent"}),DESK_FG));}}
+  if let Some(turns)=c.state["chat_turns"].as_array(){for t in turns.iter().rev().take(6).collect::<Vec<_>>().into_iter().rev(){if area.height<8 && t["role"]=="user"{continue;}let text=conversation_text(t["text"].as_str().unwrap_or(""));if lines.len()>1{lines.push(Line::raw(""));}lines.push(styled(format!("{}: {text}",if t["role"]=="user"{"You"}else{"Agent"}),DESK_FG));}}
  let block=round_panel("SPROCKET · the app's own agent",GREEN,c.chat_editing);let inner=block.inner(area);f.render_widget(block,area);
- if inner.height<5{let reply=c.state["chat_turns"].as_array().into_iter().flatten().rev().find(|t|t["role"]=="assistant").and_then(|t|t["text"].as_str()).unwrap_or("No reply received");f.render_widget(Paragraph::new(vec![styled(reply,DESK_FG),styled(if c.chat_editing{format!("> {}_",c.chat_draft)}else{"F9 compose".into()},MUTED)]).wrap(Wrap{trim:false}),inner);return;}
+  if inner.height<5{let reply=c.state["chat_turns"].as_array().into_iter().flatten().rev().find(|t|t["role"]=="assistant").and_then(|t|t["text"].as_str()).map(conversation_text).unwrap_or("No reply received");f.render_widget(Paragraph::new(vec![styled(reply,DESK_FG),styled(if c.chat_editing{format!("> {}_",c.chat_draft)}else{"F9 compose".into()},MUTED)]).wrap(Wrap{trim:false}),inner);return;}
  let parts=Layout::vertical([Constraint::Min(1),Constraint::Length(2)]).split(inner);
  let skip=wrapped_rows(&lines,parts[0].width).saturating_sub(parts[0].height);f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((skip,0)),parts[0]);
  f.render_widget(Paragraph::new(vec![styled(if c.chat_editing{"F9/Esc leave draft · Enter send"}else{"F9 compose · Enter sends only while composing"},MUTED),styled(format!("> {}{}",c.chat_draft,if c.chat_editing{"_"}else{""}),DESK_FG)]).wrap(Wrap{trim:false}),parts[1]);
@@ -1209,6 +1214,15 @@ mod feedback_tests {
         assert!(chat_outcome(&c.state).contains("[OK]"));assert!(!chat_outcome(&c.state).contains("running"));assert!(stage_evidence(&c,2).is_none(),"no prerequisites in the fixture");
         let mut lyrics=c.state.clone();lyrics["prerequisites"]=json!([{"id":"lyrics","state":"ready"}]);let mut l=fixture();l.state=lyrics;assert_eq!(stage_evidence(&l,2).and_then(|v|v["state"].as_str()),Some("ready"),"the lyrics light reads the engine's lyrics item");assert_eq!(PROJECT_STAGES[STORYBOARD_STAGE].0,"Storyboard");
         for(w,h)in [(90,38),(140,44)]{let backend=ratatui::backend::TestBackend::new(w,h);let mut terminal=ratatui::Terminal::new(backend).unwrap();terminal.draw(|f|render_desk(f,&c,false)).unwrap();let b=terminal.backend().buffer();let screen=(0..h).map(|y|(0..w).map(|x|b[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");for label in ["Lyrics & notes","Animation","ACTUAL_REPLY","Last actions","NEXT STEP"]{assert!(screen.contains(label),"{w}: missing {label}");}assert!(!screen.contains("Chat running"));}
+    }
+    #[test]
+    fn conversation_hides_injected_context_without_rewriting_stored_text(){
+        for brand in ["Magic Studio","AnimationCraft"]{
+            let stored=format!("Artwork is ready\n\n[{brand} context at send time: private context]");
+            assert_eq!(conversation_text(&stored),"Artwork is ready");
+            assert!(stored.contains("private context"),"rendering must not mutate stored history");
+        }
+        assert_eq!(conversation_text("A historical AnimationCraft filename"),"A historical AnimationCraft filename");
     }
     #[test]
     fn top_bar_centres_project_and_keeps_unknown_metrics_explicit(){

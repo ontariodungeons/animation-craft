@@ -81,7 +81,7 @@ OPTIONS
 
 SUBCOMMANDS
   backstage [project=<file>]           interactive Backstage (no automatic Studio launch)
-                                      F1 GREEN ROOM · F2 ON AIR · F4 ROLL CALL · D details
+                                      F1 WORKSHOP · F2 BOOTH · F3 MOPPETS · D PULSE
                                       optional root= name= audio= transcript= captions= audiomap=
                                       --print prints current state without entering terminal UI
   booth, center                      aliases of `backstage`
@@ -149,11 +149,11 @@ EXIT STATUS
   0 success · 1 a command failed · 2 usage error
 ";
 
-/// How long to wait for one bridge reply. An explicit `ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS` wins;
+/// How long to wait for one bridge reply. An explicit `MAGICSTUDIO_BRIDGE_TIMEOUT_MS` wins;
 /// otherwise commands the engine marks `long_running` (exports, renders, agent runs) get an hour
 /// and everything else 30 s, so a slow render is not reported as a dead bridge.
 fn bridge_timeout(id: &str) -> std::time::Duration {
-    if let Some(ms) = std::env::var("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS")
+    if let Some(ms) = std::env::var("MAGICSTUDIO_BRIDGE_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
     {
