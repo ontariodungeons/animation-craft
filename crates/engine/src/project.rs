@@ -195,7 +195,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let missing = json!(missing);
     reset_for_project(s, path.clone(), assets);
     if let Some(owner)=owner{s.project_owner=Some(owner);}
-    s.theatre_state = doc.get("theatre").cloned();
+    s.theatre_state = doc.get("theatre").filter(|state| !state.is_null()).cloned();
     s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {

@@ -35,7 +35,7 @@ fn receipt(s: &Session, project: PathBuf, state: &Value, reused: bool) -> Value 
 pub fn read(s: &mut Session, params: &Value) -> Result<Value> {
     if s.project_path.is_none() { return Ok(json!({"ok":true,"available":false,"saved":false,"status":"unavailable","state":null,"reason":"No project selected; open the intended .magic"})); }
     let project=selected_project(s,params,false)?;
-    match &s.theatre_state {
+    match s.theatre_state.as_ref().filter(|state| !state.is_null()) {
         None=>Ok(json!({"ok":true,"available":true,"saved":false,"status":"no_saved_state","project":project,"state":null})),
         Some(state)=>{native_sheets(state)?;Ok(receipt(s,project,state,true))}
     }

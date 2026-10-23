@@ -228,3 +228,17 @@ fn pose_rest_and_amount_match_the_visible_shared_sample() {
     assert_eq!(rest["amount"], 50.0);
     fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn serialized_null_theatre_opens_as_unsaved_empty_state() {
+    let (mut s, root, _) = fixture();
+    let path = s.project_path.clone().unwrap();
+    fs::write(&path, json!({"format":"magicstudio.project","version":1,"assets":[],"theatre":null}).to_string()).unwrap();
+    s.execute("project.open",json!({"path":path,"record_recent":false})).unwrap();
+    assert!(s.theatre_state.is_none(), "JSON null is not a native save file");
+    let read=s.execute("motion.theatre.read",json!({})).unwrap();
+    assert_eq!(read["status"],"no_saved_state");
+    s.theatre_state=Some(Value::Null);
+    let read=s.execute("motion.theatre.read",json!({})).unwrap();
+    assert_eq!(read["saved"],false);
+    fs::remove_dir_all(root).unwrap();
+}
