@@ -6,3 +6,7 @@ assert.equal(vm.runInContext(`resume.character==='puppet'&&resume.track==='wave'
 c.state.project='/generic/B.magic';assert.equal(vm.runInContext('animationRestore()',c),null,'selection must not leak across projects');
 for(let i=0;i<30;i++){c.state.project=`/generic/${i}.magic`;vm.runInContext('motion.project=state.project;motion.character="puppet";animationRemember()',c)}assert.ok(JSON.parse(storage.get('animation.sessions')).length<=20,'stored UI history bounded');
 console.log('PASS session: project-scoped selection, preview settings and route restore with bounded history');
+// An explicit Project asset choice must outrank remembered selection.
+c.theatreCanLeave=()=>true;c.theatreRequireSaved=()=>{};c.invoke=async()=>({assets:[{id:'puppet'},{id:'chosen-object'}]});
+vm.runInContext(`animationShell=()=>{};animationLoad=async()=>{};setView=async()=>animationOpen();`,c);
+await vm.runInContext(`openAnimation('chosen-object')`,c);assert.equal(vm.runInContext('motion.character',c),'chosen-object','explicit asset choice outranks session restore');console.log('PASS explicit object choice outranks restored selection');

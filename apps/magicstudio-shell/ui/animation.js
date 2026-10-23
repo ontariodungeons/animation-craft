@@ -52,13 +52,13 @@ function motionRange(id,label,min,max,step,value,unit,change){
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
  return el('label',{class:'motion-range'},el('span',{},label,out),input);
 }
-async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
+async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;motion.explicitCharacter=true;await setView('animation');}
 async function animationOpen(){
  if(motion.mode==='composite'){theatreRequireSaved();const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
  theatreRequireSaved();
  motion.project=state.project;motion.meta=null;motion.sample=null;motion.time=0;motion.rest=true;
- motion.resume=animationRestore();if(motion.resume)Object.assign(motion,motion.resume);
+ motion.resume=motion.explicitCharacter?null:animationRestore();motion.explicitCharacter=false;if(motion.resume)Object.assign(motion,motion.resume);
  animationShell();
  try{
   const assets=await motionCommand('project.list_assets');
