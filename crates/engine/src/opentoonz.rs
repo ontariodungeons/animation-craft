@@ -58,14 +58,26 @@ fn renderer_command(tool: &Path) -> Result<Command> {
 fn renderer_error(tool: &Path, timeout: std::time::Duration) -> Option<String> {
     use std::{process::Stdio, time::{Duration, Instant}};
     let mut command = match renderer_command(tool) { Ok(c) => c, Err(e) => return Some(e.to_string()) };
-    // No scene, user settings, or render arguments: only exercise the native loader.
-    let mut child = match command.arg("-help").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+    // A nonblocking bounded read also avoids hanging on inherited stderr handles.
+    let (mut output, writer) = match std::os::unix::net::UnixStream::pair() { Ok(pair) => pair, Err(e) => return Some(e.to_string()) };
+    if let Err(e) = output.set_nonblocking(true) { return Some(e.to_string()); }
+    // No scene or render arguments: only exercise the native loader.
+    let mut child = match command.arg("-version").stdin(Stdio::null()).stdout(Stdio::null())
+        .stderr(Stdio::from(std::os::fd::OwnedFd::from(writer))).spawn() {
         Ok(child) => child, Err(e) => return Some(format!("tcomposer readiness probe could not start: {e}")),
     };
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return (!status.success()).then(|| format!("tcomposer -help failed ({status}); check renderer shared-library/runtime dependencies")),
+            Ok(Some(status)) => {
+                let mut bytes = Vec::new();
+                let _ = (&mut output).take(4096).read_to_end(&mut bytes);
+                // OpenToonz 1.8 reports its version on stderr and exits 1.
+                let text = String::from_utf8_lossy(&bytes);
+                let version = text.split_whitespace().collect::<Vec<_>>();
+                let identified = version.first() == Some(&"OpenToonz") && version.get(1).is_some_and(|v|v.starts_with('v') && v.chars().nth(1).is_some_and(|c|c.is_ascii_digit()));
+                return (!(matches!(status.code(), Some(0 | 1)) && identified)).then(|| format!("tcomposer -version failed ({status}); check renderer shared-library/runtime dependencies"));
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
             result => {
                 let _ = child.kill(); let _ = child.wait();
@@ -386,7 +398,7 @@ pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
         "python_pillow":{"path":"/usr/bin/python3","checked":python_checked,"available":if python_checked {json!(python_error.is_none())}else{Value::Null},"error":python_error}});
     let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"prerequisites":prerequisites,"native_render_verified":Value::Null,"tcomposer":tool.as_ref().ok(),
         "tcomposer_sha256":match &tool { Ok(path) => json!(sha256_file(path)?), Err(_) => Value::Null },
-        "version":Value::Null,"version_note":"Readiness runs -help only; record the package or build version at deployment",
+        "version":Value::Null,"version_note":"Readiness runs -version only; record the package or build version at deployment",
         "stuff":stuff,"reason":tool.as_ref().err().map(|e| e.to_string()),
         "controls":["first","last","step","shrink","nthreads"],
         "unsupported":["fps, width and height overrides (use the scene's output settings)","rig, bone or Plastic authoring","action names"]});
@@ -482,9 +494,11 @@ mod tests {
         fs::create_dir_all(tool.parent().unwrap()).unwrap();
         fs::create_dir_all(&libs).unwrap();
         fs::write(libs.join("libtfarm.so"), "fixture").unwrap();
-        fs::write(&tool, format!("#!/bin/sh\n[ \"$1\" = -help ] && [ \"${{LD_LIBRARY_PATH%%:*}}\" = '{}' ] && [ \"$QT_QPA_PLATFORM\" = offscreen ]\n", libs.display())).unwrap();
+        fs::write(&tool, format!("#!/bin/sh\n[ \"$1\" = -version ] && [ \"${{LD_LIBRARY_PATH%%:*}}\" = '{}' ] && [ \"$QT_QPA_PLATFORM\" = offscreen ] || exit 127\necho 'OpenToonz v1.8.0' >&2\nexit 1\n", libs.display())).unwrap();
         fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(renderer_error(&tool, Duration::from_secs(1)).is_none());
+        fs::write(&tool, "#!/bin/sh\nexit 0\n").unwrap();
+        assert!(renderer_error(&tool, Duration::from_secs(1)).is_some());
         fs::write(&tool, "#!/bin/sh\nexit 127\n").unwrap();
         assert!(renderer_error(&tool, Duration::from_secs(1)).unwrap().contains("shared-library/runtime"));
         fs::write(&tool, "#!/bin/sh\nexec /usr/bin/sleep 10\n").unwrap();

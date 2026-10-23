@@ -123,12 +123,14 @@ five seconds. Current native jobs remain the authority for actual render success
 
 ### Native loader readiness
 
-Discovery executes `tcomposer -help` with a five-second deadline, no scene, closed
-stdin and discarded output. A failed launch, nonzero exit or timeout prevents
+Discovery executes `tcomposer -version` with a five-second deadline, no scene, closed
+stdin and a nonblocking, 4 KiB capped stderr read. OpenToonz 1.8 returns exit 1
+and writes `OpenToonz v...` to stderr; only that identity with exit 0 or 1 is
+accepted. A failed launch, unexpected output/exit or timeout prevents
 `render_capable`; `available` still describes the executable file. The new
 `prerequisites.renderer` reports `checked`, nullable `available`, `error` and
 `private_library_dir`, independently of `resources`, FFmpeg and Python/Pillow.
-A successful help probe does not claim native rendering or codec verification.
+A successful version probe does not claim native rendering or codec verification.
 
 The Arch package's launcher prepends `<prefix>/lib/opentoonz` to
 `LD_LIBRARY_PATH`. When that directory contains `libtfarm.so`, discovery and the
