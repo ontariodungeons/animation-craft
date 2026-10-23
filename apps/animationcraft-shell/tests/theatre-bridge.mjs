@@ -6,12 +6,12 @@ const firstId=await theatreProjectId('/long/project/path/Bumble Bee.acproj');
 assert.ok(firstId.length<=32);
 assert.equal(firstId,await theatreProjectId('/long/project/path/Bumble Bee.acproj'));
 assert.notEqual(firstId,await theatreProjectId('/different/project/Bumble Bee.acproj'));
-const messages=[],listeners={},nodes=new Map();
+const messages=[],listeners={},nodes=new Map(),events=[];
 const frameWindow={postMessage:message=>messages.push(message)};
 const context=vm.createContext({window:{addEventListener:(type,handler)=>listeners[type]=handler},location:{origin:'tauri://localhost'},
  el:(tag,props)=>{const node={...props,contentWindow:tag==='iframe'?frameWindow:undefined};if(props.id)nodes.set(props.id,node);return node;},
  $:id=>nodes.get(id),state:{project:'/project/Bee.acproj'},motion:{character:'bee',selected:'antenna',meta:{layers:[{id:'antenna'}]},sample:{duration:5},time:0},
- animationDraw(){},animationPause(){}});
+ animationDraw(){},animationPause(){},acFeedback:{report:(phase,ack,event)=>events.push(event)}});
 vm.runInContext(readFileSync(new URL('../ui/theatre.js',import.meta.url),'utf8'),context);
 vm.runInContext('theatreMount({append(){}})',context);
 listeners.message({source:{},data:{magicTheatre:true,type:'loaded'}});
@@ -29,4 +29,17 @@ assert.equal(messages.filter(m=>m.type==='seek').length,0,'Theatre value redraw 
 const operations=[];context.ctx={translate:(...v)=>operations.push(['translate',...v]),rotate:v=>operations.push(['rotate',v])};
 vm.runInContext('theatreTransform(ctx,{id:"antenna",pivot:[12,24]})',context);
 assert.deepEqual(operations,[['translate',12,24],['rotate',Math.PI/6],['translate',-12,-24]]);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'ready',part:'antenna'}});
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'selection',objects:[{sheet:'bee',part:'antenna'}]}});
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'playback',playing:true}});
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'playback',playing:true}});
+assert.equal(events.filter(e=>e.stage==='theatre_playback').length,1,'duplicate playback status does not flood event history');
+for(let i=0;i<20;i++)listeners.message({source:frameWindow,data:{magicTheatre:true,type:'values',part:'antenna',rotation:i}});
+assert.equal(events.filter(e=>e.stage==='theatre_values').length,0,'per-frame values stay in snapshot, not action history');
+assert.equal(vm.runInContext('theatreFeedback().value_update.value',context),19);
+assert.equal(vm.runInContext('theatreFeedback().visual_quality',context),'not_assessed','loaded and rendered are not visual quality acceptance');
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'error',error:'fixture initialization failure'}});
+assert.equal(vm.runInContext('theatreFeedback().availability',context),'error');
+assert.equal(vm.runInContext('theatreFeedback().error',context),'fixture initialization failure');
+assert.equal(events.at(-1).stage,'theatre_error');
 console.log('PASS: isolated Theatre source, captured part, native duration and original pivot');
