@@ -42,7 +42,7 @@ async function blenderAnimationOpen(selection={}){
  const video=el('video',{id:'blender-preview',controls:true,loop:true,'aria-label':'Rendered Blender animation'});
  video.style.cssText='width:100%;height:100%;object-fit:contain';
  stage.append(video);
- let latest=null,job=null,selectionRevision=0;
+ let latest=null,job=null,jobState=null,selectionRevision=0;
  const report=(message,detail=message)=>{if(current()){status.textContent=message;status.title=detail;}};
  try{
   const result=await motionCommand('project.list_assets');if(!current())return;
@@ -84,7 +84,8 @@ async function blenderAnimationOpen(selection={}){
    const selected=()=>current()&&job===requestedJob&&selectionRevision===selectedRevision;
    try{
     const value=await motionCommand('blender.status',{job});if(!selected())return;
-    if(value.state==='running'||value.state==='cancelling'){
+    jobState=value.state;
+    if(!['completed','cancelled','failed'].includes(jobState)){
      busy(true);cancel.disabled=value.state==='cancelling';
      report(value.state==='cancelling'?'Cancelling render…':value.progress?.total?`Rendering ${value.progress.completed} / ${value.progress.total}`:'Preparing animation…');
      blenderPollTimer=setTimeout(poll,1000);return;
@@ -113,13 +114,13 @@ async function blenderAnimationOpen(selection={}){
      report(`${failure}${latest?.blend?' · previous saved scene available':''}`,
       value.state==='cancelled'?failure:`${failure} · ${value.error||value.detail||'Inspect the worker log'}`);
     }
-   }catch(error){if(!selected())return;busy(false);report(String(error));}
+   }catch(error){if(!selected())return;const active=!['completed','cancelled','failed'].includes(jobState);busy(active);cancel.disabled=!active||jobState==='cancelling';report(`${error}${active?' · Retrying status…':''}`);if(active)blenderPollTimer=setTimeout(poll,1000);}
   }
   async function restore(){
    clearTimeout(blenderPollTimer);const requestedSelection=++selectionRevision;
    blenderMediaFetch?.abort();
    if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
-   job=null;latest=null;placement.refresh();busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();choice.track=tracks.value;
+   job=null;jobState=null;latest=null;placement.refresh();busy(true);cancel.disabled=true;video.pause();video.removeAttribute('src');video.load();choice.track=tracks.value;
    const selected=tracks.value;
    const saved=await motionCommand('blender.list');if(!current()||requestedSelection!==selectionRevision)return;
    job=saved.jobs.find(j=>j.character===choice.character&&j.track===selected)?.job;
@@ -134,7 +135,7 @@ async function blenderAnimationOpen(selection={}){
    try{
     const value=await motionCommand('blender.start',{character:choice.character,track:tracks.value,
      ...(source.value==='saved'&&latest?.blend?{blend:latest.blend}:{}),max_frames:Number(range.value),resolution_percent:Number(resolution.value)});
-    if(!current())return;job=value.job;cancel.disabled=false;poll();
+    if(!current())return;job=value.job;jobState=null;cancel.disabled=false;poll();
    }catch(error){if(!current())return;busy(false);report(String(error));}
   };
   cancel.onclick=async()=>{cancel.disabled=true;try{await motionCommand('blender.cancel',{job});if(current()){clearTimeout(blenderPollTimer);await poll();}}catch(error){if(current())cancel.disabled=false;report(String(error));}};
