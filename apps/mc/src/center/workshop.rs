@@ -10,7 +10,7 @@ fn matches_project(project:&Value,value:&Value)->bool{
 fn discovery_fresh(c:&Center)->bool{
  !c.studios["observation_error"].is_string()&&crate::worker::age_ms(&c.studios,"observed_at_ms").is_some_and(|age|age<6000)
 }
-fn discovery_known(c:&Center)->bool{discovery_fresh(c)&&c.studios["errors"].as_array().is_some_and(|errors|errors.is_empty())}
+fn discovery_known(c:&Center)->bool{discovery_fresh(c)&&c.studios["errors"].as_array().is_some_and(|errors|errors.iter().all(|e|e["state"]=="stale endpoint; no listener"||e["error"].as_str().is_some_and(|v|v.starts_with("stale endpoint:"))))}
 fn live_ui(c:&Center,project:&Value)->bool{
  c.state["ui"]["connection"]=="connected"&&matches_project(project,&c.state["ui"])
  &&crate::worker::age_ms(&c.state["snapshot"],"observed_unix_ms").is_some_and(|age|age<6000)
@@ -251,6 +251,7 @@ mod tests{
  #[test]
  fn stale_discovery_does_not_claim_open_saved_or_offline(){
   let mut c=fixture();assert_eq!(status(&c,&projects(&c)[1]).0,"Open");assert_eq!(save(&c,&projects(&c)[1]),"✓ Saved");
+  c.studios["errors"]=json!([{"state":"stale endpoint; no listener"}]);assert!(discovery_known(&c));
   c.studios["observation_error"]=json!("timeout");
   assert_eq!(status(&c,&projects(&c)[1]).0,"Unknown");assert_eq!(save(&c,&projects(&c)[1]),"? Save");assert_eq!(activity_label(&c),"? Active");
   c.studios["observation_error"]=Value::Null;c.studios["observed_at_ms"]=json!(crate::worker::now_ms()-7000);
