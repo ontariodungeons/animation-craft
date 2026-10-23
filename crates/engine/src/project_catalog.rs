@@ -41,6 +41,10 @@ fn update(path: &str, forget: bool) -> Result<(), String> {
             .unwrap_or_else(|_| p.clone())
             != path
     });
+    // Never persist test/fixture or temp paths as the user's recent project.
+    if path.contains("/.agent/") || path.contains("/tmp/") {
+        return Ok(());
+    }
     if !forget {
         items.insert(0, path);
         items.truncate(10);

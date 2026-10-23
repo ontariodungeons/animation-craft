@@ -78,8 +78,8 @@ fn project_root_child() {
         production.to_string_lossy().as_ref()
     );
     assert_eq!(fs::read(&config).unwrap(), saved);
-    // Test intake updated actual history. The next default must still use production.
-    assert!(animationcraft_engine::project_catalog::list()[0].contains("explicit-tests"));
+    // Test/fixture paths under /tmp are never persisted as recent projects.
+    assert!(!animationcraft_engine::project_catalog::list().iter().any(|p| p.contains("explicit-tests")));
     let created = session
         .execute("project.intake", json!({"name":"Production Song"}))
         .unwrap();

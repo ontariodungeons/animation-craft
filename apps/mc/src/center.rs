@@ -30,6 +30,8 @@ struct Center {
     editing: bool,
     state: Value,
     message: String,
+    agent_gang: Value,
+    agent_gang_at: Option<std::time::Instant>,
     scroll: u16,
     show_form: bool,
     control_view: bool,
@@ -52,9 +54,14 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = animationcraft_engine::project_settings::root().map_err(|e|e.to_string())?;
-        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
+        Ok(Self{session:Session::user_session(),fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0})
     }
     fn refresh(&mut self) {
+        if self.session.project_path.is_none() {
+            if let Some(first)=crate::dispatch(&mut self.session,"project.catalog",json!({})).ok().and_then(|v|v["projects"].as_array().cloned()).and_then(|ps|ps.into_iter().find(|p|p["exists"]==true)).and_then(|p|p["path"].as_str().map(str::to_owned)) {
+                let _=self.session.execute("project.attach",json!({"path":first}));
+            }
+        }
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
         let ui=crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":self.pinned_instance})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
         // Keep the last project inspection while the engine is busy; read its real journal directly.
@@ -79,6 +86,12 @@ impl Center {
                 let cursor=value["activity"]["next_cursor"].as_u64().unwrap_or(0);
                 if self.seen_cursor>0&&cursor>self.seen_cursor{self.flash_after=self.seen_cursor;self.flash_started=Some(std::time::Instant::now());}
                 self.seen_cursor=cursor;self.state=value;
+                if self.agent_gang_at.map(|t|t.elapsed().as_secs()>=2).unwrap_or(true) {
+                    if let Ok(out)=std::process::Command::new("herdr").args(["agent","list"]).output() {
+                        if let Ok(v)=serde_json::from_slice::<Value>(&out.stdout) { self.agent_gang=v["result"]["agents"].clone(); self.agent_gang_at=Some(std::time::Instant::now()); }
+                    }
+                }
+                self.state["agent_gang"]=self.agent_gang.clone();
                 if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
                 self.observe_chat_delivery();
 
@@ -741,7 +754,8 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",MUTED,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{"F10 🩺 Doctor · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit".into()};f.render_widget(Paragraph::new(footer),chunks[2]);
+ let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|format!("{}:{} {}",g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?"),g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"})).collect::<Vec<_>>().join("  ")).unwrap_or_default();
+ let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[2]);
 }
 
 fn render(f: &mut Frame,c: &Center) {
@@ -890,7 +904,7 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     fn fixture()->Center{
-        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None}
+        Center{session:Session::default(),fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.acproj","ui":{"connection":"connected","active_project":"/fixture.acproj","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None}
     }
     #[test]
     fn unknown_saved_state_is_not_reported_as_clean(){
