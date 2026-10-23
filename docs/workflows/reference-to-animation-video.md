@@ -47,6 +47,19 @@ mc --bridge PORT exec image.break_apart asset=GENERATED_ASSET \
 
 Those coordinates are an example from the older fish's 2103×748 sheet, not a universal grid. Read `parts`, `parts_produced` and `errors` in the result and inspect every output. This command masks each view on the original canvas, preserving alpha. Record the pivot/translation and common scale that register each body into the existing rig; a shared image size alone does not register the drawings. Forward and reverse turns can reuse the same three views, with timing derived from the existing facing keys.
 
+Register the separated views with the native CLI, preserving their measured body pivot and proportions:
+
+```bash
+mc exec image.register_frame \
+  source=/path/to/project/assets/characters/CHARACTER/turn/frames/quarter_right.png \
+  out=/path/to/project/assets/characters/CHARACTER/turn/registered-v1/quarter_right.png \
+  'canvas=[1400,900]' 'source_pivot=[490,389]' 'target_pivot=[700,450]' scale=1.15
+```
+
+This uses PhotoCraft Place Embedded on a transparent canvas. It refuses an existing output or a placement that clips any nontransparent source pixel, checks the decoded PNG dimensions/alpha channel, and saves a `.registration.json` with pivots, scale, bounds and source hash. The example measurements belong to the older fish; measure each character. Register the profile and all turn views onto the same canvas and body pivot. A wider canvas allows the profile to face either direction without losing the tail.
+
+The fish proof stores these as five layers (right profile, right quarter, front, left quarter, left profile) with named `turn-left` and `turn-right` opacity-key tracks. Both tracks use the same registered artwork; the left profile is the right profile flipped around the common pivot. Register the spec using `project.add_asset kind=cutout_rig`, then `motion.clips.convert character=...` and `project.save`. The native Animation tab and `export.layered_motion` can now play/render that action. This is a reusable action asset linked to the source character; the original swimming rig stays editable.
+
 For a turn, profile → three-quarter → front → opposite three-quarter → opposite profile provides actual shape changes. Use a short anticipation, head-led turn, delayed tail/fins and a settling hold. A flat plane rotated in Three.js still has no thickness. Mesh deformation and drawing substitutions can be combined; Remotion can schedule/interpolate those poses but cannot invent the missing views.
 
 Once a named track exists, inspect `motion.tracks`, sample with `motion.sample`, convert/save native Theatre clips with `motion.clips.convert` / `motion.theatre.save`, and export with `motion.export_track`. That exporter uses the engine's sampled motion. Do not assume an unrelated HTML performance or arbitrary Theatre-only edits are already part of that export.
@@ -56,9 +69,12 @@ Once a named track exists, inspect `motion.tracks`, sample with `motion.sample`,
 ```bash
 mc --bridge PORT exec video.place_track \
   id=older-fish-first-turn path=/path/to/rendered/turn.webm \
+  character=older_fish_volume_turn track=turn-left \
   start=22.30 duration=1.10 'rect=[1180,340,520,390]' scene=2 \
   generation_receipt=assets/generated-images/REQUEST/generation.json
 ```
+
+`character` and `track` are optional as a pair. When supplied, the engine reads the saved rig without changing the selected part, checks the registered character and saved named clip, then saves the source spec/hash and duration beside the placed video. This connects the native Animation action to its film placement. Runtime-only standard preview tracks must first be saved as named rig tracks if they need this link. Set `playback_rate=source_duration/window_duration` explicitly when a complete action must fit a shorter scene window; the HyperFrames runtime owns the media clock. The fish film uses this for the shorter return-to-parent turn.
 
 `generation_receipt` is optional for existing callers. When supplied, it must be a successful native generation receipt inside this project, and the generated artwork must still match its SHA-256. Placement retains the generated asset, pose order and animation context in `hyperframes/assets/animation/CLIP_ID.json`, together with video timing, rectangle, copied media and the composition backup. This is an explicit source association; it does not falsely certify that a particular renderer used those pixels.
 

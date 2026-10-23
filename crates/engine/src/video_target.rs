@@ -6,6 +6,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{EngineError, Result, Session};
 use crate::storyboard::{clock, storyboard_timing};
@@ -577,7 +578,23 @@ pub fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Val
 pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let dir=project_dir(s)?;
     if s.video_target!="hyperframes"{return Err(EngineError::InvalidParams("Select HyperFrames before placing this track".into()));}
+    let mut request=params.clone();
+    if params.get("character").is_some() || params.get("track").is_some(){
+        let character=params["character"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
+        let track=params["track"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
+        // Inspect the saved rig without loading it into the live selection or rewriting project metadata.
+        let asset=s.project_assets.iter().find(|a|a.id==character)
+            .ok_or_else(||EngineError::InvalidParams("Source character is not registered".into()))?;
+        let path=asset.path.as_ref().ok_or_else(||EngineError::InvalidParams("Source character has no saved rig".into()))?;
+        let bytes=std::fs::read(path)?;
+        let source:Value=serde_json::from_slice(&bytes).map_err(|_|EngineError::InvalidParams("Source motion needs a saved rig JSON".into()))?;
+        let clip=source["tracks"].as_array().and_then(|tracks|tracks.iter().find(|t|t["id"]==track))
+            .ok_or_else(||EngineError::InvalidParams("Save this named motion track in the rig before linking it to the video".into()))?;
+        if !clip["duration"].as_f64().is_some_and(|d|d.is_finite()&&d>0.0){return Err(EngineError::InvalidParams("Saved source track has no valid duration".into()));}
+        request["source_motion"]=json!({"character":character,"track":track,"duration":clip["duration"],
+            "spec":path,"canvas":source["canvas"],"rig_sha256":format!("{:x}",Sha256::digest(&bytes)),"relationship":"declared source clip; rendered media is a separate artifact"});
+    }
     let script=crate::workspace::workspace_root(s).join("pipeline/place_hyperframes_track.py");
-    let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--project".into(),dir.to_string_lossy().into_owned(),"--request".into(),params.to_string()])?;
+    let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--project".into(),dir.to_string_lossy().into_owned(),"--request".into(),request.to_string()])?;
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
 }
