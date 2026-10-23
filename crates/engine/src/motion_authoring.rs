@@ -361,6 +361,96 @@ fn part_edit(s: &mut Session, p: &Value, reset: bool) -> Result<Value> {
     let after = serde_json::to_vec_pretty(&edit.raw).map_err(|e| bad(e.to_string()))?;
     publish(s, &edit, after)
 }
+/// Global planar stacking, independent of transform parenting.
+pub fn layers_set(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut edit = begin(s, p)?;
+    theatre_guard(s, &edit.character, None)?;
+    let layers = edit.raw["layers"]
+        .as_array()
+        .ok_or_else(|| bad("Ordered layered rig required"))?;
+    if layers.is_empty() || layers.len() > 1024 {
+        return Err(bad("Layer count must be 1..1024"));
+    }
+    let mut ids: Vec<String> = layers
+        .iter()
+        .map(|v| text(v, "id").map(str::to_owned))
+        .collect::<Result<_>>()?;
+    let unique: std::collections::BTreeSet<_> = ids.iter().cloned().collect();
+    if unique.len() != ids.len() {
+        return Err(bad("Rig has duplicate part IDs"));
+    }
+    if let Some(order) = p.get("order") {
+        if p.get("depth").is_some() || p.get("part").is_some() {
+            return Err(bad("Pass order or part+depth, not both"));
+        }
+        let requested: Vec<String> = order
+            .as_array()
+            .ok_or_else(|| bad("order must be a full back-to-front ID array"))?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| bad("order entries must be IDs"))
+            })
+            .collect::<Result<_>>()?;
+        let set: std::collections::BTreeSet<_> = requested.iter().cloned().collect();
+        if requested.len() != ids.len() || set != unique {
+            return Err(bad("order must contain every part exactly once"));
+        }
+        ids = requested;
+    } else {
+        let part = text(p, "part")?;
+        let depth = p["depth"]
+            .as_u64()
+            .filter(|v| (*v as usize) < ids.len())
+            .ok_or_else(|| bad("depth must be a zero-based stack index"))?
+            as usize;
+        let index = ids
+            .iter()
+            .position(|id| id == part)
+            .ok_or_else(|| bad("Part not found"))?;
+        let id = ids.remove(index);
+        ids.insert(depth, id);
+    }
+    let reordered: Vec<Value> = ids
+        .iter()
+        .map(|id| {
+            layers
+                .iter()
+                .find(|v| v["id"] == *id)
+                .cloned()
+                .ok_or_else(|| bad("Part disappeared"))
+        })
+        .collect::<Result<_>>()?;
+    edit.raw["layers"] = json!(reordered);
+    let after = serde_json::to_vec_pretty(&edit.raw).map_err(|e| bad(e.to_string()))?;
+    let mut result = publish(s, &edit, after)?;
+    result["layer_order"] = json!(ids);
+    result["order_semantics"] = json!("back_to_front_zero_based");
+    Ok(result)
+}
+
+pub(crate) fn layer_capabilities(s: &Session, character: &str, spec: &Path, raw: &Value) -> Value {
+    let local = spec
+        .canonicalize()
+        .ok()
+        .zip(
+            s.project_path
+                .as_ref()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.canonicalize().ok()),
+        )
+        .is_some_and(|(p, root)| p.starts_with(root));
+    let reason = if !local || !raw["layers"].is_array() {
+        Some("A project-local ordered layered rig is required".to_string())
+    } else {
+        theatre_guard(s, character, None)
+            .err()
+            .map(|e| e.to_string())
+    };
+    json!({"supported":reason.is_none(),"reason":reason,"semantics":"back_to_front_zero_based","hierarchy_changed":false,"physical_z":false})
+}
+
 pub fn action_set(s: &mut Session, p: &Value) -> Result<Value> {
     let mut edit = begin(s, p)?;
     let i = track_index(&edit.raw, p)?;

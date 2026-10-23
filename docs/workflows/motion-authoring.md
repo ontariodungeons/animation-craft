@@ -103,3 +103,23 @@ Normal commit hooks run the complete Rust suite. No production project is a fixt
 This slice does not implement Theatre evaluation, per-time channel editing, negative
 scale mirroring, arbitrary native-format authoring, subpixel-filtered final-quality
 pose exports or automatic project saves. A loop toggle does not validate seam quality.
+
+## Guarded planar stacking (#23 completion)
+
+`motion.layers.set` takes common expected_project/character/expected_rig_sha256,
+then exactly one of `order:[all part IDs, back to front]` or `part` plus `depth`.
+Depth is a zero-based ordinal:0 is back, n-1 is front. IDs must form a complete
+unique permutation; ties, unknown IDs and out-of-range/noninteger depths fail.
+This reorders the saved layer array only. Transform parents and pivots do not change.
+This is stacking depth, not physical Z or perspective; root paths/scales still own
+spatial movement. Any saved Theatre edits for this character refuse the mutation.
+Common hash/lock/undo receipts apply. Existing saved blends/clips remain frozen;
+remigrate an edited rig to apply its new order to Blender.
+
+`motion.tracks` adds top-level `layer_order` and `layer_authoring` (supported/reason,
+semantics/back-to-front, hierarchy_changed:false, physical_z:false). Layer `order`
+and `depth` both expose the zero-based ordinal. `motion.sample.layer_ids` explicitly
+identifies its arrays' order. The loader, sampler, pose compositor and Blender's
+existing positive-Z painter stack consume the same saved array; no hierarchy sort
+or backend-specific order is introduced. Generic overlapping-color pose/undo checks
+and one actual tiny Blender render verify front/back parity.

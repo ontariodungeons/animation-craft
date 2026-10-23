@@ -103,3 +103,8 @@ are refused. HyperFrames remains the compositor.
 Rerender from `source_bundle.path`, passing its frozen bundle directory as `bundle`;
 choose the scene's desired range again. Original input paths are retained only as
 provenance. This does not overwrite old jobs or original native files.
+
+Frozen rerender root is now explicit: `source_bundle.bundle` is the actual frozen
+bundle directory, while `source_bundle.path` is its scene entry point (possibly
+nested under scenes/). Pass both verbatim; never infer bundle from path.parent.
+The same fields are supplied by the Synfig snapshot receipt.

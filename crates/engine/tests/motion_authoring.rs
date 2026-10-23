@@ -232,13 +232,74 @@ fn pose_rest_and_amount_match_the_visible_shared_sample() {
 fn serialized_null_theatre_opens_as_unsaved_empty_state() {
     let (mut s, root, _) = fixture();
     let path = s.project_path.clone().unwrap();
-    fs::write(&path, json!({"format":"magicstudio.project","version":1,"assets":[],"theatre":null}).to_string()).unwrap();
-    s.execute("project.open",json!({"path":path,"record_recent":false})).unwrap();
-    assert!(s.theatre_state.is_none(), "JSON null is not a native save file");
-    let read=s.execute("motion.theatre.read",json!({})).unwrap();
-    assert_eq!(read["status"],"no_saved_state");
-    s.theatre_state=Some(Value::Null);
-    let read=s.execute("motion.theatre.read",json!({})).unwrap();
-    assert_eq!(read["saved"],false);
+    fs::write(
+        &path,
+        json!({"format":"magicstudio.project","version":1,"assets":[],"theatre":null}).to_string(),
+    )
+    .unwrap();
+    s.execute("project.open", json!({"path":path,"record_recent":false}))
+        .unwrap();
+    assert!(
+        s.theatre_state.is_none(),
+        "JSON null is not a native save file"
+    );
+    let read = s.execute("motion.theatre.read", json!({})).unwrap();
+    assert_eq!(read["status"], "no_saved_state");
+    s.theatre_state = Some(Value::Null);
+    let read = s.execute("motion.theatre.read", json!({})).unwrap();
+    assert_eq!(read["saved"], false);
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn stacking_order_changes_pixels_not_parent_transforms_and_has_guarded_undo() {
+    let (mut s, root, rig) = fixture();
+    let mut raw: Value = serde_json::from_slice(&fs::read(&rig).unwrap()).unwrap();
+    let mut blue = image::RgbaImage::new(16, 16);
+    for y in 0..4 {
+        for x in 0..4 {
+            blue.put_pixel(x, y, image::Rgba([0, 0, 255, 255]));
+        }
+    }
+    blue.save(root.join("overlay.png")).unwrap();
+    raw["layers"].as_array_mut().unwrap().push(
+        json!({"id":"overlay","file":root.join("overlay.png"),"pivot":[2,2],"parent":"body"}),
+    );
+    fs::write(&rig, raw.to_string()).unwrap();
+    let before = fs::read(&rig).unwrap();
+    let mut p = params(&s, &rig);
+    p["order"] = json!(["overlay", "body"]);
+    p.as_object_mut().unwrap().remove("part");
+    let changed = s
+        .execute("motion.layers.set", p)
+        .expect("shared stacking mutation");
+    let meta = s
+        .execute("motion.tracks", json!({"character":"subject"}))
+        .unwrap();
+    assert_eq!(meta["layer_order"], json!(["overlay", "body"]));
+    assert_eq!(meta["layers"][0]["depth"], 0);
+    assert_eq!(meta["layers"][0]["parent"], "body");
+    let mut p = params(&s, &rig);
+    p["time"] = json!(0.0);
+    p["theatre_state"] = Value::Null;
+    let pose = s.execute("motion.pose.export", p).unwrap();
+    let image = image::open(pose["path"].as_str().unwrap())
+        .unwrap()
+        .into_rgba8();
+    assert_eq!(image.get_pixel(2, 2).0, [255, 0, 0, 255]);
+    let mut p = params(&s, &rig);
+    p["order"] = json!(["body", "body"]);
+    assert!(s.execute("motion.layers.set", p).is_err());
+    let mut p = params(&s, &rig);
+    p["undo"] = changed["undo"].clone();
+    s.execute("motion.edit.undo", p).unwrap();
+    assert_eq!(fs::read(&rig).unwrap(), before);
+    let mut p = params(&s, &rig);
+    p["time"] = json!(0.0);
+    p["theatre_state"] = Value::Null;
+    let pose = s.execute("motion.pose.export", p).unwrap();
+    let image = image::open(pose["path"].as_str().unwrap())
+        .unwrap()
+        .into_rgba8();
+    assert_eq!(image.get_pixel(2, 2).0, [0, 0, 255, 255]);
     fs::remove_dir_all(root).unwrap();
 }

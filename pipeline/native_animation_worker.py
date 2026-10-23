@@ -86,7 +86,7 @@ def snapshot_synfig(request, job):
     validate_references(frozen, target)
     # Digest the exact frozen file manifest, not a later read of the original rig.
     digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    return {'path':str(frozen), 'original_path':str(source), 'sha256':sha256(frozen),
+    return {'path':str(frozen), 'bundle':str(target), 'original_path':str(source), 'sha256':sha256(frozen),
             'bundle_sha256':digest, 'dependencies':manifest}
 
 
@@ -268,7 +268,7 @@ def render_opentoonz(request, request_path):
             expanded.append(path);mapping.append({'frame':frame,'scene_frame':source_frame,'path':str(path),'sha256':sha256(path)})
     width,height=int(native['width']),int(native['height']);fps=float(native['fps'])
     encoded=encode_frames(request,job,expanded,fps,width,height)
-    bundle={'path':str(frozen),'original_path':str(original),'sha256':sha256(frozen),'dependencies':manifest,
+    bundle={'path':str(frozen),'bundle':str(snapshot),'original_path':str(original),'sha256':sha256(frozen),'dependencies':manifest,
             'bundle_sha256':hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest(),
             'runtime_stuff':{'path':str(stuff),'dependencies':stuff_manifest}}
     return dict(encoded,backend='opentoonz',state='completed',frames=str(job/'frames'),frame_mapping=mapping,

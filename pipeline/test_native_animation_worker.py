@@ -20,15 +20,17 @@ class NativeWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); bundle = root/'bundle'; bundle.mkdir()
             image = bundle/'art.png'; Image.new('RGBA', (2, 2), (255,0,0,100)).save(image)
-            source = bundle/'scene.sif'
-            source.write_text('<canvas width="16" height="12" fps="24" begin-time="0f" end-time="23f"><layer type="import"><param name="filename"><string>art.png</string></param></layer></canvas>')
+            (bundle/'scenes').mkdir()
+            source = bundle/'scenes/scene.sif'
+            source.write_text('<canvas width="16" height="12" fps="24" begin-time="0f" end-time="23f"><layer type="import"><param name="filename"><string>../art.png</string></param></layer></canvas>')
             frozen = worker.snapshot_synfig({'source':str(source), 'bundle':str(bundle)}, root/'job')
             original = Path(frozen['path']).read_bytes()
+            self.assertEqual(Path(frozen['bundle']), root/'job/source-bundle')
             source.write_text('<canvas/>')
             image.write_bytes(b'changed')
             self.assertEqual(Path(frozen['path']).read_bytes(), original)
-            self.assertNotEqual((Path(frozen['path']).parent/'art.png').read_bytes(), b'changed')
-            source.write_text('<canvas><layer><param name="filename"><string>../outside.png</string></param></layer></canvas>')
+            self.assertNotEqual((Path(frozen['bundle'])/'art.png').read_bytes(), b'changed')
+            source.write_text('<canvas><layer><param name="filename"><string>../../outside.png</string></param></layer></canvas>')
             with self.assertRaisesRegex(ValueError, 'outside|escape'):
                 worker.snapshot_synfig({'source':str(source), 'bundle':str(bundle)}, root/'bad')
 

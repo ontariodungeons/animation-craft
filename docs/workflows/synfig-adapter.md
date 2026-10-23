@@ -96,3 +96,7 @@ Remaining adapter expansion: `.sfg`, exported canvases, external canvas/font/mod
 bundling, richer selections, and Studio controls. Statler owns OpenToonz planning
 and collection. Its bounded helper still needs explicit native-worker dispatch and
 shared encoding integration; this slice does not advertise OpenToonz rendering.
+
+Frozen rerenders use `source_bundle.path` as source and `source_bundle.bundle` as
+the actual root, including scenes nested below that root. Do not infer the bundle
+from the source parent directory; dependencies may live elsewhere within the root.

@@ -868,17 +868,18 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
             }
             validate_local_png(asset.path.clone(), project_root.as_deref())
         });
-    let layers: Vec<_> = rig.parts.iter().map(|p| {
+    let layers: Vec<_> = rig.parts.iter().enumerate().map(|(depth,p)| {
         let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
         let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
-        json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,"image_sha256":image_sha256,
+        json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":depth,"depth":depth,"image_sha256":image_sha256,
         "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
     Ok(
         json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"source_image":rig.source_image,"original_reference":original_reference,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,
         "rig_sha256":metadata.as_ref().map(|(_,hash,_)|hash),"image_revision":metadata.as_ref().and_then(|(_,_,revision)|*revision),
+        "layer_order":rig.parts.iter().map(|p|&p.id).collect::<Vec<_>>(),"layer_authoring":crate::motion_authoring::layer_capabilities(s,&id,&rig.plan_path,metadata.as_ref().map(|(raw,_,_)|raw).unwrap_or(&Value::Null)),
         "controls":rig.control_bindings,"audio":s.song_audio}),
     )
 }
@@ -1029,7 +1030,7 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         ];
     }
     Ok(
-        json!({"effective_parents":rig.parts.iter().map(|part| effective_parent(part,track["layers"].as_array())).collect::<Vec<_>>(),"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
+        json!({"layer_ids":rig.parts.iter().map(|part|&part.id).collect::<Vec<_>>(),"effective_parents":rig.parts.iter().map(|part| effective_parent(part,track["layers"].as_array())).collect::<Vec<_>>(),"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
     )
 }
 
