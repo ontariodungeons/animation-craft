@@ -185,7 +185,7 @@ function animationControls(){
    const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
   }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
  }},'Export track');
- box.append(motionSection('Export & integrations',[exportButton,exportStatus,authoring.pose],false));
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus,el('button',{id:'motion-mlt-assembly',class:'ghost',title:'Assemble an existing clip/audio timeline with MLT',onclick:()=>nativeAnimationOpen({backend:'mlt'}).catch(error=>toast(String(error)))},'MLT clip/audio assembly'),authoring.pose],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.assets?.find(a=>a.id===motion.character)?.name||motion.character} · Subject / shared engine · ${meta.layers.length} layers / ${authoredCount} authored clips`),

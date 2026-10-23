@@ -20,7 +20,7 @@ async function blenderLoadPreview(video,path,current){
  while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;
   if(size>64*1024*1024){await reader.cancel();throw new Error('Preview exceeds 64 MB; render a shorter or smaller preview');}chunks.push(value);}
  if(!current())return;
- blenderMediaUrl=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));
+ blenderMediaUrl=URL.createObjectURL(new Blob(chunks,{type:String(path).toLowerCase().endsWith('.mp4')?'video/mp4':'video/webm'}));
  video.src=blenderMediaUrl;video.load();
 }
 async function blenderAnimationOpen(selection={}){
