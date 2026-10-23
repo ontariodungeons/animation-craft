@@ -39,6 +39,41 @@ fn find_tcomposer(explicit: Option<OsString>, path_var: Option<OsString>) -> Res
 fn tcomposer() -> Result<PathBuf> {
     find_tcomposer(std::env::var_os("OPENTOONZ_TCOMPOSER"), std::env::var_os("PATH"))
 }
+// Arch's OpenToonz launcher supplies <prefix>/lib/opentoonz for its private
+// libraries. Apply the same layout only to the renderer child, never this process.
+fn private_libraries(tool: &Path) -> Option<PathBuf> {
+    let dir = tool.parent()?.parent()?.join("lib/opentoonz");
+    dir.join("libtfarm.so").is_file().then_some(dir)
+}
+fn renderer_command(tool: &Path) -> Result<Command> {
+    let mut command = Command::new(tool);
+    if let Some(dir) = private_libraries(tool) {
+        let inherited = std::env::var_os("LD_LIBRARY_PATH");
+        let paths = std::iter::once(dir).chain(inherited.as_ref().into_iter().flat_map(std::env::split_paths));
+        command.env("LD_LIBRARY_PATH", std::env::join_paths(paths).map_err(|e| invalid(e.to_string()))?);
+    }
+    command.env("QT_QPA_PLATFORM", "offscreen");
+    Ok(command)
+}
+fn renderer_error(tool: &Path, timeout: std::time::Duration) -> Option<String> {
+    use std::{process::Stdio, time::{Duration, Instant}};
+    let mut command = match renderer_command(tool) { Ok(c) => c, Err(e) => return Some(e.to_string()) };
+    // No scene, user settings, or render arguments: only exercise the native loader.
+    let mut child = match command.arg("-help").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        Ok(child) => child, Err(e) => return Some(format!("tcomposer readiness probe could not start: {e}")),
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return (!status.success()).then(|| format!("tcomposer -help failed ({status}); check renderer shared-library/runtime dependencies")),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            result => {
+                let _ = child.kill(); let _ = child.wait();
+                return Some(match result { Err(e) => format!("tcomposer readiness probe failed: {e}"), _ => "tcomposer readiness probe timed out".into() });
+            }
+        }
+    }
+}
 fn usable_stuff(path: &Path) -> bool {
     path.is_absolute() && path.is_dir() && fs::read_dir(path).is_ok_and(|mut entries|entries.next().is_some_and(|e|e.is_ok()))
 }
@@ -341,15 +376,17 @@ pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     if stuff.is_none() { missing.push("Readable nonempty OpenToonz stuff directory required; check OPENTOONZ_STUFF (invalid overrides do not fall back)".into()); }
     if helper.is_none() { missing.push("Executable mc must be installed beside the caller for bounded native preparation".into()); }
     if ffmpeg.is_none() { missing.push("FFmpeg executable not found on PATH; required for alpha encoding".into()); }
+    let renderer_error=tool.as_ref().ok().and_then(|tool|renderer_error(tool,std::time::Duration::from_secs(5)));
+    if let Some(error)=&renderer_error {missing.push(error.clone());}
     let python_checked=missing.is_empty();
     let python_error=if python_checked {pillow_error()}else{None};
     if let Some(error)=&python_error {missing.push(error.clone());}
     let render_reason=(!missing.is_empty()).then(||missing.join("; "));
-    let prerequisites=json!({"mc":{"path":helper,"available":helper.is_some()},"ffmpeg":{"path":ffmpeg,"available":ffmpeg.is_some()},
+    let prerequisites=json!({"renderer":{"checked":tool.is_ok(),"available":if tool.is_ok(){json!(renderer_error.is_none())}else{Value::Null},"error":renderer_error,"private_library_dir":tool.as_ref().ok().and_then(|tool|private_libraries(tool))},"resources":{"available":stuff.is_some(),"path":stuff},"mc":{"path":helper,"available":helper.is_some()},"ffmpeg":{"path":ffmpeg,"available":ffmpeg.is_some()},
         "python_pillow":{"path":"/usr/bin/python3","checked":python_checked,"available":if python_checked {json!(python_error.is_none())}else{Value::Null},"error":python_error}});
     let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"prerequisites":prerequisites,"native_render_verified":Value::Null,"tcomposer":tool.as_ref().ok(),
         "tcomposer_sha256":match &tool { Ok(path) => json!(sha256_file(path)?), Err(_) => Value::Null },
-        "version":Value::Null,"version_note":"tcomposer has no version flag; record the package or build version at deployment",
+        "version":Value::Null,"version_note":"Readiness runs -help only; record the package or build version at deployment",
         "stuff":stuff,"reason":tool.as_ref().err().map(|e| e.to_string()),
         "controls":["first","last","step","shrink","nthreads"],
         "unsupported":["fps, width and height overrides (use the scene's output settings)","rig, bone or Plastic authoring","action names"]});
@@ -409,9 +446,8 @@ fn render(s: &mut Session, p: &Value) -> Result<Value> {
     fs::create_dir_all(&dir)?;
     let log = fs::File::create(dir.join("tcomposer.log"))?;
     let args: Vec<String> = plan["argv"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_owned)).collect();
-    let mut command = Command::new(&tool);
+    let mut command = renderer_command(&tool)?;
     command.args(&args).stdout(log.try_clone()?).stderr(log);
-    if std::env::var_os("QT_QPA_PLATFORM").is_none() { command.env("QT_QPA_PLATFORM", "offscreen"); }
     let status = command.status().map_err(|e| EngineError::ExternalTool("tcomposer".into(), e.to_string()))?;
     if !status.success() {
         let code = status.code().map(|c| c as u8 as i32);
@@ -435,6 +471,27 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn renderer_probe_uses_private_libraries_and_rejects_failure_or_timeout() {
+        use std::{os::unix::fs::PermissionsExt, time::{Duration, Instant}};
+        let root = temp("renderer-runtime");
+        let tool = root.join("bin/tcomposer");
+        let libs = root.join("lib/opentoonz");
+        fs::create_dir_all(tool.parent().unwrap()).unwrap();
+        fs::create_dir_all(&libs).unwrap();
+        fs::write(libs.join("libtfarm.so"), "fixture").unwrap();
+        fs::write(&tool, format!("#!/bin/sh\n[ \"$1\" = -help ] && [ \"${{LD_LIBRARY_PATH%%:*}}\" = '{}' ] && [ \"$QT_QPA_PLATFORM\" = offscreen ]\n", libs.display())).unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(renderer_error(&tool, Duration::from_secs(1)).is_none());
+        fs::write(&tool, "#!/bin/sh\nexit 127\n").unwrap();
+        assert!(renderer_error(&tool, Duration::from_secs(1)).unwrap().contains("shared-library/runtime"));
+        fs::write(&tool, "#!/bin/sh\nexec /usr/bin/sleep 10\n").unwrap();
+        let started = Instant::now();
+        assert!(renderer_error(&tool, Duration::from_millis(30)).unwrap().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        fs::remove_dir_all(root).unwrap();
     }
 
     const SCENE: &str = r#"<?xml version="1.0"?>

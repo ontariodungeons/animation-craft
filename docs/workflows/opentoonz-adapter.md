@@ -120,3 +120,18 @@ prerequisite check from native source/plugin compatibility. `prerequisites` repo
 mc/ffmpeg paths and Python/Pillow checked/available/error; Python is unprobed/null
 when another prerequisite is already missing. Its import-only probe is limited to
 five seconds. Current native jobs remain the authority for actual render success.
+
+### Native loader readiness
+
+Discovery executes `tcomposer -help` with a five-second deadline, no scene, closed
+stdin and discarded output. A failed launch, nonzero exit or timeout prevents
+`render_capable`; `available` still describes the executable file. The new
+`prerequisites.renderer` reports `checked`, nullable `available`, `error` and
+`private_library_dir`, independently of `resources`, FFmpeg and Python/Pillow.
+A successful help probe does not claim native rendering or codec verification.
+
+The Arch package's launcher prepends `<prefix>/lib/opentoonz` to
+`LD_LIBRARY_PATH`. When that directory contains `libtfarm.so`, discovery and the
+render child use that same package layout, preserving inherited library search
+paths after it. Only those children receive the environment; Studio, the worker
+and the host configuration are not modified. Both children use offscreen Qt.
