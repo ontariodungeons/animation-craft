@@ -107,6 +107,15 @@ const tests = [
     assert.deepEqual(row.receipt, receipt, 'readers see the same receipt');
     assert.equal(boxes.recordReceipt('save', { dirty: true }).saved, false);
   }],
+  ['registry keeps boxes across project switch', () => {
+    const { ctx, boxes } = fixture();
+    boxes.register('block-song', { project: '/p/A.magic' });
+    ctx.state.project = '/p/B.magic';
+    // re-render registers readiness again, without an explicit project
+    boxes.readiness('block-song', { state: 'ready', reason: 'Ready' });
+    const ids = boxes.snapshot({ project: '/p/B.magic' }).map(r => r.id);
+    assert.ok(ids.includes('block-song'), `expected block-song in B snapshot, got ${ids}`);
+  }],
   ['no engine command id may live in the companion controller', () => {
     const source = read('companions.js');
     const hit = source.match(/\b(agent|image|blender|storyboard|mlt|synfig|opentoonz|video|sprocket)\.[a-z_]+/g);

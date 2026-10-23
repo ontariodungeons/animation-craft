@@ -123,8 +123,9 @@ function createCompanionBoxes() {
   // it never means the box failed.
   // Readiness is what the page already renders. It may say a prerequisite is unmet, so it maps both
   // the legacy "needs" flag and a real box state; it never turns a control into a failure.
-  function readiness(id, { state = null, reason = null } = {}) {
-    const box = register(id);
+  function readiness(id, { state = null, reason = null, project = null } = {}) {
+    const resolvedProject = project != null ? project : (typeof globalThis.state === "undefined" ? null : globalThis.state?.project ?? null);
+    const box = register(id, { project: resolvedProject });
     if (!box) return null;
     const next = state === "needs" ? "needs-attention" : BOX_STATES.includes(state) ? state : null;
     if (next && box.state !== next && box.state !== "working" && box.state !== "failed") {
