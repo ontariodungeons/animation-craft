@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=__WIDTH__, height=__HEIGHT__" />
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+</head>
+<body>
+<!-- Derived by `mc exec words.compose` from design/words.json; regenerate rather than hand-edit.
+     The words are the artist's canonical text; timing comes from the hidden transcript reference. -->
+<div data-composition-id="__COMPOSITION_ID__" data-width="__WIDTH__" data-height="__HEIGHT__" data-duration="__DURATION__" class="words-track">
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&display=block");
+    [data-composition-id="__COMPOSITION_ID__"] { position: relative; width: __WIDTH__px; height: __HEIGHT__px; overflow: hidden; font-family: var(--words-font, "Fredoka"), ui-rounded, system-ui, sans-serif; }
+    [data-composition-id="__COMPOSITION_ID__"] .rows { position: absolute; inset: 0; }
+    /* One sung line on screen at a time, all in the same place; a long line wraps within it. */
+    [data-composition-id="__COMPOSITION_ID__"] .row { position: absolute; left: 0; right: 0; top: 34%; display: flex; justify-content: center; align-items: flex-end;
+      gap: calc(var(--size) * 0.24) calc(var(--size) * 0.26); flex-wrap: wrap; padding: 0 6%; }
+    [data-composition-id="__COMPOSITION_ID__"] .w { display: inline-block; transform-origin: 50% 85%; }
+    [data-composition-id="__COMPOSITION_ID__"] .w.big { margin-top: calc(var(--size) * 0.9); transform-origin: 50% 90%; }
+    [data-composition-id="__COMPOSITION_ID__"] .g { display: inline-block; font-weight: 700; line-height: 1.05; -webkit-text-stroke: 0.065em var(--outline); paint-order: stroke fill;
+      text-shadow: 0 0.06em 0 rgba(0, 0, 0, .28); transform: rotate(var(--boil, 0deg)) translateY(var(--boil-y, 0px)); }
+    [data-composition-id="__COMPOSITION_ID__"] .drop { position: absolute; border: 6px solid var(--outline); border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%; opacity: 0; }
+    [data-composition-id="__COMPOSITION_ID__"] .bubble { position: absolute; border-radius: 50%; border: 4px solid rgba(220, 245, 255, .6); opacity: 0; }
+  </style>
+  <div class="rows"></div>
+  <div class="fx"></div>
+  <script>
+    (() => {
+      // Everything is found inside this composition's root, never the whole document. The runtime may
+      // run this script detached, so fall back to the element with this composition id that holds .rows.
+      // Repeated placements get their own composition id (words.compose instance_id).
+      const root = document.currentScript?.closest("[data-composition-id]")
+        || [...document.querySelectorAll('[data-composition-id="__COMPOSITION_ID__"]')].find((el) => el.querySelector(":scope > .rows, .rows"));
+      const DATA = __DATA__;
+      const style = DATA.style || {};
+      const palette = { wave: "#ffb547", tiny: "#ffe9b8", swim: "#5fe0cf", no: "#ff8f7c", cry: "#8ec3ff", big: "#5ab0ff", float: "#f7d6ff" };
+      root.style.setProperty("--outline", style.outline_color || "#0b1f30");
+      root.style.setProperty("--size", `${style.size || 120}px`);
+      if (style.font) root.style.setProperty("--words-font", JSON.stringify(style.font));
+      const rows = root.querySelector(".rows"), fx = root.querySelector(".fx");
+      const tl = gsap.timeline({ paused: true });
+      const words = [];
+      let row = null, line = null;
+      DATA.words.forEach((w, i) => {
+        if (w.line_id !== line) { row = document.createElement("div"); row.className = "row"; rows.appendChild(row); line = w.line_id; }
+        const el = document.createElement("span");
+        el.className = `w ${w.action}`;
+        el.dataset.wordId = w.word_id;
+        const glyph = document.createElement("span");
+        glyph.className = "g";
+        glyph.textContent = w.text;
+        glyph.style.fontSize = "var(--size)";
+        glyph.style.color = w.action !== "none" ? palette[w.action] : w.emphasis ? (style.emphasis_color || "#ffd166") : (style.color || "#fff6e0");
+        el.appendChild(glyph);
+        row.appendChild(el);
+        words.push({ ...w, el, glyph, seed: i * 1.7 + 0.3 });
+      });
+      const drop = (cls, x, y, size, color) => {
+        const d = document.createElement("div"); d.className = cls; Object.assign(d.style, { left: `${x}px`, top: `${y}px`, width: `${size}px`, height: `${size * 1.35}px`, background: color || "transparent" });
+        fx.appendChild(d); return d;
+      };
+      const ready = document.fonts ? document.fonts.ready : Promise.resolve();
+      ready.then(() => {
+        // A growing word gets room for half its growth on each side before anything is measured.
+        for (const w of words.filter((x) => x.action === "big")) w.el.style.marginInline = `${w.el.getBoundingClientRect().width * 0.85 / 2}px`;
+        // Measure the laid-out words once (relative to this root), then hide them.
+        const box = root.getBoundingClientRect();
+        const at = new Map(words.map((w) => { const r = w.el.getBoundingClientRect(); return [w, { x: r.left - box.left + r.width / 2, y: r.top - box.top, w: r.width }]; }));
+        for (const w of words) {
+          const t = w.start, dur = Math.max(0.5, w.end - w.start), p = at.get(w);
+          const enter = { pop: [{ scale: 0, opacity: 0, y: 30 }, { scale: 1, opacity: 1, y: 0, duration: 0.34, ease: "back.out(2.4)" }],
+                          fade: [{ opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power1.out" }],
+                          rise: [{ opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }],
+                          none: [{ opacity: 0 }, { opacity: 1, duration: 0.01 }] }[w.entrance] || [{ opacity: 0 }, { opacity: 1, duration: 0.3 }];
+          gsap.set(w.el, enter[0]);
+          tl.to(w.el, enter[1], Math.max(0, t - 0.06));
+          if (w.emphasis) tl.to(w.el, { keyframes: [{ scale: 1.18 }, { scale: 1 }], duration: 0.4, ease: "power2.out" }, t + 0.05);
+          if (w.action === "wave") tl.to(w.el, { keyframes: [{ rotation: -14 }, { rotation: 12 }, { rotation: -8 }, { rotation: 0 }], duration: 0.9, ease: "sine.inOut" }, t + 0.1);
+          else if (w.action === "tiny") tl.to(w.el, { scale: 0.62, duration: 0.45, ease: "back.out(2)" }, t + 0.25);
+          else if (w.action === "no") tl.to(w.el, { keyframes: [{ x: -16 }, { x: 16 }, { x: -12 }, { x: 10 }, { x: 0 }], duration: 0.5, ease: "power1.inOut" }, t + 0.05);
+          else if (w.action === "float") tl.to(w.el, { y: -46, rotation: w.seed % 2 > 1 ? 6 : -6, duration: 1.6, ease: "sine.inOut" }, t + 0.1);
+          else if (w.action === "swim") {
+            tl.to(w.el, { keyframes: [{ x: 26, rotation: 9 }, { x: -18, rotation: -9 }, { x: 22, rotation: 8 }, { x: 0, rotation: 0 }], duration: 1.3, ease: "sine.inOut" }, t + 0.15);
+            [0, 1, 2].forEach((k) => {
+              const b = drop("bubble", p.x + p.w / 2 + k * 18, p.y + 20, 22 + k * 10);
+              b.style.height = b.style.width;
+              tl.fromTo(b, { opacity: 0.9, y: 0, x: 0 }, { immediateRender: false, opacity: 0, y: -170 - k * 40, x: 30 - k * 20, duration: 1.4, ease: "sine.out" }, t + 0.3 + k * 0.18);
+            });
+          } else if (w.action === "cry") {
+            tl.to(w.el, { rotation: 8, y: 22, scaleY: 0.86, duration: 0.4, ease: "power2.out" }, t + 0.1);
+            const tear = drop("drop", p.x + p.w / 2 - 10, p.y + 70, 34, "#8ec3ff");
+            tl.fromTo(tear, { opacity: 1, y: 0 }, { immediateRender: false, y: 150, opacity: 0, duration: 0.9, ease: "power2.in" }, t + 0.3);
+            tl.to(w.el, { rotation: 0, y: -18, scaleY: 1.08, duration: 0.3, ease: "back.out(3)" }, t + dur + 0.05).to(w.el, { y: 0, scaleY: 1, duration: 0.25, ease: "power1.out" });
+          } else if (w.action === "big") {
+            tl.to(w.el, { scale: 1.85, duration: 0.6, ease: "back.out(1.8)" }, t + 0.2);
+            [-1, 0, 1].forEach((k) => {
+              const s = drop("drop", p.x + k * 36 - 11, p.y - 120, 22, "#a8dcff");
+              tl.fromTo(s, { opacity: 1, y: 0, x: 0 }, { immediateRender: false, opacity: 0, y: -140, x: k * 60, duration: 0.9, ease: "power2.out" }, t + 0.45 + Math.abs(k) * 0.06);
+            });
+          }
+          const exit = { fade: { opacity: 0, duration: 0.35, ease: "power1.in" }, drop: { opacity: 0, y: 60, duration: 0.35, ease: "power2.in" },
+                         none: { opacity: 0, duration: 0.01 } }[w.exit];
+          const next = words.find((o) => o.line_id !== w.line_id && o.start > w.start);
+          const leave = next ? next.start - 0.45 : DATA.duration - DATA.hold * 0.5;
+          if (exit && (next || w.exit !== "none")) tl.to(w.el, exit, Math.max(t + 0.35, leave));
+        }
+        // Hand-drawn boil: each word re-poses 8 times a second, derived from timeline time (seek-safe).
+        tl.to({ t: 0 }, { t: DATA.duration, duration: DATA.duration, ease: "none", onUpdate() {
+          const step = Math.floor(tl.time() * 8);
+          for (const w of words) {
+            const r = Math.sin(step * 12.9898 + w.seed * 78.233) * 43758.5453, f = r - Math.floor(r);
+            w.glyph.style.setProperty("--boil", `${(f - 0.5) * 2.2}deg`);
+            w.glyph.style.setProperty("--boil-y", `${(f - 0.5) * 2}px`);
+          }
+        } }, 0);
+        window.__timelines = window.__timelines || {};
+        window.__timelines[DATA.composition_id] = tl;
+      });
+    })();
+  </script>
+</div>
+</body>
+</html>
