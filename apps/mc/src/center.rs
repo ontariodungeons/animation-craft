@@ -806,7 +806,8 @@ fn render_gang(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if tiles.is_empty(){return;}
  let each=(area.width as usize)/tiles.len().max(1);
  let columns=Layout::horizontal(tiles.iter().map(|_|Constraint::Length(each as u16))).split(area);
- for (index,(name,kind,project,colour,word)) in tiles.iter().enumerate(){
+ for (index,tile) in tiles.iter().enumerate(){
+  let (name,kind,project,colour,word)=(&tile.0,&tile.1,&tile.2,&tile.3,&tile.4);
   let block=Block::default().borders(Borders::ALL).border_type(ratatui::widgets::BorderType::Rounded)
    .border_style(Style::default().fg(*colour))
    .title(Span::styled(format!(" {} ",name),Style::default().fg(*colour).add_modifier(Modifier::BOLD)));
@@ -816,6 +817,24 @@ fn render_gang(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
   f.render_widget(Paragraph::new(lines).block(block),columns[index]);
   let _=width;
  }
+}
+
+/// Compact tally strip: the glyph shape and the colour both carry the state, so the
+/// signal survives a monochrome terminal.
+fn gang_tally_spans(c: &Center)->Vec<Span<'static>>{
+ let mut spans:Vec<Span<'static>>=Vec::new();
+ for g in c.state["agent_gang"].as_array().into_iter().flatten(){
+  let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?").to_string();
+  let (colour,word)=tally(g["agent_status"].as_str().unwrap_or(""));
+  let glyph=match word{"WORKING"=>"●","STALLED"=>"◐","AVAILABLE"=>"○",_=>"·"};
+  spans.push(Span::styled(format!("{glyph} {name}"),colour));
+  spans.push(Span::raw(" "));
+ }
+ let status=c.state["chat"]["request"]["status"].as_str().unwrap_or("");
+ let (colour,word)=match status{"replied"=> (GREEN,"REPLIED"),"running"|"queued"=> (RED,"WORKING"),"error"=> (AMBER,"ERROR"),_=> (MUTED,"IDLE")};
+ let glyph=match word{"WORKING"=>"●","ERROR"=>"◐","REPLIED"=>"◆",_=>"○"};
+ spans.push(Span::styled(format!("{glyph} Sprocket"),colour));
+ spans
 }
 
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
@@ -841,10 +860,16 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let mut conversation=right[1];let turns=c.state["chat_turns"].as_array().map(|a|a.len().min(6)).unwrap_or(0);conversation.height=conversation.height.min((turns as u16*3+7).clamp(10,25));render_conversation(f,c,conversation);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
- let gang=c.state["agent_gang"].as_array().map(|a|a.iter().map(|g|{let name=g["name"].as_str().or(g["agent"].as_str()).unwrap_or("?");let task=g["terminal_title_stripped"].as_str().unwrap_or("");let cwd=g["cwd"].as_str().or(g["foreground_cwd"].as_str()).unwrap_or("");let proj=cwd.split('/').last().unwrap_or(cwd);format!("{}:{}{} {} @{}",name,g["agent"].as_str().unwrap_or("?"),if g["agent_status"]=="working"{"●"}else{"○"},task,proj)}).collect::<Vec<_>>().join("  |  ")).unwrap_or_default();
  if gang_rows>0{render_gang(f,c,chunks[3]);}
  let booth_open=c.state["ui"]["connection"]=="connected";let booth_light=if booth_open{"BOOTH ● open"}else{"BOOTH ○ off"};
- let footer=if c.message.starts_with("COPIED")||c.message.contains("error"){c.message.clone()}else{format!("{}  ·  GANG: {}  ·  F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit",booth_light,if gang.is_empty(){"(none)"}else{&gang})};f.render_widget(Paragraph::new(footer),chunks[4]);
+ let keys=if narrow{"F10 · [ / ] · F9 · D · C · ^Q"}else{"F10 🩺 · [ / ] stage · F9 chat · D details · C copy · Pg scroll · ^Q exit"};
+ let footer:Vec<Line>=if c.message.starts_with("COPIED")||c.message.contains("error"){vec![styled(c.message.clone(),AMBER)]}else{
+  let mut spans=vec![Span::styled(booth_light.to_string(),if booth_open{GREEN}else{AMBER}),Span::raw("  ·  GANG: ")];
+  spans.extend(gang_tally_spans(c));
+  spans.push(Span::styled(format!("  ·  {keys}"),MUTED));
+  vec![Line::from(spans)]
+ };
+ f.render_widget(Paragraph::new(footer),chunks[4]);
 }
 
 fn render(f: &mut Frame,c: &Center) {
