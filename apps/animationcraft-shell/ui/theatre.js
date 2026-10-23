@@ -1,16 +1,20 @@
 // Stock Theatre UI is contained inside the current Animation surface, so it
 // cannot cover the native inspector or Sproket workstation.
-const magicTheatre={frame:null,key:null,part:null,rotation:0,ready:false,syncing:false,availability:'unavailable',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',exports:new Map(),nextRequest:0};
+const magicTheatre={frame:null,key:null,part:null,rotation:0,ready:false,syncing:false,availability:'unavailable',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',exports:new Map(),nextRequest:0,interactionRevision:0,savedRevision:0,gestureActive:false};
 function theatreFeedback(){
- return {availability:magicTheatre.availability,package_version:'0.7.0',error:magicTheatre.error,selected_objects:magicTheatre.objects,native_selected_part:motion.selected,sequence_position_seconds:magicTheatre.position,sequence_playing:magicTheatre.playing,native_playing:motion.playing,value_update:magicTheatre.valueUpdate,persistence:magicTheatre.persistence,saved_snapshot_unix_ms:magicTheatre.savedAt,live_edits:'not_assessed',visual_quality:'not_assessed'};
+ return {availability:magicTheatre.availability,package_version:'0.7.0',error:magicTheatre.error,selected_objects:magicTheatre.objects,native_selected_part:motion.selected,sequence_position_seconds:magicTheatre.position,sequence_playing:magicTheatre.playing,native_playing:motion.playing,value_update:magicTheatre.valueUpdate,persistence:magicTheatre.persistence,saved_snapshot_unix_ms:magicTheatre.savedAt,live_edits:magicTheatre.interactionRevision>magicTheatre.savedRevision||magicTheatre.gestureActive?'needs_save':magicTheatre.savedAt||magicTheatre.persistence==='saved'?'saved_snapshot':'no_observed_interaction',visual_quality:'not_assessed'};
 }
 function theatreEvent(stage,detail={}){
  if(typeof acFeedback!=='undefined')acFeedback.report(null,null,{stage:`theatre_${stage}`,...detail});
 }
+function theatreRequireSaved(){
+ if(magicTheatre.interactionRevision>magicTheatre.savedRevision||magicTheatre.gestureActive)throw new Error('Save motion before changing the animation workspace; Theatre interactions may contain unsaved keyframes.');
+}
 function theatreMount(container){
+ theatreRequireSaved();
  const status=el('span',{id:'theatre-status',class:'muted'},'Loading Theatre…');
  const frame=el('iframe',{id:'theatre-timeline',title:'Theatre motion timeline',src:'theatre-frame.html'});
- Object.assign(magicTheatre,{frame,key:null,ready:false,rotation:0,availability:'loading',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded'});
+ Object.assign(magicTheatre,{frame,key:null,ready:false,rotation:0,availability:'loading',error:null,objects:[],playing:null,position:null,valueUpdate:null,project:null,load:null,savedAt:null,persistence:'not_loaded',interactionRevision:0,savedRevision:0,gestureActive:false});
  const save=el('button',{id:'theatre-save',disabled:true,title:'Save native Theatre keyframes and curves into the current project',onclick:()=>theatreSave().catch(error=>toast(String(error)))},'Save motion');
  container.append(el('div',{class:'theatre-heading'},el('strong',{},'Theatre'),status,save),frame);
 }
@@ -30,7 +34,7 @@ async function theatreContext(){
 }
 async function theatreSave(){
  if(magicTheatre.availability!=='ready')throw new Error('Theatre is not ready to save');
- const project=state.project,frame=magicTheatre.frame,request=++magicTheatre.nextRequest,button=$('theatre-save');button.disabled=true;
+ const project=state.project,frame=magicTheatre.frame,request=++magicTheatre.nextRequest,revision=magicTheatre.interactionRevision,button=$('theatre-save');button.disabled=true;
  try{
   const exported=await new Promise((resolve,reject)=>{
    const timer=setTimeout(()=>{magicTheatre.exports.delete(request);reject(new Error('Theatre export timed out; no project save was submitted'));},5000);
@@ -40,6 +44,8 @@ async function theatreSave(){
   if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during export; no state saved');
   const result=await motionCommand('motion.theatre.save',{expected_project:project,state:exported.state});
   if(result.saved!==true||result.project!==project)throw new Error('Native Theatre save was not acknowledged');
+  if(state.project!==project||magicTheatre.frame!==frame)throw new Error('Project changed during save; the previous project snapshot was saved');
+  if(magicTheatre.interactionRevision===revision&&!magicTheatre.gestureActive)magicTheatre.savedRevision=revision;
   magicTheatre.savedAt=Date.now();magicTheatre.persistence='saved_snapshot';$('theatre-status').textContent=`${magicTheatre.part} · motion snapshot saved`;theatreEvent('saved',{project,saved_unix_ms:magicTheatre.savedAt});return result;
  }finally{if(frame===magicTheatre.frame)button.disabled=false;}
 }
@@ -54,6 +60,7 @@ function theatreRender(){
 window.addEventListener('message',event=>{
  if(event.source!==magicTheatre.frame?.contentWindow||!event.data?.magicTheatre)return;
  const message=event.data;
+ if(message.type==='interaction'&&message.project===state.project&&message.project===magicTheatre.project&&Number.isSafeInteger(message.revision)&&message.revision>magicTheatre.interactionRevision){magicTheatre.interactionRevision=message.revision;magicTheatre.gestureActive=message.active===true;if(typeof acFeedback!=='undefined')acFeedback.report();}
  if(message.type==='loaded'){magicTheatre.ready=true;theatreContext();}
  if(message.type==='ready'){magicTheatre.availability='ready';magicTheatre.error=null;$('theatre-save').disabled=false;$('theatre-status').textContent=`${message.part} · ${magicTheatre.persistence==='saved'?'saved motion loaded':'Save motion to persist edits'}`;theatreEvent('ready',{part:message.part});}
  if(message.type==='exported'||message.type==='error'&&message.request){const pending=magicTheatre.exports.get(message.request);if(pending){clearTimeout(pending.timer);magicTheatre.exports.delete(message.request);if(message.type==='error'||message.project!==pending.project)pending.reject(new Error(message.error||'Theatre export project mismatch'));else pending.resolve(message);}}

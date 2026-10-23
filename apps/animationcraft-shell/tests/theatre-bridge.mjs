@@ -58,3 +58,38 @@ assert.equal(vm.runInContext('theatreFeedback().availability',context),'error');
 assert.equal(vm.runInContext('theatreFeedback().error',context),'fixture initialization failure');
 assert.equal(events.at(-1).stage,'theatre_error');
 console.log('PASS: isolated Theatre source, captured part, native duration and original pivot');
+
+// Frame-local edits must participate in native close/project/remount guards.
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'interaction',project:'/project/Bee.acproj',revision:1,active:true}});
+assert.equal(vm.runInContext('theatreFeedback().live_edits',context),'needs_save');
+assert.throws(()=>vm.runInContext('theatreRequireSaved()',context),/Save motion/);
+const held=vm.runInContext('theatreSave()',context).catch(error=>error);
+// The preceding fixture deliberately set an initialization error; restore readiness explicitly.
+await held;
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'ready',part:'antenna'}});
+const during=vm.runInContext('theatreSave()',context);const duringExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:duringExport.request,project:'/project/Bee.acproj',state:nativeState}});
+await during;
+assert.equal(vm.runInContext('theatreFeedback().live_edits',context),'needs_save','save during a pointer gesture cannot certify the final motion');
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'interaction',project:'/project/Bee.acproj',revision:2,active:false}});
+const latest=vm.runInContext('theatreSave()',context);const latestExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:latestExport.request,project:'/project/Bee.acproj',state:nativeState}});
+await latest;
+assert.equal(vm.runInContext('theatreFeedback().live_edits',context),'saved_snapshot');
+vm.runInContext('theatreRequireSaved()',context);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'interaction',project:'/other/project.acproj',revision:99,active:true}});
+assert.equal(vm.runInContext('theatreFeedback().live_edits',context),'saved_snapshot','stale project interaction cannot dirty current motion');
+const crossing=vm.runInContext('theatreSave()',context);const crossingExport=messages.at(-1);
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'interaction',project:'/project/Bee.acproj',revision:3,active:false}});
+listeners.message({source:frameWindow,data:{magicTheatre:true,type:'exported',request:crossingExport.request,project:'/project/Bee.acproj',state:nativeState}});
+await crossing;
+assert.equal(vm.runInContext('theatreFeedback().live_edits',context),'needs_save','newer interaction cannot be cleared by an older export acknowledgement');
+console.log('PASS: Theatre interaction guard, active gesture, stale project and save race');
+const animationSource=readFileSync(new URL('../ui/animation.js',import.meta.url),'utf8');
+vm.runInContext(animationSource.slice(animationSource.indexOf('function animationReset(){'),animationSource.indexOf('const motionCommand')),context);
+assert.throws(()=>vm.runInContext('animationReset()',context),/Save motion/,'reset must protect the existing iframe before clearing it');
+vm.runInContext(animationSource.slice(animationSource.indexOf('async function openAnimation('),animationSource.indexOf('async function animationOpen(')),context);
+await assert.rejects(vm.runInContext('openAnimation("another-character")',context),/Save motion/,'asset navigation must not destroy unsaved Theatre history');
+vm.runInContext(animationSource.slice(animationSource.indexOf('function animationShell(){'),animationSource.indexOf('async function animationLoad(')),context);
+assert.throws(()=>vm.runInContext('animationShell()',context),/Save motion/,'direct shell remount must also be guarded');
+console.log('PASS: reset, asset navigation and iframe remount reject before mutation');

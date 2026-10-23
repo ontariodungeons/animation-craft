@@ -70,3 +70,8 @@ assert.equal(context.acFeedback.ack,priorAck,'background frame timeout cannot ac
 assert.equal(context.acFeedback.phase,'ready','handler readiness must not hang indefinitely on an inactive workspace');
 assert.equal(reports.at(-1).report.event.stage,'render_deferred');
 console.log('PASS: deferred background frame preserves unknown render receipt without blocking handler readiness');
+context.theatreFeedback=()=>({live_edits:'needs_save'});
+assert.ok(vm.runInContext('feedbackSnapshot()',context).draft_fields.includes('theatre-motion'),'iframe-local interactions must reach the existing native dirty guard');
+context.theatreFeedback=()=>({live_edits:'saved_snapshot'});
+assert.ok(!vm.runInContext('feedbackSnapshot()',context).draft_fields.includes('theatre-motion'),'a matching saved snapshot clears the conservative draft marker');
+console.log('PASS: Theatre interactions participate in native close/project dirty fields');

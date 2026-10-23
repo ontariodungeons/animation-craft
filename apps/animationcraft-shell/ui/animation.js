@@ -1,6 +1,7 @@
 // The engine samples motion; this view only draws images using returned matrices.
 const motion = { project:null, mode:localStorage.getItem('animation.mode')||'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
+ theatreRequireSaved();
  animationPause();
  Object.assign(motion,{project:null,character:null,meta:null,sample:null,images:[],assets:[],time:0,track:'',rest:true,selected:null,loading:false,request:motion.request+1,points:[],pathUndo:null,pen:false,fit:true,zoom:1});
  $('view-animation').replaceChildren();
@@ -28,10 +29,11 @@ function motionRange(id,label,min,max,step,value,unit,change){
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
  return el('label',{class:'motion-range'},el('span',{},label,out),input);
 }
-async function openAnimation(character){motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
+async function openAnimation(character){theatreRequireSaved();motion.character=character;motion.selected=null;motion.project=null;await setView('animation');}
 async function animationOpen(){
- if(motion.mode==='composite'){const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
+ if(motion.mode==='composite'){theatreRequireSaved();const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
  if(motion.project===state.project && motion.meta){animationDraw();return;}
+ theatreRequireSaved();
  motion.project=state.project;motion.meta=null;motion.sample=null;motion.time=0;motion.rest=true;
  animationShell();
  try{
@@ -49,10 +51,11 @@ function motionModeSwitch(){
   ...['subject','composite'].map(m=>el('button',{
    class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,role:'tab','data-mode':m,
    'aria-selected':String(motion.mode===m),title:m==='subject'?'A subject: its rig, parts and action tracks':'A composite: images arranged in time',
-   onclick:async()=>{if(motion.mode===m)return;motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
+   onclick:async()=>{if(motion.mode===m)return;theatreRequireSaved();motion.mode=m;localStorage.setItem('animation.mode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
   },m==='subject'?'Subject':'Composite')));
 }
 function animationShell(){
+ theatreRequireSaved();
  const view=$('view-animation');view.replaceChildren();
  const inspector=el('aside',{class:'motion-inspector',id:'motion-inspector','aria-label':'Animation controls'});
  const stage=el('div',{class:'motion-stage',id:'motion-stage'},el('canvas',{id:'motion-canvas','aria-label':'Character animation canvas',tabindex:0}));

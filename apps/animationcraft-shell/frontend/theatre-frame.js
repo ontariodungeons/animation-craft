@@ -8,6 +8,16 @@ studio.initialize({usePersistentStorage:false});
 let sheet, object, project, projectPath, projectId, stop, stopClock, stopPlaying, synchronizing=false, mirroredPosition, contextRevision=0;
 const projects=new Map();
 const send=(type, detail={})=>parent.postMessage({magicTheatre:true,type,...detail},location.origin);
+// Conservatively protect interactions without inspecting Theatre's private history or
+// polling createContentOfSaveFile(), which itself mutates revision history in 0.7.0.
+let interactionRevision=0;
+const pointers=new Set();
+for(const type of ['pointerdown','pointerup','pointercancel','input','keydown','wheel'])window.addEventListener(type,event=>{
+ if(!projectPath)return;
+ if(type==='pointerdown')pointers.add(event.pointerId);
+ if(type==='pointerup'||type==='pointercancel')pointers.delete(event.pointerId);
+ send('interaction',{project:projectPath,revision:++interactionRevision,active:pointers.size>0});
+},{capture:true,passive:true});
 studio.onSelectionChange(selection=>send('selection',{objects:selection.map(item=>({sheet:item.address.sheetId,part:item.address.objectKey||null}))}));
 window.addEventListener('message',async event=>{
  if(event.source!==parent||!event.data?.magicTheatre)return;
