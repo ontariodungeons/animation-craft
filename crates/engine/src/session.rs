@@ -22,6 +22,8 @@ pub struct Session {
     pub project_assets: Vec<ProjectAsset>,
     /// The open `.acproj` file; `None` until `project.new` or `project.open`.
     pub project_path: Option<PathBuf>,
+    /// Opaque native Theatre save-file state; absent on projects that have never saved Theatre edits.
+    pub theatre_state: Option<Value>,
     /// User-facing sessions publish Home history and recent receipts; passive library/tests do not.
     pub record_user_state: bool,
     /// Active chat selection belongs to this engine/window, never to project serialization.
@@ -46,6 +48,10 @@ pub struct Session {
     pub last_result: Option<Value>,
     /// Whether Blender 5.3 is reachable at 127.0.0.1:9876.
     pub blender_available: bool,
+    /// Project-file writes; `write_project_file` takes `&Session`, hence the cell.
+    pub project_saves: std::cell::Cell<u64>,
+    /// Successful journaled commands since the project file was last written.
+    pub edits_since_save: u64,
 }
 
 impl Default for Session {
@@ -56,6 +62,7 @@ impl Default for Session {
             assets: HashMap::new(),
             project_assets: Vec::new(),
             project_path: None,
+            theatre_state: None,
             record_user_state: false,
             agent_selection: None,
             project_owner: None,
@@ -68,6 +75,8 @@ impl Default for Session {
             preview_range: (0, 72),
             last_result: None,
             blender_available: false,
+            project_saves: std::cell::Cell::new(0),
+            edits_since_save: 0,
         }
     }
 }

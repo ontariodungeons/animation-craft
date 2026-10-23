@@ -29,7 +29,9 @@ pub mod exports;
 pub mod image_cmds;
 pub mod mesh_geometry;
 pub mod motion;
+pub mod theatre;
 pub mod parts;
+pub mod part_replacement;
 pub mod photocraft;
 pub mod project;
 pub mod project_settings;
@@ -110,7 +112,13 @@ impl Session {
         let record=self.record_user_state&&commands::find(id).is_none_or(|c|c.journal);
         if record{activity::command(self.project_path.as_deref(),id,&params,"dispatch_running",None);}
         let started=std::time::Instant::now();
+        let (saves_before,project_before)=(self.project_saves.get(),self.project_path.clone());
         let result=self.execute_inner(id,params.clone());
+        // An edit is a successful journaled command that left the project file unwritten.
+        if result.as_ref().is_ok_and(|v|v["ok"]!=false) && commands::find(id).is_some_and(|c|c.journal) {
+            if self.project_saves.get()!=saves_before || self.project_path!=project_before {self.edits_since_save=0;}
+            else {self.edits_since_save+=1;}
+        }
         if record{if let Ok(value)=&result{activity::result(self.project_path.as_deref(),id,value,started.elapsed().as_millis());}}
         if record{match &result{Ok(v)=>activity::command(self.project_path.as_deref(),id,&params,if v["ok"]==false{"engine_error"}else if v["intake_ready"]==false{"engine_needs_work"}else{"engine_success"},None),Err(e)=>activity::command(self.project_path.as_deref(),id,&params,"engine_error",Some(&e.to_string()))};}
         if _writer.is_some(){self.project_owner=prior_owner;}
@@ -184,3 +192,27 @@ pub mod local_ipc;
 
 pub mod project_catalog;
 pub mod studio_sessions;
+
+#[cfg(test)]
+mod edit_count_tests {
+    use super::*;
+    #[test]
+    fn edits_count_unsaved_journaled_commands_and_reset_on_project_write() {
+        let dir = std::env::temp_dir().join(format!("ac-edits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut s = Session::default();
+        s.execute("project.new", serde_json::json!({"path": dir.join("e.acproj")})).unwrap();
+        assert_eq!(s.edits_since_save, 0);
+        let fix = serde_json::json!({"asset": "a", "path": "a.png", "decision": "recreate", "problem": "torn edge"});
+        s.execute("assets.fixlist_add", fix.clone()).unwrap();
+        s.execute("assets.fixlist_add", fix).unwrap();
+        assert_eq!(s.edits_since_save, 2, "journaled commands that leave the project file unwritten");
+        s.execute("command.list", serde_json::json!({})).unwrap();
+        assert_eq!(s.edits_since_save, 2, "queries are not edits");
+        assert!(s.execute("motion.path", serde_json::json!({"character": "missing"})).is_err());
+        assert_eq!(s.edits_since_save, 2, "failed commands are not edits");
+        s.execute("project.save", serde_json::json!({})).unwrap();
+        assert_eq!(s.edits_since_save, 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

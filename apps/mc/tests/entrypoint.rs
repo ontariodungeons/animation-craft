@@ -77,3 +77,26 @@ fn existing_acproj_identity_and_asset_bytes_survive_cli_readback() {
     assert_eq!(fs::read(&project).unwrap(), before_project);
     assert_eq!(fs::read(&asset).unwrap(), before_asset);
 }
+
+#[test]
+fn mcp_notifications_and_optional_discovery_follow_json_rpc() {
+    let fixture = Fixture::new();
+    let requests = [
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":1,"method":"ping"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"resources/list"}),
+        json!({"jsonrpc":"2.0","id":3,"method":"resources/templates/list"}),
+        json!({"jsonrpc":"2.0","id":4,"method":"prompts/list"}),
+        json!({"jsonrpc":"2.0","id":5,"method":"missing-method"}),
+    ];
+    let output = fixture.run(&["mcp"], &requests.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
+    let replies: Vec<Value> = success(&output).lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+    assert_eq!(replies.len(), 5, "notifications must not receive responses");
+    for (index, reply) in replies.iter().enumerate() { assert_eq!(reply["id"], index + 1); }
+    assert_eq!(replies[0]["result"], json!({}));
+    assert_eq!(replies[1]["result"]["resources"], json!([]));
+    assert_eq!(replies[2]["result"]["resourceTemplates"], json!([]));
+    assert_eq!(replies[3]["result"]["prompts"], json!([]));
+    assert_eq!(replies[4]["error"]["code"], -32601);
+    assert_eq!(replies[4]["error"]["message"], "Method not found: missing-method");
+}

@@ -25,15 +25,46 @@ pub fn write_project_file(s: &Session) -> Result<()> {
             entry
         })
         .collect();
-    let doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": assets,
+    let mut doc = json!({"format": PROJECT_FORMAT, "version": 1, "name": name, "assets": assets,
         "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target}});
+    if let Some(state) = &s.theatre_state { doc["theatre"] = state.clone(); }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| EngineError::InvalidParams(format!("cannot encode project: {e}")))?;
-    std::fs::write(path, &text)?;
+    write_preserving_lease(path, text.as_bytes())?;
+    s.project_saves.set(s.project_saves.get() + 1);
     if s.record_user_state{crate::activity::stored(path,text.len());}
+    Ok(())
+}
+
+// Preserve the inode holding Studio's existing writer lease. Replacing it with a renamed
+// temporary file would release exclusivity on the new path. Encoding precedes all disk writes;
+// an ordinary write failure restores the old bytes. This is not a crash-atomic transaction.
+fn write_preserving_lease(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_preserving_lease_using(path, bytes, store_project_bytes)
+}
+fn store_project_bytes(file: &mut std::fs::File, content: &[u8]) -> std::io::Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(content)?;
+    file.set_len(content.len() as u64)?;
+    file.sync_data()
+}
+fn write_preserving_lease_using(path: &Path, bytes: &[u8], mut store: impl FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>) -> Result<()> {
+    use std::io::Read;
+    let mut file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+    if !file.metadata()?.is_file() { return Err(EngineError::InvalidParams("Project destination must be a regular file; no write performed".into())); }
+    let mut before = Vec::new();
+    file.read_to_end(&mut before)?;
+    if before == bytes { return Ok(()); }
+    if let Err(error) = store(&mut file, bytes) {
+        if let Err(rollback) = store(&mut file, &before) {
+            return Err(EngineError::Io(std::io::Error::other(format!("Project write failed: {error}; restoring prior bytes also failed: {rollback}. Preserve this file and repair storage before retrying"))));
+        }
+        return Err(EngineError::Io(std::io::Error::other(format!("Project write failed; prior bytes restored: {error}"))));
+    }
     Ok(())
 }
 
@@ -146,6 +177,7 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let missing = json!(missing);
     reset_for_project(s, path.clone(), assets);
     if let Some(owner)=owner{s.project_owner=Some(owner);}
+    s.theatre_state = doc.get("theatre").cloned();
     s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
@@ -597,6 +629,34 @@ mod tests {
         let still = s.execute("anim.preview_2d", json!({"mode": "static"})).unwrap();
         assert_eq!(still["ok"], json!(true), "{still}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn partial_project_write_restores_bytes_without_replacing_the_leased_file() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = temp_dir("write_rollback");
+        let path = dir.join("Project.acproj");
+        let before = b"retained project bytes";
+        std::fs::write(&path, before).unwrap();
+        let lease = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        lease.try_lock().unwrap();
+        let mut calls = 0;
+        let error = write_preserving_lease_using(&path, b"new project bytes", |file, bytes| {
+            calls += 1;
+            if calls == 1 {
+                file.seek(SeekFrom::Start(0))?;
+                file.write_all(&bytes[..5])?;
+                return Err(std::io::Error::other("injected failure after partial disk write"));
+            }
+            store_project_bytes(file, bytes)
+        }).unwrap_err();
+        assert!(error.to_string().contains("prior bytes restored"));
+        assert_eq!(calls, 2);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let competing = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        assert!(competing.try_lock().is_err(), "rollback replaced the leased inode");
+        drop(competing);drop(lease);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -44,6 +44,46 @@ fn path() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
         .map(|p| p.join("animationcraft/activity.jsonl"))
 }
+/// Saves, generations, keyframe edits, errors and page selection reports, kept apart from the
+/// three-root journal so UI clicks cannot evict them.
+fn history_path() -> Option<PathBuf> {
+    path().map(|p| p.with_file_name("activity-history.jsonl"))
+}
+const HISTORY_LIMIT: usize = 512;
+fn notable(event: &Value) -> bool {
+    let stage = event["stage"].as_str().unwrap_or_default();
+    matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched" | "theatre_selection" | "theatre_saved" | "theatre_error")
+        || (matches!(event["command"].as_str(), Some("image.generate" | "motion.path" | "motion.undo_path"))
+            && matches!(stage, "dispatch_running" | "engine_success" | "engine_needs_work"))
+}
+/// Page selection reports would each become a root action; they live only in the history.
+fn history_only(event: &Value) -> bool {
+    matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched" | "theatre_selection"))
+}
+fn read_rows(path: &std::path::Path) -> Vec<Value> {
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+/// Called with the journal lock held, so sequences stay ordered across both files.
+fn remember(path: &std::path::Path, event: &Value) -> std::io::Result<()> {
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(std::io::Error::other("activity history must not be a symlink"));
+    }
+    let mut rows = read_rows(path);
+    rows.push(event.clone());
+    let excess = rows.len().saturating_sub(HISTORY_LIMIT);
+    let bytes = rows[excess..].iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\n";
+    fs::write(path, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
 fn project(event: &Value) -> String {
     event["project"]
         .as_str()
@@ -197,7 +237,12 @@ pub fn append(mut event: Value) {
                 }
             }
         }
-        rows.push(event);
+        if let Some(history) = history_path().filter(|_| notable(&event)) {
+            remember(&history, &event)?;
+        }
+        if !history_only(&event) {
+            rows.push(event);
+        }
         let mut rows = retain(rows);
         rows.push(json!({"kind":"cursor","sequence":sequence}));
         let bytes = rows
@@ -259,17 +304,17 @@ pub fn result(project:Option<&std::path::Path>,id:&str,value:&Value,elapsed_ms:u
  append(json!({"project":project,"project_id":project,"command":id,"command_id":context["_request_id"],"request_id":context["_request_id"],"stage":"command_result","elapsed_ms":elapsed_ms,"outputs":outputs,"ui_ack":"not implied by engine completion"}));
 }
 pub fn events(s: &mut crate::Session, p: &Value) -> crate::Result<Value> {
-    let text = if let Some(path) = path() {
+    let (text, history) = if let Some(path) = path() {
         if let Ok(mut file) = OpenOptions::new().read(true).open(path) {
             file.lock_shared()?;
             let mut text = String::new();
             file.read_to_string(&mut text)?;
-            text
+            (text, history_path().map(|p| read_rows(&p)).unwrap_or_default())
         } else {
-            String::new()
+            (String::new(), Vec::new())
         }
     } else {
-        String::new()
+        (String::new(), Vec::new())
     };
     let all: Vec<Value> = text
         .lines()
@@ -313,6 +358,12 @@ pub fn events(s: &mut crate::Session, p: &Value) -> crate::Result<Value> {
             actions.push(json!({"root_request_id":key,"project":event["project"],"first_sequence":event["sequence"],"last_sequence":event["sequence"],"events":[event]}));
         }
     }
+    let history: Vec<Value> = history
+        .into_iter()
+        .filter(|v| selected.as_ref().is_none_or(|p| project(v) == *p))
+        .filter(|v| v["sequence"].as_u64().unwrap_or(0) > cursor)
+        .collect();
+    let history = history[history.len().saturating_sub(limit)..].to_vec();
     let pending: Vec<Value> = matching
         .into_iter()
         .filter(|v| v["sequence"].as_u64().unwrap_or(0) > cursor)
@@ -327,7 +378,7 @@ pub fn events(s: &mut crate::Session, p: &Value) -> crate::Result<Value> {
         global
     };
     Ok(
-        json!({"ok":true,"events":events,"actions":actions,"next_cursor":next,"latest_global_cursor":global,"retained_from":first,"cursor_expired":cursor>global||first.is_some_and(|v|cursor>0&&cursor+1<v),"project":selected,"retention":"three root actions per project; up to 64 recent causal stages per action; excess stages omitted","polling":"read-only snapshot; no actions consumed"}),
+        json!({"ok":true,"events":events,"actions":actions,"next_cursor":next,"latest_global_cursor":global,"retained_from":first,"cursor_expired":cursor>global||first.is_some_and(|v|cursor>0&&cursor+1<v),"history":history,"project":selected,"retention":"three root actions per project; up to 64 recent causal stages per action; excess stages omitted; history keeps the last 512 saves, generations, keyframe edits, errors and page selection reports across projects","polling":"read-only snapshot; no actions consumed"}),
     )
 }
 pub fn stored(project: &std::path::Path, bytes: usize) {
@@ -339,6 +390,28 @@ pub fn stored(project: &std::path::Path, bytes: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_keeps_meaningful_events_bounded_and_skips_clicks() {
+        assert!(notable(&json!({"stage":"saved_state"})));
+        assert!(notable(&json!({"stage":"dispatch_running","command":"image.generate"})));
+        assert!(notable(&json!({"stage":"engine_success","command":"motion.undo_path"})));
+        assert!(notable(&json!({"stage":"engine_error","command":"project.open"})));
+        assert!(!notable(&json!({"stage":"ui_click","control":"Generate image"})));
+        assert!(!notable(&json!({"stage":"engine_success","command":"center.status"})));
+        assert!(history_only(&json!({"stage":"selection_changed"})) && history_only(&json!({"stage":"theatre_selection"})) && !history_only(&json!({"stage":"saved_state"})));
+        assert!(notable(&json!({"stage":"theatre_error"})) && !notable(&json!({"stage":"theatre_playback"})));
+        let dir = std::env::temp_dir().join(format!("ac-history-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("activity-history.jsonl");
+        for sequence in 0..HISTORY_LIMIT + 5 {
+            remember(&path, &json!({"stage":"saved_state","sequence":sequence})).unwrap();
+        }
+        let rows = read_rows(&path);
+        assert_eq!(rows.len(), HISTORY_LIMIT);
+        assert_eq!(rows[0]["sequence"], 5);
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
     #[test]
     fn three_roots_per_project_keep_causal_stages_and_other_projects() {
         let mut rows = Vec::new();

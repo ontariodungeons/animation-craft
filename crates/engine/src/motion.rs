@@ -2,6 +2,7 @@
 use crate::session::LoadedCutoutRigPlan;
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Default)]
 struct EvaluatedRigMotion {
@@ -583,11 +584,97 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let rig = &rig;
     validate(rig)?;
     let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({"id":t["id"],"duration":t["duration"],"loop":t["loop"].as_bool().unwrap_or(false),"path":t["path"],"standard":t["standard"].as_bool().unwrap_or(false),"label":t["label"]})).collect();
-    let layers: Vec<_> = rig.parts.iter().map(|p| json!({"id":p.id,"label":p.label,"file":p.cropped_path,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,
-        "state":asset.parts.iter().find(|x| x.name == p.id)})).collect();
+    // Plain image previews use a synthesized rig with no manifest path. Keep
+    // replacement capture metadata absent there; normal animation inspection
+    // must continue to work without a layered-rig source document.
+    let metadata = if !rig.plan_path.as_os_str().is_empty() && rig.plan_path.is_file() {
+        let spec_bytes = std::fs::read(&rig.plan_path)?;
+        let rig_sha256 = format!("{:x}", Sha256::digest(&spec_bytes));
+        let state_path = rig.plan_path.parent().map(|parent| {
+            parent
+                .join(".part-image-history")
+                .join(crate::workspace::sanitize_asset_id(&id))
+                .join("state.json")
+        });
+        let image_revision = state_path
+            .as_ref()
+            .map(|path| match std::fs::symlink_metadata(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(0),
+                Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => std::fs::read(path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                    .and_then(|state| {
+                        let revision = state.get("revision").and_then(Value::as_u64)?;
+                        let token = state.get("last_token")?;
+                        (token.is_null() || token.as_str().is_some_and(|v| !v.is_empty()))
+                            .then_some(revision)
+                    }),
+                _ => None,
+            })
+            .unwrap_or(None);
+        let rig_raw: Value = serde_json::from_slice(&spec_bytes)
+            .map_err(|e| invalid(format!("Invalid rig JSON: {e}")))?;
+        Some((rig_raw, rig_sha256, image_revision))
+    } else {
+        None
+    };
+    let project_root = s
+        .project_path
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .and_then(|path| std::fs::canonicalize(path).ok());
+    let original_reference = metadata
+        .as_ref()
+        .and_then(|(raw, _, _)| {
+            let value = raw
+                .get("source")
+                .or_else(|| raw.get("source_image"))?
+                .as_str()?;
+            let raw_path = std::path::PathBuf::from(value);
+            let path = if raw_path.is_absolute() {
+                raw_path
+            } else {
+                project_root.as_ref()?.join(raw_path)
+            };
+            validate_local_png(path, project_root.as_deref())
+        })
+        .or_else(|| {
+            if !rig.plan_path.as_os_str().is_empty() {
+                return None;
+            }
+            validate_local_png(asset.path.clone(), project_root.as_deref())
+        });
+    let layers: Vec<_> = rig.parts.iter().map(|p| {
+        let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
+        let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+        let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
+        json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,"image_sha256":image_sha256,
+        "state":asset.parts.iter().find(|x| x.name == p.id)})
+    }).collect();
     Ok(
-        json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,"controls":rig.control_bindings,"audio":s.song_audio}),
+        json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"source_image":rig.source_image,"original_reference":original_reference,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,
+        "rig_sha256":metadata.as_ref().map(|(_,hash,_)|hash),"image_revision":metadata.as_ref().and_then(|(_,_,revision)|*revision),
+        "controls":rig.control_bindings,"audio":s.song_audio}),
     )
+}
+
+fn validate_local_png(path: std::path::PathBuf, root: Option<&std::path::Path>) -> Option<String> {
+    let path = std::fs::canonicalize(path).ok()?;
+    if !path.is_file()
+        || !path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+        || !root.is_some_and(|root| path.starts_with(root))
+    {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    if image::guess_format(&bytes).ok() != Some(image::ImageFormat::Png)
+        || image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).is_err()
+    {
+        return None;
+    }
+    Some(path.to_string_lossy().into_owned())
 }
 
 // Compose canvas-space parent transforms; opacity is deliberately independent of ancestors.
@@ -872,41 +959,86 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 /// Bake the existing engine samples into exporter keys. No second evaluator.
-pub fn cmd_motion_export_track(s:&mut Session,p:&Value)->Result<Value>{
-    let sample=cmd_motion_sample(s,p)?;
-    let id=load_character(s,p)?;
-    let rig=preview_rig(s.assets.get(&id).ok_or_else(||invalid("Asset not loaded"))?)?;
-    let source_duration=sample["duration"].as_f64().ok_or_else(||invalid("Missing sampled duration"))?;
-    let duration=p["duration"].as_f64().unwrap_or(source_duration);
-    if !duration.is_finite() || duration<=0.0 || duration>600.0{return Err(invalid("duration must be in (0,600]"));}
-    let frames=sample["frames"].as_array().ok_or_else(||invalid("No sampled frames"))?;
-    let mut motion=json!({});
-    for (index,part) in rig.parts.iter().enumerate(){
-        for prop in ["position","rotation","scale","opacity"] {
-            let keys:Vec<Value>=frames.iter().map(|frame|{
-                let v=&frame["layers"][index][prop];
-                let value=match prop {
-                    "position"=>if v.is_array(){v.clone()}else{json!([0,0])},
-                    "rotation"=>json!(v.as_f64().unwrap_or(0.0)),
-                    "opacity"=>json!((v.as_f64().unwrap_or(1.0)-1.0)*100.0),
-                    _=>json!([(v[0].as_f64().unwrap_or(1.0)-1.0)*100.0,(v[1].as_f64().unwrap_or(1.0)-1.0)*100.0]),
-                };
-                json!([frame["time"].as_f64().unwrap_or(0.0)*duration/source_duration,value])
-            }).collect();
-            motion[&part.id][prop]=json!([{"kind":"keys","ease":"linear","keys":keys}]);
+pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
+    let sample = cmd_motion_sample(s, p)?;
+    let id = load_character(s, p)?;
+    let rig = preview_rig(
+        s.assets
+            .get(&id)
+            .ok_or_else(|| invalid("Asset not loaded"))?,
+    )?;
+    let source_duration = sample["duration"]
+        .as_f64()
+        .ok_or_else(|| invalid("Missing sampled duration"))?;
+    let duration = p["duration"].as_f64().unwrap_or(source_duration);
+    if !duration.is_finite() || duration <= 0.0 || duration > 600.0 {
+        return Err(invalid("duration must be in (0,600]"));
+    }
+    let frames = sample["frames"]
+        .as_array()
+        .ok_or_else(|| invalid("No sampled frames"))?;
+    let mut motion = json!({});
+    for (index, part) in rig.parts.iter().enumerate() {
+        for prop in ["position", "rotation", "scale", "opacity"] {
+            let keys: Vec<Value> = frames
+                .iter()
+                .map(|frame| {
+                    let v = &frame["layers"][index][prop];
+                    let value = match prop {
+                        "position" => {
+                            if v.is_array() {
+                                v.clone()
+                            } else {
+                                json!([0, 0])
+                            }
+                        }
+                        "rotation" => json!(v.as_f64().unwrap_or(0.0)),
+                        "opacity" => json!((v.as_f64().unwrap_or(1.0) - 1.0) * 100.0),
+                        _ => json!([
+                            (v[0].as_f64().unwrap_or(1.0) - 1.0) * 100.0,
+                            (v[1].as_f64().unwrap_or(1.0) - 1.0) * 100.0
+                        ]),
+                    };
+                    json!([
+                        frame["time"].as_f64().unwrap_or(0.0) * duration / source_duration,
+                        value
+                    ])
+                })
+                .collect();
+            motion[&part.id][prop] = json!([{"kind":"keys","ease":"linear","keys":keys}]);
         }
     }
     let layers:Vec<Value>=rig.parts.iter().map(|part|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":part.parent})).collect();
-    let name=crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
-    let bounds=sample["bounds"].as_array();
-    let b=|i:usize,default:f64|bounds.and_then(|a|a.get(i)).and_then(Value::as_f64).unwrap_or(default);
-    let margin=[(-b(0,0.0)).max(0.0)+8.0,(-b(1,0.0)).max(0.0)+8.0,(b(2,rig.canvas_size[0] as f64)-rig.canvas_size[0] as f64).max(0.0)+8.0,(b(3,rig.canvas_size[1] as f64)-rig.canvas_size[1] as f64).max(0.0)+8.0];
-    let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
-    let out=crate::workshop::project_dir(s)?.join(format!("tracks/{id}/{name}-{stamp}"));std::fs::create_dir_all(&out)?;
-    let spec=out.join("motion.json");
-    let data=json!({"canvas":rig.canvas_size,"fps":30,"margin":margin,"layers":layers,"tracks":[{"id":name,"duration":duration,"loop":false,"motion":motion}]});
-    std::fs::write(&spec,data.to_string())?;
-    let mut result=crate::exports::cmd_export_layered_motion(s,&json!({"spec":spec,"out_dir":out,"stills":3,"video":true}))?;
-    result["spec"]=json!(spec);result["duration"]=json!(duration);result["margin"]=json!(margin);result["asset"]=json!(id);
+    let name = crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
+    let bounds = sample["bounds"].as_array();
+    let b = |i: usize, default: f64| {
+        bounds
+            .and_then(|a| a.get(i))
+            .and_then(Value::as_f64)
+            .unwrap_or(default)
+    };
+    let margin = [
+        (-b(0, 0.0)).max(0.0) + 8.0,
+        (-b(1, 0.0)).max(0.0) + 8.0,
+        (b(2, rig.canvas_size[0] as f64) - rig.canvas_size[0] as f64).max(0.0) + 8.0,
+        (b(3, rig.canvas_size[1] as f64) - rig.canvas_size[1] as f64).max(0.0) + 8.0,
+    ];
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let out = crate::workshop::project_dir(s)?.join(format!("tracks/{id}/{name}-{stamp}"));
+    std::fs::create_dir_all(&out)?;
+    let spec = out.join("motion.json");
+    let data = json!({"canvas":rig.canvas_size,"fps":30,"margin":margin,"layers":layers,"tracks":[{"id":name,"duration":duration,"loop":false,"motion":motion}]});
+    std::fs::write(&spec, data.to_string())?;
+    let mut result = crate::exports::cmd_export_layered_motion(
+        s,
+        &json!({"spec":spec,"out_dir":out,"stills":3,"video":true}),
+    )?;
+    result["spec"] = json!(spec);
+    result["duration"] = json!(duration);
+    result["margin"] = json!(margin);
+    result["asset"] = json!(id);
     Ok(result)
 }

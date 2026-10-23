@@ -8,9 +8,17 @@ function selectedPartTarget() {
   const root = state.project.slice(0, state.project.lastIndexOf('/'));
   const prefix = `${root}/`;
   const original = motion.assets?.find((asset) => asset.id === motion.character)?.path;
-  if (!original?.startsWith(prefix) || !layer.file.startsWith(prefix) || original === layer.file) return null;
+  const sourceFile = layer.source_file || layer.file;
+  const localPng = path => typeof path === 'string' && path.startsWith(prefix) && /\.png$/i.test(path);
+  // Rig asset paths are JSON. Use its declared full-scene source PNG and the
+  // selected part PNG; never treat the derived assembled preview as authority.
+  const fullSource = localPng(original) ? original : motion.meta.original_reference;
+  if (!localPng(fullSource) || !localPng(sourceFile)) return null;
+  const references = [...new Set([fullSource, sourceFile])].map(path => path.slice(prefix.length));
   return { project: state.project, assetId: motion.character, partId: layer.id, name: layer.label || layer.id,
-    references: [original.slice(prefix.length), layer.file.slice(prefix.length)], file: layer.file, original };
+    references, file: sourceFile, original: fullSource,
+    rigSha256: motion.meta.rig_sha256, partSha256: layer.image_sha256, revision: motion.meta.image_revision,
+    sourceSize: layer.source_size };
 }
 
 // The parts panel uses this to display only the candidate generated for the captured part.
@@ -42,9 +50,10 @@ function imagePromptBlock() {
   const targetLabel = draft.target ? `${draft.target.name} · ${draft.target.partId}` : '';
   const status = el('p', { id: 'image-status', role: 'status', 'aria-live': 'polite', class: draft.error ? 'image-error' : 'why' });
   function updateStatus() {
+    status.className = draft.error ? 'image-error' : draft.result ? 'why magic-image-review' : 'why';
     if (draft.busy) status.textContent = `image.generate request running · ${elapsed()}s elapsed${targetLabel ? ` · target ${targetLabel}` : ''}`;
     else if (draft.error) status.textContent = draft.error;
-    else if (draft.result) status.textContent = `Candidate · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · ${draft.completedElapsed ?? 0}s elapsed · needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}`;
+    else if (draft.result) status.textContent = `✓ Completed in ${draft.completedElapsed ?? 0}s · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · candidate needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}`;
     else status.textContent = 'Native Codex image tool · current login · quality and dimensions are tool-controlled.';
   }
   updateStatus();
@@ -94,5 +103,16 @@ function imagePromptBlock() {
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
   const section = block('image', ICONS.animate, 'Generate image', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : 'Codex · Luna', false, body, draft.error ? 'needs' : 'empty');
   section.classList.add('image-prompt-block');
+  section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
+  const indicator = section.querySelector('.block-head .dot');
+  if (indicator) {
+    if (draft.result) {
+      const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');
+      indicator.replaceWith(success);
+    } else {
+      indicator.className = `dot ${draft.error ? 'off' : draft.busy ? 'ok' : 'pending'}`;
+      indicator.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
+    }
+  }
   return section;
 }

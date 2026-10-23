@@ -1,4 +1,4 @@
-//! CLI argument parsing for AnimationCraft headless CLI.
+//! CLI argument parsing for the mc CLI.
 
 use serde_json::Value;
 

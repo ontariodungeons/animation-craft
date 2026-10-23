@@ -30,7 +30,7 @@ function setupMagicSplitters() {
   const workstation = $('magic-workstation');
   if (!workstation || workstation.dataset.splittersReady) return;
   workstation.dataset.splittersReady = 'true';
-  const sizes = { chat: 230, image: 270 };
+  const sizes = { chat: 320, image: 270 };
   for (const key of Object.keys(sizes)) {
     const saved = Number(localStorage.getItem(`magic.${key}-height`));
     if (Number.isFinite(saved) && saved >= 120 && saved <= 700) sizes[key] = saved;
@@ -43,7 +43,7 @@ function setupMagicSplitters() {
   for (const splitter of workstation.querySelectorAll('.magic-splitter')) {
     const key = splitter.dataset.splitter;
     const change = (delta) => {
-      sizes[key] = Math.max(120, Math.min(700, sizes[key] + delta));
+      sizes[key] = Math.max(key === 'chat' ? 230 : 170, Math.min(700, sizes[key] + delta));
       apply();
       localStorage.setItem(`magic.${key}-height`, String(sizes[key]));
     };
