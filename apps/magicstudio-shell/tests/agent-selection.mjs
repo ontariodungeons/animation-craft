@@ -177,3 +177,5 @@ assert.equal(vm.runInContext('existingDraft.error', artworkContext), 'Error: Nat
 console.log('PASS: supplemental Blender controls preserve authoring selection and captured generation references');
 await import('./companions.mjs');
 await import('./animation-authoring.mjs');
+
+await import('./inspector-controls.mjs');

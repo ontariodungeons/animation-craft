@@ -1,5 +1,5 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, activeSection:'Action', loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
+const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null };
 function animationReset(){
  theatreRequireSaved();
  blenderDispose();
@@ -22,11 +22,10 @@ function motionSection(title,body,open=false,toneOverride=null){
  const [tone,icon]=groups[title]||[toneOverride||'layers','layers'];
  const heading=el('summary',{},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`}),el('span',{},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
  const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));
- node.open=open;
+ node.open=Object.hasOwn(motion.openSections,title)?motion.openSections[title]===true:open;
  node.addEventListener('toggle',()=>{
-  if(!node.open||node.parentElement?.id!=='motion-inspector')return;
-  motion.activeSection=title;
-  for(const sib of node.parentElement.querySelectorAll('details.motion-section')){if(sib!==node)sib.open=false;}
+  motion.openSections[title]=node.open;
+  localStorage.setItem('animation.openSections',JSON.stringify(motion.openSections));
  });
  return node;
 }
@@ -106,11 +105,11 @@ function animationControls(){
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);if(selected?.path?.points){motion.points=selected.path.points;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.id.replace(/^.*?-beat\d+-/, '').replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
- box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],motion.activeSection==='Action'));
+ box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks],true));
  box.append(pathControls());
  box.append(motionSection('Motion & timing',[
  motionRange('motion-speed','Playback speed',0.25,2.25,0.05,motion.speed,'×',v=>motion.speed=v),
- motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],motion.activeSection==='Motion & timing'));
+ motionRange('motion-amount','Motion amount',0,100,1,motion.amount,'%',v=>{motion.amount=v;clearTimeout(motion.amountTimer);motion.amountTimer=setTimeout(animationSample,140);})],false));
  const layers=el('div',{class:'motion-layers'});
  for(const l of [...meta.layers].reverse()){
   const row=el('div',{class:`motion-layer${motion.selected===l.id?' selected':''}`,id:`motion-layer-${l.id}`,title:l.id});const shown=l.state?.visible!==false;
@@ -158,8 +157,8 @@ function animationControls(){
  const partsSlot=$('magic-parts-slot');
  if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsGrid));else box.append(section);
  const controls=meta.controls?.joints||[];
- box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],motion.activeSection==='Expression & pose'));
- box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),motion.activeSection==='Quality checks'));
+ box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
+ box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));
  const exportStatus=el('div',{class:'why'});
  const exportButton=el('button',{class:'start',id:'motion-export',title:'Export this action as a transparent video track',onclick:async()=>{
   exportButton.disabled=true;exportStatus.textContent='Rendering transparent track…';
@@ -167,7 +166,7 @@ function animationControls(){
    const file=result.outputs?.[0]?.file;exportStatus.replaceChildren(el('span',{},'Track ready'),file?fileButton({path:file,name:file.split('/').pop()}):null);
   }catch(error){exportStatus.textContent=String(error);}finally{exportButton.disabled=false;}
  }},'Export track');
- box.append(motionSection('Export & integrations',[exportButton,exportStatus],motion.activeSection==='Export & integrations'));
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.character} · ${meta.layers.length} layers / ${authoredCount} authored clips`),
@@ -304,7 +303,7 @@ function pathControls(){
   motionRange('motion-size-start','Start size',1,Math.max(200,motion.startSize),1,motion.startSize,'%',v=>motion.startSize=v),
   motionRange('motion-size-end','End size',1,Math.max(200,motion.endSize),1,motion.endSize,'%',v=>motion.endSize=v),
   el('div',{class:'motion-path-actions'},motionButton('motion-path-clear','Clear the drawn line','reset',()=>{motion.points=[];$('motion-path-apply').disabled=true;animationDraw();}),undo,apply)
- ],motion.activeSection==='Path & depth');section.id='motion-path-section';return section;
+ ],false);section.id='motion-path-section';return section;
 }
 function setupPathPen(canvas){
  let drawing=false;
