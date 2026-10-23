@@ -28,6 +28,7 @@ const PROPERTIES: &[&str] = &[
     "MemorySwapMax",
     "CPUUsageNSec",
     "MainPID",
+    "ExecMainStartTimestamp",
 ];
 fn invalid(message: impl Into<String>) -> EngineError {
     EngineError::InvalidParams(message.into())
@@ -77,7 +78,7 @@ fn worker_lock() -> Result<fs::File> {
 }
 fn service() -> Result<Value> {
     let output = Command::new("systemctl")
-        .args(["--user", "show", UNIT])
+        .args(["--user", "show", UNIT, "--timestamp=unix"])
         .arg(format!("--property={}", PROPERTIES.join(",")))
         .output()?;
     let mut state = json!({});
@@ -110,6 +111,124 @@ fn telemetry(state: &Value) -> Value {
     json!({"memory_current_bytes":number(state,"MemoryCurrent"),"memory_peak_bytes":number(state,"MemoryPeak"),
         "memory_max_bytes":number(state,"MemoryMax"),"swap_current_bytes":number(state,"MemorySwapCurrent"),
         "swap_max_bytes":number(state,"MemorySwapMax"),"cpu_usage_ns":number(state,"CPUUsageNSec")})
+}
+// Runtime identity is published under the same lock as start/cancel. Reads never select
+// an owner from project history; the observed unit must identify this exact job.
+fn owner_path() -> Result<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(|p| PathBuf::from(p).join("magicstudio-animation-worker-owner.json"))
+        .ok_or_else(|| invalid("User runtime directory is unavailable"))
+}
+fn started_at(state: &Value) -> Value {
+    state["ExecMainStartTimestamp"]
+        .as_str()
+        .and_then(|s| s.strip_prefix('@'))
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map_or(Value::Null, |s| json!(((s * 1000.0) as u64).to_string()))
+}
+fn job_details(dir: &Path) -> Result<Value> {
+    let mut details = read_json(&dir.join("job.json"))?;
+    for key in [
+        "limits",
+        "submitted_at",
+        "started_at",
+        "cancellation_requested_at",
+    ] {
+        if details.get(key).is_none() {
+            details[key] = Value::Null;
+        }
+    }
+    if let Ok(marker) = read_json(&dir.join("cancel-requested")) {
+        details["cancellation_requested_at"] = marker
+            .get("cancellation_requested_at")
+            .unwrap_or(&marker["updated_at"])
+            .clone();
+    }
+    Ok(details)
+}
+fn add_job_details(value: &mut Value, details: &Value) {
+    for key in [
+        "limits",
+        "submitted_at",
+        "started_at",
+        "cancellation_requested_at",
+    ] {
+        if value.get(key).is_none() {
+            value[key] = details[key].clone();
+        }
+    }
+}
+fn owner_observation(state: &Value, details: Option<&Value>, error: Option<String>) -> Value {
+    let owner = if occupied(state) {
+        let id = &state["Description"];
+        let matching = details.filter(|d| {
+            d["job"] == *id
+                && (!d["invocation_id"].is_string() || d["invocation_id"] == state["InvocationID"])
+        });
+        let mut start = started_at(state);
+        if start.is_null() {
+            start = matching.map_or(Value::Null, |d| d["started_at"].clone());
+        }
+        json!({"job":id,"job_id":id,"project":matching.map(|d|&d["project"]),"unit":UNIT,
+            "invocation_id":state["InvocationID"],"updated_at":now(),"service_state":state["ActiveState"],
+            "state":if state["ActiveState"]=="deactivating" || matching.is_some_and(|d|!d["cancellation_requested_at"].is_null()){"cancelling"}else{"running"},
+            "limits":matching.map(|d|&d["limits"]),"submitted_at":matching.map(|d|&d["submitted_at"]),
+            "started_at":start,"cancellation_requested_at":matching.map(|d|&d["cancellation_requested_at"])})
+    } else {
+        Value::Null
+    };
+    json!({"worker_owner":owner,"worker_owner_status":if owner.is_null(){"idle"}else{"observed"},"worker_owner_error":error})
+}
+fn worker_owner(observed: &Result<Value>) -> Value {
+    match observed {
+        Err(error) => {
+            json!({"worker_owner":Value::Null,"worker_owner_status":"unavailable","worker_owner_error":error.to_string()})
+        }
+        Ok(state) if !occupied(state) => owner_observation(state, None, None),
+        Ok(state)
+            if !matches!(
+                state["ActiveState"].as_str(),
+                Some("active" | "activating" | "deactivating" | "reloading")
+            ) || !state["Description"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("magicstudio-blender-")) =>
+        {
+            json!({"worker_owner":Value::Null,"worker_owner_status":"unavailable","worker_owner_error":"No recognizable worker job identity/state was observed"})
+        }
+        Ok(state) => {
+            let details = (|| -> Result<Value> {
+                let owner = read_json(&owner_path()?)?;
+                if owner["job"] != state["Description"] {
+                    return Err(invalid("Runtime owner does not match observed worker"));
+                }
+                let dir = Path::new(
+                    owner["directory"]
+                        .as_str()
+                        .ok_or_else(|| invalid("Owner directory unavailable"))?,
+                );
+                let details = job_details(dir)?;
+                if details["job"] != state["Description"]
+                    || (details["invocation_id"].is_string()
+                        && details["invocation_id"] != state["InvocationID"])
+                {
+                    return Err(invalid(
+                        "Owner job/invocation does not match observed worker",
+                    ));
+                }
+                Ok(details)
+            })();
+            match details {
+                Ok(details) => owner_observation(state, Some(&details), None),
+                Err(error) => owner_observation(state, None, Some(error.to_string())),
+            }
+        }
+    }
+}
+fn add_owner(value: &mut Value, owner: &Value) {
+    for key in ["worker_owner", "worker_owner_status", "worker_owner_error"] {
+        value[key] = owner[key].clone();
+    }
 }
 fn root(s: &Session) -> Result<PathBuf> {
     s.project_path
@@ -351,6 +470,8 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         .as_nanos();
     let id = format!("magicstudio-blender-{}-{stamp}", std::process::id());
     request["job"] = json!(id);
+    request["limits"] = json!({"memory_max_bytes":memory*1024*1024,"swap_max_bytes":0,"cpu_quota_percent":200,"timeout_seconds":seconds});
+    request["submitted_at"] = json!((stamp / 1_000_000).to_string());
     let dir = root(s)?.join(&id);
     fs::create_dir_all(&dir)?;
     let request_path = dir.join("request.json");
@@ -358,7 +479,8 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
     write_json(
         &dir.join("job.json"),
         &json!({"job":id,"job_id":id,"unit":UNIT,"project":s.project_path,
-        "created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"]}),
+        "created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"],
+        "limits":request["limits"],"submitted_at":request["submitted_at"],"started_at":Value::Null,"cancellation_requested_at":Value::Null}),
     )?;
     write_json(
         &dir.join("progress.json"),
@@ -370,6 +492,7 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         include_str!("../../../pipeline/blender_animation_worker.py"),
     )?;
     let blender = std::env::var("BLENDER_BIN").unwrap_or_else(|_| "blender".into());
+    write_json(&owner_path()?, &json!({"job":id,"directory":dir}))?;
     // systemd-run waits for the start transaction while holding the start/cancel lock.
     let output = Command::new("systemd-run")
         .args(["--user", "--quiet", "--collect"])
@@ -424,12 +547,13 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
             &dir.join("result.json"),
             &json!({"job":id,"job_id":id,"project":s.project_path,"unit":UNIT,
             "invocation_id":Value::Null,"state":"failed","termination_reason":"submission","updated_at":now(),
-            "telemetry":telemetry(&json!({})),"error":error}),
+            "telemetry":telemetry(&json!({})),"limits":request["limits"],"submitted_at":request["submitted_at"],
+            "started_at":Value::Null,"cancellation_requested_at":Value::Null,"error":error}),
         )?;
         return Err(EngineError::ExternalTool("systemd-run".into(), error));
     }
     Ok(
-        json!({"ok":true,"job":id,"state":"submitted","directory":dir,"memory_limit_mb":memory,"timeout_seconds":seconds}),
+        json!({"ok":true,"job":id,"state":"submitted","directory":dir,"memory_limit_mb":memory,"timeout_seconds":seconds,"limits":request["limits"],"submitted_at":request["submitted_at"]}),
     )
 }
 fn systemd_quote(path: &Path) -> String {
@@ -443,25 +567,34 @@ fn systemd_quote(path: &Path) -> String {
     )
 }
 pub fn cmd_blender_list(s: &mut Session, _: &Value) -> Result<Value> {
-    let root = root(s)?;
+    let observed = service();
+    let owner = worker_owner(&observed);
     let mut jobs = Vec::new();
-    if root.is_dir() {
-        for entry in fs::read_dir(root)? {
-            let path = entry?.path().join("job.json");
-            if path.is_file() {
-                let value = read_json(&path)?;
-                if !value["project"].is_string() || value["project"] == json!(s.project_path) {
-                    jobs.push(value);
+    if s.project_path.is_some() {
+        let root = root(s)?;
+        if root.is_dir() {
+            for entry in fs::read_dir(root)? {
+                let dir = entry?.path();
+                if dir.join("job.json").is_file() {
+                    let value = job_details(&dir)?;
+                    if !value["project"].is_string() || value["project"] == json!(s.project_path) {
+                        jobs.push(value);
+                    }
                 }
             }
         }
     }
     jobs.sort_by(|a, b| b["created_ns"].as_str().cmp(&a["created_ns"].as_str()));
-    Ok(json!({"jobs":jobs}))
+    let mut result = json!({"jobs":jobs});
+    add_owner(&mut result, &owner);
+    Ok(result)
 }
 pub fn cmd_blender_status(s: &mut Session, p: &Value) -> Result<Value> {
     let (id, dir) = job(s, p)?;
-    let service = match service() {
+    let details = job_details(&dir)?;
+    let observed = service();
+    let owner = worker_owner(&observed);
+    let service = match observed {
         Ok(service) => service,
         Err(error) => {
             let result = dir.join("result.json");
@@ -477,6 +610,8 @@ pub fn cmd_blender_status(s: &mut Session, p: &Value) -> Result<Value> {
                     receipt["telemetry_stale"] = json!(true);
                     receipt["service_state"] = Value::Null;
                     receipt["service_error"] = json!(error.to_string());
+                    add_job_details(&mut receipt, &details);
+                    add_owner(&mut receipt, &owner);
                     return Ok(receipt);
                 }
             }
@@ -490,24 +625,32 @@ pub fn cmd_blender_status(s: &mut Session, p: &Value) -> Result<Value> {
             .is_none_or(|i| i["invocation_id"] == service["InvocationID"]);
     if matches && occupied(&service) {
         let progress = read_json(&dir.join("progress.json")).ok();
-        return Ok(
-            json!({"job":id,"job_id":id,"project":s.project_path,"unit":UNIT,"invocation_id":service["InvocationID"],"updated_at":now(),
+        let mut value = json!({"job":id,"job_id":id,"project":s.project_path,"unit":UNIT,"invocation_id":service["InvocationID"],"updated_at":now(),
             "state":if dir.join("cancel-requested").exists() || service["ActiveState"]=="deactivating"{"cancelling"}else{"running"},
             "phase":progress.as_ref().map(|v|&v["state"]),"frames_completed":progress.as_ref().map(|v|&v["completed"]),"frames_total":progress.as_ref().map(|v|&v["total"]),
             "progress":progress,"service_state":service["ActiveState"],"main_pid":number(&service,"MainPID"),"telemetry":telemetry(&service),
-            "service_result":service["Result"],"exec_main_status":number(&service,"ExecMainStatus"),"termination_reason":Value::Null,"log":dir.join("worker.log")}),
-        );
+            "service_result":service["Result"],"exec_main_status":number(&service,"ExecMainStatus"),"termination_reason":Value::Null,"log":dir.join("worker.log")});
+        add_job_details(&mut value, &details);
+        let started = started_at(&service);
+        if !started.is_null() {
+            value["started_at"] = started;
+        }
+        add_owner(&mut value, &owner);
+        return Ok(value);
     }
     if dir.join("result.json").is_file() {
         let mut value = read_json(&dir.join("result.json"))?;
         value["job"] = json!(id);
+        add_job_details(&mut value, &details);
+        add_owner(&mut value, &owner);
         return Ok(value);
     }
-    Ok(
-        json!({"job":id,"job_id":id,"project":s.project_path,"unit":UNIT,"invocation_id":invocation.map(|v|v["invocation_id"].clone()),
+    let mut value = json!({"job":id,"job_id":id,"project":s.project_path,"unit":UNIT,"invocation_id":invocation.map(|v|v["invocation_id"].clone()),
         "updated_at":now(),"state":"failed","termination_reason":"missing_receipt","telemetry":telemetry(&json!({})),
-        "detail":"Worker is no longer active and left no terminal receipt; success and resource usage are unknown","log":dir.join("worker.log")}),
-    )
+        "detail":"Worker is no longer active and left no terminal receipt; success and resource usage are unknown","log":dir.join("worker.log")});
+    add_job_details(&mut value, &details);
+    add_owner(&mut value, &owner);
+    Ok(value)
 }
 pub fn cmd_blender_cancel(s: &mut Session, p: &Value) -> Result<Value> {
     let _slot = worker_lock()?;
@@ -516,7 +659,11 @@ pub fn cmd_blender_cancel(s: &mut Session, p: &Value) -> Result<Value> {
     if active["Description"] != id || !occupied(&active) {
         return cmd_blender_status(s, p);
     }
-    write_json(&dir.join("cancel-requested"), &json!({"updated_at":now()}))?;
+    let requested_at = now();
+    write_json(
+        &dir.join("cancel-requested"),
+        &json!({"updated_at":requested_at,"cancellation_requested_at":requested_at}),
+    )?;
     let output = Command::new("systemctl")
         .args(["--user", "stop", "--no-block", UNIT])
         .output()?;
@@ -574,6 +721,66 @@ mod tests {
                 .to_string()
                 .contains("16 MiB")
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn global_owner_is_correlated_without_a_selected_project() {
+        let state = json!({"ActiveState":"active","Description":"magicstudio-blender-owner-b","InvocationID":"new-invocation","ExecMainStartTimestamp":"@1234"});
+        let mut details = json!({"job":"magicstudio-blender-owner-b","project":"/tmp/project-b/project.magic","invocation_id":"new-invocation",
+            "limits":{"timeout_seconds":27},"submitted_at":"1233000","started_at":"1234000","cancellation_requested_at":null});
+        let observation = owner_observation(&state, Some(&details), None);
+        assert_eq!(
+            observation["worker_owner"]["project"],
+            "/tmp/project-b/project.magic"
+        );
+        assert_eq!(observation["worker_owner"]["started_at"], "1234000");
+        assert_eq!(observation["worker_owner"]["limits"]["timeout_seconds"], 27);
+        details["invocation_id"] = json!("old-invocation");
+        let stale = owner_observation(&state, Some(&details), Some("stale invocation".into()));
+        assert!(stale["worker_owner"]["project"].is_null());
+        assert!(stale["worker_owner"]["limits"].is_null());
+        assert_eq!(stale["worker_owner"]["invocation_id"], "new-invocation");
+        assert!(!stale["worker_owner_error"].is_null());
+        let cancelled = owner_observation(
+            &json!({"ActiveState":"deactivating","Description":"magicstudio-blender-owner-b","InvocationID":"new-invocation"}),
+            None,
+            None,
+        );
+        assert_eq!(cancelled["worker_owner"]["state"], "cancelling");
+        let idle = worker_owner(&Ok(json!({"ActiveState":"inactive"})));
+        assert!(idle["worker_owner"].is_null());
+        assert_eq!(idle["worker_owner_status"], "idle");
+        let disconnected = worker_owner(&Err(invalid("bus unavailable")));
+        assert!(disconnected["worker_owner"].is_null());
+        assert_eq!(disconnected["worker_owner_status"], "unavailable");
+        assert!(
+            disconnected["worker_owner_error"]
+                .as_str()
+                .is_some_and(|e| e.contains("bus unavailable"))
+        );
+    }
+
+    #[test]
+    fn historical_limits_are_unknown_and_cancellation_time_is_persisted() {
+        let dir =
+            std::env::temp_dir().join(format!("blender-timing-{}-{}", std::process::id(), now()));
+        fs::create_dir_all(&dir).unwrap();
+        write_json(&dir.join("job.json"), &json!({"job":"old-job"})).unwrap();
+        write_json(
+            &dir.join("cancel-requested"),
+            &json!({"cancellation_requested_at":"5678"}),
+        )
+        .unwrap();
+        let details = job_details(&dir).unwrap();
+        assert!(details["limits"].is_null());
+        assert!(details["started_at"].is_null());
+        assert!(details["submitted_at"].is_null());
+        assert_eq!(details["cancellation_requested_at"], "5678");
+        let mut receipt = json!({"state":"cancelled"});
+        add_job_details(&mut receipt, &details);
+        assert!(receipt["limits"].is_null());
+        assert_eq!(receipt["cancellation_requested_at"], "5678");
         fs::remove_dir_all(dir).unwrap();
     }
 

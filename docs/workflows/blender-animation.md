@@ -127,6 +127,33 @@ measurements, labels `state_source`/`telemetry_source` as `terminal_receipt`, se
 historical measurements, not a claim about a live service. Without a terminal receipt,
 the service-query error is returned; running/cancelling state is never invented.
 
+`blender.list` also works without an open project (`jobs:[]`) and always returns a global
+worker observation. `blender.status job=...` adds the same observation beside the selected
+job; it never substitutes the global owner's metrics for that job's metrics.
+`worker_owner` is null when no active owner is observed. `worker_owner_status` distinguishes
+`idle`, `observed`, and `unavailable`; `worker_owner_error` is null or the actual query/metadata
+error. A disconnected user bus reports unavailable, not idle. An observed owner contains
+`job`/`job_id`, canonical `project`, `unit`, `invocation_id`, `state` (running/cancelling),
+`service_state` and `updated_at`. Identity comes from the actual fixed unit's Description
+and invocation, matched to an atomically published runtime owner pointer and job metadata;
+it is never inferred from the selected project's latest job. If matching runtime metadata
+is unavailable, the observed unit/job remains visible, but project/limits stay null with
+an explicit error. Reads reuse one systemd snapshot and add no scheduler or polling service.
+
+New requests, job metadata, live status and final receipts retain a `limits` object with
+`memory_max_bytes`, `swap_max_bytes`, `cpu_quota_percent` and `timeout_seconds`, recording
+what was submitted (including validated engine defaults). This is distinct from measured
+cgroup telemetry; clients must not invent defaults for historical jobs lacking this record.
+`submitted_at` is the durable request's elapsed-time origin, `started_at` is the observed
+systemd ExecMain start timestamp, and `cancellation_requested_at` comes from the persisted
+cancel marker. All are Unix milliseconds as decimal strings or null. The systemd start
+observation uses `--timestamp=unix`, whose installed output has second precision (encoded
+as milliseconds); it is not the later Python-entry time. The worker persists its start and
+invocation in job metadata, and stop-post persists limits/start/cancel timestamps in the
+terminal receipt. While stopping, list/status read the atomic cancel marker directly,
+avoiding concurrent writes to the worker's job metadata. Missing historical limits or
+timestamps remain null, including after a user-bus disconnect.
+
 ## Tool roles and next migration boundary
 
 Blender is the first working backend. OpenToonz is a candidate for drawn poses and Plastic
