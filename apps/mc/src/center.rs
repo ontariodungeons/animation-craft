@@ -63,7 +63,14 @@ impl Center {
             }
         }
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
-        let ui=crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":self.pinned_instance})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+        let observe=|pin:Option<&str>|crate::local_ui::call("auto","ui.feedback",json!({"project":project,"_expected_instance":pin.map(str::to_owned)})).unwrap_or_else(|e|json!({"connection":"error","error":e}));
+        let mut ui=observe(self.pinned_instance.as_deref());
+        // Observation is read-only and project-matched, so a Studio that restarted under us is
+        // re-discovered rather than pinned out. Commands still refuse to switch a live Studio.
+        if ui["connection"]!="connected" && self.pinned_instance.is_some(){
+            self.pinned_instance=None;
+            ui=observe(None);
+        }
         // Keep the last project inspection while the engine is busy; read its real journal directly.
         let inspection=if ui["connection"]=="connected" && ui["engine_unsaved"].is_null(){
             let mut value=self.state.clone();
