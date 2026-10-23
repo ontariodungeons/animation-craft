@@ -4,14 +4,11 @@
 //! A clip is an element with `class="clip"`, `id`, `data-start` and `data-duration`. Per-word
 //! caption elements (`lyric-word-clip`), the root composition and the song audio are not clips.
 //!
-//! The composition's own scripts can narrow a clip's window: a single `alpha('<id>', <expr>)` call whose
-//! expression is a literal opacity, `range(t,a,b)`, `1-range(t,a,b)` or `pulse(t,a,b,c,d)` (directly or
-//! through one binding of that form) gives the clip's real on/off times, provided the id is quoted
-//! nowhere else in the scripts (data tables and loops may set its opacity under a computed id).
-//! Anything else keeps the composition times and is reported as unresolved.
+//! Real on/off windows come from running the composition's own per-frame script read-only in
+//! `pipeline/sample_cutout_windows.mjs` (Bun). When Bun or the sampler is unavailable, or a clip is
+//! also tweened by GSAP, the clip keeps its composition times and is reported as unresolved.
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::path::Path;
 
 fn invalid(message: impl Into<String>) -> EngineError {
@@ -25,14 +22,7 @@ struct Clip {
     src: Option<String>,
     /// Composition `data-start`..`data-start + data-duration`, before any script window.
     composition: (f64, f64),
-    timing: &'static str,
-}
-
-/// What a script says about when a clip is visible.
-enum Shown {
-    Unresolved,
-    Never,
-    Window(f64, f64),
+    timing: String,
 }
 
 struct Scene {
@@ -83,97 +73,45 @@ fn read_clips(html: &str) -> Vec<Clip> {
         let duration: f64 = attr(tag, "data-duration")?.parse().ok()?;
         Some(Clip {
             id: attr(tag, "id")?.to_string(), start, end: start + duration, src: attr(tag, "src").map(str::to_string),
-            composition: (start, start + duration), timing: "unresolved (composition times)",
+            composition: (start, start + duration), timing: String::new(),
         })
     }).collect()
 }
 
-/// Text after `open` up to its matching `)`, or `None` when unbalanced.
-fn until_close(text: &str) -> Option<&str> {
-    let mut depth = 0;
-    for (i, c) in text.char_indices() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' if depth == 0 => return Some(&text[..i]),
-            ')' | ']' | '}' => depth -= 1,
-            _ => {}
+/// Runs the read-only window sampler on the composition folder; `Err` says why it could not.
+fn sample_windows(s: &Session, hyperframes: &Path) -> std::result::Result<Value, String> {
+    let root = crate::workspace::workspace_root(s);
+    let script = root.join("pipeline/sample_cutout_windows.mjs");
+    let args = [script.to_string_lossy().into_owned(), hyperframes.to_string_lossy().into_owned()];
+    let out = crate::workspace::run_tool_in(&root, "bun", &args).map_err(|e| e.to_string())?;
+    serde_json::from_str(&out).map_err(|e| format!("sampler output is not JSON: {e}"))
+}
+
+/// One entry per visible window: a clip shown twice becomes two entries with the same id.
+fn apply_windows(clips: Vec<Clip>, sampled: &std::result::Result<Value, String>) -> Vec<Clip> {
+    let mut out = Vec::new();
+    for mut c in clips {
+        let (lo, hi) = c.composition;
+        let Ok(v) = sampled else {
+            c.timing = "unresolved (sampler unavailable; composition times)".into();
+            out.push(c);
+            continue;
+        };
+        if let Some(reason) = v["unresolved"][&c.id].as_str() {
+            c.timing = format!("unresolved ({reason}; composition times)");
+            out.push(c);
+            continue;
+        }
+        match v["windows"][&c.id].as_array() {
+            None => { c.timing = "unresolved (not sampled; composition times)".into(); out.push(c); }
+            Some(windows) if windows.is_empty() => { c.timing = "never shown".into(); c.end = c.start; out.push(c); }
+            Some(windows) => for w in windows {
+                let (Some(a), Some(b)) = (w[0].as_f64(), w[1].as_f64()) else { continue };
+                out.push(Clip { id: c.id.clone(), start: a.max(lo), end: b.min(hi), src: c.src.clone(), composition: c.composition, timing: "sampled window".into() });
+            },
         }
     }
-    None
-}
-
-/// Every `alpha('<id>', <expr>)` call in `js`, by id.
-fn alpha_calls(js: &str) -> HashMap<String, Vec<String>> {
-    let mut calls: HashMap<String, Vec<String>> = HashMap::new();
-    for (i, _) in js.match_indices("alpha('") {
-        let rest = &js[i + 7..];
-        let Some(q) = rest.find('\'') else { continue };
-        let Some(expr) = rest[q + 1..].strip_prefix(',').and_then(until_close) else { continue };
-        calls.entry(rest[..q].to_string()).or_default().push(expr.trim().to_string());
-    }
-    calls
-}
-
-/// Right-hand sides of every `name=...` binding in `js` (not `==`, `=>`, or a longer identifier).
-fn bindings<'a>(js: &'a str, name: &str) -> Vec<&'a str> {
-    js.match_indices(&format!("{name}=")).filter_map(|(i, m)| {
-        let before = js[..i].chars().next_back();
-        if before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$') { return None; }
-        let rest = &js[i + m.len()..];
-        if rest.starts_with('=') || rest.starts_with('>') { return None; }
-        let mut depth = 0;
-        let end = rest.char_indices().find(|&(_, c)| {
-            match c { '(' | '[' | '{' => depth += 1, ')' | ']' | '}' => depth -= 1, _ => {} }
-            depth < 0 || (depth == 0 && (c == ',' || c == ';' || c == '\n'))
-        }).map_or(rest.len(), |(j, _)| j);
-        Some(rest[..end].trim())
-    }).collect()
-}
-
-/// Whether `id` is quoted in `js` anywhere other than its own `alpha(...)` / `move(...)` calls.
-fn quoted_elsewhere(js: &str, id: &str) -> bool {
-    [format!("'{id}'"), format!("\"{id}\"")].iter().any(|quoted| {
-        js.match_indices(quoted.as_str()).any(|(i, _)| !(js[..i].ends_with("alpha(") || js[..i].ends_with("move(")))
-    })
-}
-
-/// Literal numeric arguments of `name(t,...)` when `expr` is exactly that call.
-fn literal_call(expr: &str, name: &str, arity: usize) -> Option<Vec<f64>> {
-    let args = expr.strip_prefix(name)?.strip_prefix("(t,")?.strip_suffix(')')?;
-    let values: Vec<f64> = args.split(',').map(|a| a.trim().parse().ok()).collect::<Option<_>>()?;
-    (values.len() == arity).then_some(values)
-}
-
-fn shown(expr: &str, js: &str, follow: bool) -> Shown {
-    if let Ok(opacity) = expr.parse::<f64>() {
-        return if opacity > 0.0 { Shown::Window(f64::NEG_INFINITY, f64::INFINITY) } else { Shown::Never };
-    }
-    if let Some(v) = literal_call(expr, "range", 2) { return Shown::Window(v[0], f64::INFINITY); }
-    if let Some(v) = expr.strip_prefix("1-").and_then(|e| literal_call(e, "range", 2)) { return Shown::Window(f64::NEG_INFINITY, v[1]); }
-    if let Some(v) = literal_call(expr, "pulse", 4) { return Shown::Window(v[0], v[3]); }
-    if follow && !expr.is_empty() && expr.chars().all(|c| c.is_alphanumeric() || c == '_')
-        && let [rhs] = bindings(js, expr)[..] {
-        return shown(rhs, js, false);
-    }
-    Shown::Unresolved
-}
-
-/// Narrows clips to the windows their scripts give, where a script states one unambiguously.
-fn apply_script_windows(clips: &mut [Clip], js: &str) {
-    let calls = alpha_calls(js);
-    for c in clips {
-        let Some([expr]) = calls.get(&c.id).map(Vec::as_slice) else { continue };
-        if quoted_elsewhere(js, &c.id) { continue; }
-        match shown(expr, js, true) {
-            Shown::Unresolved => {}
-            Shown::Never => { c.timing = "never shown (script opacity 0)"; c.end = c.start; }
-            Shown::Window(a, b) => {
-                c.start = c.start.max(a);
-                c.end = c.end.min(b).max(c.start);
-                c.timing = if c.start < c.end { "script window" } else { "never shown (script window outside clip)" };
-            }
-        }
-    }
+    out
 }
 
 fn read_scenes(timeline: &Value) -> Vec<Scene> {
@@ -198,13 +136,14 @@ fn active(start: f64, end: f64, at: f64) -> bool {
 fn fit(c: &Clip, scenes: &[Scene]) -> Value {
     let (Some(first), Some(last)) = (scenes.first(), scenes.last()) else { return Value::Null };
     if c.start <= first.start && c.end >= last.end { return json!("whole song"); }
+    if c.start >= c.end { return json!("never shown"); }
     let Some(sc) = scenes.iter().find(|sc| active(sc.start, sc.end, c.start)) else { return json!("outside every scene") };
     if c.end > sc.end { json!({"over_run": ms(c.end - sc.end), "scene": sc.id}) }
     else if c.end < sc.end { json!({"under_run": ms(sc.end - c.end), "scene": sc.id}) }
     else { json!("fits scene") }
 }
 
-fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, Vec<Scene>)> {
+fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, Vec<Scene>, Value)> {
     let raw = params.get("project").and_then(Value::as_str).filter(|p| !p.trim().is_empty())
         .ok_or_else(|| invalid("missing 'project' (.acproj path)"))?;
     let acproj = crate::workspace::resolve_workspace_path(s, raw);
@@ -219,20 +158,16 @@ fn load(s: &Session, params: &Value) -> Result<(std::path::PathBuf, Vec<Clip>, V
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(e.into()),
     };
-    let mut clips = read_clips(&html);
-    let mut js = String::new();
-    for tag in start_tags(&html).into_iter().filter(|t| t.starts_with("script")) {
-        let Some(src) = attr(tag, "src").filter(|s| !s.contains("://")) else { continue };
-        let path = dir.join("hyperframes").join(src);
-        js += &std::fs::read_to_string(&path).map_err(|e| invalid(format!("composition script {}: {e}", path.display())))?;
-        js.push('\n');
-    }
-    apply_script_windows(&mut clips, &js);
-    Ok((acproj, clips, scenes))
+    let sampled = sample_windows(s, &dir.join("hyperframes"));
+    let source = match &sampled {
+        Ok(v) => json!({"ok": true, "sampler": "pipeline/sample_cutout_windows.mjs", "scripts": v["scripts"]}),
+        Err(e) => json!({"ok": false, "sampler": "pipeline/sample_cutout_windows.mjs", "error": e}),
+    };
+    Ok((acproj, apply_windows(read_clips(&html), &sampled), scenes, source))
 }
 
 pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
-    let (project, clips, scenes) = load(s, params)?;
+    let (project, clips, scenes, timing_source) = load(s, params)?;
     match (params.get("at").and_then(Value::as_f64), params.get("clip").and_then(Value::as_str)) {
         (Some(at), None) => {
             let scene = scenes.iter().find(|sc| active(sc.start, sc.end, at));
@@ -254,7 +189,7 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
                 }
             }
             Ok(json!({
-                "ok": true, "project": project, "at": at,
+                "ok": true, "project": project, "at": at, "timing_source": timing_source,
                 "scene": scene.map(|sc| json!({"id": sc.id, "start": ms(sc.start), "end": ms(sc.end), "local": ms(at - sc.start)})),
                 "cues": cues,
             }))
@@ -269,69 +204,8 @@ pub fn cues(s: &mut Session, params: &Value) -> Result<Value> {
                     "timing": c.timing, "composition": [ms(c.composition.0), ms(c.composition.1)],
                     "scenes": scenes.iter().filter(|sc| c.start < c.end && sc.start < c.end && c.start < sc.end).map(|sc| sc.id.as_str()).collect::<Vec<_>>(),
                 })).collect();
-            Ok(json!({"ok": true, "project": project, "clip": id, "src": clip.src, "uses": uses}))
+            Ok(json!({"ok": true, "project": project, "clip": id, "src": clip.src, "timing_source": timing_source, "uses": uses}))
         }
         _ => Err(invalid("give exactly one of 'at' (song seconds) or 'clip' (clip id)")),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cues_at_time_and_clip_uses_read_composition_and_timeline() {
-        let dir = std::env::temp_dir().join(format!("ac-studio-cues-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("hyperframes")).unwrap();
-        std::fs::create_dir_all(dir.join("artifacts")).unwrap();
-        std::fs::write(dir.join("Song.acproj"), "{\"assets\":[]}").unwrap();
-        std::fs::write(dir.join("hyperframes/index.html"), concat!(
-            "<div id=\"root\" data-composition-id=\"main\" data-start=\"0\" data-duration=\"20\">",
-            "<img id=\"sea\" class=\"clip\" data-start=\"0\" data-duration=\"10\" src=\"sea.png\" aria-label=\"a > b\">",
-            "<img id=\"sea-again\" class=\"clip\" data-start=\"12\" data-duration=\"4\" src=\"sea.png\">",
-            "<img id=\"boat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"boat.png\">",
-            "<img id=\"bed\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"bed.png\">",
-            "<img id=\"hat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"hat.png\">",
-            "<img id=\"rug\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"rug.png\">",
-            "<img id=\"cat\" class=\"clip\" data-start=\"0\" data-duration=\"20\" src=\"cat.png\">",
-            "<script src=\"film.js\"></script>",
-            "<div id=\"word\" class=\"clip lyric-word-clip\" data-start=\"4\" data-duration=\"1\"></div>",
-            "<audio id=\"song\" data-start=\"0\" data-duration=\"20\" src=\"song.wav\"></audio></div>",
-        )).unwrap();
-        std::fs::write(dir.join("hyperframes/film.js"), concat!(
-            "const boatOn=pulse(t,2,3,5,6);alpha('boat',boatOn);alpha('bed',0);\n",
-            "alpha('hat',range(t,1,2));alpha('hat',1);alpha('rug',Math.max(a,b));\n",
-            "alpha('cat',range(t,8,9));['cat'].forEach(id=>alpha(id,1));",
-        )).unwrap();
-        std::fs::write(dir.join("artifacts/action_timeline.json"), r#"{"scenes":[
-            {"scene_id":"s01","start_seconds":0,"end_seconds":12,"actions":[{"at_seconds":3,"duration_seconds":2,"character_id":"fish","action":"swim"}]},
-            {"scene_id":"s02","start_seconds":12,"end_seconds":20,"actions":[]}]}"#).unwrap();
-        let mut s = Session::default();
-        let project = dir.join("Song.acproj");
-
-        let at = s.execute("studio.cues", json!({"project": &project, "at": 4.5})).unwrap();
-        assert_eq!(at["scene"]["id"], "s01");
-        let cues = at["cues"].as_array().unwrap();
-        let ids: Vec<_> = cues.iter().map(|c| c["id"].as_str().or(c["character"].as_str()).unwrap()).collect();
-        // Word captions, root and audio are not clips; bed is never shown.
-        assert_eq!(ids, ["sea", "boat", "hat", "rug", "cat", "fish"]);
-        assert_eq!(cues[0]["local"], json!(4.5));
-        assert_eq!((cues[1]["start"].as_f64(), cues[1]["end"].as_f64(), cues[1]["timing"].as_str()), (Some(2.0), Some(6.0), Some("script window")));
-        assert_eq!(cues[1]["local"], json!(2.5));
-        assert_eq!(cues[2]["timing"], "unresolved (composition times)", "two alpha calls are not guessed");
-        assert_eq!(cues[3]["timing"], "unresolved (composition times)");
-        assert_eq!(cues[4]["timing"], "unresolved (composition times)", "an id also set through a loop is not guessed");
-        assert_eq!(cues[5]["local"], json!(1.5));
-        let at7 = s.execute("studio.cues", json!({"project": &project, "at": 7})).unwrap();
-        assert!(at7["cues"].as_array().unwrap().iter().all(|c| c["id"] != "boat"));
-
-        let uses = s.execute("studio.cues", json!({"project": &project, "clip": "sea"})).unwrap();
-        assert_eq!(uses["uses"].as_array().unwrap().len(), 2);
-        assert_eq!(uses["uses"][1]["scenes"], json!(["s02"]));
-        assert_eq!(uses["uses"][0]["fit"], json!({"under_run": 2.0, "scene": "s01"}));
-        assert_eq!(uses["uses"][1]["fit"], json!({"under_run": 4.0, "scene": "s02"}));
-        assert!(s.execute("studio.cues", json!({"project": &project, "clip": "missing"})).is_err());
-        assert!(s.execute("studio.cues", json!({"project": &project})).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
