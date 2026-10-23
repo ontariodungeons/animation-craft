@@ -452,7 +452,8 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         "video_server": server,
         "asset_files": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
         "studio": {"name": studio_info.name, "intent": studio_info.intent, "source": studio_info.source},
-        "video_project": active_target_path.or(fcproj),
+        "video_project": s.video_project_path.clone().or_else(|| active_target_path.or(fcproj)),
+        "video_project_path": s.video_project_path,
         "stages": stages
     }))
 }
