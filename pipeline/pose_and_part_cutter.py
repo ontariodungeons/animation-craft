@@ -67,9 +67,12 @@ def _find_photocraft_cli() -> str | None:
         proc = subprocess.run([cand, '--version'], capture_output=True, text=True, timeout=5)
     except OSError:
         return None
-    if '0.10.' in proc.stdout or '0.11.' in proc.stdout or '1.' in proc.stdout:
-        return cand
-    return None
+    version = re.match(r'^photocraft-cli\s+(\d+)\.(\d+)\.(\d+)\b', proc.stdout.strip())
+    if proc.returncode or not version or tuple(map(int, version.groups())) < (0, 10, 0):
+        detail = (proc.stdout or proc.stderr).strip() or f'exit {proc.returncode}'
+        raise RuntimeError(f'Unsupported PhotoCraft CLI {cand}: {detail}. Requires >= 0.10.0; '
+                           'set PHOTOCRAFT_CLI to the matching installed CLI executable.')
+    return cand
 
 
 def _find_vectorcraft_cli() -> str | None:

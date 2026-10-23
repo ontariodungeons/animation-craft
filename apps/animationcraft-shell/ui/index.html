@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Magic Studio</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
+      <span id="project-name">Magic Studio</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="project" role="tab" aria-selected="true">Project</button>
+      <button class="tab" data-view="animation" role="tab" aria-selected="false" title="Animate objects and polish their motion">Animation</button>
+      <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
+      <span class="tab-ink" aria-hidden="true"></span>
+    </nav>
+    <button class="icon agent-toggle" id="agent-toggle" aria-label="Agent" title="Agent · chat, point at anything (Ctrl+/)">
+      <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"/></svg>
+    </button>
+    <button class="target" id="target" aria-label="Studio server: click to start or stop" title="Studio server · click to start or stop">
+      <span class="dot off" id="server-dot"></span><span id="target-name">—</span>
+    </button>
+  </header>
+
+  <main>
+    <section class="view" id="view-home" aria-label="Home">
+      <div class="home">
+        <div class="home-hero">
+          <svg class="home-mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="6" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.6" /></svg>
+          <div>
+            <h1>Magic Studio</h1>
+            <p class="muted">Songs into animated films.</p>
+          </div>
+          <div class="home-actions">
+            <button class="start" id="home-new" title="New song project (Ctrl+N)">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New song</span><kbd>Ctrl+N</kbd></button>
+            <button class="ghost" id="home-open" data-commands="project.open" title="Open a project (Ctrl+O)">
+              <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open…</span><kbd>Ctrl+O</kbd></button>
+          </div>
+        </div>
+        <div class="group-label" id="recent-label">Recent</div>
+        <div class="recent" id="recent"></div>
+      </div>
+      <div class="sheet-backdrop" id="new-sheet" aria-hidden="true">
+        <form class="sheet" id="new-form" aria-label="New song project">
+          <h2>New song</h2>
+          <label>Song name<input id="new-name" placeholder="Bumble Bee" autocomplete="off" required /></label>
+          <label>Song audio
+            <span class="pick"><input id="new-audio" placeholder="Choose the song's audio file" readonly required />
+              <button type="button" class="ghost" id="new-audio-pick" title="Choose the audio file">Choose…</button></span></label>
+          <label>Folder
+            <span class="pick"><input id="new-root" readonly required />
+              <button type="button" class="ghost" id="new-root-pick" title="Choose where the project folder goes">Choose…</button></span></label>
+          <p class="faint" id="new-where"></p>
+          <div class="sheet-actions">
+            <button type="button" class="ghost" id="new-cancel">Cancel</button>
+            <button type="submit" class="start" id="new-create" data-commands="project.intake">Create</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    <section class="view active" id="view-project" aria-label="Project workspace">
+      <div class="project-body">
+        <!-- Left rail: collapsible blocks (song workflow) -->
+        <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
+
+        <!-- Main: storyboard title cards -->
+        <section class="storyboard" aria-label="Storyboard">
+          <div class="sb-head">
+            <button class="icon" id="project-details" title="Show or hide project details" aria-label="Show or hide project details"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+            <div class="chips" id="sb-chips" role="tablist"></div>
+            <button id="sb-save-version" class="save-icon" title="Save new version" aria-label="Save new version"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M12 17a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg></button>
+            <div class="sb-nav">
+              <button class="icon" id="sb-prev" aria-label="Previous page" title="Previous page"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
+              <span id="sb-page">—</span>
+              <button class="icon" id="sb-next" aria-label="Next page" title="Next page"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg></button>
+              <button class="icon" id="sb-pdf" aria-label="Open the storyboard PDF" title="Open the storyboard PDF"><svg viewBox="0 0 24 24"><path d="M14 3h7v7" /><path d="M21 3l-9 9" /><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg></button>
+            </div>
+          </div>
+          <div class="sb-title-wrap" id="sb-title-wrap">
+            <div class="sb-title-cards" id="sb-cards"></div>
+          </div>
+        </section>
+      </div>
+
+
+    </section>
+
+    <section class="view" id="view-animation" aria-label="Animation workspace"></section>
+    <section class="view" id="view-studio">
+      <div class="studio-slot" id="studio-slot"></div>
+      <div class="studio-empty" id="studio-empty">
+        <p>The studio is off.</p>
+        <p class="muted">It only runs when you need it.</p>
+        <button class="start" id="studio-start">Start the studio</button>
+      </div>
+    </section>
+  </main>
+      <!-- The existing agent, image composer, and project parts share one right workstation. -->
+      <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation">
+        <div class="magic-workstation-title">Magic Studio</div>
+        <section class="magic-pane magic-chat-pane" id="magic-chat-pane" aria-label="Sproket chat">
+          <div id="magic-target-chat" class="magic-target">No part selected</div>
+      <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
+        <div class="agent-head">
+          <span class="agent-title">Sproket</span>
+          <div class="agent-head-actions">
+            <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+            <button class="ghost" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
+            <button class="icon" id="agent-close" aria-label="Close the agent panel" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+        </div>
+        <div class="agent-pickers">
+          <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
+          <button class="ghost" id="agent-config-toggle" title="Agent settings: agent, model, thinking">Settings</button>
+        </div>
+        <div class="agent-config" id="agent-config" hidden>
+          <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
+          <label>Provider<input id="agent-provider" list="agent-providers" placeholder="CLI default" title="Exact provider ID; choose from the installed catalog" /><datalist id="agent-providers"></datalist></label>
+          <label>Model<input id="agent-model" list="agent-models" placeholder="CLI default" title="Exact model ID; saved for both app and CLI" /><datalist id="agent-models"></datalist></label>
+          <button class="ghost" id="agent-catalog-refresh" title="Read the installed model catalog without inference">Refresh models</button>
+          <small id="agent-catalog-status" role="status"></small>
+          <small>Messages start fresh. Chat settings are separate from image generation.</small>
+          <label>Thinking<select id="agent-thinking" title="Reasoning effort">
+            <option value="">default</option><option value="off">off</option><option value="low">low</option>
+            <option value="medium">medium</option><option value="high">high</option></select></label>
+          <label>Extra args<input id="agent-extra" placeholder="--flag value" title="Extra command-line arguments" /></label>
+          <button class="start" id="agent-config-save" title="Save the agent settings">Save</button>
+        </div>
+        <div class="agent-log" id="agent-log" aria-live="polite"></div>
+        <div class="agent-attachments" id="agent-attachments"></div>
+        <div class="agent-compose">
+          <textarea id="agent-input" rows="3" placeholder="Describe a change…" aria-label="Message" title="Enter to send · Shift+Enter for a new line · Ctrl+Enter also sends"></textarea>
+          <div class="agent-actions">
+            <button class="ghost" id="agent-point" title="Point: click anything in the app to attach a picture of it">
+              <svg viewBox="0 0 24 24"><path d="M4 4l7 16 2.5-6.5L20 11z"/></svg><span>Point</span></button>
+            <span class="agent-status" id="agent-status"></span>
+            <button class="start" id="agent-send">Send</button>
+          </div>
+        </div>
+      </aside>
+        </section>
+        <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Sproket and image generation sections" data-splitter="chat"></div>
+        <section class="magic-pane magic-image-pane" id="magic-image-pane" aria-label="Image generation">
+          <div class="magic-pane-head"><span>Image generation</span><span id="magic-target-image" class="magic-target">No part selected</span></div>
+          <div id="magic-image-tools" class="magic-image-tools"></div>
+        </section>
+        <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize image generation and fish parts sections" data-splitter="image"></div>
+        <section class="magic-pane magic-parts-pane" id="magic-parts-pane" aria-label="Fish parts and assets">
+          <div class="magic-pane-head"><span>Fish parts &amp; assets</span><span id="magic-target-parts" class="magic-target">No part selected</span></div>
+          <div id="magic-parts-slot" class="magic-parts-slot"></div>
+        </section>
+      </aside>
+  <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="feedback.js"></script>
+  <script src="app.js"></script>
+  <script src="image-prompt.js"></script>
+  <script src="animation.js"></script>
+  <script src="sequence.js"></script>
+  <script src="agent.js"></script>
+  <script src="home.js"></script>
+  <script src="bridge.js"></script>
+</body>
+</html>

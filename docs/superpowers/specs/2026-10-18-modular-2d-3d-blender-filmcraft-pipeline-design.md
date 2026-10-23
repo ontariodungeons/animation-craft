@@ -1,9 +1,10 @@
 # Modular Image-to-Animation Studio, Blender 5.3 Bridge & FilmCraft Video Pipeline Design
 
-> **Historical design reference — not the active implementation plan.**
-> The current application is Rust/egui; see [README](../../../README.md) and the current user assignment.
-> Statements below about inline/shared-checkout work, untracked baselines, old ports,
-> tool versions, completion status, or required new features are historical, not instructions.
+> **Historical design reference — not current operating instructions.**
+> The current Magic Studio application is the Tauri shell; use [README](../../../README.md)
+> and `mc --help` for its canonical CLI. `studio_pipeline_cli.py` remains an internal engine adapter.
+> Its older unified-CLI/browser descriptions, shared-checkout steps, ports, tool versions,
+> completion claims and proposed features below are historical, not instructions.
 
 
 Date: 2026-10-18
