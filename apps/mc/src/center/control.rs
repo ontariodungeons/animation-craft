@@ -10,7 +10,11 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
             if key.modifiers.contains(KeyModifiers::CONTROL)&&key.code==KeyCode::Char('s'){
                 c.execute("project.save",json!({}));return Flow::Continue;
             }
-            if key.code==KeyCode::F(9){if c.poke.is_some(){c.message="Finish or cancel the note before opening project chat.".into();}else{c.chat_editing=!c.chat_editing;}return Flow::Continue;}
+            if key.code==KeyCode::F(9){
+                if c.poke.is_some()||c.show_form{c.message="Finish or cancel the current composer/intake before opening Sproket.".into();}
+                else if c.chat_editing{c.chat_editing=false;}else if let Err(error)=open_chat(c){c.message=error;}
+                return Flow::Continue;
+            }
             if let Some(poke)=c.poke.clone(){
                 match key.code{
                     KeyCode::Esc=>c.poke=None,
@@ -27,7 +31,7 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
                 }
                 return Flow::Continue;
             }
-            if c.chat_editing {match key.code{KeyCode::Esc=>c.chat_editing=false,KeyCode::Enter=>c.send_chat(),KeyCode::Backspace=>{c.chat_draft.pop();},KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL)=>c.chat_draft.push(ch),_=>{}}return Flow::Continue;}
+            if c.chat_editing {match key.code{KeyCode::Esc=>c.chat_editing=false,KeyCode::Enter=>c.send_chat(),KeyCode::Backspace=>{c.chat_draft.pop();},KeyCode::PageUp=>c.scroll=c.scroll.saturating_add(4),KeyCode::PageDown=>c.scroll=c.scroll.saturating_sub(4),KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL)=>c.chat_draft.push(ch),_=>{}}return Flow::Continue;}
             if !c.show_form&&key.code==KeyCode::Char('g'){
                 return self::key(c,KeyEvent::new(KeyCode::F(3),KeyModifiers::NONE));
             }
@@ -152,14 +156,28 @@ fn select_agent(c:&mut Center,p:&Value)->Result<(),String>{
  if index>agents.len(){return Err("Agent index is out of range".into());}
  c.gang_selected=index;c.spy=None;c.spy_at=None;c.scroll=0;Ok(())
 }
+fn open_chat(c:&mut Center)->Result<(),String>{
+ let target=if c.view_name()=="workshop"{workshop::selected(c).and_then(|p|p["path"].as_str())}else{c.state["project"].as_str()}.ok_or("Chat blocked: choose a project first.")?.to_owned();
+ if !c.chat_draft.is_empty(){
+  let origin=c.chat_draft_project.as_deref().or(c.state["project"].as_str());
+  if origin!=Some(target.as_str()){return Err("Chat blocked: retained draft belongs to another project. Reopen that project to continue.".into());}
+ }
+ if c.view_name()=="workshop"{
+  c.observe_selected();
+  if c.state["project"].as_str()!=Some(target.as_str())||c.session.project_path.as_ref().map(|p|p.to_string_lossy()).as_deref()!=Some(target.as_str()){
+   return Err(format!("Chat blocked: selected project could not be attached. {}",c.message));
+  }
+ }
+ c.chat_draft_project=Some(target);c.chat_editing=true;c.scroll=0;Ok(())
+}
 pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
  let previous_message=c.message.clone();
  for field in ["index","sequence"]{if p.get(field).is_some()&&!p[field].is_u64(){return Err(format!("{field}= must be a nonnegative integer"));}}
  if p.get("append").is_some()&&!p["append"].is_boolean(){return Err("append= must be true or false".into());}
- if c.show_form&&matches!(name,"view"|"agent"|"project"|"project.select"|"project.open-selected"|"project.inactive"|"event"|"events"){return Err("Intake is open. Use key key=F4 to close it before changing views.".into());}
+ if c.show_form&&matches!(name,"view"|"agent"|"project"|"project.select"|"project.open-selected"|"project.inactive"|"chat"|"chat.send"|"event"|"events"){return Err("Intake is open. Use key key=F4 to close it before changing views.".into());}
  if c.poke.is_some()&&matches!(name,"chat"|"chat.send"){return Err("A note composer is open; finish or cancel that note first".into());}
  if c.chat_editing&&name=="note"{return Err("Project chat is open; finish or cancel it before composing an agent note".into());}
- if !matches!(name,"look"|"read"|"status"|"controls"|"key"|"text"|"note"|"note.send"|"note.cancel"|"chat"|"chat.send"|"cancel"|"submit"|"scroll")&&(c.poke.is_some()||c.chat_editing){return Err("A composer is open. Finish or cancel it before changing views.".into());}
+ if !matches!(name,"look"|"read"|"status"|"controls"|"key"|"text"|"note"|"note.send"|"note.cancel"|"chat"|"chat.send"|"chat.close"|"cancel"|"submit"|"scroll")&&(c.poke.is_some()||c.chat_editing){return Err("A composer is open. Finish or cancel it before changing views.".into());}
  let mut flow=Flow::Continue;
  match name{
   "look"|"read"|"status"|"controls"=>{},
@@ -217,7 +235,8 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
   },
   "note.send"=>{if c.poke.as_ref().is_none_or(|p|p.text.trim().is_empty()){return Err("No nonempty note draft is open".into());}flow=press(c,KeyCode::Enter);if c.poke.is_some(){return Err(c.message.clone());}},
   "note.cancel"=>{if c.poke.is_some(){flow=press(c,KeyCode::Esc);}},
-  "chat"=>{if !c.chat_editing{flow=press(c,KeyCode::F(9));}if p.get("text").is_some(){let text=input_text(p,"text")?;if p["append"]==true{c.chat_draft.push_str(&text);}else{c.chat_draft=text;}}},
+  "chat"=>{if !c.chat_editing{flow=press(c,KeyCode::F(9));}if !c.chat_editing{return Err(c.message.clone());}if p.get("text").is_some(){let text=input_text(p,"text")?;if p["append"]==true{c.chat_draft.push_str(&text);}else{c.chat_draft=text;}}},
+  "chat.close"=>{if c.chat_editing{flow=press(c,KeyCode::Esc);}},
   "chat.send"=>{
    if !c.chat_editing||c.chat_draft.trim().is_empty(){return Err("No nonempty chat draft is open".into());}
    if c.chat_receiver.is_some(){return Err("A chat submission is already pending".into());}
@@ -285,7 +304,8 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
  let elements:Vec<_>=c.hits.borrow().iter().map(|h|json!({"id":h.id,"label":h.label,"enabled":h.enabled,"rect":{"x":h.area.x,"y":h.area.y,"width":h.area.width,"height":h.area.height},"action":h.action,"params":h.params})).collect();
  let controls:Vec<_>=crate::tui::CONTROLS.iter().map(|(action,description)|json!({"action":action,"description":description})).collect();
  json!({"schema":"mc.tui/1","instance":std::process::id(),"endpoint":endpoint,"frame":frame,"rendered_unix_ms":crate::worker::now_ms(),"acknowledgement":"actual frame rendered",
-  "view":if c.show_form{"intake"}else if c.poke.is_some(){"note"}else if c.event_open{"event"}else{c.view_name()},"tab":c.view_name(),"project":c.state["project"],"message":c.message,
+  "view":if c.show_form{"intake"}else if c.poke.is_some(){"note"}else if c.chat_editing{"chat"}else if c.event_open{"event"}else{c.view_name()},"tab":c.view_name(),"project":c.state["project"],"message":c.message,
+  "project_overview":booth::overview(c),"artwork_motion":worker_observation(c).is_some_and(booth::motion_active),
   "status_line":crate::snapshot::status_strip(&c.state["snapshot"]),"timecode":c.state["snapshot"]["playhead_sec"].as_f64().zip(c.state["snapshot"]["fps"].as_f64()).map(|(seconds,fps)|timecode(seconds,fps)),
   "screen":{"columns":area.width,"rows":area.height,"lines":lines},"studio":c.state["ui"],"snapshot":c.state["snapshot"],
   "agents":agents,"agent_detail":{"pane":c.selected_agent().map(|a|a["pane_id"].clone()),"output":c.spy,"age_ms":c.spy_at.map(|t|t.elapsed().as_millis())},
@@ -293,7 +313,7 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
   "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"logs":c.logs,"usage":c.usage,
   "workshop":{"discovery":{"observed_at_ms":c.studios["observed_at_ms"],"pending":c.studios_receiver.is_some(),"error":c.studios["observation_error"],"errors":c.studios["errors"]},"cards":workshop::observations(c),"selected_project":workshop::selected(c),"inactive_expanded":workshop::expanded(c),"visible_order":workshop::order(c),"columns":c.catalog_columns.get()},
   "selected":{"agent":c.gang_selected,"project":c.catalog_selected,"stage":c.stage_selected,"event":c.event_index,"command":c.command_selected,"scroll":c.scroll},
-  "composers":{"note":c.poke.as_ref().map(|p|json!({"pane":p.target,"name":p.name,"text":p.text,"delivery":"unsent draft"})),"chat":{"open":c.chat_editing,"text":c.chat_draft}},
+  "composers":{"note":c.poke.as_ref().map(|p|json!({"pane":p.target,"name":p.name,"text":p.text,"delivery":"unsent draft"})),"chat":{"open":c.chat_editing,"text":c.chat_draft,"project":c.chat_draft_project}},
   "elements":elements,"intake":{"open":c.show_form,"editing":c.editing,"selected":c.selected,"fields":fields},"commands":commands,"controls":controls})
 }
 pub(super) fn reload(c:&Center)->Result<(),String>{
