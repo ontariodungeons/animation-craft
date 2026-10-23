@@ -95,6 +95,7 @@ pub fn render(s: &mut Session, p: &Value) -> Result<Value> {
 fn accepted_result(source: &Value, result: &Value, receipt: &Path) -> Result<Value> {
     if result["state"]!="completed" || result["partial"]!=false {return Err(bad("Accept requires a completed full render; partial previews are not accepted"));}
     if result["backend"]!=source["backend"] || result["source_id"]!=source["id"] || result["source_revision"]!=source["revision"] {return Err(bad("Render belongs to a different or stale source revision"));}
+    if result.pointer("/alpha_evidence/clip_max").and_then(Value::as_u64)==Some(0) {return Err(bad("Rendered clip is fully transparent; inspect the native scene before accepting"));}
     let clip=PathBuf::from(text(result,"clip")?);
     let metadata=fs::metadata(&clip)?;
     if !metadata.is_file() || metadata.len()>512*1024*1024 {return Err(bad("Accepted clip must be a regular file no larger than 512 MiB"));}
@@ -134,6 +135,9 @@ mod tests {
         result["partial"]=json!(false);result["source_revision"]=json!(1);
         assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("stale"));
         result["source_revision"]=json!(2);
+        result["alpha_evidence"]=json!({"clip_max":0});
+        assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("fully transparent"));
+        result["alpha_evidence"]=Value::Null;
         assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("hash changed"));
         fs::remove_dir_all(root).unwrap();
     }

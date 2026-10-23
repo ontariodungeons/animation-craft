@@ -18,7 +18,7 @@ Backends: `blender` (.blend), `synfig` (.sif/.sifz), `opentoonz` (.tnz), and `ml
   ordinary job identity plus `source_id`/`source_revision`, also persisted in job
   metadata. Rendering does not change the registration revision.
 - `animation.source.accept {expected_project,id,expected_revision,job}` accepts
-  only a matching completed full job. Partial previews, stale source revisions,
+  only a matching completed full job. Partial previews, entirely transparent clips, stale source revisions,
   different backends and changed clip hashes are rejected. Clip hashing streams
   from disk; files over 512 MiB are refused. Success increments the source revision.
   `accepted` includes job/clip/hash, receipt path, timing/canvas/world rectangle and
