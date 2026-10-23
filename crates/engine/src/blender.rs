@@ -130,6 +130,7 @@ fn started_at(state: &Value) -> Value {
 fn job_details(dir: &Path) -> Result<Value> {
     let mut details = read_json(&dir.join("job.json"))?;
     for key in [
+        "backend",
         "limits",
         "submitted_at",
         "started_at",
@@ -149,6 +150,7 @@ fn job_details(dir: &Path) -> Result<Value> {
 }
 fn add_job_details(value: &mut Value, details: &Value) {
     for key in [
+        "backend",
         "limits",
         "submitted_at",
         "started_at",
@@ -171,7 +173,7 @@ fn owner_observation(state: &Value, details: Option<&Value>, error: Option<Strin
             start = matching.map_or(Value::Null, |d| d["started_at"].clone());
         }
         json!({"job":id,"job_id":id,"project":matching.map(|d|&d["project"]),"unit":UNIT,
-            "invocation_id":state["InvocationID"],"updated_at":now(),"service_state":state["ActiveState"],
+            "backend":matching.map(|d|&d["backend"]),"invocation_id":state["InvocationID"],"updated_at":now(),"service_state":state["ActiveState"],
             "state":if state["ActiveState"]=="deactivating" || matching.is_some_and(|d|!d["cancellation_requested_at"].is_null()){"cancelling"}else{"running"},
             "limits":matching.map(|d|&d["limits"]),"submitted_at":matching.map(|d|&d["submitted_at"]),
             "started_at":start,"cancellation_requested_at":matching.map(|d|&d["cancellation_requested_at"])})
@@ -190,9 +192,9 @@ fn worker_owner(observed: &Result<Value>) -> Value {
             if !matches!(
                 state["ActiveState"].as_str(),
                 Some("active" | "activating" | "deactivating" | "reloading")
-            ) || !state["Description"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("magicstudio-blender-")) =>
+            ) || !state["Description"].as_str().is_some_and(|id| {
+                id.starts_with("magicstudio-blender-") || id.starts_with("magicstudio-native-")
+            }) =>
         {
             json!({"worker_owner":Value::Null,"worker_owner_status":"unavailable","worker_owner_error":"No recognizable worker job identity/state was observed"})
         }
@@ -241,10 +243,10 @@ fn job(s: &Session, p: &Value) -> Result<(String, PathBuf)> {
     let id = p["job"]
         .as_str()
         .ok_or_else(|| invalid("job is required"))?;
-    if !id.starts_with("magicstudio-blender-")
+    if !(id.starts_with("magicstudio-blender-") || id.starts_with("magicstudio-native-"))
         || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
     {
-        return Err(invalid("Invalid Blender job id"));
+        return Err(invalid("Invalid animation job id"));
     }
     let dir = root(s)?.join(id);
     if !dir.join("request.json").is_file() {
@@ -318,6 +320,20 @@ pub fn cmd_blender_actions(s: &mut Session, p: &Value) -> Result<Value> {
         json!({"character":asset.id,"tracks":tracks,"layers":[],"canvas":spec.get("canvas").unwrap_or(&raw["canvas_size"]),"spec":path}),
     )
 }
+/// Helpers must validate the complete request's job against their actual cgroup invocation.
+pub(crate) fn require_worker_invocation(request: &Value) -> Result<()> {
+    let active = service()?;
+    if active["Description"] != request["job"]
+        || active["InvocationID"].as_str() != std::env::var("INVOCATION_ID").ok().as_deref()
+        || !occupied(&active)
+    {
+        return Err(invalid(
+            "Native preparation must run inside the selected bounded worker service",
+        ));
+    }
+    Ok(())
+}
+
 /// Only the headless helper evaluates legacy motion; never attach a Studio project here.
 pub fn cmd_blender_prepare(s: &mut Session, p: &Value) -> Result<Value> {
     if s.project_path.is_some() {
@@ -331,15 +347,7 @@ pub fn cmd_blender_prepare(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| invalid("request is required"))?,
     );
     let request = read_json(&path)?;
-    let active = service()?;
-    if active["Description"] != request["job"]
-        || active["InvocationID"].as_str() != std::env::var("INVOCATION_ID").ok().as_deref()
-        || !occupied(&active)
-    {
-        return Err(invalid(
-            "Preparation must run inside the selected bounded worker service",
-        ));
-    }
+    require_worker_invocation(&request)?;
     let mut asset: crate::ProjectAsset =
         serde_json::from_value(request["asset"].clone()).map_err(|e| invalid(e.to_string()))?;
     let spec = asset
@@ -418,16 +426,6 @@ pub fn cmd_blender_prepare(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"ok":true,"prepared":true}))
 }
 pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
-    let _slot = worker_lock()?;
-    let active = service()?;
-    if occupied(&active) {
-        return Err(invalid(format!(
-            "Animation worker is busy with {}; finish or cancel it first",
-            active["Description"]
-        )));
-    }
-    let memory = bounded(p, "memory_mb", 4096, 512, 8192)?;
-    let seconds = bounded(p, "timeout_seconds", 300, 10, 3600)?;
     let mut request = json!({"resolution_percent":bounded(p,"resolution_percent",50,10,100)?,
         "max_frames":bounded(p,"max_frames",90,1,18000)?,"unit":UNIT,"project":s.project_path,"character":p["character"],"track":p["track"]});
     if let Some(path) = p["blend"].as_str() {
@@ -464,11 +462,35 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         }
         request["mc"] = json!(executable);
     }
+    submit(s, p, request, "blender")
+}
+
+/// All native backends use the same slot, lock, limits, receipts and cancellation.
+/// Keep the historical job directory so existing Blender receipts remain readable.
+pub(crate) fn submit(s: &Session, p: &Value, mut request: Value, backend: &str) -> Result<Value> {
+    let _slot = worker_lock()?;
+    let active = service()?;
+    if occupied(&active) {
+        return Err(invalid(format!(
+            "Animation worker is busy with {}; finish or cancel it first",
+            active["Description"]
+        )));
+    }
+    let memory = bounded(p, "memory_mb", 4096, 512, 8192)?;
+    let seconds = bounded(p, "timeout_seconds", 300, 10, 3600)?;
+    request["unit"] = json!(UNIT);
+    request["project"] = json!(s.project_path);
+    request["backend"] = json!(backend);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| invalid(e.to_string()))?
         .as_nanos();
-    let id = format!("magicstudio-blender-{}-{stamp}", std::process::id());
+    let kind = if backend == "blender" {
+        "blender"
+    } else {
+        "native"
+    };
+    let id = format!("magicstudio-{kind}-{}-{stamp}", std::process::id());
     request["job"] = json!(id);
     request["limits"] = json!({"memory_max_bytes":memory*1024*1024,"swap_max_bytes":0,"cpu_quota_percent":200,"timeout_seconds":seconds});
     request["submitted_at"] = json!((stamp / 1_000_000).to_string());
@@ -479,7 +501,7 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
     write_json(
         &dir.join("job.json"),
         &json!({"job":id,"job_id":id,"unit":UNIT,"project":s.project_path,
-        "created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"],
+        "backend":backend,"created_ns":stamp.to_string(),"character":p["character"],"track":p["track"],"source_blend":request["blend"],
         "limits":request["limits"],"submitted_at":request["submitted_at"],"started_at":Value::Null,"cancellation_requested_at":Value::Null}),
     )?;
     write_json(
@@ -491,7 +513,33 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         &worker,
         include_str!("../../../pipeline/blender_animation_worker.py"),
     )?;
-    let blender = std::env::var("BLENDER_BIN").unwrap_or_else(|_| "blender".into());
+    let command: Vec<String> = if backend == "blender" {
+        vec![
+            std::env::var("BLENDER_BIN").unwrap_or_else(|_| "blender".into()),
+            "--background".into(),
+            "--factory-startup".into(),
+            "--disable-autoexec".into(),
+            "--threads".into(),
+            "2".into(),
+            "--python-exit-code".into(),
+            "1".into(),
+            "--python".into(),
+            worker.to_string_lossy().into_owned(),
+            "--".into(),
+            request_path.to_string_lossy().into_owned(),
+        ]
+    } else {
+        let native = dir.join("native_worker.py");
+        fs::write(
+            &native,
+            include_str!("../../../pipeline/native_animation_worker.py"),
+        )?;
+        vec![
+            "/usr/bin/python3".into(),
+            native.to_string_lossy().into_owned(),
+            request_path.to_string_lossy().into_owned(),
+        ]
+    };
     write_json(&owner_path()?, &json!({"job":id,"directory":dir}))?;
     // systemd-run waits for the start transaction while holding the start/cancel lock.
     let output = Command::new("systemd-run")
@@ -521,21 +569,8 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
             systemd_quote(&worker),
             systemd_quote(&request_path)
         ))
-        .args([
-            "--",
-            &blender,
-            "--background",
-            "--factory-startup",
-            "--disable-autoexec",
-            "--threads",
-            "2",
-            "--python-exit-code",
-            "1",
-            "--python",
-        ])
-        .arg(&worker)
         .arg("--")
-        .arg(&request_path)
+        .args(&command)
         .output();
     let submission_error = match output {
         Ok(output) if output.status.success() => None,
@@ -680,6 +715,19 @@ pub fn cmd_blender_cancel(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_unit_owner_is_observed_without_claiming_another_project() {
+        let state = json!({"ActiveState":"active", "Description":"magicstudio-native-unmatched",
+            "InvocationID":"native-invocation"});
+        let observation = worker_owner(&Ok(state));
+        assert_eq!(
+            observation["worker_owner"]["job"],
+            "magicstudio-native-unmatched"
+        );
+        assert!(observation["worker_owner"]["project"].is_null());
+        assert!(observation["worker_owner_error"].is_string());
+    }
 
     #[test]
     fn action_discovery_never_decodes_artwork_and_bounds_input() {

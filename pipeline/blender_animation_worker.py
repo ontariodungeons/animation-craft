@@ -172,7 +172,7 @@ def finalize(request_path):
         metrics[field] = int(value) if value.isdigit() and int(value) != 2**64-1 else None
     progress_path = job/'progress.json'
     progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
-    result.update(job=request['job'], job_id=request['job'], project=request['project'],
+    result.update(backend=request.get('backend', 'blender'), job=request['job'], job_id=request['job'], project=request['project'],
                   unit=request['unit'], invocation_id=invocation, updated_at=str(time.time_ns()//1_000_000),
                   state=state, limits=metadata['limits'], submitted_at=metadata['submitted_at'],
                   started_at=metadata['started_at'], cancellation_requested_at=metadata['cancellation_requested_at'],

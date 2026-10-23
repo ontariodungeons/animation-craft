@@ -94,6 +94,7 @@ const fn is_long_running_id(id: &str) -> bool {
         id.as_bytes(),
         b"project.intake"
             | b"blender.start"
+            | b"synfig.start"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -194,6 +195,12 @@ pub fn build() -> Vec<CommandSpec> {
     vec![
         cmd!("blender.start", "Build / Render Blender Animation", ["Animation"], None,
             "{\"character\":\"rig id for initial migration\",\"track\":\"track id\",\"blend\":\"optional saved .blend instead of migration\",\"resolution_percent\":50,\"max_frames\":90,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::blender::cmd_blender_start),
+        query!("synfig.discover", "Discover Synfig Native Renderer", "{}", crate::synfig::discover),
+        cmd!("synfig.start", "Render Saved Synfig Scene", ["Animation"], None,
+            "{\"source\":\"saved .sif/.sifz\",\"bundle\":\"self-contained source directory\",\"first_frame\":0,\"last_frame\":23,\"fps\":24,\"width\":512,\"height\":512,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::synfig::start),
+        query!("animation.status", "Native Animation Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
+        query!("animation.list", "Native Animation Jobs and Global Owner", "{}", crate::blender::cmd_blender_list),
+        query!("animation.cancel", "Cancel Native Animation Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
         query!("blender.actions", "Saved Blender Migration Actions", "{\"character\":\"rig id\"}", crate::blender::cmd_blender_actions),
         query!("blender.prepare", "Headless Bounded Migration Preparation", "{\"request\":\"worker request.json\"}", crate::blender::cmd_blender_prepare),
         query!("blender.status", "Blender Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
@@ -443,7 +450,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
-        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file; omit with blender_job\",\"blender_job\":\"optional completed full Blender job id; uses its verified clip, maps rect (the original canvas) to the rendered frame and keeps its frozen provenance\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
+        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file; omit with blender_job\",\"animation_job\":\"optional completed native animation job id\",\"blender_job\":\"optional completed full Blender job id; uses its verified clip, maps rect (the original canvas) to the rendered frame and keeps its frozen provenance\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
         cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
             "{\"target\": \"remotion|filmcraft|hyperframes\"}", always, cmd_workshop_set_target),
         cmd!("workshop.add", "Add Liner Notes / Panels / Assets", ["Workshop"], None,

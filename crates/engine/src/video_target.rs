@@ -582,8 +582,9 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let dir=project_dir(s)?;
     if s.video_target!="hyperframes"{return Err(EngineError::InvalidParams("Select HyperFrames before placing this track".into()));}
     let mut request=params.clone();
-    if let Some(job)=params.get("blender_job"){
-        request=blender_job_request(s,params,job)?;
+    if params.get("blender_job").is_some() && params.get("animation_job").is_some(){return Err(EngineError::InvalidParams("Pass only one animation job selector".into()));}
+    if let Some(job)=params.get("animation_job").or_else(||params.get("blender_job")){
+        request=animation_job_request(s,params,job)?;
     } else if params.get("character").is_some() || params.get("track").is_some(){
         let character=params["character"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
         let track=params["track"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
@@ -604,14 +605,14 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
 }
 
-/// Resolve a completed project-local Blender receipt: verified clip, canvas rect mapped to the
+/// Resolve a completed project-local animation receipt: verified clip, canvas rect mapped to the
 /// rendered world frame, and the provenance frozen at render time (the current rig is not rehashed).
-fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
+fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
     let invalid=|m:String|EngineError::InvalidParams(m);
-    if params.get("path").is_some(){return Err(invalid("Pass blender_job or path, not both".into()));}
+    if params.get("path").is_some(){return Err(invalid("Pass animation_job/blender_job or path, not both".into()));}
     let receipt=crate::blender::cmd_blender_status(s,&json!({"job":job}))?;
-    if receipt["state"]!="completed"{return Err(invalid(format!("Blender job is {}, not completed",receipt["state"])));}
-    if receipt["partial"]!=false{return Err(invalid("Blender job is a shortened preview; render the full track before placing it".into()));}
+    if receipt["state"]!="completed"{return Err(invalid(format!("Animation job is {}, not completed",receipt["state"])));}
+    if receipt["partial"]!=false{return Err(invalid("Animation job is a shortened preview; render the full track before placing it".into()));}
     let jobs=s.project_path.as_ref().and_then(|p|p.parent())
         .map(|p|p.join("animation/blender-jobs").join(receipt["job"].as_str().unwrap_or_default()))
         .ok_or_else(||invalid("Open a .magic project first".into()))?;
@@ -664,11 +665,12 @@ fn blender_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
     request["path"]=json!(clip);
     request["canvas_rect"]=params["rect"].clone();
     request["rect"]=json!([x+world[0]*scale,y+world[1]*scale,ww*scale,wh*scale]);
-    request["character"]=receipt["character"].clone();
-    request["track"]=receipt["track"].clone();
+    for key in ["character","track"]{
+        if receipt[key].is_string(){request[key]=receipt[key].clone();}
+    }
     let mut frozen=json!({"receipt":jobs.join("result.json"),"relationship":"provenance frozen when this clip was rendered; later source edits do not change it"});
-    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect"]{
-        frozen[key]=receipt[key].clone();
+    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect","source_bundle","tool","selected_range","authored_range","range_note","partial","frame_mapping","alpha_evidence"]{
+        if let Some(value)=receipt.get(key){frozen[key]=value.clone();}
     }
     request["rendered_source"]=frozen;
     Ok(request)
