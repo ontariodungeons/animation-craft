@@ -23,6 +23,12 @@ mc exec opentoonz.render scene=/abs/project/scenes/a.tnz out=/abs/job/frames fir
   tool path/hash, source bundle path/hash plus dependency hashes, range, FPS, actual
   width/height, `frame_mapping`, `first_frame`/`last_frame` and alpha-channel evidence.
   It never writes `blend`.
+- `opentoonz.render request=<job>/request.json` is worker mode. It runs only inside the
+  shared worker invocation for that job (`blender::require_worker_invocation`, the same
+  check `blender.prepare` uses), reads `scene`/`first`/`last`/`step`/`shrink`/`nthreads`
+  from the request, renders into `<job>/frames` and writes `<job>/opentoonz-manifest.json`:
+  ordered absolute PNG paths, frame mapping, first/last frame, FPS, width/height, alpha
+  evidence, tool hash and the frozen source bundle.
 
 ## Rules taken from OpenToonz source (`065cc14`)
 

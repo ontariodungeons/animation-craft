@@ -310,7 +310,30 @@ pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `opentoonz.render`: run one validated plan to a fresh folder and verify its frames.
 /// Blocking; the shared bounded worker owns limits, progress, cancellation and receipts.
+/// With `request` (a job's request.json) it runs only inside that job's worker invocation,
+/// renders into `<job>/frames` and writes `<job>/opentoonz-manifest.json`.
 pub fn cmd_opentoonz_render(s: &mut Session, p: &Value) -> Result<Value> {
+    let Some(path) = p["request"].as_str() else { return render(s, p) };
+    if s.project_path.is_some() { return Err(invalid("Worker rendering requires a separate headless worker session")); }
+    let path = PathBuf::from(path);
+    let request: Value = serde_json::from_slice(&fs::read(&path)?).map_err(|e| invalid(e.to_string()))?;
+    crate::blender::require_worker_invocation(&request)?;
+    let job = path.parent().ok_or_else(|| invalid("request has no job folder"))?;
+    let mut params = json!({"out":job.join("frames")});
+    for key in ["scene", "first", "last", "step", "shrink", "nthreads", "fps", "width", "height"] { params[key] = request[key].clone(); }
+    let mut result = render(s, &params)?;
+    let manifest = json!({"backend":"opentoonz","job":request["job"],"frames":result["frames"],"frame_mapping":result["frame_mapping"],
+        "first_frame":result["first_frame"],"last_frame":result["last_frame"],"fps":result["fps"],"width":result["width"],
+        "height":result["height"],"alpha":result["alpha"],"source_bundle":result["source_bundle"],"tool":result["tool"],"range":result["range"]});
+    let target = job.join("opentoonz-manifest.json");
+    let temporary = target.with_extension("tmp");
+    fs::write(&temporary, serde_json::to_vec_pretty(&manifest).map_err(|e| invalid(e.to_string()))?)?;
+    fs::rename(&temporary, &target)?;
+    result["manifest"] = json!(target);
+    Ok(result)
+}
+
+fn render(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer()?;
     let plan = plan(s, p)?;
     let dir = PathBuf::from(plan["frames_dir"].as_str().unwrap_or_default());

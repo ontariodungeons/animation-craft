@@ -208,7 +208,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("blender.list", "Saved Blender Jobs", "{}", crate::blender::cmd_blender_list),
         query!("blender.cancel", "Cancel Blender Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
         query!("opentoonz.discover", "OpenToonz Availability and Render Plan", "{\"scene\":\"optional .tnz path; plans without rendering\",\"first\":\"optional one-based\",\"last\":\"optional one-based\"}", crate::opentoonz::cmd_opentoonz_discover),
-        cmd!("opentoonz.render", "Render OpenToonz Scene Frames", ["Animation"], None, "{\"scene\":\".tnz path\",\"out\":\"new absolute frames folder\",\"first\":\"optional one-based\",\"last\":\"optional one-based\",\"step\":1,\"shrink\":1,\"nthreads\":2}", always, crate::opentoonz::cmd_opentoonz_render),
+        cmd!("opentoonz.render", "Render OpenToonz Scene Frames", ["Animation"], None, "{\"request\":\"worker mode: job request.json (scene, range); only inside its bounded worker\",\"scene\":\".tnz path\",\"out\":\"new absolute frames folder\",\"first\":\"optional one-based\",\"last\":\"optional one-based\",\"step\":1,\"shrink\":1,\"nthreads\":2}", always, crate::opentoonz::cmd_opentoonz_render),
         query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_attach),
         query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_identity),
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
