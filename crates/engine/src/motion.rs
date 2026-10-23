@@ -805,6 +805,8 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         "standard":t["standard"].as_bool().unwrap_or(false),
         "label":t["label"],
         "channels":summarize_track_channels(&t["motion"]),
+        "static_overrides":crate::motion_authoring::static_overrides(t, &rig.effectcraft["layers"]),
+        "authoring":crate::motion_authoring::capabilities(s,&id,t,&rig.plan_path),
     })).collect();
     // Plain image previews use a synthesized rig with no manifest path. Keep
     // replacement capture metadata absent there; normal animation inspection
@@ -871,6 +873,7 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
         json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,"image_sha256":image_sha256,
+        "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
     Ok(
@@ -969,7 +972,8 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(invalid("fps must be 1–120 and amount 0–100"));
     }
     let duration = track["duration"].as_f64().unwrap_or(1.0);
-    let count = if rest {
+    let sample_time = params.get("time").map(|v|v.as_f64().filter(|v|v.is_finite() && *v>=0.0 && *v<=duration).ok_or_else(||invalid("time must be within the action duration"))).transpose()?;
+    let count = if rest || sample_time.is_some() {
         1
     } else {
         (duration * fps).ceil() as usize + 1
@@ -986,7 +990,7 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         f64::NEG_INFINITY,
     ];
     for i in 0..count {
-        let t = (i as f64 / fps).min(duration);
+        let t = sample_time.unwrap_or_else(|| (i as f64 / fps).min(duration));
         let motion = evaluate_layered_motion_spec(rig, track, t, rest, amount / 100.0);
         let layers: Vec<_> = rig.parts.iter().map(|p| {
             let shown = asset.parts.iter().find(|x| x.name==p.id).is_none_or(|x| x.visible && (!solo || x.solo));

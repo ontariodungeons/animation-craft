@@ -96,6 +96,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"blender.start"
             | b"opentoonz.render"
             | b"synfig.start"
+            | b"motion.pose.export"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -224,6 +225,11 @@ pub fn build() -> Vec<CommandSpec> {
         query!("studio.cues", "Cues at a Song Time / Uses of a Clip (read-only)", "{\"project\":\"existing .magic path\",\"at\":43.2,\"clip\":\"clip id; give at or clip\"}", crate::studio_cues::cues),
         cmd!("project.migrate", "Migrate a Legacy .acproj to .magic", ["File"], None, "{\"path\":\"legacy .acproj file\"}", always, crate::project::cmd_project_migrate),
         cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .magic override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false,\"hyperframes_cli\":\"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::command_center::intake),
+        cmd!("motion.part.set", "Set saved action part channels", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"authored action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"motion.tracks hash\",\"position\":[0,0],\"scale\":[100,100],\"rotation\":0,\"pivot\":[0,0]}", always, crate::motion_authoring::part_set),
+        cmd!("motion.part.reset", "Reset explicit saved part fields", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"hash\",\"fields\":[\"position\",\"scale\",\"rotation\"]}", always, crate::motion_authoring::part_reset),
+        cmd!("motion.action.set", "Edit authored action metadata", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"stable action id\",\"expected_rig_sha256\":\"hash\",\"label\":\"Action name\",\"duration\":3,\"loop\":false}", always, crate::motion_authoring::action_set),
+        cmd!("motion.edit.undo", "Undo a guarded rig edit", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"expected_rig_sha256\":\"current hash\",\"undo\":\"receipt token\"}", always, crate::motion_authoring::undo),
+        cmd!("motion.pose.export", "Export and register sampled pending pose", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"action id\",\"time\":0,\"expected_rig_sha256\":\"hash\",\"theatre_state\":null,\"reference_asset\":\"optional asset ID\"}", always, crate::motion_authoring::pose_export),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
         query!("agent.session", "Current Chat Session", "{}", cmd_agent_session),
@@ -238,7 +244,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{\"free_only\":false,\"image_task\":false}", always, cmd_agent_new_chat),
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
-        query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
+        query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100,\"time\":0}", crate::motion::cmd_motion_sample),
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),
         query!("motion.clips", "List clips and their Theatre sheets", "{\"character\":\"asset id\"}", crate::theatre::list),
         cmd!("motion.clips.convert", "Give every clip its own Theatre sheet", [], None, "{\"character\":\"asset id\"}", always, crate::theatre::convert),
@@ -526,8 +532,8 @@ pub fn build() -> Vec<CommandSpec> {
             "Show All Parts",
             ["Edit"],
             None,
-            "{}",
-            has_asset,
+            "{\"character\":\"optional captured asset ID\",\"expected_project\":\"required with character\"}",
+            always,
             cmd_part_show_all
         ),
         cmd!(
@@ -591,8 +597,8 @@ pub fn build() -> Vec<CommandSpec> {
             "Set Part Visibility / Solo",
             ["Edit"],
             None,
-            "{\"part\": \"name\", \"visible\": true, \"solo\": false}",
-            has_asset,
+            "{\"character\":\"optional captured asset ID\",\"expected_project\":\"required with character\",\"part\": \"name\", \"visible\": true, \"solo\": false}",
+            always,
             cmd_part_set_state
         ),
         cmd!(
