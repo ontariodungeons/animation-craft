@@ -77,7 +77,8 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
         "connection": ui["connection"].as_str().unwrap_or("unknown"),
         "project": project,
         "subject": animation["character"],
-        "clip": animation["track"],
+        // The rest pose keeps the last track selected underneath; report the pose itself.
+        "clip": if animation["rest"] == true { json!("@rest") } else { animation["track"].clone() },
         "playhead_sec": animation["time"],
         "selected_part": animation["selected_layer"],
         "unsaved_edits": unsaved,
@@ -88,6 +89,11 @@ pub fn build(project: Option<&str>, ui: &Value, live: &Value, activity: &Value) 
         // Theatre's active sheet, as the page reports it (one sheet per clip: "<asset> / <clip>").
         "sheet": if animation.is_null() { Value::Null } else { ui["theatre"]["selected_objects"][0]["sheet"].clone() },
         "converting": converting.last().cloned().unwrap_or(Value::Null),
+        "theatre": if connected && ui["theatre"].is_object() {
+            let t = &ui["theatre"];
+            json!({"availability": t["availability"], "error": t["error"], "persistence": t["persistence"],
+                "selected_object": t["selected_objects"][0], "playing": t["sequence_playing"]})
+        } else { Value::Null },
     })
 }
 
@@ -233,7 +239,7 @@ mod tests {
     #[test]
     fn snapshot_keeps_stable_keys_and_null_when_unobserved() {
         let s = build(None, &json!({"connection": "not_observed_open"}), &json!({}), &json!({}));
-        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "unsaved_reasons", "hyperframes", "fps", "last_error", "sheet", "converting"] {
+        for key in ["schema", "observed_unix_ms", "connection", "project", "subject", "clip", "playhead_sec", "selected_part", "unsaved_edits", "unsaved_reasons", "hyperframes", "fps", "last_error", "sheet", "converting", "theatre"] {
             assert!(s.get(key).is_some(), "missing {key}");
         }
         assert!(s["subject"].is_null() && s["unsaved_edits"].is_null() && s["fps"].is_null() && s["hyperframes"].is_null());
@@ -268,6 +274,10 @@ mod tests {
         }
         let s = build(None, &ui_sheet, &page, &converting);
         assert_eq!((s["sheet"].as_str(), s["converting"].as_str()), (Some("bee / fly"), Some("@walk")));
+        assert_eq!(s["theatre"]["selected_object"]["part"], "wing");
+        let mut resting = page.clone();
+        resting["page"]["animation"]["rest"] = json!(true);
+        assert_eq!(build(None, &ui, &resting, &journal)["clip"], "@rest", "rest pose, not the last track");
         assert!(status_line(&s).contains("clip fly · sheet bee / fly") && status_line(&s).contains("converting @walk"));
         assert_eq!(tail(&converting, None).last().unwrap()["sheet"], "bee / run");
         // A page showing another project is not reported as this project's state.
