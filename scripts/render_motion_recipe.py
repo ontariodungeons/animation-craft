@@ -30,8 +30,6 @@ def inputs_for(command):
     files += [(spec_path.parent / layer['file']).resolve() for layer in spec['layers']]
     if spec.get('reference'):
         files.append((spec_path.parent / spec['reference']).resolve())
-    pipeline = Path(__file__).resolve().parent.parent / 'pipeline'
-    files += [pipeline / name for name in ('layered_motion.py', 'motion_validate.py', 'craft_cli.py')]
     files = {str(path): digest(path) for path in sorted(set(files))}
     value = {'command': command, 'files': files}
     fingerprint = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
