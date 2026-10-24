@@ -374,7 +374,7 @@ pub fn build() -> Vec<CommandSpec> {
             has_asset,
             cmd_asset_build_cutout_rig
         ),
-        cmd!("rig.from_sheet", "Rig From Sheet", ["Rig & Matting"], None, "{\"sheet\":\"rig sheet asset id or PNG (image.generate rig_parts=...)\",\"name\":\"rig id\",\"out_dir\":\"optional; default assets/characters/<name>/rig\",\"pivots\":{\"part id\":\"[u,v] in the part, 0-1; corrects a joint without a new sheet\"},\"places\":{\"part id\":\"[cx,cy] centre in canvas pixels; corrects a misplaced part\"}}", always, crate::image_cmds::cmd_rig_from_sheet),
+        cmd!("rig.from_sheet", "Rig From Sheet", ["Rig & Matting"], None, "{\"sheet\":\"rig sheet asset id or PNG (image.generate rig_parts=...)\",\"name\":\"rig id\",\"out_dir\":\"optional; default assets/characters/<name>/rig\",\"pivots\":{\"part id\":\"[u,v] in the part, 0-1; corrects a joint without a new sheet\"},\"places\":{\"part id\":\"[cx,cy] centre in canvas pixels; corrects a misplaced part\"},\"order\":[\"optional: part ids back to front\"]}", always, crate::image_cmds::cmd_rig_from_sheet),
         cmd!(
             "image.break_apart",
             "Break Image Into Parts",
