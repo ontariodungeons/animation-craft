@@ -641,6 +641,186 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
 }
 
+/// Snapshot one exact time from the project's HyperFrames scene to a single output frame.
+/// Resolves the HyperFrames CLI (never installs), validates the project has an open HyperFrames
+/// project, and produces a single frame at the given time. Output is always a new file; nothing
+/// is overwritten, nothing is guessed.
+pub fn cmd_video_snapshot(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let target = params
+        .get("target")
+        .and_then(Value::as_str)
+        .unwrap_or(&s.video_target)
+        .to_string();
+    if target != "hyperframes" {
+        return Err(EngineError::InvalidParams(
+            "video.snapshot requires target=hyperframes".into(),
+        ));
+    }
+    let hf = dir.join("hyperframes");
+    if !hf.join("hyperframes.json").is_file() && !hf.join("index.html").is_file() {
+        return Err(EngineError::InvalidParams(
+            "No HyperFrames project in this song. Run video.init with target=hyperframes first.".into(),
+        ));
+    }
+    let at = params
+        .get("at")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("video.snapshot requires at=<seconds>".into()))?;
+    let at_secs: f64 = at
+        .parse()
+        .map_err(|_| EngineError::InvalidParams(format!("at must be seconds: {at}")))?;
+    let out = params
+        .get("out")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("video.snapshot requires out=<path>".into()))?;
+    let out_path = resolve_workspace_path(s, out);
+    if out_path.exists() {
+        return Err(EngineError::InvalidParams(format!(
+            "Output already exists, refusing to overwrite: {}",
+            out_path.display()
+        )));
+    }
+    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&dir))?;
+    let dir_clone = dir.clone();
+    let output = std::process::Command::new(&cli)
+        .args([
+            "snapshot".to_string(),
+            "--project".into(),
+            dir.to_string_lossy().into_owned(),
+            "--at".into(),
+            at_secs.to_string(),
+            "--out".into(),
+            out_path.to_string_lossy().into_owned(),
+        ])
+        .current_dir(dir)
+        .output()
+        .map_err(|e| EngineError::ExternalTool(cli.display().to_string(), e.to_string()))?;
+    if !output.status.success() {
+        return Err(EngineError::ExternalTool(
+            cli.display().to_string(),
+            format!(
+                "snapshot exited {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    if !out_path.is_file() {
+        return Err(EngineError::ExternalTool(
+            cli.display().to_string(),
+            "snapshot reported success but no output file appeared".into(),
+        ));
+    }
+    Ok(json!({
+        "ok": true,
+        "command": "video.snapshot",
+        "project": dir_clone,
+        "target": "hyperframes",
+        "at": at_secs,
+        "output": out_path,
+        "provenance": "single exact frame from HyperFrames scene; nothing overwritten",
+    }))
+}
+
+/// Render a bounded slice of the HyperFrames scene to an output video.
+/// Resolves the HyperFrames CLI (never installs), validates the project, and renders with
+/// bounded workers. Output is always a new file; nothing is overwritten.
+pub fn cmd_video_render(s: &mut Session, params: &Value) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let target = params
+        .get("target")
+        .and_then(Value::as_str)
+        .unwrap_or(&s.video_target)
+        .to_string();
+    if target != "hyperframes" {
+        return Err(EngineError::InvalidParams(
+            "video.render requires target=hyperframes".into(),
+        ));
+    }
+    let hf = dir.join("hyperframes");
+    if !hf.join("hyperframes.json").is_file() && !hf.join("index.html").is_file() {
+        return Err(EngineError::InvalidParams(
+            "No HyperFrames project in this song. Run video.init with target=hyperframes first.".into(),
+        ));
+    }
+    let out = params
+        .get("out")
+        .and_then(Value::as_str)
+        .ok_or_else(|| EngineError::InvalidParams("video.render requires out=<path>".into()))?;
+    let out_path = resolve_workspace_path(s, out);
+    if out_path.exists() {
+        return Err(EngineError::InvalidParams(format!(
+            "Output already exists, refusing to overwrite: {}",
+            out_path.display()
+        )));
+    }
+    let fps = params
+        .get("fps")
+        .and_then(Value::as_f64)
+        .unwrap_or(24.0);
+    let workers = params
+        .get("workers")
+        .and_then(Value::as_u64)
+        .map(|v| v as usize)
+        .unwrap_or(4)
+        .clamp(1, 16);
+    let start = params.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+    let end = params.get("end").and_then(Value::as_f64);
+    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&dir))?;
+    let dir_clone = dir.clone();
+    let mut args = vec![
+        "render".to_string(),
+        "--project".into(),
+        dir.to_string_lossy().into_owned(),
+        "--out".into(),
+        out_path.to_string_lossy().into_owned(),
+        "--fps".into(),
+        fps.to_string(),
+        "--workers".into(),
+        workers.to_string(),
+    ];
+    if start > 0.0 {
+        args.extend(["--start".into(), start.to_string()]);
+    }
+    if let Some(e) = end {
+        args.extend(["--end".into(), e.to_string()]);
+    }
+    let output = std::process::Command::new(&cli)
+        .args(&args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| EngineError::ExternalTool(cli.display().to_string(), e.to_string()))?;
+    if !output.status.success() {
+        return Err(EngineError::ExternalTool(
+            cli.display().to_string(),
+            format!(
+                "render exited {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ));
+    }
+    if !out_path.is_file() {
+        return Err(EngineError::ExternalTool(
+            cli.display().to_string(),
+            "render reported success but no output file appeared".into(),
+        ));
+    }
+    Ok(json!({
+        "ok": true,
+        "command": "video.render",
+        "project": dir_clone,
+        "target": "hyperframes",
+        "output": out_path,
+        "fps": fps,
+        "workers": workers,
+        "start": start,
+        "end": end,
+        "provenance": "bounded render from HyperFrames scene; nothing overwritten",
+    }))
+}
+
 /// Resolve a completed project-local animation receipt: verified clip, canvas rect mapped to the
 /// rendered world frame, and the provenance frozen at render time (the current rig is not rehashed).
 fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
