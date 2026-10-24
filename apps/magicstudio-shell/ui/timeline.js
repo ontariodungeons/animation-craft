@@ -71,12 +71,12 @@ function timelineRender() {
   const meta = motion.meta, sample = motion.sample;
   const track = meta?.tracks?.find((t) => t.id === motion.track);
   if ($('theatre-info')) $('theatre-info').textContent = sample ? `Range 0.00–${sample.duration.toFixed(2)}s · ${sample.fps} fps · ${sample.loop ? 'loop' : 'once'}` : '';
-  if (!meta || !sample) { box.replaceChildren(el('p', { class: 'theatre-empty muted' }, 'Choose an action or clip to see its channels.')); return; }
+  if (!meta || !sample) { box.replaceChildren(el('p', { class: 'panel-empty inline muted' }, 'Choose an action or clip to see its channels.')); return; }
   const series = timelineSeries(sample, meta);
   const rows = (motion.rest ? [] : track?.channels || [])
     .map((channel) => { const index = meta.layers.findIndex((l) => l.id === channel.layer); return { channel, index, properties: index < 0 ? [] : timelineMoving(series[index], channel.properties) }; })
     .filter((row) => row.properties.length);
-  if (!rows.length) { box.replaceChildren(el('p', { class: 'theatre-empty muted' }, motion.rest ? 'Rest pose · nothing moves. Choose an action or clip.' : 'This clip animates no channels.')); return; }
+  if (!rows.length) { box.replaceChildren(el('p', { class: 'panel-empty inline muted' }, motion.rest ? 'Rest pose · nothing moves. Choose an action or clip.' : 'This clip animates no channels.')); return; }
   const duration = sample.duration || 1;
   const ruler = el('div', { class: 'theatre-ruler' }, ...Array.from({ length: Math.floor(duration) + 1 }, (_, s) =>
     el('span', { style: `left:${100 * s / duration}%` }, `${s}s`)), duration % 1 ? el('span', { class: 'end', style: 'left:100%' }, `${duration.toFixed(1)}s`) : null);

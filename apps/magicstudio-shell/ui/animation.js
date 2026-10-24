@@ -69,7 +69,7 @@ async function animationOpen(){
   await animationLoad();
  }catch(e){animationEmpty('Artwork needs attention',String(e));}
 }
-function animationEmpty(title,detail){$('motion-stage').replaceChildren(el('div',{class:'motion-empty'},el('strong',{},title),el('p',{class:'muted'},detail),el('button',{class:'start',onclick:()=>setView('project')},'Open Project')));}
+function animationEmpty(title,detail){$('motion-stage').replaceChildren(el('div',{class:'panel-empty motion'},el('strong',{},title),el('p',{class:'muted'},detail),el('button',{class:'start',onclick:()=>setView('project')},'Open Project')));}
 function motionModeSwitch(){
  return el('div',{class:'motion-modes',role:'group','aria-label':'Animation authoring and render tools'},
   ...['subject','composite'].map(m=>el('button',{
@@ -156,7 +156,7 @@ function animationControls(){
   const dimensionsMatch=!!candidate&&candidate.result.width===sourceSize[0]&&candidate.result.height===sourceSize[1];
   compare.append(el('div',{class:'magic-compare-grid'},
    el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${name}`}),el('figcaption',{},`Original${size(sourceSize[0],sourceSize[1])}`)),
-   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${name}`}):el('div',{class:'magic-compare-empty'},'No candidate yet'),
+   el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${name}`}):el('div',{class:'panel-empty compare'},'No candidate yet'),
     el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'}${size(candidate.result.width,candidate.result.height)}`:'Candidate'))));
   const statusText=dimensionsMatch?'Sizes match · the original stays until you replace it':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${name} needs ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}`:'Generate a candidate or save an edit in PhotoCraft';
   const actionStatus=el('p',{class:'magic-part-status',id:'part-image-status',title:statusText,role:'status'},statusText);

@@ -28,7 +28,7 @@ async function renderRecent() {
   const list = await invoke("recent_projects");
   $("recent-label").hidden = !list.length;
   if (!list.length) {
-    $("recent").replaceChildren(el("div", { class: "home-empty" }, "No projects yet. Start with New song."));
+    $("recent").replaceChildren(el("div", { class: "panel-empty boxed" }, "No projects yet. Start with New song."));
     return;
   }
   $("recent").replaceChildren(...list.map((p) => {

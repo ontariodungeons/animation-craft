@@ -555,10 +555,10 @@ function renderStoryboard() {
     $("sb-page").textContent = "no storyboard yet";
     const imported=state.data?.status?.stages?.find(s=>s.id==='transcript')?.done===true;
     if(imported){
-      cards.append(el('div',{id:'sb-empty',class:'sb-empty'},el('strong',{},sb?.scene_packets_available?'Scene map available · editable deck not built':'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
+      cards.append(el('div',{id:'sb-empty',class:'panel-empty boxed'},el('strong',{},sb?.scene_packets_available?'Scene map available · editable deck not built':'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
       return;
     }
-    cards.append(el("div", {id:"sb-empty", class:"sb-empty"},
+    cards.append(el("div", {id:"sb-empty", class:"panel-empty boxed"},
       el("strong", {}, `Start ${$("project-name").textContent}`),
       el("p", {}, "Add a transcript to plan the song’s scenes."),
       el("button", {id:"sb-import-transcript", "data-commands":"workshop.import_transcript", class:"start", onclick:async () => {
