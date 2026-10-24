@@ -100,28 +100,24 @@ function updateMagicSelection() {
 }
 
 function renderMagicAssetCatalog() {
-  // Animation and Design fill this pane themselves (parts; effects).
-  if (state.view === 'animation' || state.view === 'design') return;
-  const slot = $('magic-parts-slot');
-  if (!slot) return;
-  const assets = state.data?.assets?.assets || [];
-  const draft = imageDrafts?.get(state.project);
-  slot.replaceChildren(el('div', { class: 'group-label' }, `Project assets (${assets.length})`));
-  if (!assets.length) { slot.append(el('p', { class: 'why' }, 'Project parts and generated candidates will appear here.')); return; }
-  slot.append(el('div', { class: 'magic-assets-grid' }, assets.map((asset) =>
-    magicAssetTile(asset, { candidate: draft?.result?.asset_id === asset.id, onclick: () => openAnimation(asset.id) }))));
+  const pane=$('magic-parts-pane');if(pane)pane.hidden=state.view!=='animation';
+  if(state.view!=='animation')$('magic-parts-slot')?.replaceChildren();
 }
 
-// One compact tile per project asset: the Project/Studio catalog and the Animation Assets tab.
-function magicAssetTile(asset, { active = false, candidate = false, onclick }) {
+function projectAssetGrid(assets,{active=null,prefix='magic-asset'}={}) {
+  return el('div',{class:'magic-assets-grid'},assets.map(asset=>magicAssetTile(asset,{active:asset.id===active,prefix,onclick:()=>openAnimation(asset.id)})));
+}
+
+function magicAssetTile(asset, { active = false, candidate = false, prefix='magic-asset', onclick }) {
   const name = asset.name || asset.id;
   const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
     ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
     : el('span', { class: 'magic-asset-placeholder' }, 'PART');
-  return el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `magic-asset-${asset.id}`,
-    title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · show its parts`, onclick },
+  const tile=el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `${prefix}-${asset.id}`,draggable:'true',
+    title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · drag onto a storyboard page or click to animate`, onclick },
     image, el('span', { class: 'magic-asset-name' }, name),
     candidate ? el('span', { class: 'magic-asset-badge' }, 'Candidate') : el('span', { class: 'magic-asset-id' }, asset.id));
+  tile.addEventListener('dragstart',event=>{event.dataTransfer.setData('application/x-magicstudio-asset',asset.id);event.dataTransfer.setData('text/plain',asset.id);event.dataTransfer.effectAllowed='copy';});return tile;
 }
 
 // ---- Unified footer: workflow stages · what the active tab shows · save and studio state ----
@@ -255,6 +251,7 @@ function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   let box = null;
   for (const [k, v] of Object.entries(attrs)) {
+    if(v===null||v===undefined)continue;
     if (k === "class") node.className = v;
     else if (k === "html") node.innerHTML = v;
     else if (k === "box") box = v;
@@ -546,28 +543,14 @@ function renderBlocks() {
     songState, audio ? songPlayButton(audio.path) : null));
 
   const assets=state.data?.assets?.assets||[];
-  const cards=assets.map(a=>{
-    const picture=/\.(png|jpe?g|webp|gif)$/i.test(a.path||'')?el('img',{src:convertFileSrc(a.path),alt:a.name,draggable:'false'}):el('span',{html:ICONS.animate});
-    const card=el('button',{id:`asset-${a.id}`,class:'object',draggable:'true',title:`${a.name} · drag onto a storyboard page or click to animate`,'aria-label':a.name,
-      onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
-    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-magicstudio-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
-  });
-  const animateState = observed("animate")?.state || "unknown";
-  const animateBody = assets.length > 0
-    ? [el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]
-    : [el('div',{class:'group-label'},'Objects'),
-       el('button',{id:'asset-import-animate',class:'start',onclick:importProjectAsset},'Import artwork'),
-       el('p',{class:'why'},'Drag an object onto a storyboard page once imported.')];
-  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),animateBody, animateState));
   const assetsState = observed("assets")?.state || "unknown";
   const assetFiles = (s.asset_files||[]);
-  const assetsBody = assetFiles.length > 0
-    ? [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
-       el('p',{class:'why'},'Drag a character above onto a storyboard page.'),
-       el('details',{},el('summary',{},'Project files'),...assetFiles.map(fileButton))]
-    : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
-       el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
-  box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
+  const assetsBody=[el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),projectAssetGrid(assets,{prefix:'asset'}),
+    el('p',{class:'why'},'Click an asset to animate it, or drag it onto a storyboard page.'),
+    assetFiles.length?el('details',{},el('summary',{},`Project files (${assetFiles.length})`),...assetFiles.map(fileButton)):null];
+  box.append(block('assets',ICONS.animate,'Assets',`${assets.length} assets`,ready("assets"),assetsBody, assetsState));
+  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),
+    el('p',{class:'why'},'Choose an asset above to animate it.'),observed('animate')?.state||'unknown'));
   if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
   renderMagicAssetCatalog();
   if (state.view === 'design' && typeof wordsStatusRefresh === 'function') wordsStatusRefresh();
@@ -695,7 +678,7 @@ async function setView(view, action) {
   if (typeof animationPause === "function") animationPause();
   if (view !== 'animation' && typeof blenderDispose === 'function') blenderDispose();
   state.view = view;
-  if (view !== 'animation') renderMagicAssetCatalog();
+  renderMagicAssetCatalog();
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
     t.classList.toggle("active", on);

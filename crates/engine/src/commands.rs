@@ -526,9 +526,9 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
             "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
         cmd!("video.snapshot", "Take one exact frame from HyperFrames", ["Video"], None,
-            "{\"target\": \"optional hyperframes\", \"at\": \"seconds (e.g. 12.5)\", \"out\": \"output path\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_snapshot),
-        cmd!("video.render", "Render bounded slice from HyperFrames", ["Video"], None,
-            "{\"target\": \"optional hyperframes\", \"out\": \"output path\", \"fps\": \"frames per second (default 24)\", \"workers\": \"bounded worker count (default 4, max 16)\", \"start\": \"optional start seconds\", \"end\": \"optional end seconds\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_render),
+            "{\"target\": \"optional hyperframes\", \"at\": \"seconds or array of seconds\", \"out\": \"output PNG path for one time; directory for multiple times\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_snapshot),
+        cmd!("video.render", "Render HyperFrames composition", ["Video"], None,
+            "{\"target\": \"optional hyperframes\", \"out\": \"output path\", \"fps\": \"frames per second (default 24)\", \"workers\": \"bounded worker count (default 4, max 16)\", \"start/end\": \"unsupported by official HyperFrames CLI; any supplied value is rejected\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_render),
         cmd!(
             "audio.analyze",
             "Analyze Song (HyperFrames)",

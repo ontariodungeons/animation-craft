@@ -65,6 +65,41 @@ pub(crate) fn layer_file(plan: &Value, spec: &Path, part: &str) -> Result<PathBu
     ))
 }
 
+pub(crate) fn image_edit_capability(s: &Session, spec: &Path, raw: &Value, part: &str) -> Value {
+    let checked: Result<()> = (|| {
+        let root = project_root(s)?;
+        let spec = resolve_project_file(&root, &spec.to_string_lossy(), "Rig manifest")?;
+        let source = layer_file(raw, &spec, part)?;
+        resolve_project_file(&root, &source.to_string_lossy(), "part image")?;
+        Ok(())
+    })();
+    match checked {
+        Ok(()) => json!({"supported":true,"source":"part image edit preflight"}),
+        Err(error) => json!({"supported":false,"source":"part image edit preflight","reason":error.to_string()}),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn image_edit_capability_reports_the_real_project_and_format_boundary() {
+    let directory = std::env::temp_dir().join(format!("part-edit-capability-{}",std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut session = Session::user_session();
+    session.project_path = Some(directory.join("song.magic"));
+    let spec = directory.join("rig.json");
+    std::fs::write(&spec, b"{}").unwrap();
+    image::RgbaImage::new(8,8).save(directory.join("arm.png")).unwrap();
+    assert_eq!(image_edit_capability(&session,&spec,&json!({"layers":{"arm":{}}}),"arm")["supported"], true);
+    let array = image_edit_capability(&session,&spec,&json!({"layers":[{"id":"arm","file":"arm.png"}]}),"arm");
+    assert_eq!(array["supported"], false);
+    assert!(array["reason"].as_str().unwrap().contains("read-only"));
+    let outside = directory.with_extension("outside");
+    std::fs::write(&outside,b"{}").unwrap();
+    assert_eq!(image_edit_capability(&session,&outside,&json!({"layers":{"arm":{}}}),"arm")["supported"], false);
+    std::fs::remove_file(outside).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 fn keyed_geometry_matches(plan: &crate::session::LoadedCutoutRigPlan, raw: &Value) -> Result<()> {
     let layers = raw
         .get("layers")

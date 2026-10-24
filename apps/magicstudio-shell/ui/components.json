@@ -116,7 +116,7 @@
     },
     "magic-parts-pane": {
       "component": "panel",
-      "label": "Parts and assets",
+      "label": "Parts",
       "indicator": "hidden",
       "look": "assets",
       "rail": "magic-parts-pane"
@@ -871,6 +871,213 @@
       "target": "words-main",
       "label": "Background",
       "indicator": "hidden"
+    },
+    "motion-assets": {
+      "component": "panel",
+      "look": "assets",
+      "label": "Assets",
+      "indicator": "hidden",
+      "rail": "motion-assets",
+      "icon": "layers"
+    },
+    "motion-assets-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Assets",
+      "indicator": "hidden",
+      "target": "motion-assets"
+    },
+    "authoring-action-apply": {
+      "component": "ghost",
+      "label": "action apply",
+      "indicator": "hidden",
+      "command": "motion.action.set"
+    },
+    "authoring-command": {
+      "component": "animation-readback",
+      "label": "command",
+      "indicator": "hidden"
+    },
+    "authoring-duration": {
+      "component": "control",
+      "label": "duration",
+      "indicator": "hidden"
+    },
+    "authoring-edit-result": {
+      "component": "animation-readback",
+      "label": "edit result",
+      "indicator": "hidden"
+    },
+    "authoring-edit-status": {
+      "component": "muted",
+      "label": "edit status",
+      "indicator": "hidden"
+    },
+    "authoring-label": {
+      "component": "control",
+      "label": "label",
+      "indicator": "hidden"
+    },
+    "authoring-layer-apply": {
+      "component": "ghost",
+      "label": "layer apply",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-back": {
+      "component": "ghost",
+      "label": "layer back",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-depth": {
+      "component": "control",
+      "label": "layer depth",
+      "indicator": "hidden"
+    },
+    "authoring-layer-front": {
+      "component": "ghost",
+      "label": "layer front",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-picker": {
+      "component": "control",
+      "label": "layer picker",
+      "indicator": "hidden"
+    },
+    "authoring-layer-reason": {
+      "component": "muted",
+      "label": "layer reason",
+      "indicator": "hidden"
+    },
+    "authoring-layer-undo": {
+      "component": "ghost",
+      "label": "layer undo",
+      "indicator": "hidden",
+      "command": "motion.edit.undo"
+    },
+    "authoring-loop": {
+      "component": "control",
+      "label": "loop",
+      "indicator": "hidden"
+    },
+    "authoring-part-apply": {
+      "component": "start",
+      "label": "part apply",
+      "indicator": "hidden",
+      "command": "motion.part.set"
+    },
+    "authoring-part-reset": {
+      "component": "ghost",
+      "label": "part reset",
+      "indicator": "hidden",
+      "command": "motion.part.reset"
+    },
+    "authoring-pivot-0": {
+      "component": "control",
+      "label": "pivot 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-pivot-1": {
+      "component": "control",
+      "label": "pivot 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-pose-export": {
+      "component": "ghost",
+      "label": "pose export",
+      "indicator": "hidden"
+    },
+    "authoring-pose-place": {
+      "component": "ghost",
+      "label": "pose place",
+      "indicator": "hidden",
+      "command": "storyboard.place_asset"
+    },
+    "authoring-pose-preview": {
+      "component": "animation-pose-preview",
+      "label": "pose preview",
+      "indicator": "hidden"
+    },
+    "authoring-pose-result": {
+      "component": "animation-readback",
+      "label": "pose result",
+      "indicator": "hidden"
+    },
+    "authoring-pose-scene": {
+      "component": "control",
+      "label": "pose scene",
+      "indicator": "hidden"
+    },
+    "authoring-pose-scenes": {
+      "component": "ghost",
+      "label": "pose scenes",
+      "indicator": "hidden",
+      "command": "storyboard.toc"
+    },
+    "authoring-pose-status": {
+      "component": "muted",
+      "label": "pose status",
+      "indicator": "hidden"
+    },
+    "authoring-pose-width": {
+      "component": "control",
+      "label": "pose width",
+      "indicator": "hidden"
+    },
+    "authoring-pose-x": {
+      "component": "control",
+      "label": "pose x",
+      "indicator": "hidden"
+    },
+    "authoring-pose-y": {
+      "component": "control",
+      "label": "pose y",
+      "indicator": "hidden"
+    },
+    "authoring-position-0": {
+      "component": "control",
+      "label": "position 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-position-1": {
+      "component": "control",
+      "label": "position 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-reference": {
+      "component": "control",
+      "label": "reference",
+      "indicator": "hidden"
+    },
+    "authoring-rotation": {
+      "component": "control",
+      "label": "rotation",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-scale-0": {
+      "component": "control",
+      "label": "scale 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-scale-1": {
+      "component": "control",
+      "label": "scale 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-undo": {
+      "component": "ghost",
+      "label": "undo",
+      "indicator": "hidden",
+      "command": "motion.edit.undo"
     }
   },
   "rails": {
@@ -954,6 +1161,10 @@
     },
     "words-film": {
       "accept": "yes"
+    },
+    "motion-assets": {
+      "accept": "yes",
+      "priority": 10
     }
   },
   "slots": {
@@ -1037,6 +1248,10 @@
     },
     "words-film": {
       "target": "words-film"
+    },
+    "motion-assets": {
+      "target": "motion-assets",
+      "priority": 10
     }
   },
   "signals": {
@@ -1075,7 +1290,8 @@
     "Expression & pose": "motion-pose",
     "Quality checks": "motion-quality",
     "Export & integrations": "motion-export-section",
-    "Canvas": "motion-canvas-settings"
+    "Canvas": "motion-canvas-settings",
+    "Assets": "motion-assets"
   },
   "contract_target": "magic-chat-pane",
   "timeline_tones": {

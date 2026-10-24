@@ -459,6 +459,7 @@ main { margin-right: var(--magic-workstation-width); transition: margin-right va
 .magic-image-tools { flex: 1; min-height: 0; overflow: auto; }
 .magic-image-tools .start { margin-top: var(--size-4); width: 100%; }
 .magic-image-tools .image-result { display: block; width: 100%; max-height: var(--size-130); object-fit: contain; margin-top: var(--size-8); border: var(--size-1) solid var(--line); border-radius: var(--size-7); background-color: var(--bg); background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: var(--size-16) var(--size-16); background-position: 0 0,0 var(--size-8),var(--size-8) calc(-1 * var(--size-8)),calc(-1 * var(--size-8)) 0; }
+[hidden] { display:none !important; }
 .magic-parts-slot { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .magic-parts-slot .motion-section { margin-bottom: var(--size-7); }
 .magic-parts-slot .motion-section summary { padding: var(--size-7) var(--size-9); }

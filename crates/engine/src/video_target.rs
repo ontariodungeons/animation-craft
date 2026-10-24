@@ -647,10 +647,46 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
 }
 
-/// Snapshot one exact time from the project's HyperFrames scene to a single output frame.
-/// Resolves the HyperFrames CLI (never installs), validates the project has an open HyperFrames
-/// project, and produces a single frame at the given time. Output is always a new file; nothing
-/// is overwritten, nothing is guessed.
+fn path_exists(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
+fn unique_stage_dir(parent: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(parent)?;
+    for _ in 0..8 {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?.as_nanos();
+        let path = parent.join(format!(".magicstudio-video-{}-{stamp}", std::process::id()));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(EngineError::InvalidParams("Could not create a unique video staging directory".into()))
+}
+
+fn snapshot_times(params: &Value) -> Result<Vec<f64>> {
+    let invalid = || EngineError::InvalidParams("video.snapshot requires at=<seconds> or at=[seconds, ...]".into());
+    let values: Vec<f64> = match &params["at"] {
+        Value::Number(n) => vec![n.as_f64().ok_or_else(invalid)?],
+        Value::String(s) => s.split(',').map(|part| part.trim().parse::<f64>().map_err(|_| invalid())).collect::<Result<_>>()?,
+        Value::Array(a) => a.iter().map(|v| v.as_f64().ok_or_else(invalid)).collect::<Result<_>>()?,
+        _ => return Err(invalid()),
+    };
+    if values.is_empty() || values.iter().any(|t| !t.is_finite() || *t < 0.0) {
+        return Err(EngineError::InvalidParams("Snapshot times must be a non-empty list of finite non-negative seconds".into()));
+    }
+    for pair in values.windows(2) {
+        if (pair[1] - pair[0]).abs() < 0.001 {
+            return Err(EngineError::InvalidParams("Snapshot times must be at least 1 ms apart".into()));
+        }
+    }
+    Ok(values)
+}
+
+/// Snapshot exact requested times through the official CLI. A single `out` is a PNG path;
+/// multiple times use `out` as a new directory containing the CLI's PNG names.
 pub fn cmd_video_snapshot(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let target = params
@@ -664,74 +700,113 @@ pub fn cmd_video_snapshot(s: &mut Session, params: &Value) -> Result<Value> {
         ));
     }
     let hf = dir.join("hyperframes");
-    if !hf.join("hyperframes.json").is_file() && !hf.join("index.html").is_file() {
+    if !hf.join("index.html").is_file() {
         return Err(EngineError::InvalidParams(
             "No HyperFrames project in this song. Run video.init with target=hyperframes first.".into(),
         ));
     }
-    let at = params
-        .get("at")
-        .and_then(Value::as_str)
-        .ok_or_else(|| EngineError::InvalidParams("video.snapshot requires at=<seconds>".into()))?;
-    let at_secs: f64 = at
-        .parse()
-        .map_err(|_| EngineError::InvalidParams(format!("at must be seconds: {at}")))?;
+    let times = snapshot_times(params)?;
     let out = params
         .get("out")
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::InvalidParams("video.snapshot requires out=<path>".into()))?;
     let out_path = resolve_workspace_path(s, out);
-    if out_path.exists() {
+    if path_exists(&out_path) {
         return Err(EngineError::InvalidParams(format!(
             "Output already exists, refusing to overwrite: {}",
             out_path.display()
         )));
     }
-    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&dir))?;
-    let dir_clone = dir.clone();
+    let parent = out_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&hf))?;
+    let stage = unique_stage_dir(parent)?;
+    let at_arg = times.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
     let output = std::process::Command::new(&cli)
-        .args([
-            "snapshot".to_string(),
-            "--project".into(),
-            dir.to_string_lossy().into_owned(),
-            "--at".into(),
-            at_secs.to_string(),
-            "--out".into(),
-            out_path.to_string_lossy().into_owned(),
-        ])
-        .current_dir(dir)
-        .output()
-        .map_err(|e| EngineError::ExternalTool(cli.display().to_string(), e.to_string()))?;
+        .args(["snapshot".into(), hf.to_string_lossy().into_owned(), "--at".into(), at_arg,
+            "--no-end".into(), "--describe".into(), "false".into(),
+            "--output".into(), stage.to_string_lossy().into_owned()])
+        .current_dir(&hf).output()
+        .map_err(|e| { let _ = std::fs::remove_dir_all(&stage); EngineError::ExternalTool(cli.display().to_string(), e.to_string()) })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
-        return Err(EngineError::ExternalTool(
-            cli.display().to_string(),
-            format!(
-                "snapshot exited {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
-            ),
-        ));
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(EngineError::ExternalTool(cli.display().to_string(), format!("snapshot exited {:?}; stdout: {stdout}; stderr: {stderr}", output.status.code())));
     }
-    if !out_path.is_file() {
-        return Err(EngineError::ExternalTool(
-            cli.display().to_string(),
-            "snapshot reported success but no output file appeared".into(),
-        ));
+    let mut pngs = std::fs::read_dir(&stage)?.filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png"))).collect::<Vec<_>>();
+    pngs.sort();
+    if pngs.len() != times.len() || pngs.iter().any(|p| std::fs::metadata(p).map_or(true, |m| m.len() == 0)) {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(EngineError::ExternalTool(cli.display().to_string(), format!("snapshot produced {} non-empty PNGs for {} requested times; stdout: {stdout}; stderr: {stderr}", pngs.len(), times.len())));
     }
+    let mut paths = Vec::with_capacity(pngs.len());
+    if times.len() == 1 {
+        let source = &pngs[0];
+        if let Some(p) = out_path.parent() { std::fs::create_dir_all(p)?; }
+        if let Err(e) = std::fs::hard_link(source, &out_path) {
+            let _ = std::fs::remove_dir_all(&stage);
+            return Err(EngineError::ExternalTool(cli.display().to_string(), format!("could not publish snapshot without overwrite: {e}; stdout: {stdout}; stderr: {stderr}")));
+        }
+        paths.push(out_path.clone());
+    } else {
+        std::fs::create_dir(&out_path).map_err(|e| EngineError::ExternalTool(cli.display().to_string(), format!("could not create snapshot output directory without overwrite: {e}")))?;
+        for source in &pngs {
+            let target = out_path.join(source.file_name().unwrap_or_default());
+            if let Err(e) = std::fs::hard_link(source, &target) {
+                for published in &paths { let _ = std::fs::remove_file(published); }
+                let _ = std::fs::remove_dir(&out_path);
+                let _ = std::fs::remove_dir_all(&stage);
+                return Err(EngineError::ExternalTool(cli.display().to_string(), format!("could not publish snapshot without overwrite: {e}; stdout: {stdout}; stderr: {stderr}")));
+            }
+            paths.push(target);
+        }
+    }
+    let _ = std::fs::remove_dir_all(&stage);
+    let at_result = if times.len() == 1 { json!(times[0]) } else { json!(times) };
     Ok(json!({
         "ok": true,
         "command": "video.snapshot",
-        "project": dir_clone,
+        "project": hf,
         "target": "hyperframes",
-        "at": at_secs,
+        "at": at_result,
         "output": out_path,
-        "provenance": "single exact frame from HyperFrames scene; nothing overwritten",
+        "outputs": paths,
+        "stdout": stdout,
+        "stderr": stderr,
+        "provenance": "official HyperFrames CLI snapshot; no existing output overwritten",
     }))
 }
 
-/// Render a bounded slice of the HyperFrames scene to an output video.
-/// Resolves the HyperFrames CLI (never installs), validates the project, and renders with
-/// bounded workers. Output is always a new file; nothing is overwritten.
+fn ffprobe_duration(ffprobe: &std::ffi::OsStr, path: &Path) -> Result<f64> {
+    let result = std::process::Command::new(ffprobe).args(["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1"])
+        .arg(path).output().map_err(|e| EngineError::ExternalTool("ffprobe".into(), e.to_string()))?;
+    if !result.status.success() {
+        return Err(EngineError::ExternalTool("ffprobe".into(), format!("could not inspect rendered video: {}", String::from_utf8_lossy(&result.stderr))));
+    }
+    let value = String::from_utf8_lossy(&result.stdout).trim().parse::<f64>()
+        .map_err(|e| EngineError::ExternalTool("ffprobe".into(), format!("invalid duration: {e}")))?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(EngineError::ExternalTool("ffprobe".into(), "rendered video has no positive duration".into()));
+    }
+    Ok(value)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Render a complete HyperFrames composition through the official CLI. The CLI has no range
+/// arguments; callers requesting a slice receive an explicit error instead of a full-film render.
 pub fn cmd_video_render(s: &mut Session, params: &Value) -> Result<Value> {
     let dir = project_dir(s)?;
     let target = params
@@ -745,7 +820,7 @@ pub fn cmd_video_render(s: &mut Session, params: &Value) -> Result<Value> {
         ));
     }
     let hf = dir.join("hyperframes");
-    if !hf.join("hyperframes.json").is_file() && !hf.join("index.html").is_file() {
+    if !hf.join("index.html").is_file() {
         return Err(EngineError::InvalidParams(
             "No HyperFrames project in this song. Run video.init with target=hyperframes first.".into(),
         ));
@@ -755,75 +830,76 @@ pub fn cmd_video_render(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::InvalidParams("video.render requires out=<path>".into()))?;
     let out_path = resolve_workspace_path(s, out);
-    if out_path.exists() {
+    if path_exists(&out_path) {
         return Err(EngineError::InvalidParams(format!(
             "Output already exists, refusing to overwrite: {}",
             out_path.display()
         )));
     }
+    if params.get("start").is_some() || params.get("end").is_some() {
+        return Err(EngineError::InvalidParams("The official HyperFrames render command does not support start/end slices; omit both to render the complete composition".into()));
+    }
     let fps = params
         .get("fps")
         .and_then(Value::as_f64)
         .unwrap_or(24.0);
+    if !fps.is_finite() || !(1.0..=240.0).contains(&fps) || fps.fract() != 0.0 {
+        return Err(EngineError::InvalidParams("fps must be a whole number from 1 through 240".into()));
+    }
     let workers = params
         .get("workers")
         .and_then(Value::as_u64)
         .map(|v| v as usize)
         .unwrap_or(4)
         .clamp(1, 16);
-    let start = params.get("start").and_then(Value::as_f64).unwrap_or(0.0);
-    let end = params.get("end").and_then(Value::as_f64);
-    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&dir))?;
-    let dir_clone = dir.clone();
-    let mut args = vec![
-        "render".to_string(),
-        "--project".into(),
-        dir.to_string_lossy().into_owned(),
-        "--out".into(),
-        out_path.to_string_lossy().into_owned(),
-        "--fps".into(),
-        fps.to_string(),
-        "--workers".into(),
-        workers.to_string(),
-    ];
-    if start > 0.0 {
-        args.extend(["--start".into(), start.to_string()]);
-    }
-    if let Some(e) = end {
-        args.extend(["--end".into(), e.to_string()]);
-    }
-    let output = std::process::Command::new(&cli)
-        .args(&args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| EngineError::ExternalTool(cli.display().to_string(), e.to_string()))?;
+    let hf = dir.join("hyperframes");
+    render_video(params, std::ffi::OsStr::new("ffprobe"), &hf, &out_path, fps, workers)
+}
+
+fn render_video(params: &Value, ffprobe: &std::ffi::OsStr, hf: &Path, out_path: &Path, fps: f64, workers: usize) -> Result<Value> {
+    let cli = hyperframes_cli(params["hyperframes_cli"].as_str(), Some(hf))?;
+    let parent = out_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let stage = unique_stage_dir(parent)?;
+    let staged = stage.join(out_path.file_name().unwrap_or_default());
+    let args = ["render".to_string(), hf.to_string_lossy().into_owned(), "--output".into(), staged.to_string_lossy().into_owned(), "--fps".into(), fps.to_string(), "--workers".into(), workers.to_string()];
+    let output = std::process::Command::new(&cli).args(&args).current_dir(hf).output()
+        .map_err(|e| { let _ = std::fs::remove_dir_all(&stage); EngineError::ExternalTool(cli.display().to_string(), e.to_string()) })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
-        return Err(EngineError::ExternalTool(
-            cli.display().to_string(),
-            format!(
-                "render exited {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr)
-            ),
-        ));
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(EngineError::ExternalTool(cli.display().to_string(), format!("render exited {:?}; stdout: {stdout}; stderr: {stderr}", output.status.code())));
     }
-    if !out_path.is_file() {
-        return Err(EngineError::ExternalTool(
-            cli.display().to_string(),
-            "render reported success but no output file appeared".into(),
-        ));
+    if std::fs::metadata(&staged).map_or(true, |m| m.len() == 0) {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(EngineError::ExternalTool(cli.display().to_string(), format!("render reported success without a non-empty movie; stdout: {stdout}; stderr: {stderr}")));
     }
+    let duration = match ffprobe_duration(ffprobe, &staged) {
+        Ok(value) => value,
+        Err(e) => { let _ = std::fs::remove_dir_all(&stage); return Err(EngineError::ExternalTool(cli.display().to_string(), format!("{e}; render stdout: {stdout}; render stderr: {stderr}"))); }
+    };
+    let bytes = std::fs::metadata(&staged)?.len();
+    let digest = sha256_file(&staged)?;
+    if let Err(e) = std::fs::hard_link(&staged, out_path) {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(EngineError::ExternalTool(cli.display().to_string(), format!("could not publish render without overwrite: {e}; stdout: {stdout}; stderr: {stderr}")));
+    }
+    let _ = std::fs::remove_dir_all(&stage);
     Ok(json!({
         "ok": true,
         "command": "video.render",
-        "project": dir_clone,
+        "project": hf,
         "target": "hyperframes",
         "output": out_path,
         "fps": fps,
         "workers": workers,
-        "start": start,
-        "end": end,
-        "provenance": "bounded render from HyperFrames scene; nothing overwritten",
+        "duration_sec": duration,
+        "bytes": bytes,
+        "sha256": digest,
+        "stdout": stdout,
+        "stderr": stderr,
+        "receipt": {"cli": cli.clone(), "project": hf, "output": out_path, "duration_sec": duration, "fps": fps, "workers": workers, "bytes": bytes, "sha256": digest.clone()},
+        "provenance": "official HyperFrames CLI render; no existing output overwritten",
     }))
 }
 
@@ -901,11 +977,40 @@ fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>
 #[cfg(test)]
 mod hyperframes_cli_tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     fn temp(name:&str)->PathBuf{let d=std::env::temp_dir().join(format!("hf-cli-{name}-{}",std::process::id()));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();d}
     fn install(modules:&Path,version:&str){
         std::fs::create_dir_all(modules.join("hyperframes")).unwrap();std::fs::create_dir_all(modules.join(".bin")).unwrap();
         std::fs::write(modules.join("hyperframes/package.json"),format!("{{\"version\":\"{version}\"}}")).unwrap();
         std::fs::write(modules.join(".bin/hyperframes"),"#!/bin/sh\n").unwrap();
+    }
+    fn fake_cli(root:&Path)->(PathBuf,PathBuf,PathBuf){
+        let cli=root.join("hyperframes-fake");
+        let log=root.join("args.json");
+        let source=r##"#!/usr/bin/env python3
+import json, pathlib, sys
+args=sys.argv[1:]
+pathlib.Path(__FAKE_LOG__).write_text(json.dumps(args))
+if args[0] == 'snapshot':
+    folder=pathlib.Path(args[args.index('--output')+1]); folder.mkdir(parents=True, exist_ok=True)
+    count=len(args[args.index('--at')+1].split(','))
+    for n in range(count): (folder / f'frame-{n}.png').write_bytes(b'png-fixture')
+else:
+    pathlib.Path(args[args.index('--output')+1]).write_bytes(b'movie-fixture')
+print('fake stdout')
+print('fake stderr', file=sys.stderr)
+"##.replace("__FAKE_LOG__",&serde_json::to_string(&log.to_string_lossy().into_owned()).unwrap());
+        std::fs::write(&cli, source).unwrap();
+        let mut mode=std::fs::metadata(&cli).unwrap().permissions();mode.set_mode(0o755);std::fs::set_permissions(&cli,mode).unwrap();
+        let ffprobe=root.join("ffprobe-fake");
+        std::fs::write(&ffprobe,"#!/bin/sh\nprintf '1.25\\n'\n").unwrap();
+        let mut mode=std::fs::metadata(&ffprobe).unwrap().permissions();mode.set_mode(0o755);std::fs::set_permissions(&ffprobe,mode).unwrap();
+        (cli,ffprobe,log)
+    }
+    fn video_session(root:&Path)->Session{
+        let project=root.join("song.magic");std::fs::write(&project,"{}").unwrap();
+        let hf=root.join("hyperframes");std::fs::create_dir_all(&hf).unwrap();std::fs::write(hf.join("index.html"),"<html></html>").unwrap();
+        let mut s=Session::default();s.cwd=root.to_path_buf();s.project_path=Some(project);s.video_target="hyperframes".into();s
     }
     #[test]
     fn the_pinned_version_comes_from_the_project_scripts(){
@@ -926,5 +1031,39 @@ mod hyperframes_cli_tests {
         install(&p.join("node_modules"),"0.8.166");
         assert_eq!(pinned_cli(&p,&npx,"0.8.166"),Some(p.join("node_modules/.bin/hyperframes")),"the project's own copy wins");
         std::fs::remove_dir_all(p).unwrap();std::fs::remove_dir_all(npx).unwrap();
+    }
+    #[test]
+    fn official_snapshot_uses_project_positional_and_publishes_requested_pngs(){
+        let root=temp("snapshot-adapter");let (cli,_,log)=fake_cli(&root);
+        let mut s=video_session(&root);let out=root.join("stills");
+        let result=cmd_video_snapshot(&mut s,&json!({"at":[1.0,2.5],"out":out,"hyperframes_cli":cli})).unwrap();
+        let args:Vec<String>=serde_json::from_slice(&std::fs::read(&log).unwrap()).unwrap();
+        assert_eq!(args[0],"snapshot");assert_eq!(args[1],root.join("hyperframes").to_string_lossy().to_string());
+        assert!(args.contains(&"--output".into()));assert!(!args.iter().any(|a|a=="--project"||a=="--out"));
+        assert_eq!(result["outputs"].as_array().unwrap().len(),2);
+        assert!(result["outputs"].as_array().unwrap().iter().all(|p|Path::new(p.as_str().unwrap()).is_file()));
+        assert_eq!(result["stdout"],"fake stdout\n");assert_eq!(result["stderr"],"fake stderr\n");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn official_render_uses_supported_args_and_returns_verified_receipt(){
+        let root=temp("render-adapter");let (cli,ffprobe,log)=fake_cli(&root);
+        let hf=root.join("hyperframes");std::fs::create_dir_all(&hf).unwrap();
+        let out=root.join("renders/song.mp4");let params=json!({"hyperframes_cli":cli});
+        let result=render_video(&params,ffprobe.as_os_str(),&hf,&out,30.0,3).unwrap();
+        let args:Vec<String>=serde_json::from_slice(&std::fs::read(&log).unwrap()).unwrap();
+        assert_eq!(args[0],"render");assert_eq!(args[1],hf.to_string_lossy().to_string());
+        assert!(args.contains(&"--output".into()));assert!(args.contains(&"--fps".into()));assert!(args.contains(&"--workers".into()));
+        assert!(!args.iter().any(|a|a=="--project"||a=="--out"||a=="--start"||a=="--end"));
+        assert_eq!(result["duration_sec"],1.25);assert_eq!(result["bytes"],13);assert!(out.is_file());
+        assert_eq!(result["stdout"],"fake stdout\n");assert_eq!(result["stderr"],"fake stderr\n");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn render_rejects_unsupported_slice_before_invoking_cli(){
+        let root=temp("render-slice");let (cli,_,_)=fake_cli(&root);let mut s=video_session(&root);
+        let error=cmd_video_render(&mut s,&json!({"out":root.join("out.mp4"),"start":1,"hyperframes_cli":cli})).unwrap_err().to_string();
+        assert!(error.contains("does not support start/end slices"));assert!(!root.join("args.json").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

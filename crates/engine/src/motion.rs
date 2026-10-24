@@ -742,7 +742,10 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
         let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
+        let image_edit = metadata.as_ref().map(|(raw,_,_)|crate::part_replacement::image_edit_capability(s,&rig.plan_path,raw,&p.id))
+            .unwrap_or(json!({"supported":false,"reason":"Saved source image metadata is unavailable"}));
         json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":depth,"depth":depth,"image_sha256":image_sha256,
+        "image_edit":image_edit,
         "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
