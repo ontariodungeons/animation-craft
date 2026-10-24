@@ -62,7 +62,8 @@ use crate::workshop::{
     cmd_assets_request_sheet, cmd_project_search, cmd_query_list, cmd_storyboard_approve,
     cmd_storyboard_edit, cmd_storyboard_import_openmontage, cmd_storyboard_init,
     cmd_storyboard_read, cmd_storyboard_search, cmd_storyboard_toc,
-    cmd_video_init, cmd_video_place_references, cmd_video_server_start, cmd_video_server_stop,
+    cmd_video_init, cmd_video_place_references,
+    cmd_video_server_start, cmd_video_server_stop,
     cmd_workshop_add, cmd_workshop_approve_draft, cmd_workshop_build_storyboard,
     cmd_workshop_files, cmd_workshop_import_transcript,
     cmd_workshop_remove, cmd_workshop_set_audio, cmd_workshop_set_target, cmd_workshop_split_panels,
@@ -122,6 +123,8 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"workshop.build_storyboard"
             | b"workshop.split_panels"
             | b"video.place_references"
+            | b"video.snapshot"
+            | b"video.render"
             | b"image.generate"
             | b"image.register_frame"
     )
@@ -510,6 +513,10 @@ pub fn build() -> Vec<CommandSpec> {
             "{}", always, cmd_video_server_stop),
         cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
             "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
+        cmd!("video.snapshot", "Take one exact frame from HyperFrames", ["Video"], None,
+            "{\"target\": \"optional hyperframes\", \"at\": \"seconds (e.g. 12.5)\", \"out\": \"output path\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_snapshot),
+        cmd!("video.render", "Render bounded slice from HyperFrames", ["Video"], None,
+            "{\"target\": \"optional hyperframes\", \"out\": \"output path\", \"fps\": \"frames per second (default 24)\", \"workers\": \"bounded worker count (default 4, max 16)\", \"start\": \"optional start seconds\", \"end\": \"optional end seconds\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_render),
         cmd!(
             "audio.analyze",
             "Analyze Song (HyperFrames)",

@@ -28,7 +28,8 @@ pub use crate::storyboard::{
     cmd_storyboard_toc, cmd_workshop_build_storyboard, cmd_workshop_storyboard,
 };
 pub use crate::video_target::{
-    cmd_video_init, cmd_video_place_references, cmd_video_server_start, cmd_video_server_stop,
+    cmd_video_init, cmd_video_place_references, cmd_video_place_track, cmd_video_render,
+    cmd_video_server_start, cmd_video_server_stop, cmd_video_snapshot,
 };
 
 /// Image file extensions recognized by the workshop.
