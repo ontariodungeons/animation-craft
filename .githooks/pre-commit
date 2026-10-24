@@ -28,6 +28,9 @@ fi
 if git diff --cached --name-only | grep -qE '^pipeline/(layered_motion|test_layer_alternates)\.py$'; then
     python pipeline/test_layer_alternates.py
 fi
+if git diff --cached --name-only | grep -qE '^scripts/(test_)?compile_motion_specs\.py$'; then
+    python scripts/test_compile_motion_specs.py
+fi
 
 # 2. If Rust files are staged, run workspace compile check + test suite on commit
 RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
