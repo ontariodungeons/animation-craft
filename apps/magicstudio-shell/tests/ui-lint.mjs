@@ -177,6 +177,9 @@ if (process.argv.includes('--append-report')) {
   if (!message.includes(line)) fs.writeFileSync(messagePath, `${message.replace(/\s*$/, '')}\n\n${line}\n`);
 }
 
+// The commit-msg hook only appends the measured line; the checks already ran.
+if (process.argv.includes('--append-only')) process.exit(0);
+
 if (process.argv.includes('--write-baseline')) {
   fs.writeFileSync(BASELINE, JSON.stringify({ files: counts }, null, 2) + '\n');
   console.log('PASS ui-lint: baseline written');

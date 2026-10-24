@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The measured acceptance line belongs to every commit message: before -> after.
+set -euo pipefail
+node apps/magicstudio-shell/tests/ui-lint.mjs --append-report --append-only
