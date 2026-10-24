@@ -103,8 +103,9 @@ window.magicBridge = {
     if (!record) throw new Error(`panel ${id} is not registered`);
     const handler = record.on && record.on[flag];
     if (typeof handler !== "function") throw new Error(`panel ${id} does not accept ${flag}`);
-    if (typeof registry.flag === "function") registry.flag(id, flag, !!value);
+    // The flag records what the handler did, so it is set only once the handler succeeds.
     handler(!!value);
+    if (typeof registry.flag === "function") registry.flag(id, flag, !!value);
     return { panel: id, flag, value: !!value };
   },
   click(target) {

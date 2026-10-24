@@ -202,6 +202,19 @@ const tests = [
     bridge.panel('block-lyrics', 'busy', true);
     assert.equal(seen, true);
   }],
+  ['panels() reports only the current project', () => {
+    const { boxes } = fixture();
+    boxes.register('old-panel', { label: 'Old', project: '/p/Old.magic' });
+    boxes.register('block-song', { label: 'Song', project: '/p/Study.magic' });
+    boxes.register('shared', { label: 'Shared' });
+    assert.deepEqual(plain(boxes.panels().items.map(item => item.id)), ['block-song', 'shared']);
+  }],
+  ['a failing handler leaves the flag unchanged', () => {
+    const { boxes, bridge } = fixture();
+    boxes.register('block-song', { label: 'Song', on: { busy: () => { throw new Error('render refused'); } } });
+    assert.throws(() => bridge.panel('block-song', 'busy', true), /render refused/);
+    assert.equal(boxes.panels().items[0].busy, false);
+  }],
 ];
 
 let failed = 0;

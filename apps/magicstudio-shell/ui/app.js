@@ -249,15 +249,12 @@ function el(tag, attrs = {}, ...children) {
   for (const c of children.flat()) if (c != null) node.append(c);
   const project = typeof state === "undefined" ? null : state.project;
   const boxId = box || attrs.id || null;
-  const entry = attrs.id ? uiConfig.elements[attrs.id] : null;
+  const entry = boxId ? uiConfig.elements[boxId] : null;
   if (entry) applyEntry(node, entry);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
     if (window.companionBoxes) window.companionBoxes.register(boxId, { project, look: entry?.look || null, density: entry?.density || null });
   }
-  // A control may also be a rail slot. Declaring it here means the slot
-  // inherits the same stable id and the same contract as the box.
-  if (attrs["data-companion-slot"] && boxId && !node.getAttribute("data-box-id")) node.setAttribute("data-box-id", boxId);
   return node;
 }
 
@@ -900,7 +897,8 @@ function renderDesignPlacements(){
    e.preventDefault();node.setPointerCapture(e.pointerId);const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let nx=x,ny=y;
    node.onpointermove=event=>{nx=x+(event.clientX-start[0])*size[0]/r.width;ny=y+(event.clientY-start[1])*size[1]/r.height;node.style.left=`${nx/size[0]*100}%`;node.style.top=`${ny/size[1]*100}%`;};
    node.onpointerup=async()=>{node.onpointermove=null;node.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,x:nx,y:ny,width:w,placement:item.id});}catch(error){toast(String(error));}};
-  });page.append(node,el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',style:`left:${100*(x+w)/size[0]}%;top:${100*y/size[1]}%`,onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×'));
+  });const remove=el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×');
+  remove.style.setProperty('--x',`${100*(x+w)/size[0]}%`);remove.style.setProperty('--y',`${100*y/size[1]}%`);page.append(node,remove);
  }
 }
 $('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.setAttribute('aria-busy','true');try{await designCommand('storyboard.save_version',state.data?.storyboard?.draft?{draft:state.data.storyboard.manifest}:{});toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.removeAttribute('aria-busy');}});

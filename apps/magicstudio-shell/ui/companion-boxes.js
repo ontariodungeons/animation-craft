@@ -208,7 +208,10 @@ function createCompanionBoxes() {
     const bridge = typeof window !== "undefined" ? window.magicBridge : null;
     const unconfigured = bridge && typeof bridge.unconfigured === "function" ? bridge.unconfigured() : [];
     const items = [];
+    // Boxes survive a project switch; the report is about the project on screen.
+    const current = typeof globalThis.state === "undefined" ? null : globalThis.state?.project ?? null;
     for (const box of boxes.values()) {
+      if (current && box.project && box.project !== current) continue;
       const busy = !!box.busy || box.state === "working";
       items.push({
         id: box.id,
