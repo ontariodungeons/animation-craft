@@ -31,7 +31,6 @@ const PANEL_FLAGS = ["open", "busy", "dirty"];
 
 function createCompanionBoxes() {
   const boxes = new Map();
-  const observed = new Map();
   const listeners = new Set();
   let quiet = false;
   let changeSeq = 0;
@@ -127,27 +126,6 @@ function createCompanionBoxes() {
     return box;
   }
 
-  // The frontend's own view of a box (a draft, a render in flight, a UI
-  // readiness hint). This is an OBSERVATION, not an engine fact, and it is
-  // published as such so the TUI can tell the difference.
-  function observe({ id, project = null, context = null, state = null, reason = null, priority = null, request = null, job = null } = {}) {
-    const box = register(id, { project, context });
-    if (!box) return null;
-    if (state && BOX_STATES.includes(state)) {
-      // A frontend observation may soften a fact, never assert a failure.
-      if (state !== "failed" || box.source !== "engine") box.state = state;
-    }
-    if (reason != null) box.reason = String(reason).slice(0, 180);
-    if (priority != null) box.priority = priority;
-    if (request != null) box.request = request;
-    if (job != null) box.job = job;
-    box.source = "frontend";
-    box.observed_at = Date.now();
-    box.seq = ++changeSeq;
-    notify();
-    return box;
-  }
-
   // Readiness the page already renders. It may say a prerequisite is unmet;
   // it never means the box failed.
   // Readiness is what the page already renders. It may say a prerequisite is unmet, so it maps both
@@ -166,28 +144,6 @@ function createCompanionBoxes() {
       notify();
     }
     return box;
-  }
-
-  // A box is resolved only by the event that matches its request or job.
-  function resolve({ id = null, request = null, job = null, resolution = null, state = null, reason = null } = {}) {
-    const candidates = [];
-    if (id) {
-      const box = boxes.get(id);
-      if (box) candidates.push(box);
-    }
-    if (request) for (const box of boxes.values()) if (box.request === request) candidates.push(box);
-    if (job) for (const box of boxes.values()) if (box.job === job) candidates.push(box);
-    for (const box of candidates) {
-      if (id && box.id !== id && !((request && box.request === request) || (job && box.job === job))) continue;
-      if (resolution != null) box.resolution = resolution;
-      if (state && BOX_STATES.includes(state)) box.state = state;
-      if (reason != null) box.reason = String(reason).slice(0, 180);
-      box.source = "engine";
-      box.observed_at = Date.now();
-      box.seq = ++changeSeq;
-    }
-    if (candidates.length) notify();
-    return candidates;
   }
 
   // A command's receipt, kept beside the control it came from. Global Undo/Redo and Autosave read
@@ -269,21 +225,8 @@ function createCompanionBoxes() {
     return { revision: panelRevision, available: true, items: bounded, unconfigured: unconfigured.slice(0, 64) };
   }
 
-  // When the app is closed the frontend cannot observe anything. Say so
-  // instead of reporting a stale or invented state.
-  function markUnavailable() {
-    for (const box of boxes.values()) {
-      if (box.source === "frontend") {
-        box.source = "unavailable";
-        box.state = "idle";
-        box.reason = "The app was closed; this observation is stale.";
-      }
-    }
-  }
-
   function clear() {
     boxes.clear();
-    observed.clear();
     notify();
   }
 
@@ -305,7 +248,7 @@ function createCompanionBoxes() {
     return () => listeners.delete(fn);
   }
 
-  return { register, flag, fact, observe, readiness, resolve, recordReceipt, get, snapshot, panels, markUnavailable, clear, states: BOX_STATES, flags: PANEL_FLAGS, signal, dot, subscribe };
+  return { register, flag, fact, readiness, recordReceipt, get, snapshot, panels, clear, states: BOX_STATES, flags: PANEL_FLAGS, signal, dot, subscribe };
 }
 
 // One shared registry, created before the app renders, so every control can
