@@ -86,6 +86,27 @@ function fixture() {
   return { ctx, boxes: ctx.companionBoxes, bridge: ctx.magicBridge, elements };
 }
 
+// el() and the config reader, as the page runs them.
+function elFixture(entries) {
+  const created = [];
+  const node = (tag) => {
+    const element = { tagName: tag.toUpperCase(), className: '', dataset: {}, attributes: {}, children: [],
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; },
+      append(...items) { this.children.push(...items); }, addEventListener() {} };
+    created.push(element);
+    return element;
+  };
+  const doc = { createElement: node, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, body: { classList: { contains: () => false, add() {}, remove() {} } } };
+  const ctx = vm.createContext({ console, JSON, Promise, document: doc, state: { project: '/p/Study.magic' },
+    fetch: async () => ({ ok: true, json: async () => ({ version: 1, looks: {}, densities: [], elements: entries }) }),
+    queueMicrotask, window: {} });
+  vm.runInContext('globalThis.window = globalThis;', ctx);
+  const source = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('const uiConfig = {'), source.indexOf('const kindOf =')), ctx);
+  return { ctx, created };
+}
+
 const tests = [
   ['panels() shape matches contract', () => {
     const { boxes } = fixture();
@@ -119,6 +140,15 @@ const tests = [
     assert.equal(boxes.panels().revision, after);
     boxes.fact({ id: 'block-song', state: 'needs-attention' });
     assert.equal(boxes.panels().revision, after + 1);
+  }],
+  ['el() applies data-look and data-density from the entry', async () => {
+    const { ctx } = elFixture({ 'block-song': { component: 'panel-head', look: 'control', density: 'normal', label: 'Song' } });
+    await ctx.loadComponents();
+    const node = ctx.el('button', { id: 'block-song' });
+    assert.equal(node.dataset.look, 'control', 'the look comes from the entry');
+    assert.equal(node.dataset.density, 'normal', 'the density comes from the entry');
+    const plain = ctx.el('button', { id: 'not-configured' });
+    assert.equal(plain.dataset.look, undefined, 'an element without an entry gets no look');
   }],
   ['every components.json look is in looks and every density is in densities', () => {
     const config = JSON.parse(readFileSync(new URL('../ui/components.json', import.meta.url), 'utf8'));

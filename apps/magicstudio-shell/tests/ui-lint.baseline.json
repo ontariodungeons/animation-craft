@@ -16,7 +16,9 @@
       "style_attributes": 0,
       "style_writes": 13,
       "geometry_without_custom_property": 12,
-      "lines": 455
+      "lines": 455,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "animation-native.js": {
       "hand_built_dots": 0,
@@ -24,7 +26,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 148
+      "lines": 148,
+      "ids_without_config_entry": 28,
+      "class_from_code": 0
     },
     "animation.js": {
       "hand_built_dots": 0,
@@ -32,7 +36,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 398
+      "lines": 398,
+      "ids_without_config_entry": 30,
+      "class_from_code": 1
     },
     "app.js": {
       "hand_built_dots": 0,
@@ -40,7 +46,9 @@
       "style_attributes": 4,
       "style_writes": 6,
       "geometry_without_custom_property": 6,
-      "lines": 906
+      "lines": 906,
+      "ids_without_config_entry": 15,
+      "class_from_code": 2
     },
     "blender-placement.js": {
       "hand_built_dots": 0,
@@ -48,7 +56,9 @@
       "style_attributes": 5,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 106
+      "lines": 106,
+      "ids_without_config_entry": 8,
+      "class_from_code": 0
     },
     "blender.js": {
       "hand_built_dots": 0,
@@ -56,7 +66,9 @@
       "style_attributes": 0,
       "style_writes": 1,
       "geometry_without_custom_property": 0,
-      "lines": 145
+      "lines": 145,
+      "ids_without_config_entry": 12,
+      "class_from_code": 0
     },
     "bridge.js": {
       "hand_built_dots": 0,
@@ -64,7 +76,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 167
+      "lines": 167,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "companion-boxes.js": {
       "hand_built_dots": 0,
@@ -72,7 +86,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 264
+      "lines": 264,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "companion-rails.js": {
       "hand_built_dots": 0,
@@ -80,7 +96,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 194
+      "lines": 194,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "companion-sprites.js": {
       "hand_built_dots": 0,
@@ -88,7 +106,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 77
+      "lines": 77,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "companions.js": {
       "hand_built_dots": 0,
@@ -96,7 +116,9 @@
       "style_attributes": 0,
       "style_writes": 3,
       "geometry_without_custom_property": 3,
-      "lines": 253
+      "lines": 253,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "feedback.js": {
       "hand_built_dots": 0,
@@ -104,7 +126,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 60
+      "lines": 60,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "home.js": {
       "hand_built_dots": 0,
@@ -112,7 +136,9 @@
       "style_attributes": 0,
       "style_writes": 1,
       "geometry_without_custom_property": 0,
-      "lines": 124
+      "lines": 124,
+      "ids_without_config_entry": 1,
+      "class_from_code": 0
     },
     "image-prompt.js": {
       "hand_built_dots": 0,
@@ -120,7 +146,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 136
+      "lines": 136,
+      "ids_without_config_entry": 9,
+      "class_from_code": 0
     },
     "motion-authoring.js": {
       "hand_built_dots": 0,
@@ -128,7 +156,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 78
+      "lines": 78,
+      "ids_without_config_entry": 22,
+      "class_from_code": 0
     },
     "sequence.js": {
       "hand_built_dots": 0,
@@ -136,7 +166,9 @@
       "style_attributes": 0,
       "style_writes": 7,
       "geometry_without_custom_property": 6,
-      "lines": 284
+      "lines": 284,
+      "ids_without_config_entry": 4,
+      "class_from_code": 0
     },
     "studio-caption-compat.js": {
       "hand_built_dots": 0,
@@ -144,7 +176,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 22
+      "lines": 22,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0
     },
     "theatre.js": {
       "hand_built_dots": 0,
@@ -152,7 +186,9 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 126
+      "lines": 126,
+      "ids_without_config_entry": 6,
+      "class_from_code": 0
     },
     "timeline.js": {
       "hand_built_dots": 0,
@@ -160,7 +196,19 @@
       "style_attributes": 3,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 117
+      "lines": 117,
+      "ids_without_config_entry": 1,
+      "class_from_code": 0
+    },
+    "words.js": {
+      "hand_built_dots": 1,
+      "retired": 0,
+      "ids_without_config_entry": 11,
+      "class_from_code": 0,
+      "style_attributes": 0,
+      "style_writes": 5,
+      "geometry_without_custom_property": 3,
+      "lines": 234
     }
   }
 }

@@ -16,6 +16,14 @@ const read = name => fs.readFileSync(new URL(name, UI), 'utf8');
 const BASELINE = new URL('./ui-lint.baseline.json', import.meta.url);
 
 const jsFiles = fs.readdirSync(UI).filter(name => name.endsWith('.js'));
+const config = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('components.json', UI), 'utf8'));
+  } catch {
+    return { elements: {} };
+  }
+})();
+const configured = new Set(Object.keys(config.elements ?? {}));
 const cssFiles = fs.readdirSync(UI).filter(name => name.endsWith('.css'));
 const sources = new Map([...cssFiles, ...jsFiles].map(name => [name, read(name)]));
 
@@ -105,6 +113,20 @@ function cssCounts(file, source) {
   };
 }
 
+// An element id the config does not know is untracked UI; a class still
+// written at the call site is a look that has not moved into the config yet.
+function configCounts(source) {
+  const ids = [...source.matchAll(/\bid\s*:\s*["'`]([^"'`$]*)["'`]/g)].map(match => match[1]);
+  const withoutEntry = ids.filter(id => id && !configured.has(id)).length;
+  const calls = source.match(/el\([^)]*?\}/gs) || [];
+  const classFromCode = calls.filter(call => {
+    const id = call.match(/\bid\s*:\s*["'`]([^"'`$]*)["'`]/);
+    const klass = call.match(/\bclass\s*:\s*["'`]([^"'`]*)["'`]/);
+    return !!(id && klass && configured.has(id[1]));
+  }).length;
+  return { ids_without_config_entry: withoutEntry, class_from_code: classFromCode };
+}
+
 function jsCounts(file, source) {
   let retired = 0;
   for (const { re } of RETIRED) {
@@ -123,6 +145,7 @@ function jsCounts(file, source) {
   return {
     hand_built_dots: handBuiltDots,
     retired,
+    ...configCounts(source),
     style_attributes: styleAttributes,
     style_writes: styleWrites,
     geometry_without_custom_property: geometryWrites,
@@ -197,6 +220,22 @@ if (process.argv.includes('--write-baseline')) {
     }
   }
   if (process.argv.includes('--ratchet')) {
+    // A count the baseline has never seen becomes today's floor, recorded in
+    // the same commit, so the ratchet starts from a known place.
+    let floorChanged = false;
+    for (const [file, fileCounts] of Object.entries(counts)) {
+      if (!baselineFiles[file]) baselineFiles[file] = {};
+      for (const [key, value] of Object.entries(fileCounts)) {
+        if (baselineFiles[file][key] === undefined) {
+          baselineFiles[file][key] = value;
+          floorChanged = true;
+        }
+      }
+    }
+    if (floorChanged) {
+      fs.writeFileSync(BASELINE, JSON.stringify({ files: baselineFiles }, null, 2) + '\n');
+      try { execSync(`git add ${BASELINE.pathname}`, { encoding: 'utf8' }); } catch { /* not a git tree */ }
+    }
     let staged = [];
     try {
       staged = execSync('git diff --cached --name-only', { encoding: 'utf8' }).split('\n').filter(Boolean);
