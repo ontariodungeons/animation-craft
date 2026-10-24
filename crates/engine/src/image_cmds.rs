@@ -187,7 +187,7 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     // pivot starts at its part's centre (refined later in the Animation view). It carries a gentle
     // "rest" track for motion.path to draw on.
     let rig = match params.get("rig_order").and_then(Value::as_array) {
-        Some(order) if errors.is_empty() => Some(write_parts_rig(&out_dir, &asset_id, order)?),
+        Some(order) if errors.is_empty() => Some(write_parts_rig(&out_dir, &asset_id, order, None)?),
         Some(_) => { errors.push("rig.json not written: some parts failed".into()); None }
         None => None,
     };
@@ -205,7 +205,9 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
     }))
 }
 
-fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value]) -> Result<std::path::PathBuf> {
+/// `joints` (rig.from_sheet's placed parts: id, parent, pivot) replaces the centre pivots and the
+/// largest-part root with the placed joints and parents.
+fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value], joints: Option<&[Value]>) -> Result<std::path::PathBuf> {
     let mut layers = Vec::new();
     let mut canvas = (0, 0);
     for id in order {
@@ -220,17 +222,64 @@ fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value]) -
         if area == 0 { return Err(EngineError::InvalidParams(format!("rig_order: part {id} is empty"))); }
         layers.push((id.to_string(), file, [(min.0 + max.0) as f64 / 2.0, (min.1 + max.1) as f64 / 2.0], area));
     }
-    let root = layers.iter().max_by_key(|l| l.3).map(|l| l.0.clone()).unwrap_or_default();
+    let joint = |id: &str| joints.and_then(|j| j.iter().find(|p| p["id"].as_str() == Some(id)));
+    let root = joints
+        .and_then(|j| j.iter().find(|p| p["parent"].is_null()).and_then(|p| p["id"].as_str()).map(str::to_string))
+        .unwrap_or_else(|| layers.iter().max_by_key(|l| l.3).map(|l| l.0.clone()).unwrap_or_default());
     // One starting track to draw paths on: the root bobs and tilts gently, as a cut-out at rest does.
     let rest = json!({"id": "rest", "label": "Rest · gentle bob", "duration": 4, "loop": true, "motion": {root.as_str(): {
         "position": [{"kind": "oscillate", "axis": 1, "amplitude": 4, "hz": 0.5, "phase": 0}],
         "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.2, "hz": 0.5, "phase": 0.25}]}}});
     let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": [rest],
-        "layers": layers.iter().map(|(id, file, pivot, _)| json!({"id": id, "file": file, "pivot": pivot,
-            "parent": if *id == root { Value::Null } else { json!(root) }})).collect::<Vec<_>>()});
+        "layers": layers.iter().map(|(id, file, pivot, _)| match joint(id) {
+            Some(j) => json!({"id": id, "file": file, "pivot": j["pivot"], "parent": j["parent"]}),
+            None => json!({"id": id, "file": file, "pivot": pivot, "parent": if *id == root { Value::Null } else { json!(root) }}),
+        }).collect::<Vec<_>>()});
     let path = out_dir.join("rig.json");
     std::fs::write(&path, serde_json::to_vec_pretty(&rig).map_err(|e| EngineError::InvalidParams(e.to_string()))?)?;
     Ok(path)
+}
+
+/// A rig sheet from `image.generate rig_parts=...` becomes a layered rig: pipeline/rig_from_sheet.py cuts the
+/// cells, places each part where it sits on the assembled asset and finds the joints; rig.json is then
+/// written like image.break_apart's. Connect it with project.add_asset kind=cutout_rig.
+pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
+    let invalid = |message: String| EngineError::InvalidParams(message);
+    let sheet_ref = p["sheet"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("rig.from_sheet needs sheet=<generated rig sheet asset id or PNG path>".into()))?;
+    let sheet = match s.project_assets.iter().find(|a| a.id == sheet_ref).and_then(|a| a.path.clone()) {
+        Some(path) => path,
+        None => resolve_workspace_path(s, sheet_ref),
+    };
+    let receipt = sheet.with_file_name("generation.json");
+    if !sheet.is_file() || !receipt.is_file() {
+        return Err(invalid(format!("{} needs its generation.json beside it; make the sheet with image.generate rig_parts=...", sheet.display())));
+    }
+    let name = crate::workspace::sanitize_asset_id(p["name"].as_str().unwrap_or("rig"));
+    let out_dir = match p["out_dir"].as_str() {
+        Some(dir) => resolve_workspace_path(s, dir),
+        None => crate::workshop::project_dir(s)?.join("assets/characters").join(&name).join("rig"),
+    };
+    let root = workspace_root(s);
+    let script = root.join("pipeline/rig_from_sheet.py");
+    let mut args = vec![script.to_string_lossy().into_owned(), "--sheet".into(), sheet.to_string_lossy().into_owned(),
+        "--receipt".into(), receipt.to_string_lossy().into_owned(), "--out-dir".into(), out_dir.to_string_lossy().into_owned()];
+    if let Some(pivots) = p.get("pivots").filter(|v| !v.is_null()) {
+        if !pivots.as_object().is_some_and(|m| m.values().all(|v| v.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|n| n.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)))))) {
+            return Err(invalid("pivots maps part ids to [u, v] inside the part, each 0 to 1".into()));
+        }
+        args.extend(["--pivots".into(), pivots.to_string()]);
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut placement: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok())
+        .ok_or_else(|| EngineError::CommandFailed("rig.from_sheet".into(), "rig_from_sheet.py returned no result".into()))?;
+    let order = placement["order"].as_array().cloned().unwrap_or_default();
+    let joints = placement["parts"].as_array().cloned().unwrap_or_default();
+    let rig = write_parts_rig(&out_dir, &name, &order, Some(&joints))?;
+    placement["command"] = json!("rig.from_sheet");
+    placement["rig"] = json!(rig);
+    placement["next"] = json!(format!("project.add_asset path={} kind=cutout_rig id={name} name={name}", rig.display()));
+    Ok(placement)
 }
 
 /// Warp the active asset's source with explicit src/dst pins via PhotoCraft puppet warp.

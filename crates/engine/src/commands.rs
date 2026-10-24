@@ -101,6 +101,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"motion.pose.export"
             | b"motion.export_track"
             | b"motion.place_section"
+            | b"rig.from_sheet"
             | b"sequence.render"
             | b"animation.source.render"
             | b"video.init"
@@ -373,6 +374,7 @@ pub fn build() -> Vec<CommandSpec> {
             has_asset,
             cmd_asset_build_cutout_rig
         ),
+        cmd!("rig.from_sheet", "Rig From Sheet", ["Rig & Matting"], None, "{\"sheet\":\"rig sheet asset id or PNG (image.generate rig_parts=...)\",\"name\":\"rig id\",\"out_dir\":\"optional; default assets/characters/<name>/rig\",\"pivots\":{\"part id\":\"[u,v] in the part, 0-1; corrects a joint without a new sheet\"}}", always, crate::image_cmds::cmd_rig_from_sheet),
         cmd!(
             "image.break_apart",
             "Break Image Into Parts",
@@ -470,7 +472,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("agent.log", "Agent Transcript / Reply Retrieval", "{\"refresh\":false}", cmd_agent_log),
         cmd!("agent.send", "Send to the app agent", ["Agent"], None, "{\"message\":\"text\",\"attachments\":[\"png\"],\"new_chat\":true,\"session\":\"optional expected existing session; requires new_chat=false\",\"wait\":300,\"free_only\":false,\"image_task\":false}", always, cmd_agent_send),
         cmd!("image.generate", "Generate Image (Codex)", ["Project Assets"], None,
-            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"reference_asset\":\"optional registered reference PNG asset ID\",\"references\":[\"project-relative or absolute project PNG; max 5 including reference_asset\"],\"poses\":[\"optional 2 to 8 ordered pose descriptions; requires a reference\"],\"character\":\"optional registered source character ID\",\"scene\":1,\"animation\":\"optional intended action name\",\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .magic for CLI targeting\"}",
+            "{\"prompt\":\"image description\",\"model\":\"gpt-6-luna (default; selected Codex model, not pixel resolution)\",\"quality\":\"auto (only verified option)\",\"reference_asset\":\"optional registered reference PNG asset ID\",\"references\":[\"project-relative or absolute project PNG; max 5 including reference_asset\"],\"poses\":[\"optional 2 to 8 ordered pose descriptions; requires a reference\"],\"rig_parts\":[{\"id\":\"part id\",\"description\":\"what the part is\",\"parent\":\"optional part id\",\"pivot\":\"optional [u,v] in the part, 0-1\"}],\"character\":\"optional registered source character ID\",\"scene\":1,\"animation\":\"optional intended action name\",\"transparent_background\":true,\"name\":\"optional asset name\",\"timeout_s\":300,\"project\":\"optional existing .magic for CLI targeting\"}",
             always, crate::image_generation::generate),
         cmd!("assets.agent_sheets", "Draw Asset Sheets (agent)", ["Rig & Matting"], None, "{\"character\":\"optional id\",\"kinds\":[\"turnaround\",\"skeleton\",\"poses\"],\"agent\":\"codex|omp|claude\",\"run\":true,\"check\":false,\"timeout_s\":1800,\"note\":\"optional\"}", always, cmd_assets_agent_sheets),
         cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
