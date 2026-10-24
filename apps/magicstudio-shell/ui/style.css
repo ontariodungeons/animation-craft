@@ -979,7 +979,7 @@ body.at-home .app-footer { display:none; }
    (right) share --song-s per second, so a sung line sits level with its frame;
    the stage, the section's lanes and what goes on them stay pinned in the centre.
    Items carry their song time and length as --at-s / --len-s, the playhead --now-s. */
-#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 9), 24vw) minmax(0, 1fr) calc(var(--space-5) * 7); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto;
+#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8.5), 22vw) minmax(0, 1fr) calc(var(--space-5) * 6); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto;
   --song-s-px: 18; --song-s: calc(var(--space-1) * 4.5); }
 .words-side, .words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 .words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); background: var(--bg); }
@@ -987,6 +987,8 @@ body.at-home .app-footer { display:none; }
 .words-head strong { font-size: var(--text-lg); }
 .words-head > :last-child { margin-left: auto; }
 .words-crumb { font-size: var(--text-md); }
+.words-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.words-spacer { flex: 1; }
 .words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
@@ -995,21 +997,30 @@ body.at-home .app-footer { display:none; }
 .words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
 .words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
 .words-band > .meta { color: var(--faint); }
-.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 2.4), 1fr));
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 2.4), 1fr)); grid-auto-rows: max-content;
   align-content: start; gap: var(--space-1); padding-left: var(--space-1); border-left: medium solid transparent; overflow: hidden; cursor: pointer; }
 .words-tl > .words-line.active { border-left-color: var(--accent); }
-.words-tl > .first { margin-top: var(--text-xl); height: calc(var(--len-s) * var(--song-s) - var(--text-xl) - var(--space-1)); }
+.words-tl > .first { margin-top: var(--space-5); height: calc(var(--len-s) * var(--song-s) - var(--space-5) - var(--space-1)); }
 .words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }
+/* An instrumental: a quiet hatched block where nothing is sung. */
+.words-tl > .words-gap { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1);
+  border: thin dashed var(--line); border-radius: var(--radius-sm); color: var(--faint); font-size: var(--text-sm); letter-spacing: .08em; text-transform: uppercase;
+  background: repeating-linear-gradient(135deg, transparent 0 var(--space-2), color-mix(in srgb, var(--line) 35%, transparent) var(--space-2) calc(var(--space-2) + var(--space-1))); }
+.words-gap > .meta { text-transform: none; letter-spacing: 0; font-size: var(--text-xs); }
+.words-roll > .words-gap { left: var(--space-4); right: var(--space-4); }
 /* The film roll: sprocket holes down both edges, a time mark every ten seconds. */
-.words-roll { padding-inline: var(--space-4); border-radius: var(--radius-sm);
-  background: radial-gradient(circle, var(--line) 35%, transparent 40%) left top / var(--space-4) var(--text-xl) repeat-y,
-    radial-gradient(circle, var(--line) 35%, transparent 40%) right top / var(--space-4) var(--text-xl) repeat-y, var(--bg); }
-.words-roll > .words-band { left: var(--space-4); right: var(--space-4); }
+.words-roll { padding-inline: var(--space-4); border-radius: var(--radius-sm); box-shadow: inset 0 0 0 thin color-mix(in srgb, black 60%, var(--line));
+  background: radial-gradient(ellipse 34% 26%, color-mix(in srgb, var(--surface-2) 70%, black) 92%, transparent 100%) left top / var(--space-4) var(--text-xl) repeat-y,
+    radial-gradient(ellipse 34% 26%, color-mix(in srgb, var(--surface-2) 70%, black) 92%, transparent 100%) right top / var(--space-4) var(--text-xl) repeat-y,
+    color-mix(in srgb, var(--bg) 70%, black); }
+.words-roll > .words-band { left: var(--space-4); right: var(--space-4); border-top-width: thin; background: none; }
+.words-roll > .words-band > strong { position: relative; z-index: 2; padding: 0 var(--space-1); background: color-mix(in srgb, var(--bg) 70%, black); font-size: var(--text-xs); }
 .words-roll > .words-tick { left: var(--space-4); right: var(--space-4); border-top: thin dashed var(--surface-2); color: var(--faint); font-size: var(--text-xs); text-align: right; }
-.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); padding: 0; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius-sm);
+/* A frame fills the strip's width, edge to edge; the strip's black shows as the gap between frames. */
+.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); padding: 0; overflow: hidden; border: 0; border-radius: 0;
   background: color-mix(in srgb, var(--tone-lyrics) 14%, white); cursor: pointer; }
-.words-roll > .words-frame { left: calc(var(--space-4) + var(--space-1)); right: calc(var(--space-4) + var(--space-1)); }
-.words-frame:hover, .words-frame.active { border-color: var(--accent); }
+.words-roll > .words-frame { left: var(--space-4); right: var(--space-4); }
+.words-frame:hover, .words-frame.active { box-shadow: inset 0 0 0 medium var(--accent); }
 /* The line's minimal lanes: when its words are sung, when items move, when strokes draw. */
 .words-lanes { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); }

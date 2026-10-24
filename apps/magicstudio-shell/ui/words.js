@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "full", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "full", offset: 0, timeLabel: null, effects: null };
 // How a designed lyric item moves on its accent word (the engine's MOVES), and what each does.
 const WORDS_MOVES = [["quiet", "Quiet", "Fades in and holds"], ["sleep", "Sleep", "Letters sink one by one"], ["settle", "Settle", "Drops and squashes into place"],
   ["fall", "Fall", "Drops down"], ["pop", "Pop", "A quick swell on the beat"], ["rise", "Rise", "Arcs up and away"], ["east", "East", "Slides right"],
@@ -287,23 +287,27 @@ const wordsFitter = new ResizeObserver((entries) => {
 // The settled look of a line: every move done and every stroke drawn.
 const wordsPose = (anim, lineId) => wordsLineSpan(anim, lineId).end - 0.05;
 
+// Play the song from the line, on through the whole song: the stage follows each line as it is sung
+// and the lyrics and film roll roll up past it, like film. A section with unsaved changes stays put.
 function wordsPlay() {
   const anim = wordsCurrent();
   if (!anim || !wordsPanel.line) return;
   const path = wordsSongPath();
   if (!path) return toast("Add the song in Project › Song to hear it here");
   wordsPanel.audio ??= new Audio();
-  const audio = wordsPanel.audio, span = wordsLineSpan(anim, wordsPanel.line), section = wordsSpan(anim);
+  const audio = wordsPanel.audio, span = wordsLineSpan(anim, wordsPanel.line);
   if (!audio.paused) { audio.pause(); return; }
   if (audio.getAttribute("src") !== convertFileSrc(path)) audio.src = convertFileSrc(path);
   audio.currentTime = Math.max(0, span.start - 0.4);
   audio.play();
   const tick = () => {
-    if (audio.paused || state.view !== "design") { audio.pause(); wordsPanel.playing = false; return; }
-    const t = audio.currentTime;
-    if (t >= section.end) { audio.pause(); return; }
-    const line = wordsLines(anim).findLast((l) => wordsAt(l.words[0]) <= t + 0.4);
-    if (line && line.id !== wordsPanel.line) { wordsPanel.line = line.id; wordsPanel.item = null; wordsRender(); }
+    if (audio.paused || audio.ended || state.view !== "design") { audio.pause(); wordsPanel.playing = false; return; }
+    const t = audio.currentTime, animations = wordsPanel.read.document.animations;
+    const here = animations.find((a) => { const s = wordsSpan(a); return t >= s.start - 0.4 && t < s.end; });
+    const unsaved = wordsPanel.designs.size || Object.keys(wordsPanel.styleEdits).length;
+    if (here && here.animation_id !== wordsPanel.selected && !unsaved) { wordsPanel.selected = here.animation_id; wordsPanel.line = null; wordsPanel.item = null; wordsPanel.followed = `${here.animation_id}/playing`; wordsRender(); }
+    const current = wordsCurrent(), line = wordsLines(current).findLast((l) => wordsAt(l.words[0]) <= t + 0.4);
+    if (line && line.id !== wordsPanel.line) { wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.followed = `${current.animation_id}/${line.id}`; wordsRender(); }
     wordsPanel.time = t; wordsPanel.playing = true;
     wordsCanvasDraw(t); wordsNow(t);
     requestAnimationFrame(tick);
@@ -315,7 +319,8 @@ function wordsPlay() {
 function wordsChip(anim, w) {
   const design = wordsDesign(anim, w.line_id), index = design.items.findIndex((it) => it.word_ids.includes(w.word_id)), it = design.items[index];
   const hero = it && (it.weight === 700 || it.italic || it.font === "serif"), on = wordsPanel.line === w.line_id && wordsPanel.item === index;
-  const chip = el("button", { class: `chip word${on ? " active" : ""}${hero ? " hero" : ""}${w.text.length > 9 ? " long" : ""}`, "data-word-id": w.word_id,
+  const move = it && it.motion !== "quiet" ? WORDS_MOVES.find((m) => m[0] === it.motion)?.[1] : "";
+  const chip = el("button", { class: `chip word${on ? " active" : ""}${hero ? " hero" : ""}${w.text.length + (move ? move.length + 1 : 0) > 10 ? " long" : ""}`, "data-word-id": w.word_id,
     title: `${w.text} · ${wordsClock(wordsAt(w))}`,
     onclick: (event) => {
       event.stopPropagation();
@@ -323,14 +328,23 @@ function wordsChip(anim, w) {
       if (anim.animation_id !== wordsPanel.selected) return;
       wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsPose(anim, w.line_id); wordsRender();
     } },
-    w.text, el("span", { class: "chip-action" }, it ? (it.motion === "quiet" ? "" : WORDS_MOVES.find((m) => m[0] === it.motion)?.[1]) : ""));
+    w.text, el("span", { class: "chip-action" }, move));
   if (wordsPanel.designs.has(w.line_id)) chip.dataset.changed = "";
   return chip;
 }
 
+// Stretches of the song with no sung line (the intro and the breaks between sections): instrumentals.
+function wordsGaps(animations) {
+  const spans = animations.map(wordsSpan).sort((a, b) => a.start - b.start), gaps = [];
+  let at = 0;
+  for (const s of spans) { if (s.start - at > 1.5) gaps.push([at, s.start]); at = Math.max(at, s.end); }
+  return gaps.map(([a, b]) => wordsPlace(el("div", { class: "words-gap", title: `No singing from ${wordsClock(a)} to ${wordsClock(b)}` },
+    el("span", {}, "Instrumental"), el("span", { class: "meta" }, `${wordsClock(a)} – ${wordsClock(b)}`)), a, b - a));
+}
+
 // Left: the lyrics on the song clock, each section a band and each sung line its tags.
 function wordsTimeline(animations, end) {
-  return wordsPlace(el("div", { class: "words-tl", "aria-label": "Lyrics on the song timeline" },
+  return wordsPlace(el("div", { class: "words-tl", "aria-label": "Lyrics on the song timeline" }, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "button", { "data-section": a.animation_id, onclick: () => a.animation_id === wordsPanel.selected || wordsSelect(a.animation_id) })),
     ...wordsRows(animations).map(([a, j, line, at, len]) => wordsPlace(el("div", { class: `words-line${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`,
       title: "Click around the words to design the whole line",
@@ -353,7 +367,7 @@ function wordsRoll(animations, end) {
     wordsFitter.observe(frame);
     return frame;
   });
-  return wordsPlace(el("div", { class: "words-tl words-roll", "aria-label": "Film roll of the song" }, ...ticks,
+  return wordsPlace(el("div", { class: "words-tl words-roll", "aria-label": "Film roll of the song" }, ...ticks, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "div")), ...frames, el("span", { class: "words-tl-head" })), 0, end);
 }
 
@@ -386,10 +400,16 @@ function wordsNow(t) {
     const span = wordsLineSpan(anim, wordsPanel.line), from = span.start - 0.4;
     wordsPanel.lanes.style.setProperty("--at", `${(100 * wordsClamp((t - from) / (span.end - from))).toFixed(3)}%`);
   }
-  const tl = view?.querySelector(".words-tl");
-  if (!wordsPanel.playing || !tl) return;
-  const y = tl.offsetTop + tl.clientHeight * t / Number(tl.style.getPropertyValue("--len-s")) - view.clientHeight / 2;
-  if (Math.abs(view.scrollTop - y) > view.clientHeight / 4) view.scrollTop = y;
+  if (wordsPanel.playing) wordsFollow(t);
+}
+// The lyrics and the film roll move with the song: the moment t sits level with the middle of the
+// stage, where the eye rests. While playing this tracks every frame; a new pick glides there.
+function wordsFollow(t, smooth = false) {
+  const view = $("view-design"), tl = view?.querySelector(".words-tl"), eye = view?.querySelector(".lyric-canvas, .words-preview");
+  if (!tl || !eye) return;
+  const seconds = Number(tl.style.getPropertyValue("--len-s"));
+  const target = tl.offsetTop + tl.clientHeight * t / seconds - (eye.getBoundingClientRect().top - view.getBoundingClientRect().top + eye.clientHeight / 2);
+  view.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "instant" });
 }
 
 const wordsCard = (on, title, does, onclick) => el("button", { class: "effect", role: "radio", "aria-checked": String(!!on), onclick },
@@ -476,28 +496,35 @@ function wordsRender() {
   const main = el("section", { class: "words-main", "aria-label": `${wordsLabel(anim)} lyrics` },
     el("div", { class: "words-head" },
       el("span", { class: "words-crumb" }, "Changing: ", el("strong", {}, wordsLabel(anim)), ` › line ${lineNo}`, it ? el("strong", {}, ` › “${itemText}”`) : " · the whole line"),
-      segmented("What the stage shows", wordsPanel.view, [["design", "Design"], ["video", "Video"]], (key) => { wordsPanel.view = key; wordsRender(); wordsVideoRange(); }),
-      wordsPanel.read.in_video?.includes(anim.animation_id)
-        ? el("button", { class: "ghost", title: "Put the video's original lyrics back for this section", onclick: () => wordsApply(false) }, "In the video · Restore original")
-        : el("button", { class: "ghost", title: "Replace this section's lyrics in the video with the designed lines", onclick: () => wordsApply(true) }, "Use in the video"),
-      designer ? segmented("Behind the lyrics", wordsPanel.scene ? "scene" : "paper", [["scene", "Scene"], ["paper", "Paper"]], (key) => { wordsPanel.scene = key === "scene"; wordsRender(); }) : null,
       save),
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
+    designer ? wordsCanvas(anim) : wordsStage(anim),
+    // The stage's controls sit in one row under it, so the stage stays high in the column.
+    el("div", { class: "words-toolbar" },
+      designer ? el("button", { class: "icon", "aria-label": "Play this line", title: "Play from this line", onclick: wordsPlay, html: ICONS.play }) : null,
+      designer ? el("span", { class: "meta" }, wordsClock(wordsLineSpan(anim, wordsPanel.line).start)) : null,
+      segmented("What the stage shows", wordsPanel.view, [["design", "Design"], ["video", "Video"]], (key) => { wordsPanel.view = key; wordsRender(); wordsVideoRange(); }),
+      designer ? segmented("Behind the lyrics", wordsPanel.scene ? "scene" : "paper", [["scene", "Scene"], ["paper", "Paper"]], (key) => { wordsPanel.scene = key === "scene"; wordsRender(); }) : null,
+      el("span", { class: "words-spacer" }),
+      wordsPanel.read.in_video?.includes(anim.animation_id)
+        ? el("button", { class: "ghost", title: "Put the video's original lyrics back for this section", onclick: () => wordsApply(false) }, "In the video · Restore original")
+        : el("button", { class: "ghost", title: "Replace this section's lyrics in the video with the designed lines", onclick: () => wordsApply(true) }, "Use in the video")),
     ...(designer ? [
-      wordsCanvas(anim),
-      el("div", { class: "transport" },
-        el("button", { class: "icon", "aria-label": "Play this line", title: "Play from this line", onclick: wordsPlay, html: ICONS.play }),
-        el("span", { class: "meta" }, `${wordsClock(wordsLineSpan(anim, wordsPanel.line).start)} · drag a word on the stage to move it · Esc picks the whole line`)),
       wordsLanes(anim),
       segmented("What to change", wordsPanel.tab, [["look", "Look"], ["move", "Move"], ["draw", "Draw"]], (key) => { wordsPanel.tab = key; wordsRender(); }),
       ...wordsOptions(anim)]
     : [el("div", { class: "words-head" }, el("label", { class: "field-row" }, "Size", wordsSizeInput(anim)), ...wordsStyleFields(anim)),
-      wordsStage(anim), el("div", { class: "group-label" }, `Text effects for ${wordsLabel(anim)} · HyperFrames`), wordsEffects(anim)]));
+      el("div", { class: "group-label" }, `Text effects for ${wordsLabel(anim)} · HyperFrames`), wordsEffects(anim)]));
   view.replaceChildren(
     el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Lyrics · on the song timeline"), wordsTimeline(animations, end)),
     main,
     el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Film roll · the whole song"), wordsRoll(animations, end)));
-  requestAnimationFrame(() => { wordsCanvasDraw(); wordsFitClock(view); });
+  requestAnimationFrame(() => {
+    wordsCanvasDraw(); wordsFitClock(view);
+    // A new pick brings its line level with the stage.
+    const pick = `${wordsPanel.selected}/${wordsPanel.line}`;
+    if (pick !== wordsPanel.followed && wordsPanel.line && !wordsPanel.playing) { wordsPanel.followed = pick; wordsFollow(wordsLineSpan(anim, wordsPanel.line).start, true); }
+  });
   wordsNow(wordsPanel.time);
   wordsFit();
 }
@@ -565,7 +592,7 @@ function wordsStage(anim) {
       : wordsPanel.studio?.error ? `The video's lyric clips could not be read: ${wordsPanel.studio.error}` : "The video has no lyric clips for this section.");
   }
   const scrub = el("input", { type: "range", id: "words-scrub", min: String(section.start), max: String(section.end), step: "0.01", "aria-label": "Video time",
-    oninput: (e) => wordsSeekSong(Number(e.target.value)) });
+    oninput: (e) => { e.target.defaultValue = e.target.value; wordsSeekSong(Number(e.target.value)); } });
   scrub.value = scrub.defaultValue = String(section.start); // a view control, never an unsaved edit
   // The preview player of the HyperFrames server, same project id as the Studio link.
   const server = new URL(url);
