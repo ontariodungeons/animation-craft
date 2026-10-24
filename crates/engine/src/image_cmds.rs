@@ -270,6 +270,12 @@ pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
         args.extend(["--pivots".into(), pivots.to_string()]);
     }
+    if let Some(places) = p.get("places").filter(|v| !v.is_null()) {
+        if !places.as_object().is_some_and(|m| m.values().all(|v| v.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|n| n.as_f64().is_some_and(f64::is_finite))))) {
+            return Err(invalid("places maps part ids to [cx, cy], the part's centre in canvas pixels".into()));
+        }
+        args.extend(["--places".into(), places.to_string()]);
+    }
     let stdout = run_tool_in(&root, "python3", &args)?;
     let mut placement: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok())
         .ok_or_else(|| EngineError::CommandFailed("rig.from_sheet".into(), "rig_from_sheet.py returned no result".into()))?;

@@ -91,7 +91,7 @@ def place(assembled: np.ndarray, part: np.ndarray, scales, fine=np.arange(0.95, 
     return match(assembled, part, s * np.asarray(fine), around=(x, y), radius=12)
 
 
-def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None) -> dict:
+def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, places: dict | None = None) -> dict:
     layout = json.loads(receipt.read_text())['rig_sheet']
     if not layout:
         raise ValueError(f'{receipt} is not a rig sheet request')
@@ -148,6 +148,11 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None) -
     for spec in parts:
         if spec in roots:
             continue
+        if spec['id'] in (places or {}):  # a placement correction: the part's centre in canvas pixels
+            cx, cy = places[spec['id']]
+            h, w = trims[spec['id']].shape[:2]
+            put(spec, sheet_scale, cx - w * sheet_scale / 2, cy - h * sheet_scale / 2, 0.0, 'given centre')
+            continue
         err, s, x, y = place(assembled, trims[spec['id']], sheet_scale * np.linspace(0.9, 1.1, 9))
         put(spec, s, x + mx, y + my, err, 'colour')
     # A root carries the most hidden artwork, so a free scale search misjudges it. The sheet draws every
@@ -186,8 +191,8 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None) -
     # Every visible pixel of the asset belongs to one part: of the parts whose placed sheet drawing covers it
     # and resembles it there, the one that matches best (smoothed, so regions are whole; nearer the front wins ties); a
     # pixel no part covers goes to the nearest owned pixel's part. A layer holds the asset's own pixels where
-    # it owns them, and its sheet pixels only where they hide behind a part in front (the painted joint
-    # art a turning part uncovers). So the rig at rest is the asset itself.
+    # it owns them, and its sheet pixels only where they hide behind a joint partner in front (the painted
+    # joint art a turning part uncovers). So the rig at rest is the asset itself.
     order = [p['id'] for p in parts]
     visible = reference[:, :, 3] > 0
     cost = np.full((len(order),) + visible.shape, np.inf, np.float32)
@@ -229,7 +234,11 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None) -
         layer = np.zeros_like(reference)
         own = owner == k
         layer[own] = reference[own]
-        behind_front = (placed[pid][:, :, 3] > 16) & (owner > k)
+        # Hidden art is kept only behind the part's joint partners (its parent or children); behind an
+        # unrelated part it would show as a stray fragment when that part moves.
+        spec = parts[k]
+        partners = [order.index(q['id']) for q in parts if q.get('parent') == pid] + ([order.index(spec['parent'])] if spec.get('parent') else [])
+        behind_front = (placed[pid][:, :, 3] > 16) & (owner > k) & np.isin(owner, partners)
         layer[behind_front] = placed[pid][behind_front]
         layers[pid] = layer
         row = next(r for r in report if r['id'] == pid)
@@ -291,8 +300,9 @@ def main(argv=None) -> int:
     ap.add_argument('--receipt', required=True, type=Path, help="the sheet's generation.json")
     ap.add_argument('--out-dir', required=True, type=Path)
     ap.add_argument('--pivots', type=json.loads, default=None, help='JSON {part id: [u, v]} joint corrections')
+    ap.add_argument('--places', type=json.loads, default=None, help='JSON {part id: [cx, cy]} placement corrections in canvas pixels')
     a = ap.parse_args(argv)
-    print(json.dumps(run(a.sheet.resolve(), a.receipt.resolve(), a.out_dir.resolve(), a.pivots)))
+    print(json.dumps(run(a.sheet.resolve(), a.receipt.resolve(), a.out_dir.resolve(), a.pivots, a.places)))
     return 0
 
 
