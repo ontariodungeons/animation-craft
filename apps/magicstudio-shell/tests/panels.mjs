@@ -145,6 +145,9 @@ const tests = [
     const { ctx } = elFixture({ 'block-song': { component: 'panel-head', look: 'control', density: 'normal', label: 'Song' } });
     await ctx.loadComponents();
     const node = ctx.el('button', { id: 'block-song' });
+    assert.equal(node.className, 'panel-head', 'the component class comes from the entry without caller styling');
+    const active = ctx.el('button', { id: 'block-song', class: 'active panel-head' });
+    assert.equal(active.className, 'active panel-head', 'behavioral classes survive and the component is not duplicated');
     assert.equal(node.dataset.look, 'control', 'the look comes from the entry');
     assert.equal(node.dataset.density, 'normal', 'the density comes from the entry');
     const plain = ctx.el('button', { id: 'not-configured' });

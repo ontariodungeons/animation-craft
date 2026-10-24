@@ -120,7 +120,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 [data-look="control"] { width: 100%; text-align: left; cursor: pointer; --panel-gap: var(--space-3); --panel-pad-y: var(--space-3); --panel-pad-x: var(--space-3); }
 [data-look="bar"] { flex: none; --panel-gap: var(--space-3); --panel-pad-y: var(--space-2); --panel-pad-x: var(--space-3); --panel-rule: 1px solid var(--line); }
 [data-look="ruler"] { position: sticky; top: 0; z-index: 2; height: var(--text-xl); background: var(--bg); color: var(--faint); font-size: var(--text-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-[data-look="inline"] { --panel-gap: var(--space-2); }
+.panel-head[data-look="inline"] { --panel-gap: var(--space-2); }
 [data-density="compact"] { --panel-pad-y: var(--space-1); --panel-pad-x: var(--space-2); }
 .panel-head.item { width: 100%; padding: var(--space-2) var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; }
 .panel-head.item.active { border-color: var(--accent); }
@@ -140,7 +140,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 [data-look="card"] { align-self: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; --panel-pad-y: var(--space-5); --panel-pad-x: var(--space-5); }
 [data-look="overlay"] { position: absolute; inset: 0; display: none; place-content: center; gap: var(--space-1); }
 [data-look="overlay"].show { display: grid; }
-[data-look="inline"] { margin: auto; font-size: var(--text-sm); --panel-pad-y: var(--space-4); --panel-pad-x: var(--space-4); }
+.panel-empty[data-look="inline"] { margin: auto; font-size: var(--text-sm); --panel-pad-y: var(--space-4); --panel-pad-x: var(--space-4); }
 
 /* One status row. The base is the shared shape; a modifier carries the
    density or the alignment that differs. */

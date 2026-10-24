@@ -232,6 +232,7 @@ async function loadComponents() {
 
 function applyEntry(node, entry) {
   if (!entry) return node;
+  if (entry.component) node.className = [...new Set(`${node.className || ''} ${entry.component}`.trim().split(/\s+/))].join(' ');
   if (entry.look) node.dataset.look = entry.look;
   if (entry.density) node.dataset.density = entry.density;
   return node;
@@ -254,7 +255,7 @@ function el(tag, attrs = {}, ...children) {
   if (entry) applyEntry(node, entry);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
-    if (window.companionBoxes) window.companionBoxes.register(boxId, { project, look: entry?.look || null, density: entry?.density || null });
+    if (window.companionBoxes) window.companionBoxes.register(boxId, { project, label: entry?.label || null, look: entry?.look || null, density: entry?.density || null });
   }
   return node;
 }
