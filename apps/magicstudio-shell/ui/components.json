@@ -171,6 +171,14 @@
     "view-design": {
       "component": "workspace",
       "label": "Design"
+    },
+    "theatre-timeline": {
+      "component": "workspace",
+      "label": "Theatre timeline"
+    },
+    "motion-scrub": {
+      "component": "transport",
+      "label": "Animation scrubber"
     }
   }
 }

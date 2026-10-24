@@ -64,3 +64,24 @@ fn unavailable_destination_preserves_session_state_and_existing_lease(){
     assert!(other.execute("motion.theatre.save",json!({"expected_project":f.project,"state":native_state()})).unwrap_err().to_string().contains("owned by another"));
     assert_eq!(fs::read(&f.project).unwrap(),original);
 }
+
+#[test]
+fn clear_removes_one_characters_keyframes_and_keeps_its_sheets(){
+    let mut f=Fixture::new();
+    f.session.project_assets.push(ProjectAsset{id:"fish".into(),name:"Fish".into(),preset:None,path:Some(f.rig.clone()),kind:"cutout_rig".into(),parts:Vec::new()});
+    let keyed=json!({"tail":{"trackData":{"t":{"type":"BasicKeyframedTrack","keyframes":[{"id":"k","type":"bezier","position":0.0,"value":7.3,"handles":[0.5,1,0.5,0],"connectedRight":true}]}},"trackIdByPropPath":{"[\"rotation\"]":"t"}}});
+    let sheet=|tracks:&Value|json!({"sequence":{"type":"PositionalSequence","length":6,"subUnitsPerUnit":30,"tracksByObject":tracks},"staticOverrides":{"byObject":{}}});
+    f.save(json!({"definitionVersion":"0.4.0","revisionHistory":["r"],"sheetsById":{"fish / swim":sheet(&keyed),"fish / hover":sheet(&keyed),"bee / walk":sheet(&keyed)}})).unwrap();
+    let one=f.session.execute("motion.theatre.clear",json!({"expected_project":f.project,"character":"fish","track":"swim"})).unwrap();
+    assert_eq!(one["removed_tracks"],1);
+    let state=f.session.execute("motion.theatre.read",json!({})).unwrap()["state"].clone();
+    assert_eq!(state["sheetsById"]["fish / swim"]["sequence"]["tracksByObject"],json!({}),"the cleared clip plays the engine motion");
+    assert_eq!(state["sheetsById"]["fish / hover"]["sequence"]["tracksByObject"],keyed,"other clips keep their edits");
+    let all=f.session.execute("motion.theatre.clear",json!({"expected_project":f.project,"character":"fish"})).unwrap();
+    assert_eq!(all["removed_tracks"],1);
+    let disk:Value=serde_json::from_slice(&fs::read(&f.project).unwrap()).unwrap();
+    assert_eq!(disk["theatre"]["sheetsById"]["fish / hover"]["sequence"]["tracksByObject"],json!({}));
+    assert_eq!(disk["theatre"]["sheetsById"]["bee / walk"]["sequence"]["tracksByObject"],keyed,"another character is untouched");
+    assert!(disk["theatre"]["sheetsById"].get("fish / swim").is_some(),"sheets stay; only keyframes go");
+    assert!(f.session.execute("motion.theatre.clear",json!({"character":"fish"})).is_err(),"clearing needs the expected project");
+}

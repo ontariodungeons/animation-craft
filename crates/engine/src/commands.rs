@@ -263,6 +263,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),
         query!("motion.clips", "List clips and their Theatre sheets", "{\"character\":\"asset id\"}", crate::theatre::list),
         cmd!("motion.clips.convert", "Give every clip its own Theatre sheet", [], None, "{\"character\":\"asset id\"}", always, crate::theatre::convert),
+        cmd!("motion.theatre.clear", "Clear a character's Theatre keyframes", [], None, "{\"expected_project\":\"required selected .magic identity\",\"character\":\"asset id\",\"track\":\"optional clip id; all clips when omitted\"}", always, crate::theatre::clear),
         cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .magic identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
         query!(
             "project.list_assets",
