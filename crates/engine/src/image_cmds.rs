@@ -184,7 +184,8 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
 
     // `rig_order` (part ids, back to front) also writes the parts' layered rig, `rig.json`, for
     // project.add_asset kind=cutout_rig: the largest part is the root, the others ride on it, and each
-    // pivot starts at its part's centre (refined later in the Animation view).
+    // pivot starts at its part's centre (refined later in the Animation view). It carries a gentle
+    // "rest" track for motion.path to draw on.
     let rig = match params.get("rig_order").and_then(Value::as_array) {
         Some(order) if errors.is_empty() => Some(write_parts_rig(&out_dir, &asset_id, order)?),
         Some(_) => { errors.push("rig.json not written: some parts failed".into()); None }
@@ -220,7 +221,11 @@ fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value]) -
         layers.push((id.to_string(), file, [(min.0 + max.0) as f64 / 2.0, (min.1 + max.1) as f64 / 2.0], area));
     }
     let root = layers.iter().max_by_key(|l| l.3).map(|l| l.0.clone()).unwrap_or_default();
-    let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": [],
+    // One starting track to draw paths on: the root bobs and tilts gently, as a cut-out at rest does.
+    let rest = json!({"id": "rest", "label": "Rest · gentle bob", "duration": 4, "loop": true, "motion": {root.as_str(): {
+        "position": [{"kind": "oscillate", "axis": 1, "amplitude": 4, "hz": 0.5, "phase": 0}],
+        "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.2, "hz": 0.5, "phase": 0.25}]}}});
+    let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": [rest],
         "layers": layers.iter().map(|(id, file, pivot, _)| json!({"id": id, "file": file, "pivot": pivot,
             "parent": if *id == root { Value::Null } else { json!(root) }})).collect::<Vec<_>>()});
     let path = out_dir.join("rig.json");
