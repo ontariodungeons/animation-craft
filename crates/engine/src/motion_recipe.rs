@@ -5,9 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     if s.project_path.is_some() {
-        return Err(EngineError::InvalidParams("Run mc exec motion.recipe project=<song.magic> studio=<port> without --bridge; the batch connects each command to Studio itself".into()));
+        return Err(EngineError::InvalidParams("Run mc exec motion.recipe path=<song.magic> studio=<port> without --bridge; the batch connects each command to Studio itself".into()));
     }
-    let raw = p["project"].as_str().ok_or_else(|| EngineError::InvalidParams("project is required".into()))?;
+    let raw = p["path"].as_str().ok_or_else(|| EngineError::InvalidParams("path is required".into()))?;
     let project = crate::workspace::resolve_workspace_path(s, raw).canonicalize()?;
     if !project.is_file() || project.extension().is_none_or(|ext| ext != "magic") {
         return Err(EngineError::InvalidParams("project must be an existing .magic file".into()));
