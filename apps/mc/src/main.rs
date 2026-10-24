@@ -95,6 +95,10 @@ SUBCOMMANDS
   panels [--json|--check]              shared UI configuration and live panel telemetry
   tui look [instance=<pid>]            actual live TUI frame, state and all controls as JSON
   tui read [instance=<pid>]            the actual rendered terminal text
+  tui watch [notify=<agent>] [count=<n>]
+                                      stream only the selected TUI's new typed events; notify
+                                      prompts that agent once per distinct new failure, never
+                                      retried, and nothing already on screen is replayed
   tui instances                       list controllable TUIs; multiple instances require selection
   tui controls                        discover named actions and equivalent keys
   tui view name=booth|workshop|mops|telemetry
@@ -833,6 +837,14 @@ fn main() {
         "tui"=>{
             let action=a.pos(1).unwrap_or("look");
             let params=a.params_from(2).unwrap_or_else(|e|usage(e));
+            // A watch streams new events as they are observed; every other action is one reply.
+            if action=="watch"{
+                match tui::watch(&params,&mut |value|outln!("{}",value)){
+                    Ok(summary)=>outln!("{}",summary),
+                    Err(error)=>{outln!("{}",json!({"ok":false,"error":error}));std::process::exit(1);}
+                }
+                return;
+            }
             let value=tui::call(if action=="read"{"look"}else{action},&params).unwrap_or_else(|error|{outln!("{}",json!({"ok":false,"error":error}));std::process::exit(1)});
             if action=="read"||params["format"]=="text"{
                 for line in value["screen"]["lines"].as_array().into_iter().flatten(){outln!("{}",line.as_str().unwrap_or(""));}
