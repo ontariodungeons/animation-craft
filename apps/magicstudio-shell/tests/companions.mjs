@@ -59,6 +59,8 @@ const tests = [
     assert.match(boxes.get('render').reason,/Worker failed/);
     boxes.event({...start,request:'render-2',phase:'start'});
     boxes.event({...start,request:'render-2',phase:'success',result:{job:'job-2',state:'submitted'}});
+    boxes.event({command:'blender.status',project:ctx.state.project,params:{job:'job-1'},phase:'start'});
+    assert.equal(boxes.get('render').job,'job-2','old poll start cannot replace the active job');
     boxes.event({command:'blender.status',project:ctx.state.project,params:{job:'job-1'},phase:'success',result:{state:'completed'}});
     assert.equal(boxes.get('render').state,'working','old job cannot complete the replacement');
     boxes.event({command:'blender.status',project:ctx.state.project,params:{job:'job-2'},phase:'success',result:{state:'completed'}});

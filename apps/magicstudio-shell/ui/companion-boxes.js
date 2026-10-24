@@ -216,7 +216,7 @@ function createCompanionBoxes() {
       const context = event.box ? event : capture(event.command, event.params);
       if (!context.box) return;
       const box = get(context.box), request = context.job ? context.request : event.request || context.request;
-      if (event.phase !== "start" && (box?.state === "working" || context.job) && box?.request && request && box.request !== request) return;
+      if (box?.request && request && box.request !== request && (context.job || (event.phase !== "start" && box.state === "working"))) return;
       const result = event.result || {}, failed = event.phase === "error" || result.ok === false || result.state === "failed";
       const working = event.phase === "start" || ["submitted", "queued", "running", "cancelling"].includes(result.state);
       const job = jobId(result.job) || jobId(result.job_id) || context.job;
