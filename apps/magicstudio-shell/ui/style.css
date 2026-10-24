@@ -972,17 +972,52 @@ body.at-home .app-footer { display:none; }
 .companion-state { margin: 2px 0 6px; padding-left: 18px; color: var(--muted); font-size: 11px; }
 .companion-state li { margin: 1px 0; }
 
-/* Design > Words: the workspace. Sections on the left; preview, words and the
-   selected word's motion on the right. */
-#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8), 22vw) minmax(0, 1fr); align-content: start; gap: var(--space-3); padding: var(--space-3); overflow: auto; }
-.words-side, .words-main, .words-preview, .words-lines { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.words-main { gap: var(--space-3); }
+/* Design > Words: one vertical song timeline. The lyrics (left) and the film roll
+   (right) share --song-s per second, so a sung line sits level with its frame;
+   the stage, the section's lanes and what goes on them stay pinned in the centre.
+   Items carry their song time and length as --at-s / --len-s, the playhead --now-s. */
+#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 9), 24vw) minmax(0, 1fr) calc(var(--space-5) * 7); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto; --song-s: calc(var(--space-1) * 3.5); }
+.words-side, .words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); background: var(--bg); }
 .words-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .words-head strong { font-size: var(--text-lg); }
 .words-head > :last-child { margin-left: auto; }
 .words-line, .words-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .words-actions { width: 100%; }
-.words-reference { display: flex; flex-direction: column; gap: var(--space-2); margin-top: auto; padding: var(--space-3); border: thin dashed var(--line); border-radius: var(--radius); }
-.words-reference p { margin: 0; font-size: var(--text-sm); }
+.words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
+.words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
+.words-band { --band: var(--tone-transcript); display: flex; align-items: flex-start; gap: var(--space-2); height: calc(var(--len-s) * var(--song-s)); padding: var(--space-1) var(--space-2);
+  border-top: medium solid var(--band); border-radius: 0 0 var(--radius) var(--radius); background: color-mix(in srgb, var(--band) 6%, transparent); color: var(--band); font-size: var(--text-sm); text-align: left; }
+.words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
+.words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
+.words-band > .meta { color: var(--faint); }
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); align-content: flex-start; gap: var(--space-1); overflow: hidden; }
+.words-tl > .first { margin-top: var(--text-xl); height: calc(var(--len-s) * var(--song-s) - var(--text-xl) - var(--space-1)); }
+.words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }
+/* The film roll: sprocket holes down both edges, a time mark every ten seconds. */
+.words-roll { padding-inline: var(--space-4); border-radius: var(--radius-sm);
+  background: radial-gradient(circle, var(--line) 35%, transparent 40%) left top / var(--space-4) var(--text-xl) repeat-y,
+    radial-gradient(circle, var(--line) 35%, transparent 40%) right top / var(--space-4) var(--text-xl) repeat-y, var(--bg); }
+.words-roll > .words-band { left: var(--space-4); right: var(--space-4); }
+.words-roll > .words-tick { left: var(--space-4); right: var(--space-4); border-top: thin dashed var(--surface-2); color: var(--faint); font-size: var(--text-xs); text-align: right; }
+.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--space-1);
+  padding: var(--space-1); overflow: hidden; border: thin solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.words-roll > .words-frame { left: calc(var(--space-4) + var(--space-1)); right: calc(var(--space-4) + var(--space-1)); }
+.words-frame:hover, .words-frame.active { border-color: var(--accent); }
+.words-tag { padding: 0 var(--space-1); border-radius: var(--radius-sm); background: var(--tag, var(--tone-lyrics)); color: var(--accent-ink); font-size: var(--text-xs); }
+.words-tag[data-track="motion"] { --tag: var(--tone-animate); }
+/* The section's minimal lanes; the selected one decides what shows below them. */
+.words-lanes { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); cursor: pointer; }
+.words-lanes > .lane[data-track="motion"] { --lane-fill: var(--tone-animate); }
+.words-lanes > .lane[aria-selected="true"] { background: var(--surface-2); }
+.words-lanes .lane-track { background: var(--bg); }
+.lane-name { display: flex; flex-direction: column; min-width: 0; color: var(--text); }
+.lane-name > .meta { color: var(--faint); font-size: var(--text-xs); }
+.words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 7), 1fr)); gap: var(--space-2); max-height: calc(var(--space-5) * 10); overflow: auto; }
+/* Design has no parts or assets; its effects sit under the lanes. */
+body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-inspector { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .words-inspector .group-label { width: 100%; }
+.words-library { display: flex; flex-direction: column; gap: var(--space-1); width: 100%; }
+.effect[aria-checked="true"] { border-color: var(--accent); background: var(--surface-2); }
