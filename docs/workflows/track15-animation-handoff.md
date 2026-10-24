@@ -21,7 +21,11 @@ The six scene specs are also project assets `scene_s1_ship_laps` … `scene_s6_7
 
 ## Lyrics
 
-The video's captions are the sung words (`compositions/captions.html`) to 136.74 s. The words mapping stopped at 102.74 s because the sheet prints verse 5 once; `structure_as_sung` (commit 67d41400) adds the sung repeat (verse 5 lines 1–2 at 116.3–136.74 s) without changing printed text. The running Studio predates it; `words.align` covers the ending after its next build.
+The video's captions today are the heard words in batches of five (`compositions/captions.html`), e.g. "We sank our heads" where the sheet prints "Then we dipped our heads". Two commits fix this without changing printed text:
+- 67d41400 `structure_as_sung` (written into the sheet): the sung repeat of verse 5 lines 1–2 at 116.3–136.74 s, so the mapping no longer stops at 102.74 s.
+- e5bc1512 `words.captions to=video`: rewrites the caption track from the printed lines with sung timing, one group per line (long lines in halves), keeps the old source as `captions.v1.html`.
+
+The running Studio (pid 1280318) predates both. After it runs this build: `mc --bridge 19971 exec words.captions to=video`, then snapshot 20, 52, 120 s.
 
 ## Not done / requests
 
