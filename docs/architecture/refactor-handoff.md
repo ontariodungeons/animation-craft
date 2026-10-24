@@ -30,3 +30,9 @@ No intake workflow, animation engine or new timeline was rewritten. Lyric-tag po
 - [Narrow layout](evidence/pets-700.png)
 
 Idle acceptance deliberately injects idle facts in a disposable fixture; it does not claim that an empty project has completed intake. Error acceptance uses an actual rejected engine command. No user chat was sent or authored animation changed.
+
+## Final verification and publication boundary
+
+Final review repairs are committed in `21607e0e` and `24e62387`; the fresh reviewer confirmed no remaining findings. The final rebuilt shell passed the complete live pet acceptance and 295-component paging again. An actual failed command in fixture A followed by opening disposable fixture B and requesting attention produced B's idle underlying state plus yellow attention, with null request/receipt and no frontend errors. The task-owned preview was closed cleanly; its window and port 19963 are confirmed closed in [preview-close.json](evidence/preview-close.json). Other agents' windows and source edits were preserved.
+
+The work is committed locally and ready for integration review. No PR can be scoped against the remote main until its pre-existing 146-commit baseline gap is handled; no unrelated baseline was published or merged as part of this task.
