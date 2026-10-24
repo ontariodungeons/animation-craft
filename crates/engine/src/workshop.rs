@@ -316,7 +316,6 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
     let audio_ok = s.song_audio.as_ref().is_some_and(|p| p.is_file());
     let liner = files_in(&dir.join("liner-notes"), None);
     let transcripts = transcript_files(&dir);
-    let fcproj = video_project_path(&dir);
     let panels = panel_files(&dir);
     let assets = workshop_asset_files(&dir);
     let pdf = dir.join(STORYBOARD_DIR).join(STORYBOARD_PDF);
@@ -452,8 +451,9 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         "video_server": server,
         "asset_files": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
         "studio": {"name": studio_info.name, "intent": studio_info.intent, "source": studio_info.source},
-        "video_project": s.video_project_path.clone().or_else(|| active_target_path.or(fcproj)),
+        // One answer: the project video.init (or set_target) stored. A file that merely sits in the folder is not it.
         "video_project_path": s.video_project_path,
+        "video_project_exists": s.video_project_path.as_ref().is_some_and(|p| p.exists()),
         "stages": stages
     }))
 }
@@ -678,8 +678,9 @@ pub fn cmd_workshop_set_target(s: &mut Session, params: &Value) -> Result<Value>
         )));
     }
     s.video_target = target.into();
+    // The new target's project replaces the old one; failing to scaffold it leaves none, never the previous target's.
+    s.video_project_path = ensure_video_target_project(s, &dir, target).ok();
     crate::project::write_project_file(s)?;
-    let _ = ensure_video_target_project(s, &dir, target);
     workshop_status(s)
 }
 
@@ -1554,7 +1555,7 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
         .or_else(|| s.song_audio.clone())
         .filter(|p| p.is_file())
         .ok_or_else(|| EngineError::InvalidParams("no song audio: pass audio=<file> or workshop.set_audio".into()))?;
-    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str())?;
+    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str(), project_dir(s).ok().map(|d| d.join("hyperframes")).as_deref())?;
     let runtime = runtime.to_str().ok_or_else(|| EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?;
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let hf = project_dir(s)?.join("hyperframes");

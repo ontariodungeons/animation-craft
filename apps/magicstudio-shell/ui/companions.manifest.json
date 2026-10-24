@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "generator": "magicstudio companion art; original lightweight local sprites",
+  "characters": {
+    "gaffer": {
+      "label": "Gaffer",
+      "species": "cat",
+      "role": "artwork",
+      "poses": {
+        "rest": "media/companions/gaffer-cat-rest.png",
+        "work": "media/companions/gaffer-cat-work.png",
+        "alert": "media/companions/gaffer-cat-alert.png",
+        "asleep": "media/companions/gaffer-cat-asleep.png"
+      }
+    },
+    "sproket": {
+      "label": "Sproket",
+      "species": "dog",
+      "role": "issue/chat",
+      "poses": {
+        "rest": "media/companions/sproket-dog-rest.png",
+        "work": "media/companions/sproket-dog-work.png",
+        "sniff": "media/companions/sproket-dog-sniff.png",
+        "alert": "media/companions/sproket-dog-alert.png"
+      }
+    }
+  }
+}

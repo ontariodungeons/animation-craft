@@ -152,7 +152,7 @@
 
 **Interfaces:**
 - Consumes: Sol's manifest (turnarounds, transparency flags).
-- Produces: AnimationCraft cutout rigs exported with `mc exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
+- Produces: Magic Studio cutout rigs exported with `mc exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
 
 - [ ] **Step 1:** Import each character with `mc` (`asset.cut_sheet` → `asset.build_cutout_rig`) and validate it with `assets.assess`. Likeness must match the turnarounds (check with `intake.compare_reference`).
 - [ ] **Step 2:** Pose library per character (pose-library-design): neutral, smug, recoil, drenched, conduct, point. Check silhouettes for readability at 25% scale.
@@ -236,7 +236,7 @@ Each insert keeps its native document in `PROJECT/apps/<app>/` and its render in
 
 ### Task 11: Evidence ledger, closing card, review page, CLI
 
-**Files:** `PROJECT/ledger.csv`, `PROJECT/review.html`, the commands `production.voice`, `production.timeline` and `production.ledger` in `crates/engine/src/` (wired like `export.layered_motion` in `commands.rs:327`), and AnimationCraft `README.md` lines
+**Files:** `PROJECT/ledger.csv`, `PROJECT/review.html`, the commands `production.voice`, `production.timeline` and `production.ledger` in `crates/engine/src/` (wired like `export.layered_motion` in `commands.rs:327`), and Magic Studio `README.md` lines
 
 - [ ] **Step 1:** Fill `ledger.csv` from the actual edit (FilmCraft `sequence.inspect` gives the shot timecodes). Run `mc exec production.ledger spec=PROJECT/production.json ledger=PROJECT/ledger.csv` and fix or remove every failure. The closing card text comes from `LedgerReport` (the achieved counts), and the card is rendered in EffectCraft and placed at the end.
 - [ ] **Step 2:** `review.html`:

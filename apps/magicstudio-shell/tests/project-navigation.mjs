@@ -35,7 +35,7 @@ vm.runInContext(readFileSync(new URL('../ui/bridge.js',import.meta.url),'utf8'),
 context.state.project=null;
 calls.length=0;
 context.invoke=async(command,params)=>{calls.push({command,params});return {status:{stages:[]}};};
-await vm.runInContext('window.acBridge.refresh("project.intake","/chosen/ab/project/A&B.magic",7,{problems:["Needs captions"],intake_ready:false})',context);
+await vm.runInContext('window.magicBridge.refresh("project.intake","/chosen/ab/project/A&B.magic",7,{problems:["Needs captions"],intake_ready:false})',context);
 assert.equal(calls.filter(c=>c.command==='project_open'||c.command==='project_create').length,0,'external transition refresh does not recursively launch the CLI');
 assert.equal(calls.filter(c=>c.command==='project_state').length,1);
 assert.equal(context.state.project,result.project);

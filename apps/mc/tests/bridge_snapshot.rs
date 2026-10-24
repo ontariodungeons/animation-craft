@@ -1,5 +1,38 @@
 //! Explicit CLI and MCP observations must stay on their selected Studio bridge.
 #[test]
+fn bridge_timeout_uses_only_the_canonical_magicstudio_override() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    for (variable, should_succeed) in [("MAGICSTUDIO_BRIDGE_TIMEOUT_MS", false), ("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS", true)] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            assert!(request.contains("project.info"));
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            // A timed-out client is expected to have closed its socket.
+            let _ = writeln!(stream, "{}", serde_json::json!({"ok":true,"result":{"observed":true}}));
+        });
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_mc"))
+            .args(["--bridge", &address.to_string(), "exec", "project.info"])
+            .env_remove("MAGICSTUDIO_BRIDGE_TIMEOUT_MS")
+            .env_remove("ANIMATIONCRAFT_BRIDGE_TIMEOUT_MS")
+            .env(variable, "50")
+            .output().unwrap();
+        server.join().unwrap();
+        assert_eq!(output.status.success(), should_succeed, "{variable}: {}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        if should_succeed {
+            assert_eq!(serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["observed"], true);
+        } else {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("bridge read"));
+        }
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn snapshot_and_tail_honor_the_explicit_bridge() {
     let result = std::process::Command::new("/usr/bin/python3")

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<canvas version="1.0" width="64" height="48" xres="2834.645752" yres="2834.645752" view-box="-4 3 4 -3" antialias="1" fps="24" begin-time="0f" end-time="23f" bgcolor="0 0 0 0">
+ <name>Generic moving circle</name>
+ <layer type="circle" active="true" version="0.3">
+  <param name="z_depth"><real value="0"/></param>
+  <param name="amount"><real value="1"/></param>
+  <param name="blend_method"><integer value="0"/></param>
+  <param name="color"><color><r>0.8</r><g>0.2</g><b>0.1</b><a>1</a></color></param>
+  <param name="radius"><real value="0.8"/></param>
+  <param name="feather"><real value="0"/></param>
+  <param name="origin"><animated type="vector">
+   <waypoint time="0f" before="linear" after="linear"><vector><x>-2</x><y>0</y></vector></waypoint>
+   <waypoint time="23f" before="linear" after="linear"><vector><x>2</x><y>0</y></vector></waypoint>
+  </animated></param>
+  <param name="invert"><bool value="false"/></param>
+ </layer>
+</canvas>

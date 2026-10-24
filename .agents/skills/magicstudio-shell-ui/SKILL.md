@@ -1,13 +1,13 @@
 ---
-name: animationcraft-shell-ui
-description: Use before building or changing any screen of the Magic Studio Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
+name: magicstudio-shell-ui
+description: Use before building or changing any screen of the Magic Studio Tauri shell (apps/magicstudio-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
 ---
 
 # Magic Studio shell UI
 
 The shell is a creative tool for one person working with an agent. Every screen answers: **what is this,
 what's its state, what's the one next step.** Everything else waits behind a hover, a tooltip or a click.
-Source of truth: `apps/animationcraft-shell/ui/style.css` (tokens on `:root`). Reuse its classes; add a
+Source of truth: `apps/magicstudio-shell/ui/style.css` (tokens on `:root`). Reuse its classes; add a
 token before you add a color.
 
 ## Research before a new screen
@@ -18,7 +18,7 @@ requirements. Present a new screen's layout and behavior and wait for user appro
 The Animation layout was approved on 2026-10-21. The user has specified controls on the **left** and a
 useful main canvas immediately after import. Progressive disclosure preserves features, not removes them.
 
-The app's permanent agent instructions are `apps/animationcraft-shell/agent.md`. Keep that document
+The app's permanent agent instructions are `apps/magicstudio-shell/agent.md`. Keep that document
 focused on the current app's design, technical ownership, tools and verification.
 
 ## Principles
@@ -153,8 +153,8 @@ Upgrade only touched dependencies to latest stable releases and record versions;
 ## Verify loop (every visible change)
 
 ```
-cargo build -p animationcraft-shell -p mc      # ui/ is embedded: rebuild after edits
-./target/debug/animationcraft-shell --control <port> [<project.acproj>]
+cargo build -p magicstudio-shell -p mc          # ui/ is embedded: rebuild after edits
+./target/debug/magicstudio-shell --control <port> [<project.magic>]
 mc --bridge <selected-endpoint> exec ui.look [region=<id|css>] [click=<id|label>] output=<project>/.agent/look.png
 ```
 Open the PNG and check, every time: alignment, truncation, contrast, empty states, hover-only controls

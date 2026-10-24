@@ -61,12 +61,7 @@ fn configured_agent() -> String {
     {
         return agent.to_string();
     }
-    let default = std::process::Command::new("omarchy-default-agent")
-        .output()
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|name| !name.is_empty());
-    default.unwrap_or_else(|| "codex".to_string())
+    crate::agent::default_agent().unwrap_or_else(|| "codex".to_string())
 }
 
 /// The last `chars` of a stream, with the tail marker that makes a truncation visible.

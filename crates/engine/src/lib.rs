@@ -19,6 +19,10 @@
 )]
 
 pub mod agent;
+pub mod blender;
+pub mod animation_links;
+pub mod opentoonz;
+pub mod synfig;
 pub(crate) mod audio_trace;
 pub mod activity;
 pub mod commands;
@@ -29,10 +33,13 @@ pub mod exports;
 pub mod image_cmds;
 pub mod mesh_geometry;
 pub mod motion;
+pub mod mlt;
+pub mod motion_authoring;
 pub mod theatre;
 pub mod parts;
 pub mod part_replacement;
 pub mod photocraft;
+pub mod panels;
 pub mod project;
 pub mod project_settings;
 pub mod rig;
@@ -40,6 +47,8 @@ pub mod sequence;
 pub mod sheets;
 pub mod image_generation;
 pub mod session;
+pub mod lyrics;
+pub mod words;
 pub mod storyboard;
 pub mod storyboard_design;
 pub mod studio_cues;

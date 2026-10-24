@@ -93,6 +93,14 @@ const fn is_long_running_id(id: &str) -> bool {
     matches!(
         id.as_bytes(),
         b"project.intake"
+            | b"blender.start"
+            | b"mlt.start"
+            | b"opentoonz.start"
+            | b"opentoonz.render"
+            | b"synfig.start"
+            | b"motion.pose.export"
+            | b"motion.export_track"
+            | b"animation.source.render"
             | b"video.init"
             | b"intake.validate"
             | b"intake.three_question"
@@ -191,6 +199,30 @@ pub fn check_param_types(description: &str, params: &Value) -> Result<()> {
 
 pub fn build() -> Vec<CommandSpec> {
     vec![
+        cmd!("blender.start", "Build / Render Blender Animation", ["Animation"], None,
+            "{\"character\":\"rig id for initial migration\",\"track\":\"track id\",\"blend\":\"optional saved .blend instead of migration\",\"resolution_percent\":50,\"max_frames\":90,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::blender::cmd_blender_start),
+        query!("synfig.discover", "Discover Synfig Native Renderer", "{}", crate::synfig::discover),
+        cmd!("synfig.start", "Render Saved Synfig Scene", ["Animation"], None,
+            "{\"source\":\"saved .sif/.sifz\",\"bundle\":\"self-contained source directory\",\"first_frame\":0,\"last_frame\":23,\"fps\":24,\"width\":512,\"height\":512,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::synfig::start),
+        query!("animation.sources", "Registered native animation sources", "{\"expected_project\":\"optional project identity\"}", crate::animation_links::sources),
+        cmd!("animation.source.set", "Register editable native source", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"stable source id\",\"backend\":\"blender|synfig|opentoonz|mlt\",\"source\":\"editable native file; MLT assembly JSON\",\"bundle\":\"optional dependency root\",\"character\":\"optional paired rig ID\",\"track\":\"optional paired action ID\",\"expected_revision\":0}", always, crate::animation_links::set),
+        cmd!("animation.source.render", "Render registered native source", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"source id\",\"expected_revision\":1,\"options\":{}}", always, crate::animation_links::render),
+        cmd!("animation.source.accept", "Accept completed native result", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"id\":\"source id\",\"expected_revision\":1,\"job\":\"completed full job id\"}", always, crate::animation_links::accept),
+        query!("animation.status", "Native Animation Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
+        query!("animation.list", "Native Animation Jobs and Global Owner", "{}", crate::blender::cmd_blender_list),
+        query!("animation.cancel", "Cancel Native Animation Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
+        query!("blender.actions", "Saved Blender Migration Actions", "{\"character\":\"rig id\"}", crate::blender::cmd_blender_actions),
+        query!("blender.prepare", "Headless Bounded Migration Preparation", "{\"request\":\"worker request.json\"}", crate::blender::cmd_blender_prepare),
+        query!("blender.status", "Blender Job Progress", "{\"job\":\"job id\"}", crate::blender::cmd_blender_status),
+        query!("blender.list", "Saved Blender Jobs", "{}", crate::blender::cmd_blender_list),
+        query!("blender.cancel", "Cancel Blender Job", "{\"job\":\"job id\"}", crate::blender::cmd_blender_cancel),
+        query!("mlt.discover", "Discover MLT assembly runtime", "{}", crate::mlt::discover),
+        cmd!("mlt.start", "Assemble clips and audio with MLT", ["Video"], None,
+            "{\"timeline\":\"generic timeline JSON path\",\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::mlt::start),
+        cmd!("opentoonz.start", "Render OpenToonz through shared worker", ["Animation"], None,
+            "{\"scene\":\"saved .tnz\",\"bundle\":\"optional self-contained project root\",\"first\":1,\"last\":24,\"step\":1,\"shrink\":1,\"nthreads\":2,\"memory_mb\":4096,\"timeout_seconds\":300}", always, crate::opentoonz::cmd_opentoonz_start),
+        query!("opentoonz.discover", "OpenToonz Availability and Render Plan", "{\"scene\":\"optional .tnz path; plans without rendering\",\"first\":\"optional one-based\",\"last\":\"optional one-based\"}", crate::opentoonz::cmd_opentoonz_discover),
+        cmd!("opentoonz.render", "Render OpenToonz Scene Frames", ["Animation"], None, "{\"request\":\"worker mode: job request.json (scene, range); only inside its bounded worker\",\"scene\":\".tnz path\",\"out\":\"new absolute frames folder\",\"first\":\"optional one-based\",\"last\":\"optional one-based\",\"step\":1,\"shrink\":1,\"nthreads\":2}", always, crate::opentoonz::cmd_opentoonz_render),
         query!("project.attach", "Attach Project Metadata Without Switching Studio", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_attach),
         query!("project.identity", "Canonical Project Identity", "{\"path\":\"existing .magic path\"}", crate::project::cmd_project_identity),
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
@@ -206,6 +238,13 @@ pub fn build() -> Vec<CommandSpec> {
         query!("studio.cues", "Cues at a Song Time / Uses of a Clip (read-only)", "{\"project\":\"existing .magic path\",\"at\":43.2,\"clip\":\"clip id; give at or clip\"}", crate::studio_cues::cues),
         cmd!("project.migrate", "Migrate a Legacy .acproj to .magic", ["File"], None, "{\"path\":\"legacy .acproj file\"}", always, crate::project::cmd_project_migrate),
         cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .magic override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"resume\":false,\"replace_transcript\":false,\"hyperframes_cli\":\"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::command_center::intake),
+        cmd!("motion.layers.set", "Set planar layer stacking", ["Animation"], None,
+            "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"expected_rig_sha256\":\"current hash\",\"part\":\"alternative to order: part ID\",\"depth\":0,\"order\":[\"back-part\",\"front-part\"]}", always, crate::motion_authoring::layers_set),
+        cmd!("motion.part.set", "Set saved action part channels", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"authored action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"motion.tracks hash\",\"position\":[0,0],\"scale\":[100,100],\"rotation\":0,\"pivot\":[0,0]}", always, crate::motion_authoring::part_set),
+        cmd!("motion.part.reset", "Reset explicit saved part fields", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"hash\",\"fields\":[\"position\",\"scale\",\"rotation\"]}", always, crate::motion_authoring::part_reset),
+        cmd!("motion.action.set", "Edit authored action metadata", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"stable action id\",\"expected_rig_sha256\":\"hash\",\"label\":\"Action name\",\"duration\":3,\"loop\":false}", always, crate::motion_authoring::action_set),
+        cmd!("motion.edit.undo", "Undo a guarded rig edit", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"expected_rig_sha256\":\"current hash\",\"undo\":\"receipt token\"}", always, crate::motion_authoring::undo),
+        cmd!("motion.pose.export", "Export and register sampled pending pose", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"action id\",\"time\":0,\"rest\":false,\"amount\":100,\"expected_rig_sha256\":\"hash\",\"theatre_state\":null,\"reference_asset\":\"optional asset ID\"}", always, crate::motion_authoring::pose_export),
         cmd!("motion.path", "Draw a timed motion path", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"duration\":3,\"start_size\":100,\"end_size\":100}", always, crate::motion::cmd_motion_path),
         cmd!("motion.undo_path", "Undo drawn motion path", ["Edit"], None, "{\"character\":\"asset id\",\"undo\":\"history token\"}", always, crate::motion::cmd_motion_undo_path),
         query!("agent.session", "Current Chat Session", "{}", cmd_agent_session),
@@ -218,12 +257,13 @@ pub fn build() -> Vec<CommandSpec> {
         query!("agent.config", "Current Window Chat Selection", "{\"selection\":{\"model\":\"optional active model; shared defaults unchanged\"}}", cmd_agent_config),
         query!("agent.models", "Available Chat Models", "{\"agent\":\"optional catalog adapter: opencode\"}", cmd_agent_models),
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{\"free_only\":false,\"image_task\":false}", always, cmd_agent_new_chat),
-        cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
+        cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"rest\":false,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
-        query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100}", crate::motion::cmd_motion_sample),
+        query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100,\"time\":0}", crate::motion::cmd_motion_sample),
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),
         query!("motion.clips", "List clips and their Theatre sheets", "{\"character\":\"asset id\"}", crate::theatre::list),
         cmd!("motion.clips.convert", "Give every clip its own Theatre sheet", [], None, "{\"character\":\"asset id\"}", always, crate::theatre::convert),
+        cmd!("motion.theatre.clear", "Clear a character's Theatre keyframes", [], None, "{\"expected_project\":\"required selected .magic identity\",\"character\":\"asset id\",\"track\":\"optional clip id; all clips when omitted\"}", always, crate::theatre::clear),
         cmd!("motion.theatre.save", "Save native Theatre state", [], None, "{\"expected_project\":\"required selected .magic identity\",\"state\":{\"definitionVersion\":\"0.4.0\",\"revisionHistory\":[],\"sheetsById\":{}}}", always, crate::theatre::save),
         query!(
             "project.list_assets",
@@ -403,6 +443,15 @@ pub fn build() -> Vec<CommandSpec> {
             cmd_export_cutout_mp4
         ),
         query!("workshop.status", "Workshop Stages", "{}", cmd_workshop_status),
+        query!("song.lyrics", "Song Lyrics (Artist Sheet or Transcript)", "{}", crate::lyrics::cmd_song_lyrics),
+        query!("words.align", "Artist Words vs Timing Reference", "{}", crate::words::cmd_words_align),
+        query!("words.read", "Words Animations", "{\"animation_id\":\"optional\"}", crate::words::cmd_words_read),
+        query!("words.studio_track", "Lyric Clips in the Video", "{}", crate::words::cmd_words_studio_track),
+        cmd!("words.lyrics_view", "Lyrics-Only View of the Video", ["Design"], None, "{}", always, crate::words::cmd_words_lyrics_view),
+        query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
+        cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
+        cmd!("words.save", "Save Words Animation", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"expected_source_revision\":0,\"style\":{\"size\":120},\"words\":[{\"word_id\":\"ch1-l1/w5\",\"action\":\"cry\",\"emphasis\":true}]}", always, crate::words::cmd_words_save),
+        cmd!("words.compose", "Compose Words Track (HyperFrames)", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"instance_id\":\"optional: isolated composition for a repeated placement\"}", always, crate::words::cmd_words_compose),
         query!("workshop.files", "Workshop Files", "{\"filter\": \"optional substring\", \"group\": \"optional audio|liner_notes|transcript|storyboard|assets|other\"}", cmd_workshop_files),
         query!("workshop.storyboard", "Storyboard Pages", "{}", cmd_workshop_storyboard),
         query!("project.search", "Search Project, Files, Storyboard & Commands", "{\"query\": \"search text\"}", cmd_project_search),
@@ -435,7 +484,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
             "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
-        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
+        cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file; omit with blender_job\",\"animation_job\":\"optional completed native animation job id\",\"blender_job\":\"optional completed full Blender job id; uses its verified clip, maps rect (the original canvas) to the rendered frame and keeps its frozen provenance\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
         cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
             "{\"target\": \"remotion|filmcraft|hyperframes\"}", always, cmd_workshop_set_target),
         cmd!("workshop.add", "Add Liner Notes / Panels / Assets", ["Workshop"], None,
@@ -508,8 +557,8 @@ pub fn build() -> Vec<CommandSpec> {
             "Show All Parts",
             ["Edit"],
             None,
-            "{}",
-            has_asset,
+            "{\"character\":\"optional captured asset ID\",\"expected_project\":\"required with character\"}",
+            always,
             cmd_part_show_all
         ),
         cmd!(
@@ -573,8 +622,8 @@ pub fn build() -> Vec<CommandSpec> {
             "Set Part Visibility / Solo",
             ["Edit"],
             None,
-            "{\"part\": \"name\", \"visible\": true, \"solo\": false}",
-            has_asset,
+            "{\"character\":\"optional captured asset ID\",\"expected_project\":\"required with character\",\"part\": \"name\", \"visible\": true, \"solo\": false}",
+            always,
             cmd_part_set_state
         ),
         cmd!(
@@ -685,6 +734,11 @@ mod tests {
         let result = crate::workshop::cmd_query_list(&mut s, &json!({})).unwrap();
         let commands = result["commands"].as_array().unwrap();
         assert_eq!(commands.len(), command_specs().len());
+    }
+
+    #[test]
+    fn action_export_dispatches_without_holding_shared_session_during_render() {
+        assert!(find("motion.export_track").unwrap().long_running);
     }
 
     #[test]

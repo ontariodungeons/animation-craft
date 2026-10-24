@@ -657,136 +657,6 @@ fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
     out
 }
 
-fn short_theatre_id(seed: &str) -> String {
-    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    let digest = Sha256::digest(seed.as_bytes());
-    (0..10)
-        .map(|i| ALPHABET[(digest[i] as usize) % ALPHABET.len()] as char)
-        .collect()
-}
-
-/// Convert authored rig rotation tracks into Theatre `tracksByObject` entries per clip.
-pub(crate) fn convert_clip_rotation_tracks(
-    s: &mut Session,
-    params: &Value,
-) -> Result<BTreeMap<String, BTreeMap<String, Value>>> {
-    let id = load_character(s, params)?;
-    let asset = s
-        .assets
-        .get(&id)
-        .ok_or_else(|| invalid("Asset not loaded"))?;
-    let rig = preview_rig(asset)?;
-    let rig = &rig;
-    validate(rig)?;
-    let mut by_clip = BTreeMap::new();
-    for track in rig.effectcraft["tracks"].as_array().into_iter().flatten() {
-        let Some(clip_id) = track["id"].as_str() else {
-            continue;
-        };
-        let duration = track["duration"].as_f64().unwrap_or(1.0).max(0.1);
-        let motion_obj = track.get("motion").unwrap_or(&Value::Null);
-        let mut objects = BTreeMap::new();
-        for part in &rig.parts {
-            let lid = part.id.as_str();
-            let Some(rot_terms) = motion_obj
-                .get(lid)
-                .and_then(|m| m.get("rotation"))
-                .and_then(Value::as_array)
-                .filter(|a| !a.is_empty())
-            else {
-                continue;
-            };
-            let mut max_hz = 0.0_f64;
-            let mut key_times = vec![0.0_f64, (duration * 1000.0).round() / 1000.0];
-            for term in rot_terms {
-                match term.get("kind").and_then(Value::as_str).unwrap_or("") {
-                    "oscillate" => {
-                        let hz = term.get("hz").and_then(Value::as_f64).unwrap_or(1.0);
-                        max_hz = max_hz.max(hz);
-                    }
-                    "follow" => {
-                        max_hz = max_hz.max(1.2);
-                        let target_lid = term.get("layer").and_then(Value::as_str).unwrap_or(lid);
-                        if let Some(pos_terms) = motion_obj
-                            .get(target_lid)
-                            .and_then(|m| m.get("position"))
-                            .and_then(Value::as_array)
-                        {
-                            for pt in pos_terms {
-                                if let Some(ks) = pt.get("keys").and_then(Value::as_array) {
-                                    for k in ks {
-                                        if let Some(kt) = k.as_array().and_then(|a| a.first()).and_then(Value::as_f64) {
-                                            key_times.push(kt.clamp(0.0, duration));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "keys" => {
-                        if let Some(ks) = term.get("keys").and_then(Value::as_array) {
-                            for k in ks {
-                                if let Some(kt) = k.as_array().and_then(|a| a.first()).and_then(Value::as_f64) {
-                                    key_times.push(kt.clamp(0.0, duration));
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if max_hz > 0.0 {
-                let raw_step = (1.0 / (max_hz * 2.0)).clamp(0.18, 0.45);
-                let steps = ((duration / raw_step).ceil() as usize).clamp(4, 20);
-                for i in 1..steps {
-                    let t = duration * (i as f64) / (steps as f64);
-                    key_times.push((t * 1000.0).round() / 1000.0);
-                }
-            }
-            key_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            key_times.dedup_by(|a, b| (*a - *b).abs() < 0.02);
-
-            let mut keyframes = Vec::with_capacity(key_times.len());
-            for (idx, &t) in key_times.iter().enumerate() {
-                let eval = evaluate_layered_motion_spec(rig, track, t, false, 1.0);
-                let deg = eval
-                    .angles_deg
-                    .get(lid)
-                    .copied()
-                    .unwrap_or(0.0)
-                    .clamp(-45.0, 45.0);
-                let deg_rounded = (deg * 100.0).round() / 100.0;
-                let kf_id = short_theatre_id(&format!("kf:{clip_id}:{lid}:{idx}"));
-                keyframes.push(json!({
-                    "id": kf_id,
-                    "position": (t * 1000.0).round() / 1000.0,
-                    "value": deg_rounded,
-                    "type": "bezier",
-                    "handles": [0.5, 1.0, 0.5, 0.0],
-                    "connectedRight": idx + 1 < key_times.len(),
-                }));
-            }
-            let track_id = short_theatre_id(&format!("track:{clip_id}:{lid}:rotation"));
-            objects.insert(
-                lid.to_string(),
-                json!({
-                    "trackData": {
-                        track_id.clone(): {
-                            "type": "BasicKeyframedTrack",
-                            "__debugName": format!("{lid}:[\"rotation\"]"),
-                            "keyframes": keyframes,
-                        }
-                    },
-                    "trackIdByPropPath": {
-                        "[\"rotation\"]": track_id,
-                    }
-                }),
-            );
-        }
-        by_clip.insert(clip_id.to_string(), objects);
-    }
-    Ok(by_clip)
-}
 
 pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let id = load_character(s, params)?;
@@ -805,6 +675,8 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         "standard":t["standard"].as_bool().unwrap_or(false),
         "label":t["label"],
         "channels":summarize_track_channels(&t["motion"]),
+        "static_overrides":crate::motion_authoring::static_overrides(t, &rig.effectcraft["layers"]),
+        "authoring":crate::motion_authoring::capabilities(s,&id,t,&rig.plan_path),
     })).collect();
     // Plain image previews use a synthesized rig with no manifest path. Keep
     // replacement capture metadata absent there; normal animation inspection
@@ -866,16 +738,18 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
             }
             validate_local_png(asset.path.clone(), project_root.as_deref())
         });
-    let layers: Vec<_> = rig.parts.iter().map(|p| {
+    let layers: Vec<_> = rig.parts.iter().enumerate().map(|(depth,p)| {
         let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
         let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
-        json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":p.layer,"image_sha256":image_sha256,
+        json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":depth,"depth":depth,"image_sha256":image_sha256,
+        "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
     Ok(
         json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"source_image":rig.source_image,"original_reference":original_reference,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,
         "rig_sha256":metadata.as_ref().map(|(_,hash,_)|hash),"image_revision":metadata.as_ref().and_then(|(_,_,revision)|*revision),
+        "layer_order":rig.parts.iter().map(|p|&p.id).collect::<Vec<_>>(),"layer_authoring":crate::motion_authoring::layer_capabilities(s,&id,&rig.plan_path,metadata.as_ref().map(|(raw,_,_)|raw).unwrap_or(&Value::Null)),
         "controls":rig.control_bindings,"audio":s.song_audio}),
     )
 }
@@ -897,6 +771,10 @@ fn validate_local_png(path: std::path::PathBuf, root: Option<&std::path::Path>) 
         return None;
     }
     Some(path.to_string_lossy().into_owned())
+}
+
+fn effective_parent<'a>(part: &'a crate::session::CutoutRigPart, names: Option<&Vec<Value>>) -> Option<&'a str> {
+    part.parent.as_deref().filter(|parent| names.is_none_or(|ns| ns.is_empty() || ns.iter().any(|name| name.as_str()==Some(*parent))))
 }
 
 // Compose canvas-space parent transforms; opacity is deliberately independent of ancestors.
@@ -934,9 +812,7 @@ fn matrix(
             n[0] * m[4] + n[2] * m[5] + n[4],
             n[1] * m[4] + n[3] * m[5] + n[5],
         ];
-        current = part.parent.as_deref().filter(|p| {
-            names.is_none_or(|ns| ns.is_empty() || ns.iter().any(|n| n.as_str() == Some(*p)))
-        });
+        current = effective_parent(part, names);
     }
     m
 }
@@ -967,7 +843,8 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(invalid("fps must be 1–120 and amount 0–100"));
     }
     let duration = track["duration"].as_f64().unwrap_or(1.0);
-    let count = if rest {
+    let sample_time = params.get("time").map(|v|v.as_f64().filter(|v|v.is_finite() && *v>=0.0 && *v<=duration).ok_or_else(||invalid("time must be within the action duration"))).transpose()?;
+    let count = if rest || sample_time.is_some() {
         1
     } else {
         (duration * fps).ceil() as usize + 1
@@ -984,7 +861,7 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         f64::NEG_INFINITY,
     ];
     for i in 0..count {
-        let t = (i as f64 / fps).min(duration);
+        let t = sample_time.unwrap_or_else(|| (i as f64 / fps).min(duration));
         let motion = evaluate_layered_motion_spec(rig, track, t, rest, amount / 100.0);
         let layers: Vec<_> = rig.parts.iter().map(|p| {
             let shown = asset.parts.iter().find(|x| x.name==p.id).is_none_or(|x| x.visible && (!solo || x.solo));
@@ -1023,7 +900,7 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         ];
     }
     Ok(
-        json!({"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
+        json!({"layer_ids":rig.parts.iter().map(|part|&part.id).collect::<Vec<_>>(),"effective_parents":rig.parts.iter().map(|part| effective_parent(part,track["layers"].as_array())).collect::<Vec<_>>(),"bounds":bounds,"ok":true,"character":id,"track":track["id"],"fps":fps,"duration":duration,"rest":rest,"loop":track["loop"].as_bool().unwrap_or(false),"frames":frames}),
     )
 }
 
@@ -1181,9 +1058,15 @@ pub fn cmd_motion_undo_path(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 /// Bake the existing engine samples into exporter keys. No second evaluator.
+fn sampled_export_layers(rig: &LoadedCutoutRigPlan, sample: &Value) -> Vec<Value> {
+    rig.parts.iter().enumerate().map(|(index,part)|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":sample["effective_parents"][index]})).collect()
+}
+
 pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
-    let sample = cmd_motion_sample(s, p)?;
     let id = load_character(s, p)?;
+    crate::motion_authoring::theatre_guard(s, &id, p["track"].as_str().filter(|id| !id.is_empty()))?;
+    // Preserve all sampler preview parameters, including rest and amount.
+    let sample = cmd_motion_sample(s, p)?;
     let rig = preview_rig(
         s.assets
             .get(&id)
@@ -1230,7 +1113,7 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
             motion[&part.id][prop] = json!([{"kind":"keys","ease":"linear","keys":keys}]);
         }
     }
-    let layers:Vec<Value>=rig.parts.iter().map(|part|json!({"id":part.id,"file":part.full_layer_path,"pivot":part.pivot,"parent":part.parent})).collect();
+    let layers = sampled_export_layers(&rig, &sample);
     let name = crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
     let bounds = sample["bounds"].as_array();
     let b = |i: usize, default: f64| {
@@ -1262,6 +1145,8 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     result["duration"] = json!(duration);
     result["margin"] = json!(margin);
     result["asset"] = json!(id);
+    result["rest"] = sample["rest"].clone();
+    result["amount"] = json!(p["amount"].as_f64().unwrap_or(100.0));
     Ok(result)
 }
 
@@ -1272,6 +1157,21 @@ mod tests {
 
     fn part(id: &str, size: [u32; 2], pivot: [f32; 2]) -> CutoutRigPart {
         CutoutRigPart { id: id.into(), label: id.into(), crop_size: size, pivot, ..CutoutRigPart::default() }
+    }
+
+    #[test]
+    fn action_export_preserves_sampled_parent_filter_and_stack() {
+        let root = part("root", [4,4], [2.0,2.0]);
+        let mut child = part("child", [2,2], [3.0,3.0]);
+        child.parent = Some("root".into());
+        let rig = LoadedCutoutRigPlan { parts:vec![root,child], ..LoadedCutoutRigPlan::default() };
+        for selected in [json!(["child"]),json!(["root","child"])] {
+            let parents:Vec<_> = rig.parts.iter().map(|p|effective_parent(p,selected.as_array())).collect();
+            let sample=json!({"effective_parents":parents});
+            let layers=sampled_export_layers(&rig,&sample);
+            assert_eq!(layers.iter().map(|p|p["id"].clone()).collect::<Vec<_>>(),vec![json!("root"),json!("child")]);
+            assert_eq!(layers[1]["parent"],sample["effective_parents"][1],"export must not restore an excluded parent's transform");
+        }
     }
 
     #[test]

@@ -1,0 +1,10 @@
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const calls=[],c=vm.createContext({console,document:{body:{classList:{contains:()=>false}}},window:{},state:{project:'/generic/Study.magic',view:'animation',data:{}},motion:{character:'puppet',track:'wave',rest:false,time:1,playing:false,selected:'top'},serverUrl:()=>null,agent:{},$:()=>({classList:{contains:()=>false}}),invoke:async()=>({}),renderTarget(){},renderBlocks(){},renderStoryboard(){},animationRefresh:async()=>{calls.push('refresh');throw Error('Preview unavailable')},acFeedback:{phase:'ready',errors:[],acknowledge:async()=>calls.push('ack'),report:async()=>{}},animationFeedback:()=>({character:'puppet',backend:'subject',speed:1.5})});
+vm.runInContext(readFileSync(new URL('../ui/bridge.js',import.meta.url),'utf8'),c);
+const result=await c.window.magicBridge.refresh('project.add_asset',c.state.project,9,{ok:true,asset:{id:'new'}});
+assert.equal(result.engine_succeeded,true,'refresh error must not misreport completed backend mutation');assert.equal(result.refreshed,false);assert.match(result.refresh_error,/Preview unavailable/);assert.equal(calls.includes('ack'),false,'failed refresh cannot acknowledge rendered revision');
+c.animationRefresh=async()=>calls.push('mutation');await c.window.magicBridge.refresh('motion.action.set',c.state.project,10,{ok:true});assert.equal(calls.includes('mutation'),true,'CLI motion mutations refresh UI');
+assert.equal(c.window.magicBridge.state().animation.speed,1.5,'CLI sees same animation state');
+console.log('PASS bridge: successful engine write retains separate refresh error; motion mutation parity');

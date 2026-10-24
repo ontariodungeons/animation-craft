@@ -35,7 +35,7 @@ fn receipt(s: &Session, project: PathBuf, state: &Value, reused: bool) -> Value 
 pub fn read(s: &mut Session, params: &Value) -> Result<Value> {
     if s.project_path.is_none() { return Ok(json!({"ok":true,"available":false,"saved":false,"status":"unavailable","state":null,"reason":"No project selected; open the intended .magic"})); }
     let project=selected_project(s,params,false)?;
-    match &s.theatre_state {
+    match s.theatre_state.as_ref().filter(|state| !state.is_null()) {
         None=>Ok(json!({"ok":true,"available":true,"saved":false,"status":"no_saved_state","project":project,"state":null})),
         Some(state)=>{native_sheets(state)?;Ok(receipt(s,project,state,true))}
     }
@@ -128,36 +128,15 @@ fn add_clip_sheets(state: &mut Value, asset: &str, clips: &[Value]) -> Vec<Value
 pub fn convert(s: &mut Session, params: &Value) -> Result<Value> {
     selected_project(s,params,false)?;
     let (asset,clips)=clips(s,params)?;
-    let authored_by_clip=crate::motion::convert_clip_rotation_tracks(s,params).unwrap_or_default();
     let pending:Vec<&Value>=clips.iter().filter(|c|c["status"]!="converted").collect();
     if s.record_user_state { for clip in &pending { clip_event(s,"clip_sheet_started",clip,None); } }
     let mut state=s.theatre_state.clone().unwrap_or_else(||json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{}}));
     let legacy_kept=state["sheetsById"].get(&asset).is_some();
-    let mut results=add_clip_sheets(&mut state,&asset,&clips);
-    let mut seeded_tracks=0usize;
-    for res in &mut results {
-        let clip_id=res["clip"].as_str().unwrap_or_default().to_string();
-        let sheet_id=res["sheet"].as_str().unwrap_or_default().to_string();
-        let mut clip_seeded=Vec::new();
-        if let Some(authored_objs)=authored_by_clip.get(&clip_id) {
-            if let Some(tracks_by_obj)=state["sheetsById"][&sheet_id]["sequence"]["tracksByObject"].as_object_mut() {
-                for (part_id,track_obj) in authored_objs {
-                    let has_existing=tracks_by_obj.get(part_id).is_some_and(|existing| {
-                        existing["trackData"].as_object().is_some_and(|td|!td.is_empty())
-                            || existing.as_object().is_some_and(|o|!o.is_empty() && !o.contains_key("trackData"))
-                    });
-                    if !has_existing {
-                        tracks_by_obj.insert(part_id.clone(),track_obj.clone());
-                        clip_seeded.push(part_id.clone());
-                        seeded_tracks+=1;
-                    }
-                }
-            }
-        }
-        res["seeded_parts"]=json!(clip_seeded);
-    }
+    // New sheets start empty: Theatre holds only edits made in it, added on top of the engine
+    // motion. A sampled copy of the engine motion goes stale the moment the rig changes.
+    let results=add_clip_sheets(&mut state,&asset,&clips);
     let created=results.iter().filter(|r|r["created"]==true).count();
-    if created>0 || seeded_tracks>0 {
+    if created>0 {
         if state["revisionHistory"].as_array().is_some_and(|r|r.is_empty()) {
             state["revisionHistory"]=json!(["mc-clips-convert-0"]);
         }
@@ -169,7 +148,37 @@ pub fn convert(s: &mut Session, params: &Value) -> Result<Value> {
         }
     }
     if s.record_user_state { for clip in &pending { clip_event(s,"clip_sheet_converted",clip,None); } }
-    Ok(json!({"ok":true,"character":asset,"created":created,"seeded_tracks":seeded_tracks,"clips":results,"legacy_sheet_kept":legacy_kept}))
+    Ok(json!({"ok":true,"character":asset,"created":created,"clips":results,"legacy_sheet_kept":legacy_kept}))
+}
+
+/// Remove a character's Theatre keyframes so its clips play the engine motion again, for one clip
+/// (`track`) or all of them. What is removed goes to the project journal, so it can be restored.
+pub fn clear(s: &mut Session, params: &Value) -> Result<Value> {
+    let project=selected_project(s,params,true)?;
+    let asset=params.get("character").and_then(Value::as_str).filter(|v|!v.trim().is_empty())
+        .ok_or_else(||invalid("motion.theatre.clear requires character=<asset id>; nothing was cleared"))?.to_string();
+    let only=params.get("track").and_then(Value::as_str).map(|t|clip_sheet_id(&asset,t));
+    let Some(mut state)=s.theatre_state.clone().filter(|state|!state.is_null()) else {
+        return Ok(json!({"ok":true,"character":asset,"cleared":[],"removed_tracks":0}));
+    };
+    let prefix=format!("{asset} / ");
+    let mut cleared=Vec::new();
+    let mut removed_tracks=0usize;
+    for (id,sheet) in state["sheetsById"].as_object_mut().into_iter().flatten() {
+        if !(id==&asset || id.starts_with(&prefix)) || only.as_ref().is_some_and(|o|o!=id) { continue; }
+        let tracks=std::mem::replace(&mut sheet["sequence"]["tracksByObject"],json!({}));
+        let overrides=std::mem::replace(&mut sheet["staticOverrides"]["byObject"],json!({}));
+        let parts:Vec<String>=tracks.as_object().into_iter().flatten().chain(overrides.as_object().into_iter().flatten()).map(|(k,_)|k.clone()).collect();
+        if parts.is_empty() { continue; }
+        removed_tracks+=parts.len();
+        cleared.push(json!({"sheet":id,"parts":parts,"removed":{"tracksByObject":tracks,"staticOverrides":overrides}}));
+    }
+    if cleared.is_empty() { return Ok(json!({"ok":true,"character":asset,"project":project,"cleared":[],"removed_tracks":0})); }
+    let previous=s.theatre_state.replace(state);
+    if let Err(error)=crate::project::write_project_file(s) { s.theatre_state=previous;return Err(error); }
+    crate::activity::append(json!({"stage":"theatre_cleared","project":s.project_path,"command":"motion.theatre.clear","character":asset,"cleared":cleared}));
+    let summary:Vec<Value>=cleared.iter().map(|c|json!({"sheet":c["sheet"],"parts":c["parts"]})).collect();
+    Ok(json!({"ok":true,"character":asset,"project":project,"cleared":summary,"removed_tracks":removed_tracks}))
 }
 
 #[cfg(test)]

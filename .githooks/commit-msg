@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Every commit is its own status report (template: .gitmessage). The measured acceptance
+# line belongs to every commit message too: before -> after.
+set -euo pipefail
+msg="$1"
+if [ ! -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && ! grep -qiE '^Status: *(done|partial|blocked)\b' "$msg"; then
+    echo "ERROR: the commit message needs a status line, e.g." >&2
+    echo "  Status: done" >&2
+    echo "  Status: partial: <what is left>" >&2
+    echo "  Status: blocked: <why>" >&2
+    echo "Template: .gitmessage" >&2
+    exit 1
+fi
+node apps/magicstudio-shell/tests/ui-lint.mjs --append-report --append-only

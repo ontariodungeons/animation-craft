@@ -4,11 +4,32 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
 
+// Explicit targets do not borrow another caller's active selection.
+fn target<'a>(s: &'a mut Session, params: &Value) -> Result<&'a mut crate::Asset> {
+    if let Some(character) = params.get("character") {
+        crate::motion_authoring::project_guard(s, params)?;
+        let id = character
+            .as_str()
+            .ok_or_else(|| EngineError::InvalidParams("character must be an asset ID".into()))?;
+        let selected = s.active_asset.clone();
+        let loaded = crate::project::cmd_project_load_asset(s, &json!({"id":id}));
+        s.active_asset = selected;
+        loaded?;
+        return s
+            .assets
+            .get_mut(id)
+            .ok_or_else(|| EngineError::InvalidParams("Target asset unavailable".into()));
+    }
+    if params.get("expected_project").is_some() {
+        crate::motion_authoring::project_guard(s, params)?;
+    }
+    s.current_asset_mut()
+        .ok_or_else(|| EngineError::InvalidParams("no active asset in session".into()))
+}
+
 /// Ensure every part of the active asset is visible and none are soloed.
-pub fn cmd_part_show_all(s: &mut Session, _params: &Value) -> Result<Value> {
-    let asset = s
-        .current_asset_mut()
-        .ok_or_else(|| EngineError::InvalidParams("no active asset in session".into()))?;
+pub fn cmd_part_show_all(s: &mut Session, params: &Value) -> Result<Value> {
+    let asset = target(s, params)?;
     for part in &mut asset.parts {
         part.visible = true;
         part.solo = false;
@@ -31,9 +52,7 @@ pub fn cmd_part_set_state(s: &mut Session, params: &Value) -> Result<Value> {
     let solo = params.get("solo").and_then(Value::as_bool);
     let verified = params.get("verified").and_then(Value::as_bool);
 
-    let asset = s
-        .current_asset_mut()
-        .ok_or_else(|| EngineError::InvalidParams("no active asset in session".into()))?;
+    let asset = target(s, params)?;
 
     if part_name == "*" || part_name.eq_ignore_ascii_case("all") {
         for p in &mut asset.parts {
@@ -83,4 +102,3 @@ pub fn cmd_part_set_state(s: &mut Session, params: &Value) -> Result<Value> {
         "verified": updated.verified,
     }))
 }
-

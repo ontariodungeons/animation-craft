@@ -156,11 +156,47 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
     })
 }
 
-/// Resolve only an explicitly selected executable, HYPERFRAMES_CLI, or PATH; never install with npx.
-pub(crate) fn hyperframes_cli(explicit: Option<&str>) -> Result<PathBuf> {
+/// The HyperFrames version a video project pins (`hyperframes@X` in its package.json scripts,
+/// or a `hyperframes` dependency), if it pins one.
+pub(crate) fn pinned_hyperframes(project: &Path) -> Option<String> {
+    let text=std::fs::read_to_string(project.join("package.json")).ok()?;
+    let json:Value=serde_json::from_str(&text).ok()?;
+    let scripts=json["scripts"].as_object().into_iter().flatten().filter_map(|(_,v)|v.as_str());
+    scripts.filter_map(|cmd|cmd.split("hyperframes@").nth(1).map(|rest|rest.chars().take_while(|c|c.is_ascii_digit()||*c=='.').collect::<String>()))
+        .find(|v|!v.is_empty())
+        .or_else(||json["dependencies"]["hyperframes"].as_str().or(json["devDependencies"]["hyperframes"].as_str()).map(|v|v.trim_start_matches(['^','~','=']).to_string()))
+}
+
+/// An already-downloaded executable of exactly `version`: the project's own node_modules, then
+/// the npm cache under `npx_root`. Nothing is installed or fetched.
+pub(crate) fn pinned_cli(project: &Path, npx_root: &Path, version: &str) -> Option<PathBuf> {
+    let matches=|modules:&Path|{
+        let manifest=std::fs::read_to_string(modules.join("hyperframes/package.json")).ok()?;
+        let found=serde_json::from_str::<Value>(&manifest).ok()?["version"].as_str()?.to_string();
+        let bin=modules.join(".bin/hyperframes");
+        (found==version && bin.is_file()).then_some(bin)
+    };
+    matches(&project.join("node_modules")).or_else(||{
+        let mut caches:Vec<PathBuf>=std::fs::read_dir(npx_root).ok()?.filter_map(|e|e.ok()).map(|e|e.path().join("node_modules")).collect();
+        caches.sort();
+        caches.iter().find_map(|modules|matches(modules))
+    })
+}
+
+/// Resolve an explicitly selected executable, HYPERFRAMES_CLI, PATH, or an already-downloaded copy
+/// of the version the project pins; never install with npx. A failure says exactly what to do.
+pub(crate) fn hyperframes_cli(explicit: Option<&str>, project: Option<&Path>) -> Result<PathBuf> {
     let configured=explicit.map(PathBuf::from).or_else(||std::env::var_os("HYPERFRAMES_CLI").map(PathBuf::from));
-    let path=configured.or_else(||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file())))
-        .ok_or_else(||EngineError::InvalidParams("HyperFrames executable unavailable. Pass hyperframes_cli=/absolute/path or set HYPERFRAMES_CLI to an existing official executable; no install or npx lookup was attempted".into()))?;
+    let on_path=||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file()));
+    let pinned=project.and_then(|dir|pinned_hyperframes(dir).map(|version|(dir,version)));
+    let cached=||pinned.as_ref().and_then(|(dir,version)|{
+        let npx=PathBuf::from(std::env::var_os("HOME")?).join(".npm/_npx");
+        pinned_cli(dir,&npx,version)
+    });
+    let path=configured.or_else(on_path).or_else(cached).ok_or_else(||EngineError::InvalidParams(match &pinned {
+        Some((dir,version))=>format!("HyperFrames {version} not found. This project pins it in {}. Install it with `npm i -g hyperframes@{version}`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.",dir.join("package.json").display()),
+        None=>"HyperFrames executable not found on PATH. Install it with `npm i -g hyperframes`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.".into(),
+    }))?;
     if !path.is_absolute() || !path.is_file() {return Err(EngineError::InvalidParams(format!("HyperFrames executable must be an existing absolute file: {}",path.display())));}
     Ok(path)
 }
@@ -174,7 +210,7 @@ fn generated_files(root:&Path, relative:&Path, files:&mut Vec<PathBuf>) -> Resul
 }
 
 fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>, replace_scaffold:bool) -> Result<PathBuf> {
-    let cli=hyperframes_cli(executable)?;
+    let cli=hyperframes_cli(executable,Some(&dir.join("hyperframes")))?;
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|EngineError::InvalidParams(e.to_string()))?.as_nanos();
     let stage=dir.join(format!(".hyperframes-init-{}-{stamp}",std::process::id()));
     let mut args=vec!["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
@@ -401,7 +437,7 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     status["video_project_path"]=json!(s.video_project_path);
     if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
     status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
-    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
+    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?);}
     Ok(status)
 }
 
@@ -442,7 +478,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
             let work_dir = dir.join("hyperframes");
             // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
             // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
-            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str())?)
+            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&work_dir))?)
                 .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", &work_dir.to_string_lossy()])
                 .current_dir(&work_dir)
                 .env("PWD", &work_dir)
@@ -582,7 +618,10 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let dir=project_dir(s)?;
     if s.video_target!="hyperframes"{return Err(EngineError::InvalidParams("Select HyperFrames before placing this track".into()));}
     let mut request=params.clone();
-    if params.get("character").is_some() || params.get("track").is_some(){
+    if params.get("blender_job").is_some() && params.get("animation_job").is_some(){return Err(EngineError::InvalidParams("Pass only one animation job selector".into()));}
+    if let Some(job)=params.get("animation_job").or_else(||params.get("blender_job")){
+        request=animation_job_request(s,params,job)?;
+    } else if params.get("character").is_some() || params.get("track").is_some(){
         let character=params["character"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
         let track=params["track"].as_str().ok_or_else(||EngineError::InvalidParams("Source motion needs character and track".into()))?;
         // Inspect the saved rig without loading it into the live selection or rewriting project metadata.
@@ -600,4 +639,106 @@ pub fn cmd_video_place_track(s:&mut Session,params:&Value)->Result<Value>{
     let script=crate::workspace::workspace_root(s).join("pipeline/place_hyperframes_track.py");
     let output=run_tool_in(&dir,"python3",&[script.to_string_lossy().into_owned(),"--project".into(),dir.to_string_lossy().into_owned(),"--request".into(),request.to_string()])?;
     serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))
+}
+
+/// Resolve a completed project-local animation receipt: verified clip, canvas rect mapped to the
+/// rendered world frame, and the provenance frozen at render time (the current rig is not rehashed).
+fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>{
+    let invalid=|m:String|EngineError::InvalidParams(m);
+    if params.get("path").is_some(){return Err(invalid("Pass animation_job/blender_job or path, not both".into()));}
+    let receipt=crate::blender::cmd_blender_status(s,&json!({"job":job}))?;
+    if receipt["state"]!="completed"{return Err(invalid(format!("Animation job is {}, not completed",receipt["state"])));}
+    if receipt["partial"]!=false{return Err(invalid("Animation job is a shortened preview; render the full track before placing it".into()));}
+    let jobs=s.project_path.as_ref().and_then(|p|p.parent())
+        .map(|p|p.join("animation/blender-jobs").join(receipt["job"].as_str().unwrap_or_default()))
+        .ok_or_else(||invalid("Open a .magic project first".into()))?;
+    let clip=PathBuf::from(receipt["clip"].as_str().ok_or_else(||invalid("Receipt has no clip".into()))?);
+    if clip.parent()!=Some(jobs.as_path()){return Err(invalid("Receipt clip is outside its job folder".into()));}
+    // Stream the hash: a long clip must not be loaded into Studio memory.
+    let mut hasher=Sha256::new();
+    std::io::copy(&mut std::fs::File::open(&clip)?,&mut hasher)?;
+    if receipt["clip_sha256"].as_str()!=Some(format!("{:x}",hasher.finalize()).as_str()){
+        return Err(invalid("Clip does not match its receipt clip_sha256".into()));
+    }
+    for key in ["character","track"]{
+        if let Some(v)=params.get(key) && *v!=receipt[key]{return Err(invalid(format!("{key} does not match the rendered job ({})",receipt[key])));}
+    }
+    let number=|v:&Value,what:&str|v.as_f64().filter(|n|n.is_finite()).ok_or_else(||invalid(format!("{what} is missing or invalid")));
+    let positive=|v:&Value,what:&str|number(v,what).and_then(|n|if n>0.0{Ok(n)}else{Err(invalid(format!("{what} must be positive")))});
+    let rate=params.get("playback_rate").map_or(Ok(1.0),|v|positive(v,"playback_rate"))?;
+    if rate>16.0{return Err(invalid("playback_rate must be in (0,16]".into()));}
+    let duration=positive(&params["duration"],"duration")?;
+    let (seconds,fps)=(positive(&receipt["clip_seconds"],"Receipt clip_seconds")?,positive(&receipt["fps"],"Receipt fps")?);
+    let (width,height)=(positive(&receipt["width"],"Receipt width")?,positive(&receipt["height"],"Receipt height")?);
+    // The receipt must describe the actual media: dimensions exact, rate and duration within a frame.
+    let probe=run_tool_in(&jobs,"ffprobe",&["-v","error","-select_streams","v:0","-show_entries","stream=width,height,r_frame_rate:format=duration","-of","json"].map(String::from).into_iter().chain([clip.to_string_lossy().into_owned()]).collect::<Vec<_>>())?;
+    let probe:Value=serde_json::from_str(&probe).map_err(|e|invalid(format!("ffprobe output: {e}")))?;
+    let stream=&probe["streams"][0];
+    let media_fps=stream["r_frame_rate"].as_str().and_then(|r|r.split_once('/'))
+        .and_then(|(n,d)|Some(n.parse::<f64>().ok()?/d.parse::<f64>().ok()?)).filter(|f|f.is_finite()&&*f>0.0);
+    let media_seconds=probe["format"]["duration"].as_str().and_then(|d|d.parse::<f64>().ok());
+    let (Some(media_fps),Some(media_seconds),Some(media_w),Some(media_h))=(media_fps,media_seconds,stream["width"].as_f64(),stream["height"].as_f64())
+        else{return Err(invalid("ffprobe could not read the clip's frame rate, duration or dimensions".into()));};
+    if media_w!=width||media_h!=height||(media_fps-fps).abs()>fps*1e-3||(media_seconds-seconds).abs()>1.0/fps{
+        return Err(invalid(format!("Clip media ({media_w}x{media_h}, {media_fps:.3}fps, {media_seconds:.3}s) does not match its receipt ({width}x{height}, {fps:.3}fps, {seconds:.3}s)")));
+    }
+    if duration>seconds/rate+1e-6{
+        return Err(invalid(format!("Clip covers {:.3}s at playback_rate {rate}; requested duration is {duration}s",seconds/rate)));
+    }
+    // rect frames the original canvas with object-fit: contain; the clip itself shows world_rect.
+    let values=|v:&Value,n:usize,what:&str|->Result<Vec<f64>>{
+        let a=v.as_array().filter(|a|a.len()==n).ok_or_else(||invalid(format!("{what} must have {n} numbers")))?;
+        a.iter().map(|x|number(x,what)).collect()
+    };
+    let (c,world,rect)=(values(&receipt["canvas"],2,"Receipt canvas")?,values(&receipt["world_rect"],4,"Receipt world_rect")?,values(&params["rect"],4,"rect")?);
+    let (ww,wh)=(world[2]-world[0],world[3]-world[1]);
+    if !(c[0]>0.0&&c[1]>0.0&&ww>0.0&&wh>0.0&&rect[2]>0.0&&rect[3]>0.0) || (ww/wh*height-width).abs()>1.0{
+        return Err(invalid("rect, canvas or world_rect is invalid, or world_rect does not match the clip aspect".into()));
+    }
+    let scale=(rect[2]/c[0]).min(rect[3]/c[1]);
+    let (x,y)=(rect[0]+(rect[2]-c[0]*scale)/2.0,rect[1]+(rect[3]-c[1]*scale)/2.0);
+    let mut request=params.clone();
+    request["path"]=json!(clip);
+    request["canvas_rect"]=params["rect"].clone();
+    request["rect"]=json!([x+world[0]*scale,y+world[1]*scale,ww*scale,wh*scale]);
+    for key in ["character","track"]{
+        if receipt[key].is_string(){request[key]=receipt[key].clone();}
+    }
+    let mut frozen=json!({"receipt":jobs.join("result.json"),"relationship":"provenance frozen when this clip was rendered; later source edits do not change it"});
+    for key in ["job","source_job","backend","character","track","spec","rig_sha256","artwork","source_blend","source_blend_sha256","clip_sha256","clip_seconds","fps","first_frame","last_frame","canvas","world_rect","source_bundle","tool","selected_range","authored_range","range_note","partial","frame_mapping","alpha_evidence","native_project","native_project_sha256","audio_mode","fps_fraction"]{
+        if let Some(value)=receipt.get(key){frozen[key]=value.clone();}
+    }
+    request["rendered_source"]=frozen;
+    Ok(request)
+}
+
+#[cfg(test)]
+mod hyperframes_cli_tests {
+    use super::*;
+    fn temp(name:&str)->PathBuf{let d=std::env::temp_dir().join(format!("hf-cli-{name}-{}",std::process::id()));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();d}
+    fn install(modules:&Path,version:&str){
+        std::fs::create_dir_all(modules.join("hyperframes")).unwrap();std::fs::create_dir_all(modules.join(".bin")).unwrap();
+        std::fs::write(modules.join("hyperframes/package.json"),format!("{{\"version\":\"{version}\"}}")).unwrap();
+        std::fs::write(modules.join(".bin/hyperframes"),"#!/bin/sh\n").unwrap();
+    }
+    #[test]
+    fn the_pinned_version_comes_from_the_project_scripts(){
+        let p=temp("pin");
+        std::fs::write(p.join("package.json"),r#"{"scripts":{"dev":"npx --yes hyperframes@0.8.166 preview"}}"#).unwrap();
+        assert_eq!(pinned_hyperframes(&p).as_deref(),Some("0.8.166"));
+        std::fs::write(p.join("package.json"),r#"{"dependencies":{"hyperframes":"^0.8.181"}}"#).unwrap();
+        assert_eq!(pinned_hyperframes(&p).as_deref(),Some("0.8.181"));
+        std::fs::remove_dir_all(p).unwrap();
+    }
+    #[test]
+    fn only_a_downloaded_copy_of_exactly_the_pinned_version_is_used(){
+        let p=temp("proj");let npx=temp("npx");
+        install(&npx.join("aaa/node_modules"),"0.8.189");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),None,"another version is never used");
+        install(&npx.join("bbb/node_modules"),"0.8.166");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),Some(npx.join("bbb/node_modules/.bin/hyperframes")));
+        install(&p.join("node_modules"),"0.8.166");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),Some(p.join("node_modules/.bin/hyperframes")),"the project's own copy wins");
+        std::fs::remove_dir_all(p).unwrap();std::fs::remove_dir_all(npx).unwrap();
+    }
 }

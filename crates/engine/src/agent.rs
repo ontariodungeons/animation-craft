@@ -7,6 +7,31 @@ fn invalid(message: impl Into<String>) -> EngineError { EngineError::InvalidPara
 fn stamp() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d|d.as_nanos()).unwrap_or(0) }
 
 /// Read only chat settings from the same file the app edits. Never return credential fields.
+/// The coding agent Omarchy runs by default.
+///
+/// Omarchy moved its command surface behind a command centre, so the stable
+/// `omarchy-default-agent` binary is tried first and `omarchy default agent`
+/// (a read-only query with no argument) is the fallback. A launch is never
+/// triggered from here.
+pub fn default_agent() -> Option<String> {
+    let read = |output: std::process::Output| String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let legacy = Command::new("omarchy-default-agent")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(read)
+        .filter(|s| !s.is_empty() && !s.contains(char::is_whitespace));
+    legacy.or_else(|| {
+        Command::new("omarchy")
+            .args(["default", "agent"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(read)
+            .filter(|s| !s.is_empty() && !s.contains(char::is_whitespace))
+    })
+}
+
 pub fn settings() -> Result<Value> {
     let base=std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
         .or_else(||std::env::var_os("HOME").map(|h|std::path::PathBuf::from(h).join(".config")));
@@ -20,9 +45,7 @@ pub fn settings() -> Result<Value> {
     if stored.get("agent").is_some_and(|v|!v.is_string()) {return Err(invalid("Invalid saved agent; choose an installed chat agent in the app. No fallback selected"));}
     if stored.get("extra_args").is_some_and(|v|!v.is_array()) {return Err(invalid("Invalid saved extra_args; expected an array. No arguments ignored"));}
     let agent=stored["agent"].as_str().filter(|s|!s.trim().is_empty()).map(str::to_owned)
-        .unwrap_or_else(||Command::new("omarchy-default-agent").output().ok()
-            .filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).trim().to_owned())
-            .filter(|s|!s.is_empty()).unwrap_or_else(||"codex".into()));
+        .unwrap_or_else(||default_agent().unwrap_or_else(||"codex".into()));
     let mut selected=json!({"agent":agent});
     for key in ["provider","model","thinking"] {
         if stored.get(key).is_some_and(|v|!v.is_string()) {return Err(invalid(format!("Invalid saved {key}; expected a string. No selection fallback attempted")));}

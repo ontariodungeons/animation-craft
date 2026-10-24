@@ -81,7 +81,7 @@ console.log("PASS: reply receipts require actual visible text, project match, op
 
 // CLI New Chat refresh uses the same drawer loader, not removed Tauri chat commands.
 vm.runInContext(readFileSync(new URL("../ui/bridge.js", import.meta.url), "utf8"), context);
-await vm.runInContext(`agent.turns=[{role:"assistant",text:"Previous conversation"}]; window.acBridge.refresh("agent.new_chat",state.project,12,{session:"ses_fresh",turns:[]})`,context);
+await vm.runInContext(`agent.turns=[{role:"assistant",text:"Previous conversation"}]; window.magicBridge.refresh("agent.new_chat",state.project,12,{session:"ses_fresh",turns:[]})`,context);
 assert.equal(vm.runInContext("agent.turns.length",context),0);
 assert.equal(vm.runInContext("agent.newChat",context),false);
 assert.ok(calls.some(c=>c.id==="render_revision"&&c.revision===12));
@@ -96,3 +96,114 @@ const drawer = shell.indexOf('id="agent"');
 assert.ok(drawer > projectEnd && drawer > projectStart, "shared drawer cannot be nested in Project");
 assert.ok(shell.indexOf('</main>') < drawer, "drawer is independent of tab-specific view visibility");
 console.log("PASS: shared Sproket drawer is outside tab-specific containers");
+
+// Supplemental Blender rendering cannot replace the authoring editor or its part selection.
+// Run real mode-switch, selection-label and Gaffer handlers; only native transport is synthetic.
+const artworkNodes = new Map(), artworkCalls = [];
+function artworkElement(tag, attrs = {}, ...children) {
+  const n = { tag, ...attrs, _value:attrs.value, children: [], parentElement:null, style: {}, dataset: {}, events:{}, textContent: children.filter(c => typeof c === 'string').join(''),
+    classList: { add() {} }, addEventListener(type,fn) {this.events[type]=fn;}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, setAttribute(name,value) {this[name]=value;}, replaceWith() {}, showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},remove(){},
+    append(...items) { for(const item of items.flat()){if(item&&typeof item==='object'){if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}item.parentElement=this;}this.children.push(item);} },
+    replaceChildren(...items) { for(const child of this.children)if(child&&typeof child==='object')child.parentElement=null;this.children=[];this.append(...items); },
+    insertBefore(item,reference) { if(reference!==null&&!this.children.includes(reference))throw new DOMException('Reference is not a child','NotFoundError');if(item===reference)return item;if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}this.children.splice(reference===null?this.children.length:this.children.indexOf(reference),0,item);item.parentElement=this;return item; },
+    querySelector(selector) {
+      const cls = selector.split(' ').at(-1).slice(1);
+      const find = node => node && typeof node === 'object' && ((node.class || '').split(' ').includes(cls) ? node : node.children?.map(find).find(Boolean));
+      return this.children.map(find).find(Boolean) || null;
+    },
+    get options() { return this.children.filter(c => c?.tag === 'option'); },
+    get selectedOptions() { return this.options.filter(o => o.value === this.value); },
+    get value() { return this._value ?? this.options[0]?.value ?? ''; }, set value(v) { this._value = v; },
+  };
+  n.append(...children.flat());
+  if (attrs.id) artworkNodes.set(attrs.id, n);
+  return n;
+}
+// DOM insertion moves an existing node, preserves parent links, and rejects a foreign reference.
+{
+ const a=artworkElement('a'),b=artworkElement('b'),parent=artworkElement('div',{},a,b),other=artworkElement('div');
+ assert.equal(parent.insertBefore(b,a),b);assert.deepEqual(parent.children,[b,a]);assert.equal(b.parentElement,parent);
+ other.insertBefore(b,null);assert.deepEqual(parent.children,[a]);assert.equal(b.parentElement,other);
+ assert.throws(()=>parent.insertBefore(b,b),{name:'NotFoundError'});
+ parent.replaceChildren(b);assert.equal(a.parentElement,null);assert.equal(b.parentElement,parent);assert.equal(other.children.length,0);
+}
+for (const id of ['view-animation', 'magic-target-image', 'magic-target-parts']) artworkElement('div', { id });
+const artworkContext = vm.createContext({
+  console, Map, Set, URL, Promise, queueMicrotask, performance, Event, clearTimeout, setTimeout, clearInterval, setInterval,
+  localStorage: { getItem: () => null, setItem() {} },
+  state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
+  $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
+  document: { querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
+  magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
+  updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
+  invoke: async (id, args) => {
+    artworkCalls.push({ id, ...args });
+    if (id !== 'engine_command') throw Error(`Unexpected fixture transport ${id}`);
+    if (args.id === 'project.list_assets') return { assets: [{ id: 'paper-puppet', kind: 'cutout_rig', name: 'Paper puppet' }] };
+    if (args.id === 'blender.actions') return { character: 'paper-puppet', tracks: [{ id: 'wave', duration: 1, standard: false }], layers: [], canvas: [64, 64], spec: '/fixture/rig.json' };
+    if (args.id === 'blender.list') return { jobs: [] };
+    if (args.id === 'storyboard.toc') return { chapters: [] };
+    if (args.id === 'image.generate') throw Error('Native generation disabled in fixture');
+    throw Error(`Unexpected fixture command ${args.id}`);
+  },
+});
+for (const file of ['companion-boxes.js', 'animation.js', 'blender-placement.js', 'blender.js', 'image-prompt.js']) {
+  vm.runInContext(readFileSync(new URL(`../ui/${file}`, import.meta.url), 'utf8'), artworkContext);
+}
+const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
+// Use the production shared-label and block renderers without booting the desktop app.
+for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction objectsFrom(']]) {
+  vm.runInContext(appSource.slice(appSource.indexOf(start), appSource.indexOf(end)), artworkContext);
+}
+vm.runInContext(`
+  motion.mode='subject'; motion.character='paper-puppet'; motion.selected='left-piece';
+  motion.meta={original_reference:'/fixture/source.png',layers:[
+    {id:'left-piece',label:'Left piece',file:'/fixture/left.png'},
+    {id:'right-piece',label:'Right piece',file:'/fixture/right.png'}]};
+  updateMagicSelection();
+  const captured=selectedPartTarget();
+  const existingResult={asset_id:'earlier-candidate',image:'/fixture/candidate.png'};
+  const existingDraft={prompt:'Draw a whole new artwork',model:'gpt-6-luna',busy:false,error:'',target:captured,candidateTarget:captured,result:existingResult};
+  imageDrafts.set(state.project,existingDraft);
+`, artworkContext);
+assert.match(artworkNodes.get('magic-target-image').textContent, /Left piece/);
+assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
+// Click the actual Blender mode control, including its normal metadata loading.
+await vm.runInContext(`motionModeSwitch().children.find(n=>n.id==='motion-mode-blender').onclick()`, artworkContext);
+assert.equal(vm.runInContext('motion.selected', artworkContext), 'left-piece', 'rendering must preserve the authoring part ID');
+assert.equal(artworkNodes.get('blender-render-dialog').open,true,'actual render dialog must open');
+assert.equal(artworkNodes.get('magic-target-image').textContent, 'Left piece · left-piece');
+assert.equal(artworkNodes.get('magic-target-parts').textContent, 'Left piece · left-piece');
+assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
+assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 2, 'lightweight render metadata must not replace authoring layers');
+assert.ok(artworkCalls.some(c=>c.id==='blender.actions'),'fixture must reach the real render metadata query');
+assert.equal(vm.runInContext('existingDraft.target===captured && existingDraft.candidateTarget===captured && existingDraft.result===existingResult', artworkContext), true, 'switching backend preserves captured generation data');
+assert.equal(vm.runInContext('JSON.stringify(captured.references)', artworkContext), '["source.png","left.png"]');
+await vm.runInContext(`imagePromptBlock();`, artworkContext);
+await artworkNodes.get('image-generate').onclick();
+const wholeArtwork = artworkCalls.find(c => c.id === 'image.generate');
+assert.ok(wholeArtwork, 'valid captured part request still reaches the transport');
+assert.equal(wholeArtwork.params.prompt, 'Draw a whole new artwork');
+assert.equal(JSON.stringify(wholeArtwork.params.references),'["source.png","left.png"]','render selection must not retarget generation references');
+assert.equal(vm.runInContext('existingDraft.error', artworkContext), 'Error: Native generation disabled in fixture');
+console.log('PASS: supplemental Blender controls preserve authoring selection and captured generation references');
+await import('./companions.mjs');
+await import('./animation-authoring.mjs');
+
+await import('./inspector-controls.mjs');
+
+await import('./blender-placement.mjs');
+
+await import('./animation-refresh.mjs');
+
+await import('./animation-bridge.mjs');
+
+await import('./animation-transport.mjs');
+
+await import('./animation-native.mjs');
+
+await import('./motion-authoring-controls.mjs');
+
+await import('./animation-session.mjs');
+
+await import('./animation-feedback.mjs');

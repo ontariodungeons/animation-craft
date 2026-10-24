@@ -51,10 +51,10 @@ pub fn eval(app: &AppHandle, body: &str) -> Result<Value, String> {
     if v["ok"].as_bool() == Some(true) { Ok(v["value"].clone()) } else { Err(v["error"].as_str().unwrap_or("page error").to_string()) }
 }
 
-/// `acBridge.<name>(args…)` in the page.
+/// `magicBridge.<name>(args…)` in the page.
 fn page(app: &AppHandle, name: &str, args: &[&Value]) -> Result<Value, String> {
     let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-    eval(app, &format!("return await acBridge.{name}({});", args.join(", ")))
+    eval(app, &format!("return await magicBridge.{name}({});", args.join(", ")))
 }
 
 /// A png path for a picture: `output`, else `<project>/.agent/looks/` (projects stay self-contained).
@@ -137,7 +137,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
             if ui_project_request {return Ok(result);}
             // The page shows the change (and follows a project opened or created from outside).
             let project = app.state::<Engine>().with(None, |s| Ok(s.project_path.clone()))?;
-            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision), &result])?;
+            page(app, "refresh", &[&json!(id), &json!(project), &json!(revision), &result, &json!(request_id), params])?;
             Ok(result)
         }
     }

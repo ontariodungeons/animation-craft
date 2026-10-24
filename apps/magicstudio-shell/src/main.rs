@@ -247,9 +247,7 @@ fn which(name: &str) -> Option<std::path::PathBuf> {
 
 /// The agent Omarchy launches by default (`omarchy default agent`).
 fn omarchy_default_agent() -> Option<String> {
-    let out = std::process::Command::new("omarchy-default-agent").output().ok()?;
-    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!name.is_empty()).then_some(name)
+    magicstudio_engine::agent::default_agent()
 }
 
 /// The agents installed on this machine, with the one the system runs by default.

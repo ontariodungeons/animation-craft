@@ -1,0 +1,21 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "@theatre/core": "0.7.0",
+        "@theatre/studio": "0.7.0",
+      },
+    },
+  },
+  "packages": {
+    "@theatre/core": ["@theatre/core@0.7.0", "", { "dependencies": { "@theatre/dataverse": "0.7.0" } }, "sha512-CXRUxOaKQtb4biQa6+I6PW8wPsFj9NsZgr7VdosSB20WxlanQ8/ZR0xH/A3A3oCHdCXKaZxQlNcEOeByk4Yf/g=="],
+
+    "@theatre/dataverse": ["@theatre/dataverse@0.7.0", "", { "dependencies": { "lodash-es": "^4.17.21" } }, "sha512-NbhTZYOqETp9g0II7R9GypErnZ47TmoT6yzyQ0vGfgVLD1a+dsPG+CLvvyzssbGG/gfDDoMzkXNwWJAwNkqFvQ=="],
+
+    "@theatre/studio": ["@theatre/studio@0.7.0", "", { "dependencies": { "@theatre/dataverse": "0.7.0" }, "peerDependencies": { "@theatre/core": "*" } }, "sha512-aBkDUBmvajWaha5dd/6Fs7sHCDMQKqVlLX9SDGsMJkKoCEb9dzwD5F5FOZCWt+OhbbwIbP9dYR6S4n6abyDkBQ=="],
+
+    "lodash-es": ["lodash-es@4.18.1", "", {}, "sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A=="],
+  }
+}

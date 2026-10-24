@@ -3,7 +3,7 @@
 //! Reads `/proc` directly: the Studio's own process tree (the shell plus its webview),
 //! memory and CPU, so the panel shows real numbers instead of guesses.
 
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::{Duration, Instant}};
 
 /// One process in the Studio's tree.
 #[derive(Clone, Debug)]
@@ -11,7 +11,39 @@ pub struct Proc {
     pub pid: u32,
     pub name: String,
     pub rss_kb: u64,
-    pub cpu_pct: f64,
+    pub cpu_ticks: u64,
+    pub start_ticks: u64,
+}
+
+/// A bounded snapshot for one selected Studio. CPU uses one core = 100%.
+pub struct Sample {
+    pub pid: u32,
+    pub instance: String,
+    pub at: Instant,
+    pub procs: Vec<Proc>,
+    pub cpu_pct: Option<f64>,
+}
+
+impl Sample {
+    pub fn capture(instance: &str, previous: Option<&Self>) -> Option<Self> {
+        let pid = pid_from_socket(Path::new(instance))?;
+        let procs = tree(pid);
+        if !procs.iter().any(|p| p.pid == pid) { return None; }
+        let at = Instant::now();
+        let cpu_pct = previous.filter(|p| p.instance == instance).and_then(|p| {
+            cpu_percent(&p.procs, &procs, at.duration_since(p.at), clock_ticks()?)
+        });
+        Some(Self { pid, instance: instance.into(), at, procs, cpu_pct })
+    }
+}
+
+pub fn clock_ticks() -> Option<u64> {
+    static TICKS: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *TICKS.get_or_init(|| {
+        let out = std::process::Command::new("getconf").arg("CLK_TCK").output().ok()?;
+        if !out.status.success() { return None; }
+        String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+    })
 }
 
 /// Every descendant of `root`, deepest last.
@@ -28,6 +60,17 @@ pub fn tree(root: u32) -> Vec<Proc> {
         }
     }
     out
+}
+
+/// Every readable process on the machine, for a host-wide list.
+pub fn all_procs() -> Vec<Proc> {
+    fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(read_proc)
+        .collect()
 }
 
 fn children_map() -> std::collections::HashMap<u32, Vec<u32>> {
@@ -50,7 +93,7 @@ fn parent_of(pid: u32) -> Option<u32> {
     after.split_whitespace().nth(1)?.parse().ok()
 }
 
-fn read_proc(pid: u32) -> Option<Proc> {
+pub fn read_proc(pid: u32) -> Option<Proc> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let open = stat.find('(')?;
     let close = stat.rfind(')')?;
@@ -61,14 +104,23 @@ fn read_proc(pid: u32) -> Option<Proc> {
     let ticks = fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
     let rss_kb = fs::read_to_string(format!("/proc/{pid}/status")).ok()
         .and_then(|s| s.lines().find_map(|l| l.strip_prefix("VmRSS:")).and_then(|v| v.trim().split_whitespace().next()).and_then(|v| v.parse().ok()))?;
-    Some(Proc { pid, name, rss_kb, cpu_pct: ticks as f64 / 100.0 })
+    let start_ticks = fields.get(19)?.parse().ok()?;
+    Some(Proc { pid, name, rss_kb, cpu_ticks: ticks, start_ticks })
 }
 
-/// CPU percent for the tree since the previous sample. Linux `getconf CLK_TCK` is 100.
-pub fn cpu_since(previous_ticks: f64, tree: &[Proc]) -> f64 {
-    let now: f64 = tree.iter().map(|p| p.cpu_pct).sum();
-    let delta = now - previous_ticks;
-    delta / 2.0 // seconds of CPU per second of wall clock, sampled over ~2s
+/// Only compare processes present in both samples, guarding against PID reuse.
+pub fn cpu_percent(previous: &[Proc], current: &[Proc], elapsed: Duration, hz: u64) -> Option<f64> {
+    if elapsed.is_zero() || hz == 0 { return None; }
+    let mut delta = 0u64;
+    let mut matched = false;
+    for p in current {
+        if let Some(old) = previous.iter().find(|old| old.pid == p.pid && old.start_ticks == p.start_ticks)
+            && let Some(ticks) = p.cpu_ticks.checked_sub(old.cpu_ticks) {
+            delta = delta.saturating_add(ticks);
+            matched = true;
+        }
+    }
+    matched.then(|| delta as f64 / hz as f64 / elapsed.as_secs_f64() * 100.0)
 }
 
 /// Total resident memory of the tree, in megabytes.
@@ -79,26 +131,6 @@ pub fn rss_mb(tree: &[Proc]) -> f64 {
 /// The Studio pid from its socket name (`<pid>-<nonce>.sock`).
 pub fn pid_from_socket(socket: &Path) -> Option<u32> {
     socket.file_name()?.to_str()?.split('-').next()?.parse().ok()
-}
-
-/// The newest Studio endpoint in the runtime directory, as a pid.
-pub fn studio_pid() -> Option<u32> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)?;
-    let dir = runtime.join("magicstudio-studio");
-    let mut newest: Option<(std::time::SystemTime, u32)> = None;
-    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "sock") {
-            continue;
-        }
-        let Some(pid) = pid_from_socket(&path) else { continue; };
-        let stamp = entry.metadata().and_then(|m| m.modified()).ok();
-        let stamp = stamp.unwrap_or(std::time::UNIX_EPOCH);
-        if newest.as_ref().is_none_or(|(old, _)| stamp > *old) {
-            newest = Some((stamp, pid));
-        }
-    }
-    newest.map(|(_, pid)| pid)
 }
 
 /// Human-readable byte size.
@@ -122,5 +154,32 @@ mod tests {
     fn a_socket_name_yields_its_pid() {
         let path = Path::new("/run/user/1000/magicstudio-studio/4242-1.sock");
         assert_eq!(pid_from_socket(path), Some(4242));
+    }
+
+    #[test]
+    fn cpu_uses_elapsed_time_and_keeps_observed_zero() {
+        let old = Proc { pid: 1, name: "test".into(), rss_kb: 0, cpu_ticks: 100, start_ticks: 10 };
+        let mut now = old.clone();
+        now.cpu_ticks = 175;
+        assert_eq!(cpu_percent(&[old.clone()], &[now], Duration::from_secs(3), 100), Some(25.0));
+        assert_eq!(cpu_percent(&[old.clone()], &[old], Duration::from_secs(2), 100), Some(0.0));
+    }
+
+    #[test]
+    fn cpu_does_not_mix_reused_pids_or_new_children() {
+        let old = Proc { pid: 1, name: "test".into(), rss_kb: 0, cpu_ticks: 100, start_ticks: 10 };
+        let mut reused = old.clone();
+        reused.start_ticks = 20;
+        reused.cpu_ticks = 900;
+        assert_eq!(cpu_percent(&[old.clone()], &[reused], Duration::from_secs(2), 100), None);
+        assert_eq!(cpu_percent(&[], &[old.clone()], Duration::from_secs(2), 100), None);
+        assert_eq!(cpu_percent(&[old.clone()], &[old], Duration::ZERO, 100), None);
+    }
+
+    #[test]
+    fn first_sample_has_memory_but_no_cpu_rate() {
+        let sample = Sample::capture(&format!("{}-test.sock",std::process::id()), None).unwrap();
+        assert!(rss_mb(&sample.procs) > 0.0);
+        assert_eq!(sample.cpu_pct, None);
     }
 }

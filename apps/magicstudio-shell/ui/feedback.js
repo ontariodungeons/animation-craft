@@ -1,12 +1,20 @@
 // Bounded rendered feedback for this application only. Never read input values or agent chat text.
 window.acFeedback={phase:'booting',errors:[],pending:0,ack:0,last:null,actions:new WeakMap()};
 function feedbackSnapshot(){
- const changed=[...document.querySelectorAll('input:not([type=password]),textarea,[contenteditable=true]')].filter(n=>n.getBoundingClientRect().width&&n.getBoundingClientRect().height&&!n.closest('#agent-log')&&n.id!=='motion-scrub').filter(n=>n.isContentEditable?!!n.textContent.trim():n.value!==n.defaultValue).map(n=>n.id||n.tagName.toLowerCase());
+ const changed=[...document.querySelectorAll('input:not([type=password]),textarea,[contenteditable=true]')].filter(n=>n.getBoundingClientRect().width&&n.getBoundingClientRect().height&&!n.closest('#agent-log')&&n.id!=='motion-scrub').filter(n=>n.isContentEditable?!!n.textContent.trim():n.type==='checkbox'||n.type==='radio'?n.checked!==n.defaultChecked:n.value!==n.defaultValue).map(n=>n.id||n.tagName.toLowerCase());
  if(typeof theatreFeedback==='function'&&theatreFeedback().live_edits==='needs_save')changed.push('theatre-motion');
  const pane=typeof state==='undefined'?null:document.querySelector(state.project?'#view-'+(state.view==='studio'&&typeof serverUrl==='function'&&serverUrl()?'project':state.view):'#view-home');
  const rendered=!!pane&&pane.getBoundingClientRect().width>0&&pane.getBoundingClientRect().height>0&&getComputedStyle(pane).display!=='none'&&pane.textContent.trim().length>0;
  const chat=typeof agent!=="undefined"&&agent.loaded?{agent:document.getElementById('agent-command')?.value||null,provider:document.getElementById('agent-provider')?.value||null,model:document.getElementById('agent-model')?.value||null,source:'rendered selector; may include unsaved edits'}:null;
- return {theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
+ // The shared box snapshot rides in the EXISTING feedback payload, so the app
+ // light, the companion and the TUI all read ONE observation. Each row says
+ // where it came from and when it was seen; a stale or closed-app observation
+ // is marked, never invented as a failure. No new poller and no new command.
+ const boxes=window.companionBoxes?window.companionBoxes.snapshot({project:typeof state==='undefined'?null:state.project}):[];
+ // The one standard record per panel: flags, a revision that changes only when
+ // a flag changes, and the clickable controls that belong to no known panel.
+ const panels=window.companionBoxes?window.companionBoxes.panels():null;
+ return {companions:window.magicCompanions?.snapshot()||null,boxes,panels,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
 }
 acFeedback.report=async function(phase,ack,event){
  if(phase)acFeedback.phase=phase;if(ack)acFeedback.ack=Math.max(acFeedback.ack,ack);

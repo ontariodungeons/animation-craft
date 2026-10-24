@@ -686,16 +686,8 @@ pub fn cmd_part_undo_image(s: &mut Session, params: &Value) -> Result<Value> {
             "A later part-image operation exists; this undo token is stale",
         ));
     }
-    if params
-        .get("expected_rig_sha256")
-        .and_then(Value::as_str)
-        .is_some_and(|expected| expected != rig_hash)
-        || record["rig_sha256"].as_str() != Some(&rig_hash)
-    {
-        return Err(invalid(
-            "Rig changed since replacement; reload and review before undo",
-        ));
-    }
+    // A symlinked part is refused before the rig-hash comparison: the hash covers layer bytes, so a
+    // changed alias would otherwise report "rig changed" and hide the real, unsafe binding.
     let part = record["part"]
         .as_str()
         .ok_or_else(|| invalid("Undo receipt has no part ID"))?
@@ -707,6 +699,16 @@ pub fn cmd_part_undo_image(s: &mut Session, params: &Value) -> Result<Value> {
     {
         return Err(invalid(
             "Symlink-bound part images are read-only; undo refused",
+        ));
+    }
+    if params
+        .get("expected_rig_sha256")
+        .and_then(Value::as_str)
+        .is_some_and(|expected| expected != rig_hash)
+        || record["rig_sha256"].as_str() != Some(&rig_hash)
+    {
+        return Err(invalid(
+            "Rig changed since replacement; reload and review before undo",
         ));
     }
     let target = resolve_project_file(

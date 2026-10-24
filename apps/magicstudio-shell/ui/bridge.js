@@ -13,6 +13,17 @@ function regionNode(region) {
   return document.getElementById(region) || document.querySelector(region);
 }
 
+// A visual inline style: any property set on the element itself. Custom
+// properties carry data (geometry), not style.
+function visualInlineStyle(node) {
+  const style = node.style;
+  if (!style) return false;
+  const names = typeof style.length === "number" && typeof style.item === "function"
+    ? Array.from({ length: style.length }, (_, i) => style.item(i))
+    : Object.keys(style).filter(key => !key.startsWith("--"));
+  return names.some(name => !name.startsWith("--"));
+}
+
 function idOf(node) {
   return node.id || node.getAttribute("aria-label") || (node.innerText || node.value || node.placeholder || "").trim().split("\n")[0].slice(0, 60);
 }
@@ -28,10 +39,11 @@ function find(target) {
   throw new Error(`no element "${target}"; ui.elements lists them`);
 }
 
-window.acBridge = {
+window.magicBridge = {
   state() {
     return {
-      animation: typeof motion === "undefined" ? null : { character: motion.character, track: motion.track, rest: motion.rest, time: motion.time, playing: motion.playing, selected_layer: motion.selected },
+      companions: window.magicCompanions?.snapshot() || null,
+      animation: typeof animationFeedback === "function" ? animationFeedback() : null,
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
       storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
@@ -56,6 +68,32 @@ window.acBridge = {
       return { id: idOf(n), kind: n.getAttribute("role") || n.tagName.toLowerCase(), label: n.title || n.getAttribute("aria-label") || "",
         rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] };
     });
+  },
+  // A control is tracked when it, or an ancestor, is a panel the registry
+  // knows or has an entry in the config. A control with neither is untracked.
+  // A control with a visual inline style is unstyled; geometry set as custom
+  // properties is data, not styling, and is never unstyled.
+  unconfigured() {
+    const registry = window.companionBoxes;
+    const entries = (window.uiConfig && window.uiConfig.elements) || {};
+    const tracked = (node) => {
+      for (let n = node; n; n = n.parentElement) {
+        if (n.id && entries[n.id]) return true;
+        const host = n.getAttribute && n.getAttribute("data-box-id");
+        if (host && registry && typeof registry.get === "function" && registry.get(host)) return true;
+      }
+      return false;
+    };
+    const rows = [];
+    const nodes = [...document.querySelectorAll(`${CLICKABLE}, [id]`)];
+    nodes.forEach((node, i) => {
+      const reason = !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
+      if (!reason) return;
+      const tag = node.tagName.toLowerCase();
+      const label = (node.title || node.getAttribute("aria-label") || node.textContent || "").trim().slice(0, 80);
+      rows.push({ id: node.id || `${tag}-${i + 1}`, tag, label: label || null, reason });
+    });
+    return rows.slice(0, 64);
   },
   click(target) {
     const node = find(target);
@@ -86,8 +124,9 @@ window.acBridge = {
     return [x, y, Math.min(innerWidth, r.right + pad) - x, Math.min(innerHeight, r.bottom + pad) - y];
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
-  async refresh(id, project, revision, result = {}) {
-    if (id.startsWith("motion.")) return { refreshed: id };
+  async refresh(id, project, revision, result = {}, request_id = null, params = {}) {
+    if(project===state.project)window.magicCompanions?.event({command:id,project,view:state.view,request:request_id||result._request_id||`cli-revision-${revision}`,phase:'success',params,result});
+    try {
     if (id === "agent.new_chat") {
       await agentLoad(); agent.newChat = !result.session;
       await acFeedback.acknowledge(revision,project);
@@ -103,8 +142,14 @@ window.acBridge = {
     renderTarget();
     renderBlocks();
     renderStoryboard();
-    if (state.view === "animation") await animationRefresh();
+    if (state.view === "animation") {await animationRefresh();motion.refreshError=null;}
     await acFeedback.acknowledge(revision,project);
     return { refreshed: id, ack_engine_revision:revision };
+    }catch(error){
+      const message=String(error);
+      if(typeof motion!=='undefined')motion.refreshError=message;
+      await acFeedback.report(null,null,{stage:'refresh_error',command:id,engine_succeeded:true,error:message});
+      return {refreshed:false,command:id,engine_succeeded:true,refresh_error:message,ack_engine_revision:null};
+    }
   },
 };

@@ -194,7 +194,7 @@ def _vlm_ocr_label(crop_with_caption: Image.Image) -> dict | None:
         "standing, walking, running, jumping, dancing, waving, pointing, sitting, clapping, looking_up, looking_down, arms_wide."
     )
     payload = json.dumps({
-        'model': os.environ.get('ANIMATIONCRAFT_OCR_VLM', 'llava-llama3:latest'),
+        'model': os.environ.get('MAGICSTUDIO_OCR_VLM', 'llava-llama3:latest'),
         'prompt': prompt,
         'images': [b64],
         'stream': False,
