@@ -95,8 +95,8 @@ const tests = [
     assert.equal(timers.size, 2, 'the dog and the cat each start a burst');
     for (let round = 0; round < 10 && timers.size; round++) for (const [key, timer] of [...timers]) { timers.delete(key); timer.fn(); }
     const snap = pets.snapshot();
-    assert.equal(snap.sproket.pose, 'rest', 'the dog is not frozen mid-burst');
-    assert.equal(snap.gaffer.pose, 'rest');
+    assert.equal(snap.sproket.pose, 'alert', 'the dog settles on the red light, not frozen mid-burst');
+    assert.equal(snap.gaffer.pose, 'work', 'the cat settles at work on the newest change');
   }],
   ['news within the cooldown makes one burst, not two', async () => {
     const { ctx, boxes, timers } = fixture();

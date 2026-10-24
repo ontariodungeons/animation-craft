@@ -132,7 +132,8 @@ function createCompanions(frames, options = {}) {
     const now = Date.now();
     if (now - (pet.lastBurstAt || 0) < 1500) return;
     pet.lastBurstAt = now;
-    const poses = ["work", "alert", "rest"];
+    // A burst is news, then the pet settles in the pose its signal asks for.
+    const poses = ["work", "alert", pet.pose];
     clearTimeout(pet.timer);
     pet.step = 0;
     const tick = () => {
