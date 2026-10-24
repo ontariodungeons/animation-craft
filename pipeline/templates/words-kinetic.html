@@ -39,24 +39,37 @@
         return { w, el, act, hero, width: el.offsetWidth, height: el.offsetHeight };
       });
       // Layout: rows that fit the frame, then the chosen arrangement.
-      const maxW = W * 0.84, gap = S.size * 0.32, rows = [[]];
+      const giant = (e) => K.layout === "giant" && e.hero;
+      const maxW = W * 0.84, gap = S.size * (K.layout === "scatter" ? 0.55 : 0.32), rows = [[]];
       const perRow = K.layout === "stack" ? 3 : Infinity;
-      for (const e of els) { const row = rows.at(-1), wide = row.reduce((s, x) => s + x.width + gap, 0) + e.width;
+      for (const e of els.filter((x) => !giant(x))) { const row = rows.at(-1), wide = row.reduce((s, x) => s + x.width + gap, 0) + e.width;
         if (row.length && (wide > maxW || row.length >= perRow)) rows.push([e]); else row.push(e); }
-      const rowH = Math.max(...els.map((e) => e.height)) * 1.02;
+      const rowH = Math.max(...els.filter((e) => !giant(e)).map((e) => e.height), S.size) * 1.02;
       let y0 = top ? H * 0.08 : H * 0.92 - rowH * rows.length;
       rows.forEach((row, r) => {
         const total = row.reduce((s, x) => s + x.width, 0) + gap * (row.length - 1);
         let x = (W - total) / 2;
         row.forEach((e, k) => {
           let ex = x, ey = y0 + r * rowH + (rowH - e.height), rot = 0;
-          if (K.layout === "scatter") { ex += (rand() - 0.5) * 80; ey += (rand() - 0.5) * 50; rot = (rand() - 0.5) * 14; }
-          if (K.layout === "cascade") { const n = els.indexOf(e); ex = W * 0.08 + n * Math.min(150, (W * 0.7) / els.length); ey = (top ? H * 0.06 : H * 0.5) + n * (S.size * 0.55); }
-          if (K.layout === "giant" && e.hero) { e.el.style.fontSize = `${S.hero_size * 2.2}px`; ex = (W - e.el.offsetWidth) / 2; ey = (H - e.el.offsetHeight) / 2; }
+          if (K.layout === "scatter") { ex += (rand() - 0.5) * gap * 0.8; ey += (rand() - 0.5) * 30; rot = (rand() - 0.5) * 14; }
           Object.assign(e.el.style, { left: `${Math.round(ex)}px`, top: `${Math.round(ey)}px`, rotate: `${rot.toFixed(1)}deg` });
           x += e.width + gap;
         });
       });
+      // Cascade: each word steps down and right from the last, wrapping back to the left edge.
+      if (K.layout === "cascade") {
+        let cx = W * 0.08, cy = top ? H * 0.05 : H * 0.48;
+        for (const e of els) {
+          if (cx + e.width > W * 0.94) { cx = W * 0.08; cy += rowH * 0.5; }
+          Object.assign(e.el.style, { left: `${Math.round(cx)}px`, top: `${Math.round(cy)}px` });
+          cx += e.width + gap * 0.6; cy += S.size * 0.32;
+        }
+      }
+      // Giant word: a meaning word fills the frame on its own, outside the line.
+      for (const e of els.filter(giant)) {
+        e.el.style.fontSize = `${S.hero_size * 2.2}px`;
+        Object.assign(e.el.style, { left: `${Math.round((W - e.el.offsetWidth) / 2)}px`, top: `${Math.round((H - e.el.offsetHeight) / 2)}px` });
+      }
       // The line shows from its first sung word to the next line; push-in grows it meanwhile.
       at(box, { opacity: 0 }, { opacity: 1, duration: 0.05 }, start - 0.05);
       at(box, { opacity: 1 }, { opacity: 0, duration: 0.25 }, end - 0.25);
@@ -72,8 +85,12 @@
         } else {
           at(e.el, from, to, e.w.start);
         }
-        // A giant word gives the frame back after its beat.
-        if (K.layout === "giant" && e.hero) at(e.el, { opacity: 1 }, { opacity: 0, duration: 0.3 }, Math.min(end - 0.3, e.w.end + 0.6));
+        // A giant word gives the frame back after its beat, or to the next giant word.
+        if (giant(e)) {
+          const next = els.find((x) => giant(x) && x.w.start > e.w.start);
+          const out = Math.max(e.w.start + 0.4, Math.min(end - 0.3, e.w.end + 0.6, next ? next.w.start - 0.15 : Infinity));
+          at(e.el, { opacity: 1 }, { opacity: 0, duration: 0.15 }, out);
+        }
       }
     });
     window.__timelines = window.__timelines || {};

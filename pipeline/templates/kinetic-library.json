@@ -1,5 +1,5 @@
 {
-  "about": "Kinetic lyric library: how a meaning word performs (acts), how the other words arrive (entrances), and how a line sits in the frame (layouts). GSAP from/to values; `letters` animates each letter with `stagger`. Read by words.compose for a section with a kinetic design.",
+  "about": "Kinetic lyric library: how a meaning word performs (acts), how the other words arrive (entrances), how a line sits in the frame (layouts), and a transparent layer over the section (overlays: a HyperFrames registry block with a blend mode and opacity; blocks drawn on black use screen so the black disappears). Read by words.save/compose/apply.",
   "acts": {
     "jump": {
       "name": "Jump",
@@ -315,6 +315,61 @@
     "giant": {
       "name": "Giant word",
       "does": "Each meaning word fills the frame for its beat"
+    }
+  },
+  "overlays": {
+    "none": {
+      "name": "None",
+      "does": "Just the scene"
+    },
+    "paper-grain": {
+      "name": "Paper grain",
+      "does": "A soft drifting texture, like felt and paper",
+      "block": "fractal-noise",
+      "blend": "soft-light",
+      "opacity": 0.35
+    },
+    "godrays": {
+      "name": "Sun rays",
+      "does": "Light rays drift across the scene",
+      "block": "godrays",
+      "blend": "screen",
+      "opacity": 0.35
+    },
+    "ripples": {
+      "name": "Ripples",
+      "does": "Water rings spread out from the centre",
+      "block": "ripples",
+      "blend": "screen",
+      "opacity": 0.22
+    },
+    "lens-flare": {
+      "name": "Lens flare",
+      "does": "A warm sun flare shimmers",
+      "block": "lens-flare",
+      "blend": "screen",
+      "opacity": 0.5
+    },
+    "sparkle-lines": {
+      "name": "Falling sparkles",
+      "does": "Thin bright lines fall gently",
+      "block": "falling-lines",
+      "blend": "screen",
+      "opacity": 0.3
+    },
+    "starfield": {
+      "name": "Starry night",
+      "does": "Stars twinkle over the scene",
+      "block": "starfield",
+      "blend": "screen",
+      "opacity": 0.7
+    },
+    "snow": {
+      "name": "Snowfall",
+      "does": "Soft flakes drift down",
+      "block": "snow",
+      "blend": "normal",
+      "opacity": 0.85
     }
   }
 }

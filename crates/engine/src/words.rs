@@ -658,6 +658,7 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
         "size":st["size"].as_f64().filter(|v| (20.0..=300.0).contains(v)).unwrap_or(64.0),"hero_size":st["hero_size"].as_f64().filter(|v| (20.0..=400.0).contains(v)).unwrap_or(110.0),
         "color":hex(&st["color"]).unwrap_or(json!("#173F49")),"hero_color":hex(&st["hero_color"]).unwrap_or(json!("#B8442A")),"outline":hex(&st["outline"])});
     Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,
+        "overlay":if k["overlay"].is_null() { json!("none") } else { named("overlays",&k["overlay"])? },
         "band":if k["band"] == "bottom" { "bottom" } else { "top" },"seed":k["seed"].as_u64().unwrap_or(1),"style":style}))
 }
 
@@ -799,12 +800,13 @@ pub fn cmd_words_design(s: &mut Session, p: &Value) -> Result<Value> {
                 kin["acts"][&key].as_str().map(|act| (w["word_id"].as_str().unwrap_or_default().to_owned(), json!(act)))
             }).collect();
             save["kinetic"] = json!({"layout":pick(&kin["layouts"], "layout", k).unwrap_or(json!("karaoke")),"entrance":pick(&kin["entrances"], "entrance", k).unwrap_or(json!("fade-up")),
+                "overlay":pick(&kin["overlays"], "overlay", k).unwrap_or(json!("none")),
                 "acts":acts,"band":recipe_doc["band"],"seed":p["seed"].as_u64().unwrap_or(1) + k as u64,"style":kin["style"]});
         }
         let saved = cmd_words_save(s, &save)?;
         let applied = if p["apply"] == false { Value::Null } else { cmd_words_apply(s, &json!({"animation_id":id}))?["in_video"].clone() };
         sections.push(json!({"animation_id":id,"lines":designs[id].as_object().map_or(0, |m| m.len()),"revision":saved["animation"]["source_revision"],"in_video":applied,
-            "kinetic":saved["animation"]["kinetic"].as_object().map(|k| json!({"layout":k["layout"],"entrance":k["entrance"],"acts":k["acts"].as_object().map_or(0, |a| a.len())}))}));
+            "kinetic":saved["animation"]["kinetic"].as_object().map(|k| json!({"layout":k["layout"],"entrance":k["entrance"],"overlay":k["overlay"],"acts":k["acts"].as_object().map_or(0, |a| a.len())}))}));
     }
     // The video's caption track keeps only the sections without a design, so no line shows twice.
     let captions = if p["apply"] != false && dir.join("hyperframes/compositions/captions.html").is_file() {
@@ -876,6 +878,22 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
         html.insert_str(root, &format!("<div id=\"{composition_id}\" class=\"clip lyric-design-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{composition_id}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{track_index}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:76\"></div>\n",
             composed["src"].as_str().unwrap_or_default(),
             composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0)));
+        // The section's overlay: a registry block over the section, blended so the scene shows through.
+        let overlay = &read["document"]["animations"][0]["kinetic"]["overlay"];
+        let lib: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
+        if let Some(block) = overlay.as_str().and_then(|o| lib["overlays"][o]["block"].as_str()) {
+            let look = &lib["overlays"][overlay.as_str().unwrap_or_default()];
+            let installed = cmd_words_effect_install(s, &json!({"name":block}))?;
+            // One copy per section, under its own composition id (host id, scene root and timeline key match).
+            let own = format!("{id}-overlay");
+            let comp = dir.join("hyperframes/compositions/components");
+            let source = fs::read_to_string(dir.join("hyperframes").join(installed["src"].as_str().unwrap_or_default()))?;
+            fs::write(comp.join(format!("{own}.html")), source.replace(&format!("\"{block}\""), &format!("\"{own}\"")).replace(&format!("'{block}'"), &format!("'{own}'")))?;
+            html.insert_str(root, &format!("<div id=\"{own}\" class=\"clip lyric-overlay-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{own}\" data-composition-src=\"compositions/components/{own}.html\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:75;mix-blend-mode:{};opacity:{}\"></div>\n",
+                composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0), track_index + 1,
+                look["blend"].as_str().unwrap_or("normal"), look["opacity"].as_f64().unwrap_or(1.0)));
+            receipt["overlay"] = json!({"name":overlay,"block":block,"src":format!("compositions/components/{own}.html")});
+        }
         receipt["src"] = composed["src"].clone();
         receipt["start"] = composed["song_anchor"].clone();
         receipt["hidden_clips"] = json!(clips.len());
@@ -959,6 +977,9 @@ mod tests {
         let words = json!([{"word_id":"v1-l1/w0","text":"around"},{"word_id":"v1-l1/w1","text":"sea"}]);
         let ok = kinetic_design(&words, &json!({"layout":"scatter","entrance":"pop","acts":{"v1-l1/w0":"spin"},"seed":3,"style":{"font":"C059","color":"#112233"}})).unwrap();
         assert_eq!((ok["layout"].clone(), ok["acts"]["v1-l1/w0"].clone(), ok["style"]["color"].clone(), ok["band"].clone()), (json!("scatter"), json!("spin"), json!("#112233"), json!("top")));
+        assert_eq!(ok["overlay"], json!("none"), "no overlay unless chosen");
+        assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","overlay":"ripples"})).is_ok());
+        assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","overlay":"lava"})).is_err(), "unknown overlay");
         assert!(kinetic_design(&words, &json!({"layout":"melt","entrance":"pop"})).is_err(), "unknown layout");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v9-l1/w0":"spin"}})).is_err(), "a word from another section");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
