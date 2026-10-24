@@ -363,12 +363,12 @@ function toggleAgentFloat() {
 
 let agentDrag = null;
 function setupAgentDrag() {
-  const head = $("agent").querySelector(".agent-head");
+  const head = $("agent").querySelector(".panel-head.spread");
   head.style.cursor = "move";
   head.addEventListener("pointerdown", onAgentDragStart);
 }
 function teardownAgentDrag() {
-  const head = $("agent").querySelector(".agent-head");
+  const head = $("agent").querySelector(".panel-head.spread");
   head.style.cursor = "";
   head.removeEventListener("pointerdown", onAgentDragStart);
   if (agentDrag) { window.removeEventListener("pointermove", agentDrag.move); window.removeEventListener("pointerup", agentDrag.up); agentDrag = null; }

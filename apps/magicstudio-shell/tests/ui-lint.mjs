@@ -35,11 +35,11 @@ for (const [name, source] of sources) {
 // Retired class families: one indicator, one panel head, one empty state,
 // one status row. A name that comes back is a second convention again.
 const RETIRED = [
-  { name: 'dot-colours', re: /(?:\.dot\.(?:ok|warn|off|busy|pending)\b)|(?:\bdot\s+(?:ok|warn|off|busy|pending)\b)/g },
-  { name: 'magic-part-dot', re: /\bmagic-part-dot\b/g },
-  { name: 'panel-heads', re: /\b(?:agent-head|block-head|magic-pane-head|motion-object-head|sb-head|song-section-head|theatre-head)\b/g },
-  { name: 'panel-empties', re: /\b(?:home-empty|magic-compare-empty|motion-empty|sb-empty|studio-empty|theatre-empty)\b/g },
-  { name: 'panel-statuses', re: /\b(?:agent-status|magic-part-status|footer-status)\b/g },
+  { name: 'dot-colours', re: /(?:\.dot\.(?:ok|warn|off|busy|pending)(?![\w-]))|(?:(?<![\w-])dot\s+(?:ok|warn|off|busy|pending)(?![\w-]))/g },
+  { name: 'magic-part-dot', re: /(?<![\w-])magic-part-dot(?![\w-])/g },
+  { name: 'panel-heads', re: /(?<![\w-])(?:agent-head|block-head|magic-pane-head|motion-object-head|sb-head|song-section-head|theatre-head)(?![\w-])/g },
+  { name: 'panel-empties', re: /(?<![\w-])(?:home-empty|magic-compare-empty|motion-empty|sb-empty|studio-empty|theatre-empty)(?![\w-])/g },
+  { name: 'panel-statuses', re: /(?<![\w-])(?:agent-status|magic-part-status|footer-status)(?![\w-])/g },
 ];
 
 const retired = {};

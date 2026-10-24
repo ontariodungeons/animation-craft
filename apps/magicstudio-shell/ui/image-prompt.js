@@ -60,7 +60,7 @@ function imagePromptBlock() {
     draft.model = model.value; updateCommand();
     if (!draft.busy && !draft.result && !draft.error) {
       section.querySelector('.meta').textContent = draft.model;
-      section.querySelector('.block-head').title = `Gaffer · Artwork · ${draft.model}`;
+      section.querySelector('.panel-head.control').title = `Gaffer · Artwork · ${draft.model}`;
     }
   });
   const command = el('code', { id: 'image-command' });
@@ -121,7 +121,7 @@ function imagePromptBlock() {
   const section = block('image', '🐈', 'Gaffer · Artwork', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : draft.model, false, body, draft.error ? 'needs' : 'empty');
   section.classList.add('image-prompt-block');
   section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
-  const indicator = section.querySelector('.block-head .dot');
+  const indicator = section.querySelector('.panel-head.control .dot');
   if (indicator) {
     if (draft.result) {
       const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');

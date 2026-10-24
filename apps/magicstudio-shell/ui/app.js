@@ -255,7 +255,7 @@ function songSection(id, title, meta, done, sectionState, body) {
   const head = window.companionBoxes.dot(done ? "ready" : "needs-attention");
   head.title = done ? "Ready" : "Needs work";
   return el("div", { class: "song-section", id: `song-${id}`, "data-section": id, "data-state": sectionState },
-    el("div", { class: "song-section-head" },
+    el("div", { class: "panel-head" },
       head,
       el("span", { class: "title" }, title), el("span", { class: "meta" }, meta || "")),
     ...body);
@@ -388,7 +388,7 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
         : [el("span", {}, line.text)]))))));
   const title = model.canonical ? "Lyrics" : "Transcript";
   const pane = el("section", { class: "magic-pane magic-reader", id: "magic-reader", "aria-label": `${title}, read only` },
-    el("div", { class: "magic-pane-head" }, el("span", {}, title),
+    el("div", { class: "panel-head pane" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
       el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
@@ -420,7 +420,7 @@ function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
   const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention");
   dot.title = done ? "Ready" : "Needs work";
-  const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
+  const head = el("button", { class: "panel-head control", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
     dot,
     el("span", { class: "ico", html: icon }),

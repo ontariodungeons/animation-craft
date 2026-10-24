@@ -99,7 +99,7 @@ function timelineRender() {
   const note = picked ? `${meta.layers[picked.index].label || picked.channel.layer} / ${picked.properties.join(' + ')} · ${picked.channel.summary}` : `${rows.length} animated parts · select one to follow it`;
   box.replaceChildren(
     el('div', { class: 'theatre-grid' },
-      el('div', { class: 'theatre-row theatre-head' }, el('span', {}, 'Layer / channel'), el('span', {}, 'Motion'), ruler),
+      el('div', { class: 'theatre-row panel-head tiny' }, el('span', {}, 'Layer / channel'), el('span', {}, 'Motion'), ruler),
       ...lines, el('div', { class: 'theatre-playhead', id: 'theatre-playhead' })),
     el('div', { class: 'theatre-foot muted' }, el('span', {}, note), el('span', {}, 'Curves show the clip’s source motion · Keys edits Theatre rotation')));
   for (const [canvas, curve, keys] of drawn) timelineDraw(canvas, curve, keys, duration);
