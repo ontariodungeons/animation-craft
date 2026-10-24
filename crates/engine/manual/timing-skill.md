@@ -17,7 +17,7 @@
 Original recording and supplied lyrics/timing.
 
 ## Source
-https://github.com/ontariodungeons/animation-craft/blob/main/README.md#workshop--project-intake
+https://github.com/ontariodungeons/magic-studio/blob/main/README.md#workshop--project-intake
 
 ## Output
 Exact timing-skill reference, or an explicit blocked state.

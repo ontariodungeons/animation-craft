@@ -74,6 +74,7 @@ blender-skills/
 .mcp.json.bak-*
 
 # Agent advisor config and stray media in the checkout root.
+/crew/.cast.lock
 WATCHDOG.yml
 /*.mp4
 

@@ -1,5 +1,7 @@
 # Magic Studio
 
+Canonical repository: [ontariodungeons/magic-studio](https://github.com/ontariodungeons/magic-studio). Jesse reviews the app built from `main`.
+
 The application is the Tauri shell in `apps/magicstudio-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
 
 ## Run and discover
@@ -85,6 +87,10 @@ Scripted clients use the same `project.intake` and `center.status` engine comman
 Recent activity stores three root action groups per project. Engine results and matched Studio acknowledgements remain separate; closed projects use a disk snapshot. Control shows the existing ten-entry recent-project catalog, not a complete filesystem inventory; selecting a different catalog project is not implemented.
 
 Tauri New/Open invoke the adjacent CLI through the selected Studio bridge. `storyboard.init` populates the bundled native DeckCraft template from the imported transcript and canonical scene spans, registers the resulting deck and preserves an existing active deck on rerun. Studio uses its existing continuous document picture-placement and Save-new-version path. Existing native storyboard text fields are editable in place and save when the field changes; `mc --bridge <port> storyboard edit scene 14 "text" field=action` is a short spelling of the same `storyboard.edit` operation. `storyboard.read scene=14` returns the actual native `text_fields` names and values; text edits preserve the existing document and do not regenerate its template. Creative fields remain instructional until authored. Current shell source exposes guarded dirty-state and UI-feedback queries; a running older shell must be rebuilt and safely restarted before those updated contracts apply. Its UI mapping panel labels remaining gaps. Audio-tool provider/model provenance is reported unknown when the received source did not record it.
+
+## Design every lyric line
+
+`mc exec words.design` (or `mc --bridge <port> exec words.design` with the Studio open) designs every sung line from the project's `lyrics-design.json` and uses it in the video. The recipe sets the palette, the band (`top` or `bottom`), the base lettering and the hero words: each hero's lettering, size, colour, move (`pop`, `settle`, `fall`, `rise`, `loop`, `sleep`, `east`, `west`) and optional stroke (`underline`, `swoop`, `loop`, `hill`, `down`). Lines are measured with the fonts the video renders, so nothing leaves the frame. The caption track keeps only the sections without a design. Fine-tune any line afterwards on the Design page.
 
 ## Rig an image
 

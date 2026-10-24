@@ -1078,6 +1078,34 @@
       "label": "undo",
       "indicator": "hidden",
       "command": "motion.edit.undo"
+    },
+    "learning-cast": {
+      "component": "ghost",
+      "label": "MOPPETS cast"
+    },
+    "cast-page": {
+      "component": "panel",
+      "label": "Magic Studio cast"
+    },
+    "cast-lead": {
+      "component": "field-row",
+      "label": "Department lead"
+    },
+    "cast-search": {
+      "component": "field-row",
+      "label": "Find a candidate"
+    },
+    "cast-filter": {
+      "component": "field-row",
+      "label": "Casting filter"
+    },
+    "cast-candidates": {
+      "component": "panel",
+      "label": "Cast candidates"
+    },
+    "cast-saved-file": {
+      "component": "panel",
+      "label": "Saved AGENTS.md"
     }
   },
   "rails": {

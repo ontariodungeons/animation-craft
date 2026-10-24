@@ -104,6 +104,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"motion.recipe"
             | b"motion.place_section"
             | b"rig.from_sheet"
+            | b"words.design"
             | b"sequence.render"
             | b"animation.source.render"
             | b"video.init"
@@ -235,6 +236,8 @@ pub fn build() -> Vec<CommandSpec> {
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
         cmd!("project.root", "Inspect / Set Production Project Root", ["File"], None, "{\"root\":\"optional absolute production root; omitted to inspect\"}", always, crate::project_settings::command),
         query!("skills.list", "Registered knowledge skills (info blocks)", "{}", crate::skills_registry::cmd_skills_list),
+        query!("crew.list", "Magic Studio MOPPETS and shared department AGENTS.md files", "{\"workspace\":\"optional workshop root\"}", crate::crew::cmd_list),
+        cmd!("crew.save", "Save one department cast and shared instructions (revision guarded)", [], None, "{\"workspace\":\"workshop root from crew.list\",\"department\":\"creative|animation|production|backstage|review\",\"expected_revision\":\"from crew.list\",\"document\":\"department and instructions from crew.list\"}", always, crate::crew::cmd_save),
         query!("skills.info", "One registered skill's info block", "{\"id\":\"skill id\"}", crate::skills_registry::cmd_skills_info),
         cmd!("skills.limits", "Read / explicitly configure Learning block caps", [], None, "{\"max_words\":\"optional explicit cap\",\"max_steps\":\"optional explicit cap\"}", always, crate::skills_registry::cmd_skills_limits),
         cmd!("skills.diagram", "Archify view derived from Learning task records", [], None, "{\"kind\":\"production|correction\",\"render\":false}", always, crate::skills_registry::cmd_skills_diagram),
@@ -469,10 +472,12 @@ pub fn build() -> Vec<CommandSpec> {
         query!("words.align", "Artist Words vs Timing Reference", "{}", crate::words::cmd_words_align),
         query!("words.read", "Words Animations", "{\"animation_id\":\"optional\"}", crate::words::cmd_words_read),
         query!("words.studio_track", "Lyric Clips in the Video", "{}", crate::words::cmd_words_studio_track),
-        cmd!("words.lyrics_view", "Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"scene\"}", always, crate::words::cmd_words_lyrics_view),
+        cmd!("words.lyrics_view", "Stage, Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"stage (the backdrop, music and lyrics), lyrics or scene\"}", always, crate::words::cmd_words_lyrics_view),
         query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
         cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
         cmd!("words.captions", "Captions by the Artist's Lines", ["Design"], None, "{\"by\":\"section (default) or line\",\"out\":\"optional .srt path; default lyrics.captions.srt in the project\",\"to\":\"video: the video's caption track shows the printed lines (earlier source kept as captions.vN.html)\"}", always, crate::words::cmd_words_captions),
+        cmd!("words.track", "Lyric Line in the Video", ["Design"], None, "{}", always, crate::words::cmd_words_track),
+        cmd!("words.design", "Design Every Sung Line", ["Design"], None, "{\"recipe\":\"optional; default lyrics-design.json in the project (palette, band, hero words and their moves)\",\"apply\":\"true (default) uses each section in the video\",\"section\":\"optional animation id\",\"layout\":\"optional kinetic layout\",\"entrance\":\"optional kinetic entrance\",\"overlay\":\"optional overlay layer\",\"seed\":\"varies layouts and entrances per section\",\"kinetic\":\"false keeps static line designs\"}", always, crate::words::cmd_words_design),
         cmd!("words.apply", "Use Designed Lyrics in the Video", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"use\":true}", always, crate::words::cmd_words_apply),
         cmd!("words.save", "Save Words Animation", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"expected_source_revision\":0,\"style\":{\"size\":120},\"words\":[{\"word_id\":\"ch1-l1/w5\",\"action\":\"cry\",\"emphasis\":true}]}", always, crate::words::cmd_words_save),
         cmd!("words.compose", "Compose Words Track (HyperFrames)", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"instance_id\":\"optional: isolated composition for a repeated placement\"}", always, crate::words::cmd_words_compose),

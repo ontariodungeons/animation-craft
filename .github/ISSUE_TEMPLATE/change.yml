@@ -1,0 +1,10 @@
+name: Change or problem
+description: A sentence is enough. Technical details are the maintainer's job.
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change?
+      description: Say what you need or what went wrong.
+    validations:
+      required: true

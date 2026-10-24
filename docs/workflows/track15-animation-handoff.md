@@ -33,3 +33,23 @@ The running Studio (pid 1280318) predates both. After it runs this build: `mc --
 - mc adapters requested (Beaker/Fozzie): `video.snapshot at=[s…] out_dir=<dir>` → `{frames:[path]}` and `video.render out=<mp4>` → `{file, duration, receipt}` over the installed HyperFrames CLI.
 - Blender and pose-replacement comparisons of the song cast were not run; `animation.source.from_rig` does not exist and the existing Blender bridge builds a fixed humanoid (gap per `track15-animation-sequence.md`).
 - Seen in the Studio: setting the Animation object picker over the bridge needed a relaunch once to show the new object; the Layers guard needed the specs inside the project (now moved).
+
+## Lyrics panel (Rizzo owns words.js, Words CSS, words engine)
+
+Committed, not yet seen in the combined Studio:
+- 9937ce4c: the left column shows each sung line in its own lettering (the line design's font, weight, slant, colour and size) on paper; click a word to pick it, Shift-click adds or drops words in that line; Look edits (lettering, colour, outline, size, tilt) apply to every picked word. Stage about two thirds of the width; film roll wider. Text stays the sheet's. Test: `apps/magicstudio-shell/tests/words-lettering.mjs` (in the pre-commit hook).
+- 67d41400 + sheet edit: the sung ending repeat is its own section (verse 5, second time, lines 1–2), so it gets its own design and words in the panel.
+- e5bc1512: `words.captions to=video` puts the printed lines in the video's caption track.
+
+When the combined Studio is up: open Design, check the column on Three Times Around (seven sections now), style a few words, Save, then `mc --bridge 19971 exec words.captions to=video` and snapshot 20, 52, 120 s.
+
+## Lyrics designed (Jesse's task)
+
+`mc exec words.design` designed and used all 26 sung lines (24 printed + the 2-line ending repeat) from `project/lyrics-design.json`; recipe `animation/recipe/06-design-lyrics.jsonl`. The caption track was removed (every section designed), so each line shows once. Checked in snapshots at 3.5, 14.6, 32, 52, 65, 80, 100.5, 118 and 130 s (`animation/preview/lyrics-check-2/sheet.jpg`). The video index before this is kept in `animation/recipe/history/index.before-words-design.html`. Change the art direction in the recipe and run the command again; adjust single lines in Design.
+
+## Kinetic lyrics and the Layers panel (2026-10-24 evening)
+
+- Settings file: `pipeline/templates/kinetic-library.json` (14 acts, 6 entrances, 6 layouts, 8 overlays: registry blocks with blend and opacity). The song's choices: the `kinetic` block in `project/lyrics-design.json` (meaning word → act, the layouts, entrances and overlays to vary through, lettering).
+- Commands: `words.track` (the lyric line: one anchor clip per sung word), `words.design seed= layout= entrance= overlay= section=` (kinetic sections), `words.save kinetic=…`, `words.apply` (mounts the section and its overlay).
+- Design page: a kinetic section shows Layers under the stage (Layout, Words arrive, Meaning words with acts, Overlay), Shuffle and Static lines.
+- Track 15: all seven sections kinetic (frames in `animation/preview/kinetic-check-1/`); overlays were mid-run when the Studio on 19971 (shared-target build, pid 1721943) took the project. With this branch (1660df5f) in that build: `mc --bridge 19971 exec words.track`, then `mc --bridge 19971 exec words.design seed=0`, then snapshot.

@@ -1,0 +1,100 @@
+<template>
+<!-- Derived by `mc exec words.compose` from a section's kinetic design in design/words.json; regenerate rather than hand-edit.
+     Words are the artist's printed text; times come from the video's lyric line. Meaning words perform an act from
+     the kinetic library on their sung beat; the other words use the section's entrance; the layout places each line.
+     A HyperFrames scene file: everything inside <template>; host, root and timeline share the composition id. -->
+<style>
+  #root { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .kline { position: absolute; inset: 0; opacity: 0; transform-origin: 50% 30%; }
+  .w { position: absolute; white-space: pre; line-height: 1.05; opacity: 0; transform-origin: 50% 80%; paint-order: stroke fill; }
+  .w > span { display: inline-block; white-space: pre; }
+</style>
+<div id="root" data-composition-id="__COMPOSITION_ID__" data-width="__WIDTH__" data-height="__HEIGHT__" data-duration="__DURATION__" data-words-kinetic data-layout-allow-overlap></div>
+<script>
+  (() => {
+    const root = document.querySelector('[data-composition-id="__COMPOSITION_ID__"][data-words-kinetic], [data-composition-id="__COMPOSITION_ID__"] [data-words-kinetic]');
+    const DATA = __DATA__;
+    const W = DATA.width, H = DATA.height, K = DATA.kinetic, S = DATA.style, LIB = DATA.library;
+    const tl = gsap.timeline({ paused: true });
+    const at = (target, from, to, time) => tl.fromTo(target, from, { ...to, immediateRender: false }, Math.max(0, time));
+    // A seeded random, so a section looks the same on every render.
+    let seed = (K.seed || 1) >>> 0;
+    const rand = () => { seed = (seed + 0x6D2B79F5) >>> 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const family = (f) => f === "serif" ? "serif" : f === "sans" || !f ? "sans-serif" : `${JSON.stringify(f)}, sans-serif`;
+    const lines = [];
+    for (const w of DATA.words) { if (lines.at(-1)?.id !== w.line_id) lines.push({ id: w.line_id, words: [] }); lines.at(-1).words.push(w); }
+    const top = K.band !== "bottom";
+    lines.forEach((line, i) => {
+      const start = line.words[0].start, last = line.words.at(-1).end + 1.0;
+      const end = Math.min(DATA.duration, lines[i + 1] ? Math.min(last, lines[i + 1].words[0].start) : last);
+      const box = document.createElement("div"); box.className = "kline"; root.appendChild(box);
+      // Make and measure every word in its lettering.
+      const els = line.words.map((w) => {
+        const act = K.acts?.[w.word_id], hero = !!act, el = document.createElement("div");
+        el.className = "w"; el.textContent = w.text;
+        Object.assign(el.style, { fontFamily: family(hero ? S.hero_font || S.font : S.font), fontWeight: String(hero ? S.hero_weight || 700 : S.weight || 700),
+          fontStyle: hero && S.hero_italic ? "italic" : "normal", fontSize: `${hero ? S.hero_size : S.size}px`, color: hero ? S.hero_color : S.color,
+          webkitTextStroke: S.outline ? `${Math.max(2, (hero ? S.hero_size : S.size) * 0.07)}px ${S.outline}` : "" });
+        box.appendChild(el);
+        return { w, el, act, hero, width: el.offsetWidth, height: el.offsetHeight };
+      });
+      // Layout: rows that fit the frame, then the chosen arrangement.
+      const giant = (e) => K.layout === "giant" && e.hero;
+      const maxW = W * 0.84, gap = S.size * (K.layout === "scatter" ? 0.55 : 0.32), rows = [[]];
+      const perRow = K.layout === "stack" ? 3 : Infinity;
+      for (const e of els.filter((x) => !giant(x))) { const row = rows.at(-1), wide = row.reduce((s, x) => s + x.width + gap, 0) + e.width;
+        if (row.length && (wide > maxW || row.length >= perRow)) rows.push([e]); else row.push(e); }
+      const rowH = Math.max(...els.filter((e) => !giant(e)).map((e) => e.height), S.size) * 1.02;
+      let y0 = top ? H * 0.08 : H * 0.92 - rowH * rows.length;
+      rows.forEach((row, r) => {
+        const total = row.reduce((s, x) => s + x.width, 0) + gap * (row.length - 1);
+        let x = (W - total) / 2;
+        row.forEach((e, k) => {
+          let ex = x, ey = y0 + r * rowH + (rowH - e.height), rot = 0;
+          if (K.layout === "scatter") { ex += (rand() - 0.5) * gap * 0.8; ey += (rand() - 0.5) * 30; rot = (rand() - 0.5) * 14; }
+          Object.assign(e.el.style, { left: `${Math.round(ex)}px`, top: `${Math.round(ey)}px`, rotate: `${rot.toFixed(1)}deg` });
+          x += e.width + gap;
+        });
+      });
+      // Cascade: each word steps down and right from the last, wrapping back to the left edge.
+      if (K.layout === "cascade") {
+        let cx = W * 0.08, cy = top ? H * 0.05 : H * 0.48;
+        for (const e of els) {
+          if (cx + e.width > W * 0.94) { cx = W * 0.08; cy += rowH * 0.5; }
+          Object.assign(e.el.style, { left: `${Math.round(cx)}px`, top: `${Math.round(cy)}px` });
+          cx += e.width + gap * 0.6; cy += S.size * 0.32;
+        }
+      }
+      // Giant word: a meaning word fills the frame on its own, outside the line.
+      for (const e of els.filter(giant)) {
+        e.el.style.fontSize = `${S.hero_size * 2.2}px`;
+        Object.assign(e.el.style, { left: `${Math.round((W - e.el.offsetWidth) / 2)}px`, top: `${Math.round((H - e.el.offsetHeight) / 2)}px` });
+      }
+      // The line shows from its first sung word to the next line; push-in grows it meanwhile.
+      at(box, { opacity: 0 }, { opacity: 1, duration: 0.05 }, start - 0.05);
+      at(box, { opacity: 1 }, { opacity: 0, duration: 0.25 }, end - 0.25);
+      if (K.layout === "push") at(box, { scale: 1 }, { scale: 1.12, duration: Math.max(0.1, end - start), ease: "none" }, start);
+      for (const e of els) {
+        const move = e.hero ? LIB.acts[e.act] : LIB.entrances[K.entrance] || LIB.entrances["fade-up"];
+        const from = { ...move.from }, to = { ...move.to };
+        if (move.glow) { from.textShadow = `0 0 0px ${S.hero_color}`; to.textShadow = `0 0 28px ${S.hero_color}`; }
+        if (move.letters) {
+          e.el.textContent = ""; e.el.style.opacity = 1;
+          const spans = [...e.w.text].map((ch) => { const s = document.createElement("span"); s.textContent = ch; e.el.appendChild(s); return s; });
+          spans.forEach((s, k) => at(s, from, to, e.w.start + k * (move.stagger || 0.04)));
+        } else {
+          at(e.el, from, to, e.w.start);
+        }
+        // A giant word gives the frame back after its beat, or to the next giant word.
+        if (giant(e)) {
+          const next = els.find((x) => giant(x) && x.w.start > e.w.start);
+          const out = Math.max(e.w.start + 0.4, Math.min(end - 0.3, e.w.end + 0.6, next ? next.w.start - 0.15 : Infinity));
+          at(e.el, { opacity: 1 }, { opacity: 0, duration: 0.15 }, out);
+        }
+      }
+    });
+    window.__timelines = window.__timelines || {};
+    window.__timelines["__COMPOSITION_ID__"] = tl;
+  })();
+</script>
+</template>

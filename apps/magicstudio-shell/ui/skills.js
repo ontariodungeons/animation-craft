@@ -5,7 +5,7 @@ const lnode=(tag,cls,...children)=>el(tag,{class:cls},...children);
 const lbutton=(id,label,action,title=label)=>el('button',{id,class:'ghost',onclick:action,title},label);
 const lkey=(suffix='draft')=>`learning:${suffix}:${learning.directory}:${learning.selected?.id}`;
 function learningStored(key){try{return JSON.parse(localStorage.getItem(key));}catch{return null;}}
-function learningStore(key,value){try{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value));}catch{learning.message='Draft could not be persisted locally. Keep this window open or copy it.';}}
+function learningStore(key,value){try{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value));return true;}catch{learning.message='Draft could not be persisted locally. Keep this window open or copy it.';return false;}}
 async function learningApi(id,params={}) {return invoke('engine_command',{id,params:{...params,...(learning.directory?{_expected_directory:learning.directory}:{})}});}
 function learningError(e){learning.message=String(e);const n=$('learning-message');if(n)n.textContent=learning.message;}
 async function renderSkills(){
@@ -21,12 +21,13 @@ function learningMount(){
   const search=el('input',{id:'learning-search',type:'search',placeholder:'Find a task / command',title:'Search task content'});
   search.addEventListener('input',()=>{learning.search=search.value;learningRail();if(!learning.selected)learningHome();});
   const rail=lnode('aside','learning-rail',lnode('h2','', 'Production manual'),search,
+    lbutton('learning-cast','MOPPETS cast',castOpen,'Choose the Magic Studio cast and edit shared department AGENTS.md files'),
     lbutton('learning-overview','Production path',()=>{learning.category=null;learningHome();}),
     lnode('nav','learning-categories',...LEARNING_CATEGORIES.map(([id,title])=>lbutton(`learning-category-${id}`,title,()=>{learning.category=id;learningHome();}))),
     lnode('div','learning-task-list'),lnode('p','learning-location',learning.directory));
   rail.addEventListener('dragover',e=>e.preventDefault());rail.addEventListener('drop',e=>{e.preventDefault();const source=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');if(source)learningImportSource(source.trim());});
   const main=lnode('main','learning-main',lnode('header','learning-bar',lnode('span','learning-breadcrumb','Learning / production path'),
-    lnode('div','learning-actions',lbutton('learning-new','New task',learningNew),lbutton('learning-import','Import reference',learningImportClipboard,'Import a URL or existing package path from clipboard; also drop it on the list'),lbutton('learning-save','Save',learningSave),lnode('span','learning-save-state'))),
+    lnode('div','learning-actions',lbutton('learning-new','New task',learningNew),lbutton('learning-import','Import reference',learningImportClipboard,'Import a URL or existing package path from clipboard; also drop it on the list'),lbutton('learning-save','Save',()=>cast.active?castSave():learningSave()),lnode('span','learning-save-state'))),
     lnode('p','learning-message'),lnode('div','learning-surface'));
   main.querySelector('.learning-message').id='learning-message';main.querySelector('.learning-save-state').id='learning-save-state';
   root.replaceChildren(lnode('div','learning-layout',rail,main));root.firstChild.id='learning-layout';
@@ -37,6 +38,7 @@ function learningRail(){
   list.replaceChildren(...learning.items.filter(learningMatches).map(item=>el('button',{class:`learning-task ${learning.selected?.id===item.id?'active':''}`,'data-task':item.id,title:item.name,onclick:()=>learningOpen(item.id)},lnode('strong','',item.name||item.id),lnode('small','',`${item.category||'legacy reference'} · ${item.block?.word_count||0} words${item.blocked?' · blocked':''}`))));
 }
 async function learningHome(){
+  castLeave();
   await learning.editor?.destroy();learning.editor=null;learning.selected=null;learning.dirty=false;learning.conflict=null;learning.epoch++;
   const surface=$('view-skills').querySelector('.learning-surface');surface.replaceChildren();surface.id='learning-home';
   $('learning-save').disabled=true;$('learning-save-state').textContent='';learningRail();
@@ -56,6 +58,7 @@ function learningMessage(){
   $('learning-message').textContent=learning.message||policy;
 }
 async function learningOpen(id,options={}){
+  castLeave();
   const epoch=++learning.epoch;
   try{
     const item=options.item||(await learningApi('skills.info',{id})).skill;if(epoch!==learning.epoch)return;
@@ -141,6 +144,7 @@ function learningDemo(){
   host.append(lnode('h3','','Mechanism reference'),svg,lnode('small','','Original illustration · AE recipe · Craft equivalents unverified. Edit descriptions and Demo word on the writing surface.'));
 }
 async function learningDiagram(kind){
+  castLeave();
   try{
     learning.message='Generating Archify from these task records…';learningMessage();const result=await learningApi('skills.diagram',{kind,render:true});
     const surface=$('view-skills').querySelector('.learning-surface');await learning.editor?.destroy();learning.editor=null;learning.selected=null;
