@@ -81,7 +81,7 @@ console.log("PASS: reply receipts require actual visible text, project match, op
 
 // CLI New Chat refresh uses the same drawer loader, not removed Tauri chat commands.
 vm.runInContext(readFileSync(new URL("../ui/bridge.js", import.meta.url), "utf8"), context);
-await vm.runInContext(`agent.turns=[{role:"assistant",text:"Previous conversation"}]; window.acBridge.refresh("agent.new_chat",state.project,12,{session:"ses_fresh",turns:[]})`,context);
+await vm.runInContext(`agent.turns=[{role:"assistant",text:"Previous conversation"}]; window.magicBridge.refresh("agent.new_chat",state.project,12,{session:"ses_fresh",turns:[]})`,context);
 assert.equal(vm.runInContext("agent.turns.length",context),0);
 assert.equal(vm.runInContext("agent.newChat",context),false);
 assert.ok(calls.some(c=>c.id==="render_revision"&&c.revision===12));

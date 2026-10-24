@@ -103,7 +103,7 @@ pub struct PanelReport { pub revision: u64, pub available: bool, pub items: Vec<
 impl PanelReport { pub fn from_feedback(feedback: &serde_json::Value) -> PanelReport; pub fn worst(&self) -> Signal; pub fn count(&self, reason: Reason) -> usize; }
 ```
 
-Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>` → shell `bridge.rs` routes to page `acBridge.panel(id, flag, value)` → calls the handler the panel registered for that flag; a flag without a handler is refused with `"panel <id> does not accept <flag>"`.
+Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>` → shell `bridge.rs` routes to page `magicBridge.panel(id, flag, value)` → calls the handler the panel registered for that flag; a flag without a handler is refused with `"panel <id> does not accept <flag>"`.
 
 ## The style contract (Task 8)
 
@@ -169,7 +169,7 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 
 **Files:** Modify `apps/magicstudio-shell/ui/companion-boxes.js`, `apps/magicstudio-shell/ui/feedback.js:13-14`, `apps/magicstudio-shell/ui/bridge.js` (add `panel()`, reuse `CLICKABLE`). Create test `apps/magicstudio-shell/tests/panels.mjs`.
 
-**Produces:** `companionBoxes.panels() -> {revision, available:true, items, unconfigured}`; `companionBoxes.register(id, {label, on: {open: fn, busy: fn, dirty: fn}})`; `companionBoxes.flag(id, name, value)`; `acBridge.panel(id, flag, value)`.
+**Produces:** `companionBoxes.panels() -> {revision, available:true, items, unconfigured}`; `companionBoxes.register(id, {label, on: {open: fn, busy: fn, dirty: fn}})`; `companionBoxes.flag(id, name, value)`; `magicBridge.panel(id, flag, value)`.
 
 - [ ] Tests in `panels.mjs`: `panels() shape matches contract`; `revision unchanged when nothing changed` (call panels() twice, and flag() with the same value); `revision bumps once per real change`; `unconfigured lists clickable without data-box-id ancestor`; `child of registered panel is configured`; `panel() refuses flag with no handler` (exact message from the contract).
 - [ ] Implement. Remove the registry methods that have no callers after this change (`fact`, `observe`, `resolve`, `markUnavailable` — grep first; keep any with a caller).
@@ -190,7 +190,7 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 
 ### Task 4 (Rizzo): `mc panels` + generic `ui.panel` setter
 
-**Consumes:** Task 2 `acBridge.panel`, Task 3 `PanelReport`.
+**Consumes:** Task 2 `magicBridge.panel`, Task 3 `PanelReport`.
 **Files:** Modify `apps/mc/src/main.rs` (subcommand + SUBCOMMANDS + help), create `apps/mc/src/panels.rs`; modify `apps/magicstudio-shell/src/bridge.rs:93-96` (route `ui.panel` → `page(app, "panel", [id, flag, value])`), register `ui.panel` wherever `ui.set` is registered for MCP/command_list.
 
 - [ ] `mc panels` prints `SIGNAL  ID  LABEL  LOOK  open busy dirty` rows + one line per non-zero reason (`untracked 3: ids…`); `--json` prints the `PanelReport`; `--check` exits 1 when `unconfigured` is non-empty or `available` is false, 0 otherwise. Help line in `mc help` + one README example.

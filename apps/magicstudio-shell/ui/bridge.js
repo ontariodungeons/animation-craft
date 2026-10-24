@@ -28,7 +28,7 @@ function find(target) {
   throw new Error(`no element "${target}"; ui.elements lists them`);
 }
 
-window.acBridge = {
+window.magicBridge = {
   state() {
     return {
       companions: window.magicCompanions?.snapshot() || null,

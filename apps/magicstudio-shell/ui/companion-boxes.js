@@ -201,7 +201,7 @@ function createCompanionBoxes() {
   // The revision moves only when a flag or the unconfigured list really changes,
   // so the 1 s feedback heartbeat can re-send the same panels forever.
   function panels() {
-    const bridge = typeof window !== "undefined" ? window.acBridge : null;
+    const bridge = typeof window !== "undefined" ? window.magicBridge : null;
     const unconfigured = bridge && typeof bridge.unconfigured === "function" ? bridge.unconfigured() : [];
     const items = [];
     for (const box of boxes.values()) {

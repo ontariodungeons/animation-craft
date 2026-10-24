@@ -78,7 +78,7 @@ function fixture() {
   vm.runInContext('globalThis.window = globalThis;', ctx);
   vm.runInContext(read('companion-boxes.js'), ctx);
   vm.runInContext(read('bridge.js'), ctx);
-  return { ctx, boxes: ctx.companionBoxes, bridge: ctx.acBridge, elements };
+  return { ctx, boxes: ctx.companionBoxes, bridge: ctx.magicBridge, elements };
 }
 
 const tests = [
