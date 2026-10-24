@@ -1,7 +1,8 @@
 //! Words: editable visible lyric animations built from the artist's canonical lines, timed by
 //! the hidden transcript reference. The reference (heard words, their order and times) is never
 //! edited or exported; mismatches against the artist's words are reported, never substituted.
-//! Text and timing are not editable here: `words.save` changes only style, emphasis and motion.
+//! Text and timing are not editable here: `words.save` changes only style, emphasis, motion and
+//! each line's design (where its words sit, their lettering and moves, and drawn strokes).
 use std::{fs, path::{Path, PathBuf}};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -10,6 +11,10 @@ use crate::{EngineError, Result, Session};
 pub const ACTIONS: &[&str] = &["none", "wave", "tiny", "swim", "no", "cry", "big", "float"];
 const ENTRANCES: &[&str] = &["pop", "fade", "rise", "none"];
 const EXITS: &[&str] = &["fade", "drop", "none"];
+/// How a designed lyric item moves on its accent word.
+const MOVES: &[&str] = &["quiet", "sleep", "settle", "fall", "pop", "rise", "east", "west", "loop"];
+/// A designed item's lettering: the section's song font, or a serif or sans for contrast.
+const FONTS: &[&str] = &["song", "serif", "sans"];
 const LEAD_IN: f64 = 0.4;
 const HOLD: f64 = 1.0;
 
@@ -179,22 +184,33 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
 /// clips, on a plain ground, so the lyrics can be judged on their own.
 const LYRICS_ONLY_STYLE: &str = r#"<style data-magicstudio="lyrics-only">
 [data-composition-id] * { visibility: hidden !important; }
-.lyric-word-clip, .lyric-word-clip * { visibility: visible !important; }
+.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: visible !important; }
 html, body, [data-composition-id] { background: #1b2430 !important; }
 </style>"#;
 
-/// `words.lyrics_view`: a derived copy of the video showing only its lyric word clips, for the
-/// Design stage. Written beside the Words compositions and rewritten only when the video changes;
-/// the video itself is never touched.
-pub fn cmd_words_lyrics_view(s: &mut Session, _: &Value) -> Result<Value> {
+/// The opposite view: the video's scene with its lyric word clips hidden, for designing new lyrics
+/// over the picture they will sit in.
+const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
+.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: hidden !important; }
+</style>"#;
+
+/// `words.lyrics_view`: a derived copy of the video for the Design stage: only its lyric word clips
+/// (`show: "lyrics"`, the default) or only its scene (`show: "scene"`). Written beside the Words
+/// compositions and rewritten only when the video changes; the video itself is never touched.
+pub fn cmd_words_lyrics_view(s: &mut Session, p: &Value) -> Result<Value> {
+    let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
+        "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
+        "scene" => (SCENE_ONLY_STYLE, "scene-only"),
+        other => return Err(invalid(format!("show must be lyrics or scene, not {other}"))),
+    };
     let dir = crate::workshop::project_dir(s)?;
     let hf = dir.join("hyperframes");
     let html = fs::read_to_string(hf.join("index.html")).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
     if !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
     let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
-    let derived = format!("{}{LYRICS_ONLY_STYLE}\n{}", &html[..head], &html[head..]);
-    let src = "compositions/words/lyrics-only.html";
-    let file = hf.join(src);
+    let derived = format!("{}{style}\n{}", &html[..head], &html[head..]);
+    let src = format!("compositions/words/{name}.html");
+    let file = hf.join(&src);
     let written = fs::read_to_string(&file).ok().as_deref() != Some(derived.as_str());
     if written {
         fs::create_dir_all(file.parent().unwrap())?;
@@ -260,6 +276,36 @@ fn studio_times(s: &mut Session) -> std::collections::HashMap<String, (f64, f64)
         .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), (c["start"].as_f64()?, c["start"].as_f64()? + c["duration"].as_f64()?)))).collect()
 }
 
+/// Printed words the singer didn't sing as written have no time. Each run of them is spread evenly
+/// between the timed words around it (marked `interpolated`), so a line still reads and moves in
+/// place; a section with no timed word at all stays untimed and is refused by compose.
+fn fill_untimed(anim: &mut Value) {
+    let Some(words) = anim["words"].as_array_mut() else { return };
+    let timed = |w: &Value| w["start"].is_number() && w["end"].is_number();
+    let mut i = 0;
+    while i < words.len() {
+        if timed(&words[i]) { i += 1; continue; }
+        let run_end = (i..words.len()).find(|&k| timed(&words[k])).unwrap_or(words.len());
+        let before = (0..i).rev().find(|&k| timed(&words[k])).and_then(|k| words[k]["end"].as_f64());
+        let after = words.get(run_end).and_then(|w| w["start"].as_f64());
+        let n = (run_end - i) as f64;
+        let (from, to) = match (before, after) {
+            (Some(a), Some(b)) if b > a => (a, b),
+            (Some(a), _) => (a, a + 0.35 * n),
+            (None, Some(b)) => ((b - 0.35 * n).max(0.0), b),
+            (None, None) => return,
+        };
+        let step = (to - from) / n;
+        for (k, w) in words[i..run_end].iter_mut().enumerate() {
+            let start = from + step * k as f64;
+            w["start"] = json!((start * 1e6).round() / 1e6);
+            w["end"] = json!(((start + step) * 1e6).round() / 1e6);
+            w["timing_source"] = json!("interpolated");
+        }
+        i = run_end;
+    }
+}
+
 fn timing(anim: &mut Value) {
     let times: Vec<(f64, f64)> = anim["words"].as_array().into_iter().flatten()
         .filter_map(|w| Some((w["start"].as_f64()?, w["end"].as_f64()?))).collect();
@@ -280,6 +326,39 @@ fn load(dir: &Path) -> Result<Option<Value>> {
     }
 }
 
+/// `words.captions`: subtitles for the recording grouped by the artist's sheet: one cue per section
+/// (each verse or chorus as sung; the default, so storyboard scenes follow the song's sections) or per
+/// line (`by: "line"`). Every heard word appears once, in order, in its own wording and time (the
+/// transcript the workshop imports it with); a heard word aligned to no printed word stays with the
+/// group it is sung in.
+pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let aligned = aligned(s)?;
+    let (_, _, heard) = reference(&dir)?;
+    let by_line = match p["by"].as_str().unwrap_or("section") { "section" => false, "line" => true, other => return Err(invalid(format!("by must be section or line, not {other}"))) };
+    let line_of: std::collections::HashMap<u64, String> = aligned["words"].as_array().into_iter().flatten()
+        .filter_map(|w| Some((w["ref_index"].as_u64()?, if by_line { w["sung_id"].as_str()?.to_owned() }
+            else { format!("{}#{}", w["section"].as_str()?, w["occurrence"].as_u64()?) }))).collect();
+    let mut cues: Vec<(String, Vec<&Value>)> = Vec::new();
+    for (i, w) in heard.iter().enumerate() {
+        let line = line_of.get(&(i as u64)).cloned().or_else(|| cues.last().map(|(id, _)| id.clone())).unwrap_or_default();
+        if cues.last().is_none_or(|(id, _)| *id != line) { cues.push((line, Vec::new())); }
+        cues.last_mut().unwrap().1.push(w);
+    }
+    let clock = |t: f64| { let ms = (t * 1000.0).round() as u64; format!("{:02}:{:02}:{:02},{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000) };
+    let mut srt = String::new();
+    for (n, (_, words)) in cues.iter().enumerate() {
+        let start = words.iter().filter_map(|w| w["start"].as_f64()).reduce(f64::min).unwrap_or(0.0);
+        let end = words.iter().filter_map(|w| w["end"].as_f64()).reduce(f64::max).unwrap_or(start);
+        let text = words.iter().filter_map(|w| w["text"].as_str().or_else(|| w["word"].as_str())).collect::<Vec<_>>().join(" ");
+        srt.push_str(&format!("{}\n{} --> {}\n{text}\n\n", n + 1, clock(start), clock(end.max(start + 0.1))));
+    }
+    let out = p["out"].as_str().map(PathBuf::from).unwrap_or_else(|| dir.join("lyrics.captions.srt"));
+    if let Some(parent) = out.parent() { fs::create_dir_all(parent)?; }
+    fs::write(&out, &srt)?;
+    Ok(json!({"ok":true,"path":out,"cues":cues.len(),"words":heard.len()}))
+}
+
 /// `words.read`: the saved Words document, or the unsaved default built from the artist's sheet.
 /// Reports when the hidden reference changed since the document was saved.
 pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
@@ -292,7 +371,21 @@ pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| invalid(format!("No Words animation {id}")))?;
         doc["animations"] = json!([anim]);
     }
-    Ok(json!({"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc}))
+    let video = fs::read_to_string(dir.join("hyperframes/index.html")).unwrap_or_default();
+    let in_video: Vec<&str> = video.split("data-magicstudio-words=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    Ok(json!({"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video)}))
+}
+
+/// The fonts the video declares (`@font-face` family, file and weight), so the designer can letter
+/// in the video's own type.
+fn video_fonts(hf: &Path, video: &str) -> Vec<Value> {
+    video.split("@font-face").skip(1).filter_map(|rule| {
+        let rule = rule.split('}').next()?;
+        let family = rule.split("font-family:").nth(1)?.split([';', '}']).next()?.trim().trim_matches(['"', '\'']).to_owned();
+        let url = rule.split("url(").nth(1)?.split(')').next()?.trim().trim_matches(['"', '\'']);
+        let weight = rule.split("font-weight:").nth(1).and_then(|w| w.split([';', '}']).next()).map(str::trim).unwrap_or("400");
+        Some(json!({"family":family,"path":hf.join(url),"weight":weight}))
+    }).collect()
 }
 
 fn one_of(value: &Value, allowed: &[&str], what: &str) -> Result<Value> {
@@ -341,6 +434,13 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
             word[key] = checked;
         }
     }
+    if let Some(designs) = p.get("design").filter(|v| !v.is_null()) {
+        for (line_id, design) in designs.as_object().ok_or_else(|| invalid("design must be an object of line_id: design"))? {
+            let words: Vec<Value> = anim["words"].as_array().into_iter().flatten().filter(|w| w["line_id"] == json!(line_id)).cloned().collect();
+            if words.is_empty() { return Err(invalid(format!("{line_id} is not a line of {id}"))); }
+            anim["design"][line_id] = if design.is_null() { Value::Null } else { line_design(&words, design)? };
+        }
+    }
     if let Some(effects) = p.get("effects").filter(|v| !v.is_null()) {
         for (track, choice) in effects.as_object().ok_or_else(|| invalid("effects must be an object of track: effect"))? {
             if track != "text" { return Err(invalid(format!("effects.{track}: only the text track takes registry effects so far"))); }
@@ -356,6 +456,50 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
     fs::write(&temporary, serde_json::to_vec_pretty(&doc).map_err(|e| invalid(e.to_string()))?)?;
     fs::rename(&temporary, &path)?;
     Ok(json!({"ok":true,"conflict":false,"path":path,"animation":saved}))
+}
+
+/// Check one line's design. Items group the line's own words, all of them, in sung order; each
+/// item's text is joined from those words, so lyrics never change here. Strokes are SVG path data.
+fn line_design(words: &[Value], design: &Value) -> Result<Value> {
+    let num = |v: &Value, what: &str, lo: f64, hi: f64| v.as_f64().filter(|n| (lo..=hi).contains(n)).map(|n| json!(n))
+        .ok_or_else(|| invalid(format!("{what} must be a number from {lo} to {hi}")));
+    let colour = |v: &Value| v.as_str().filter(|c| c.len() <= 32 && !c.contains(['<', '>', '"', ';'])).map(|c| json!(c))
+        .ok_or_else(|| invalid("colour must be a short CSS colour"));
+    let mut placed: Vec<&str> = Vec::new();
+    let mut items = Vec::new();
+    for item in design["items"].as_array().ok_or_else(|| invalid("a design needs items"))? {
+        let ids: Vec<&str> = item["word_ids"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if ids.is_empty() { return Err(invalid("each item needs word_ids")); }
+        let text: Vec<&str> = ids.iter().map(|id| words.iter().find(|w| w["word_id"] == json!(id)).and_then(|w| w["text"].as_str())
+            .ok_or_else(|| invalid(format!("{id} is not a word of this line")))).collect::<Result<_>>()?;
+        let accent = match &item["accent"] { Value::Null => Value::Null,
+            a => a.as_str().filter(|a| ids.contains(a)).map(|a| json!(a)).ok_or_else(|| invalid("accent must be one of the item's words"))? };
+        placed.extend(&ids);
+        items.push(json!({"word_ids":ids,"text":text.join(" "),"x":num(&item["x"],"x",-2000.0,6000.0)?,"y":num(&item["y"],"y",-2000.0,6000.0)?,
+            "size":num(&item["size"],"size",8.0,600.0)?,"weight":item["weight"].as_u64().filter(|w| [400, 700].contains(w)).ok_or_else(|| invalid("weight must be 400 or 700"))?,
+            "italic":item["italic"].as_bool().ok_or_else(|| invalid("italic must be true or false"))?,"color":colour(&item["color"])?,
+            "font":one_of(item.get("font").unwrap_or(&json!("song")),FONTS,"font")?,
+            "outline":if item["outline"].is_null() { Value::Null } else { colour(&item["outline"])? },
+            "rotate":num(&item["rotate"],"rotate",-45.0,45.0)?,"motion":one_of(&item["motion"],MOVES,"motion")?,"accent":accent}));
+    }
+    let line: Vec<&str> = words.iter().filter_map(|w| w["word_id"].as_str()).collect();
+    if placed != line { return Err(invalid("the items must hold every word of the line once, in sung order")); }
+    let mut draws = Vec::new();
+    for draw in design["draws"].as_array().into_iter().flatten() {
+        let mut paths = Vec::new();
+        for path in draw["paths"].as_array().ok_or_else(|| invalid("a drawing needs paths"))? {
+            let d = path["d"].as_str().filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit() || " ,.-eMmLlHhVvCcSsQqTtAaZz".contains(c)))
+                .ok_or_else(|| invalid("a stroke's d must be SVG path data"))?;
+            let (from, to) = (num(&path["from"],"from",0.0,600.0)?, num(&path["to"],"to",0.0,600.0)?);
+            if from.as_f64() > to.as_f64() { return Err(invalid("a stroke finishes drawing after it starts")); }
+            paths.push(json!({"d":d,"stroke":colour(&path["stroke"])?,"width":num(&path["width"],"width",0.5,60.0)?,"from":from,"to":to}));
+        }
+        let view_box = draw["view_box"].as_str().filter(|v| v.split_whitespace().count() == 4 && v.split_whitespace().all(|n| n.parse::<f64>().is_ok()))
+            .ok_or_else(|| invalid("view_box must be four numbers"))?;
+        draws.push(json!({"name":draw["name"].as_str().unwrap_or("Drawing"),"view_box":view_box,"x":num(&draw["x"],"x",-2000.0,6000.0)?,
+            "y":num(&draw["y"],"y",-2000.0,6000.0)?,"w":num(&draw["w"],"w",1.0,6000.0)?,"h":num(&draw["h"],"h",1.0,6000.0)?,"paths":paths}));
+    }
+    Ok(json!({"items":items,"draws":draws}))
 }
 
 /// A registry component's declared variables, read from its `data-composition-variables`.
@@ -435,6 +579,106 @@ fn effect_composition(anim: &Value, composition_id: &str, width: u64, height: u6
   [data-composition-id=\"{composition_id}\"] > .line {{ position: absolute; left: 6%; right: 6%; top: 62%; height: 26%; }}</style>\n{mounts}</div>\n</body>\n</html>\n")
 }
 
+/// The section composed from its line designs: each designed line's items, moves and strokes on the
+/// section's local clock, and undesigned lines as a plain row, so the whole section still reads.
+fn design_composition(anim: &Value, composition_id: &str, width: u64, height: u64, duration: f64, local: &dyn Fn(f64) -> f64) -> Result<String> {
+    let mut lines: Vec<(String, Vec<&Value>)> = Vec::new();
+    for w in anim["words"].as_array().into_iter().flatten() {
+        let line = w["line_id"].as_str().unwrap_or_default().to_owned();
+        if lines.last().is_none_or(|(id, _)| *id != line) { lines.push((line, Vec::new())); }
+        lines.last_mut().unwrap().1.push(w);
+    }
+    let start_of = |w: &Value| local(w["start"].as_f64().unwrap_or(0.0));
+    let mut out = Vec::new();
+    for (i, (line_id, words)) in lines.iter().enumerate() {
+        let start = start_of(words[0]);
+        let end = lines.get(i + 1).map_or(local(words.last().unwrap()["end"].as_f64().unwrap_or(0.0)) + HOLD, |(_, next)| start_of(next[0]));
+        let design = &anim["design"][line_id];
+        if !design.is_object() {
+            let text = words.iter().filter_map(|w| w["text"].as_str()).collect::<Vec<_>>().join(" ");
+            out.push(json!({"start":start,"end":end,"plain":true,"text":text}));
+            continue;
+        }
+        let items: Vec<Value> = design["items"].as_array().into_iter().flatten().map(|it| {
+            let accent = it["accent"].as_str().and_then(|id| words.iter().find(|w| w["word_id"] == json!(id))).map_or(start, |w| start_of(w));
+            let mut it = it.clone();
+            it["accent"] = json!(accent);
+            it
+        }).collect();
+        out.push(json!({"start":start,"end":end,"items":items,"draws":design["draws"]}));
+    }
+    let style = &anim["style"];
+    let data = json!({"composition_id":composition_id,"duration":duration,"font":style["font"],"size":style["size"].as_f64().unwrap_or(96.0),
+        "color":style["color"].as_str().unwrap_or("#fff6e0"),"lines":out});
+    Ok(include_str!("../../../pipeline/templates/words-design.html")
+        .replace("__COMPOSITION_ID__", composition_id).replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string())
+        .replace("__DURATION__", &format!("{duration:.6}"))
+        .replace("__DATA__", &serde_json::to_string(&data).map_err(|e| invalid(e.to_string()))?.replace("</", "<\\/")))
+}
+
+/// Take one section's placement back out of the video: its mount and the rule hiding its lyric clips.
+fn without_placement(html: &str, id: &str) -> String {
+    let mark = format!("data-magicstudio-words=\"{id}\"");
+    let mut out = html.to_owned();
+    for (open, close) in [("<style ", "</style>\n"), ("<div ", "</div>\n")] {
+        while let Some(at) = out.find(&mark) {
+            let Some(begin) = out[..at].rfind(open) else { break };
+            if out[begin..at].contains('>') { break; }
+            let Some(end) = out[at..].find(close).map(|e| at + e + close.len()) else { break };
+            out.replace_range(begin..end, "");
+        }
+    }
+    out
+}
+
+/// `words.apply`: put one section's designed lyrics into the video (`use`, the default) or take
+/// them back out (`use: false`). Using composes the section, mounts it at its song time and hides
+/// the section's original lyric clips; restoring leaves the video exactly as it was before.
+pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let index = dir.join("hyperframes/index.html");
+    let id = p["animation_id"].as_str().filter(|i| i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+        .ok_or_else(|| invalid("animation_id is required (letters, digits, '-' or '_')"))?;
+    let original = fs::read_to_string(&index).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
+    let mut html = without_placement(&original, id);
+    let use_it = p["use"].as_bool().unwrap_or(true);
+    let mut receipt = json!({"ok":true,"animation_id":id,"in_video":use_it});
+    if use_it {
+        let composed = cmd_words_compose(s, &json!({"animation_id":id}))?;
+        let read = cmd_words_read(s, &json!({"animation_id":id}))?;
+        let scope = &read["document"]["animations"][0]["scope"];
+        let track = cmd_words_studio_track(s, &json!({}))?;
+        let clips: Vec<String> = track["sections"].as_array().into_iter().flatten()
+            .filter(|sec| sec["section"] == scope["section"] && sec["occurrence"] == scope["occurrence"])
+            .flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default()).filter_map(|c| c["clip_id"].as_str().map(|c| format!("#{c}"))).collect();
+        // A video with lyric clips of its own has them hidden for this section; a video without them
+        // (a new song with no lyric track yet) simply gains the designed lyrics.
+        if !clips.is_empty() {
+            let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
+            html.insert_str(head, &format!("<style data-magicstudio-words=\"{id}\">{} {{ visibility: hidden !important; }}</style>\n", clips.join(", ")));
+        }
+        let root = html.find("data-composition-id=").and_then(|at| html[at..].find('>').map(|e| at + e + 1))
+            .ok_or_else(|| invalid("The video has no root composition"))?;
+        let track_index = html.split("data-track-index=\"").skip(1).filter_map(|r| r.split('"').next()?.parse::<u64>().ok()).max().unwrap_or(0) + 1;
+        let (w, h) = (composed["width"].as_u64().unwrap_or(1920), composed["height"].as_u64().unwrap_or(1080));
+        // HyperFrames needs the host's id, the scene root and the timeline key to be the same id.
+        let composition_id = composed["composition_id"].as_str().unwrap_or(id);
+        html.insert_str(root, &format!("<div id=\"{composition_id}\" class=\"clip lyric-design-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{composition_id}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{track_index}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:76\"></div>\n",
+            composed["src"].as_str().unwrap_or_default(),
+            composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0)));
+        receipt["src"] = composed["src"].clone();
+        receipt["start"] = composed["song_anchor"].clone();
+        receipt["hidden_clips"] = json!(clips.len());
+    }
+    if html != original {
+        let temporary = index.with_extension("html.tmp");
+        fs::write(&temporary, &html)?;
+        fs::rename(&temporary, &index)?;
+    }
+    receipt["changed"] = json!(html != original);
+    Ok(receipt)
+}
+
 fn composition_size(hf: &Path) -> (u64, u64) {
     let index = fs::read_to_string(hf.join("index.html")).unwrap_or_default();
     let attr = |name: &str| index.split(&format!("{name}=\"")).nth(1).and_then(|v| v.split('"').next()).and_then(|v| v.parse().ok());
@@ -457,8 +701,9 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
         for w in synced["words"].as_array_mut().into_iter().flatten() {
             if let Some((a, b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); w["timing_source"] = json!("studio"); }
         }
-        timing(&mut synced);
     }
+    fill_untimed(&mut synced);
+    timing(&mut synced);
     let anim = &synced;
     let instance = match p["instance_id"].as_str() {
         Some(i) if !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => Some(i),
@@ -479,7 +724,9 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let (width, height) = composition_size(&hf);
     let data = json!({"composition_id":composition_id,"animation_id":id,"source_revision":anim["source_revision"],"duration":duration,
         "hold":anim["hold"],"style":anim["style"],"words":words});
-    let html = if anim["effects"]["text"].is_object() { effect_composition(anim, &composition_id, width, height, duration, &local) }
+    let designed = anim["design"].as_object().is_some_and(|d| d.values().any(Value::is_object));
+    let html = if designed { design_composition(anim, &composition_id, width, height, duration, &local)? }
+        else if anim["effects"]["text"].is_object() { effect_composition(anim, &composition_id, width, height, duration, &local) }
         else { include_str!("../../../pipeline/templates/words-composition.html")
         .replace("__COMPOSITION_ID__", &composition_id).replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string())
         .replace("__DURATION__", &format!("{duration:.6}"))
@@ -579,6 +826,11 @@ mod tests {
         assert!(derived.find("lyrics-only").unwrap() < derived.find("</head>").unwrap(), "the style sits in the head");
         assert_eq!(fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(), video, "the video is untouched");
         assert_eq!(cmd_words_lyrics_view(&mut s, &json!({})).unwrap()["written"], false, "unchanged video, nothing rewritten");
+        let scene = cmd_words_lyrics_view(&mut s, &json!({"show":"scene"})).unwrap();
+        assert_eq!(scene["src"], "compositions/words/scene-only.html");
+        let scene_html = fs::read_to_string(dir.join("hyperframes/compositions/words/scene-only.html")).unwrap();
+        assert!(scene_html.contains(r#"data-magicstudio="scene-only""#) && !scene_html.contains("[data-composition-id] * { visibility: hidden"), "only the lyric clips are hidden");
+        assert!(cmd_words_lyrics_view(&mut s, &json!({"show":"credits"})).is_err());
         fs::write(dir.join("hyperframes/index.html"), "<html><head></head><body><div data-composition-id=\"main\"></div></body></html>").unwrap();
         assert!(cmd_words_lyrics_view(&mut s, &json!({})).is_err(), "no lyric clips, nothing to show");
     }
@@ -655,6 +907,89 @@ mod tests {
         assert_eq!((reread["saved"].clone(), reread["reference_changed"].clone()), (json!(true), json!(false)));
         fs::write(dir.join("song.transcript.json"), json!({"words":[{"text":"Hey","start":4.0,"end":4.2}]}).to_string()).unwrap();
         assert_eq!(cmd_words_read(&mut s, &json!({})).unwrap()["reference_changed"], true);
+    }
+
+    #[test]
+    fn a_line_design_groups_the_lines_own_words_and_checks_every_field() {
+        let (_dir, mut s) = project("design");
+        let item = |ids: &[&str], motion: &str, accent: Option<&str>| json!({"word_ids":ids,"x":120,"y":80,"size":96,"weight":700,"italic":false,
+            "color":"#173F49","font":"serif","outline":"#fff8e9","rotate":-3,"motion":motion,"accent":accent});
+        let stroke = json!({"name":"Arrow","view_box":"0 0 100 100","x":10,"y":20,"w":100,"h":100,
+            "paths":[{"d":"M 10 10 Q 50 90 90 10","stroke":"#8B3D26","width":6,"from":0.2,"to":1.1}]});
+        let design = json!({"ch-l1":{"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w1")),item(&["ch-l1/w2","ch-l1/w3"],"quiet",None)],"draws":[stroke]}});
+        let saved = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"design":design})).unwrap();
+        let line = &saved["animation"]["design"]["ch-l1"];
+        assert_eq!((line["items"][0]["text"].clone(), line["items"][1]["text"].clone()), (json!("Hey ho"), json!("don't cry.")), "text comes from the sheet");
+        assert_eq!(line["draws"][0]["paths"][0]["to"], 1.1);
+        assert_eq!((line["items"][0]["font"].clone(), line["items"][0]["outline"].clone()), (json!("serif"), json!("#fff8e9")));
+        let mut bad = |design: Value| cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"design":{"ch-l1":design}})).is_err();
+        let whole = |a: Value, b: Value| json!({"items":[a,b],"draws":[]});
+        assert!(bad(whole(item(&["ch-l1/w1","ch-l1/w0"],"pop",None), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "words keep the sung order");
+        assert!(bad(json!({"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",None)],"draws":[]})), "every word of the line is placed");
+        assert!(bad(whole(item(&["ch-l1/w0","ch-l1/w1"],"explode",None), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "only known moves");
+        assert!(bad(whole(item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w3")), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "the accent is one of the item's words");
+        let mut scribble = design["ch-l1"].clone();
+        scribble["draws"][0]["paths"][0]["d"] = json!("M 0 0 <script>");
+        assert!(bad(scribble), "a stroke is path data only");
+        let cleared = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"design":{"ch-l1":null}})).unwrap();
+        assert!(cleared["animation"]["design"]["ch-l1"].is_null());
+        assert!(cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":2,"design":{"v1-l1":null}})).is_err(), "only this section's lines");
+    }
+
+    #[test]
+    fn a_designed_section_goes_into_the_video_and_comes_back_out_exactly() {
+        let (dir, mut s) = project("apply");
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        let video = r#"<html><head><style>@font-face{font-family:Andika;src:url("assets/vendor/Andika-Bold.ttf") format("truetype");font-weight:700}</style></head><body>
+<div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+<div id="kinetic-ch-l1-0" class="clip lyric-word-clip" data-start="4.0" data-duration="0.3" data-track-index="200"><span>Hey</span></div>
+<div id="kinetic-ch-l1-1" class="clip lyric-word-clip" data-start="4.3" data-duration="0.3" data-track-index="201"><span>ho</span></div>
+<div id="kinetic-ch-l1-2" class="clip lyric-word-clip" data-start="4.6" data-duration="0.3" data-track-index="202"><span>don't</span></div>
+<div id="kinetic-ch-l1-3" class="clip lyric-word-clip" data-start="4.9" data-duration="0.4" data-track-index="203"><span>cry.</span></div>
+</div></body></html>
+"#;
+        fs::write(dir.join("hyperframes/index.html"), video).unwrap();
+        let read = cmd_words_read(&mut s, &json!({})).unwrap();
+        assert_eq!((read["fonts"][0]["family"].clone(), read["fonts"][0]["weight"].clone()), (json!("Andika"), json!("700")), "the video's own lettering");
+        assert!(read["fonts"][0]["path"].as_str().unwrap().ends_with("hyperframes/assets/vendor/Andika-Bold.ttf"));
+        let alone = cmd_words_apply(&mut s, &json!({"animation_id":"words-verse-1-1"})).unwrap();
+        assert_eq!((alone["hidden_clips"].clone(), alone["changed"].clone()), (json!(0), json!(true)), "a section without lyric clips still goes in");
+        cmd_words_apply(&mut s, &json!({"animation_id":"words-verse-1-1","use":false})).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(), video, "and comes back out exactly");
+        let item = |ids: &[&str], motion: &str, accent: Option<&str>| json!({"word_ids":ids,"x":200,"y":120,"size":140,"weight":400,"italic":true,
+            "color":"#173F49","font":"serif","outline":null,"rotate":0,"motion":motion,"accent":accent});
+        let design = json!({"ch-l1":{"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w1")),item(&["ch-l1/w2","ch-l1/w3"],"settle",Some("ch-l1/w3"))],
+            "draws":[{"name":"Underline","view_box":"0 0 280 30","x":200,"y":300,"w":280,"h":30,"paths":[{"d":"M 5 14 Q 61 5 125 13 T 269 10","stroke":"#8B3D26","width":6,"from":0.3,"to":0.9}]}]}});
+        cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"design":design})).unwrap();
+        let applied = cmd_words_apply(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap();
+        assert_eq!((applied["changed"].clone(), applied["hidden_clips"].clone()), (json!(true), json!(4)));
+        let html = fs::read_to_string(dir.join("hyperframes/index.html")).unwrap();
+        assert_eq!(html.matches("lyric-design-clip").count(), 1);
+        assert!(html.contains(r#"data-composition-src="compositions/words/words-chorus-1.html""#) && html.contains(r#"data-track-index="204""#), "{html}");
+        assert!(html.contains("#kinetic-ch-l1-0, #kinetic-ch-l1-1, #kinetic-ch-l1-2, #kinetic-ch-l1-3 { visibility: hidden !important; }"), "{html}");
+        let composed = fs::read_to_string(dir.join("hyperframes/compositions/words/words-chorus-1.html")).unwrap();
+        assert!(composed.starts_with("<template>") && composed.trim_end().ends_with("</template>"), "a HyperFrames scene file");
+        assert!(html.contains(r#"<div id="words-chorus-1" class="clip lyric-design-clip""#), "the host carries the scene's id");
+        assert!(composed.contains("data-words-design") && composed.contains(r#""text":"Hey ho""#) && composed.contains(r#""accent":0.7"#), "accent on the local clock: {composed}");
+        assert_eq!(cmd_words_read(&mut s, &json!({})).unwrap()["in_video"], json!(["words-chorus-1"]));
+        let again = cmd_words_apply(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap();
+        assert_eq!(again["changed"], false, "applying twice changes nothing");
+        cmd_words_apply(&mut s, &json!({"animation_id":"words-chorus-1","use":false})).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(), video, "restored exactly");
+    }
+
+    #[test]
+    fn captions_are_one_cue_per_sung_line_of_the_sheet() {
+        let (dir, mut s) = project("captions");
+        let lines = cmd_words_captions(&mut s, &json!({"by":"line"})).unwrap()["cues"].as_u64().unwrap();
+        let made = cmd_words_captions(&mut s, &json!({})).unwrap();
+        assert!(made["cues"].as_u64().unwrap() <= lines, "a section holds one or more lines");
+        assert!(cmd_words_captions(&mut s, &json!({"by":"word"})).is_err());
+        let srt = fs::read_to_string(dir.join("lyrics.captions.srt")).unwrap();
+        assert_eq!(made["cues"].as_u64().unwrap() as usize, srt.matches(" --> ").count());
+        assert!(srt.starts_with("1\n00:00:"), "{srt}");
+        let words: usize = srt.split("\n\n").filter(|c| !c.trim().is_empty()).map(|c| c.lines().nth(2).unwrap_or("").split_whitespace().count()).sum();
+        assert_eq!(words as u64, made["words"].as_u64().unwrap(), "every heard word once: {srt}");
     }
 
     #[test]

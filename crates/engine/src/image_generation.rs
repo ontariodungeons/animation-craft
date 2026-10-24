@@ -151,12 +151,56 @@ fn request_context(s: &Session, root: &Path, p: &Value) -> Result<(Vec<Value>, V
     Ok((refs, poses, context))
 }
 
+/// A rig sheet request (`rig_parts`): the template's prompt for the assembled asset plus one cell per part,
+/// and the sheet layout rig.from_sheet cuts by. The template lives in pipeline/templates/rig_sheet_spec.json.
+fn rig_sheet(s: &Session, p: &Value, has_references: bool) -> Result<Option<(String, Value)>> {
+    let Some(value) = p.get("rig_parts") else { return Ok(None) };
+    let parts = value.as_array().filter(|v| (2..=15).contains(&v.len()))
+        .ok_or_else(|| invalid("rig_parts must list 2 to 15 parts, back to front"))?;
+    if !has_references { return Err(invalid("A rig sheet needs reference_asset or references; no image job started")); }
+    if p.get("poses").is_some() { return Err(invalid("Pass poses or rig_parts, not both")); }
+    let mut ids = Vec::new();
+    for part in parts {
+        let id = part["id"].as_str().filter(|id| !id.is_empty() && id.len() <= 40 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+            .ok_or_else(|| invalid("Each rig part needs an id of letters, digits or _"))?;
+        if part["description"].as_str().is_none_or(|d| d.trim().is_empty() || d.len() > 240) {
+            return Err(invalid("Each rig part needs a description of 1 to 240 bytes"));
+        }
+        if ids.contains(&id) { return Err(invalid("rig_parts ids must be unique")); }
+        ids.push(id);
+    }
+    for part in parts {
+        if let Some(parent) = part.get("parent").filter(|v| !v.is_null()) {
+            if !parent.as_str().is_some_and(|parent| ids.contains(&parent) && parent != part["id"]) {
+                return Err(invalid("A rig part's parent must be another listed part id"));
+            }
+        }
+        if let Some(pivot) = part.get("pivot").filter(|v| !v.is_null()) {
+            let ok = pivot.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|v| v.as_f64().is_some_and(|v| (0.0..=1.0).contains(&v))));
+            if !ok { return Err(invalid("A rig part's pivot is [u, v] inside its bounds, each 0 to 1")); }
+        }
+    }
+    let template_path = crate::workspace::workspace_root(s).join("pipeline/templates/rig_sheet_spec.json");
+    let template: Value = serde_json::from_slice(&fs::read(&template_path).map_err(|e| io_failure("read_rig_sheet_template", &template_path, e))?)
+        .map_err(|e| invalid(&format!("rig sheet template: {e}")))?;
+    let cells = parts.len() + 1;
+    let columns = (cells as f64).sqrt().ceil() as usize;
+    let rows = cells.div_ceil(columns);
+    let list = parts.iter().enumerate()
+        .map(|(i, part)| format!("cell {}: {} ({})", i + 2, part["id"].as_str().unwrap_or_default(), part["description"].as_str().unwrap_or_default().trim()))
+        .collect::<Vec<_>>().join("; ");
+    let prompt = template["promptTemplate"].as_str().ok_or_else(|| invalid("rig sheet template has no promptTemplate"))?
+        .replace("{columns}", &columns.to_string()).replace("{rows}", &rows.to_string()).replace("{cells}", &list);
+    Ok(Some((prompt, json!({"template": template_path, "columns": columns, "rows": rows, "assembled_cell": 0, "parts": parts}))))
+}
+
 pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     let (prompt, model, timeout) = validate(p)?;
     let project = s.project_path.clone().ok_or_else(|| invalid(
         "Open/attach a project before image.generate, or pass project=<existing .magic> through the CLI"))?;
     let root = project.parent().ok_or_else(|| invalid("Project has no parent directory"))?;
     let (references, poses, context) = request_context(s, root, p)?;
+    let rig = rig_sheet(s, p, !references.is_empty())?;
     if p.get("transparent_background").is_some_and(|v| !v.is_boolean()) {
         return Err(invalid("transparent_background must be boolean; no image job started"));
     }
@@ -169,7 +213,7 @@ pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     fs::create_dir(&dir).map_err(|e| io_failure("create_request_directory", &dir, e))?;
     let dir = fs::canonicalize(&dir).map_err(|e| io_failure("resolve_request_directory", &dir, e))?;
     let out = dir.join("asset.png");
-    let effective_prompt = if poses.is_empty() { prompt.to_owned() } else {
+    let effective_prompt = if let Some((sheet, _)) = &rig { format!("{prompt}\n\n{sheet}") } else if poses.is_empty() { prompt.to_owned() } else {
         let columns = poses.len().min(3);
         let rows = poses.len().div_ceil(columns);
         format!("{prompt}\n\nDraw ONE action pose sheet of the attached character, with {} columns and {} rows. \
@@ -208,6 +252,7 @@ pub fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         .map_err(|e| io_failure("write_prompt", &prompt_file, e))?;
     let mut record = json!({"format":"magicstudio.image-generation", "project":project,
         "prompt":prompt, "effective_prompt":effective_prompt, "poses":poses, "animation_context":context,
+        "rig_sheet":rig.as_ref().map(|(_, layout)| layout.clone()),
         "references":references, "transparent_background":p["transparent_background"], "agent_model":model, "image_model":"unknown; not reported by native tool",
         "quality":"auto", "resolution":"tool-controlled; measured after generation",
         "executable":"codex", "argv":args, "timeout_s":timeout, "status":"started",

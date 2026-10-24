@@ -344,12 +344,15 @@ summary.panel-head::-webkit-details-marker { display: none; }
 .chip.chapter { font-size: var(--size-11); padding: var(--size-4) var(--size-10); border-left: var(--size-3) solid transparent; }
 .chip.chapter.active { border-left-color: var(--accent-ink); }
 .chip.scene { min-width: var(--size-130); }
-.chip.word { display: inline-flex; align-items: center; gap: var(--space-2); max-width: none; color: var(--text); font-size: var(--text-lg); }
-.chip.word.active { background: var(--surface); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 calc(var(--space-1) / 2) color-mix(in srgb, var(--accent) 30%, transparent); }
-.chip.word[data-emphasis] { font-weight: 700; }
-.chip.word[data-heard=differs] { text-decoration: underline wavy var(--amber); text-underline-offset: var(--space-1); }
-.chip.word[data-timing=differs] { border-style: dotted; border-color: var(--amber); }
-.chip-action { color: var(--accent); font-size: var(--text-sm); }
+/* A lyric tag: no fill, soft square corners, the word then its data. */
+.chip.word { display: flex; align-items: baseline; gap: var(--space-1); max-width: none; min-width: 0; padding: 0 var(--space-1);
+  border-radius: var(--radius-sm); background: none; color: var(--text); font-size: var(--text-md); line-height: 1.5; }
+.chip.word:hover { border-color: var(--muted); }
+.chip.word.active { background: none; color: var(--accent); border-color: var(--accent); }
+.chip.word.hero { border-color: color-mix(in srgb, var(--tone-lyrics) 45%, var(--line)); }
+.chip.word.long { grid-column: span 2; }
+.chip.word[data-changed] { border-style: dashed; }
+.chip-action { color: var(--tone-animate); font-size: var(--text-xs); }
 .sb-nav { display: flex; align-items: center; gap: var(--size-4); color: var(--muted); flex: none; }
 .icon { display: grid; place-items: center; width: var(--size-30); height: var(--size-30); border-radius: var(--size-8); color: var(--muted); transition: all var(--fast) var(--ease); }
 .icon:hover { background: var(--surface-2); color: var(--text); }
@@ -972,13 +975,21 @@ body.at-home .app-footer { display:none; }
    (right) share --song-s per second, so a sung line sits level with its frame;
    the stage, the section's lanes and what goes on them stay pinned in the centre.
    Items carry their song time and length as --at-s / --len-s, the playhead --now-s. */
-#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 9), 24vw) minmax(0, 1fr) calc(var(--space-5) * 7); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto; --song-s: calc(var(--space-1) * 3.5); }
-#view-design > aside, #words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-#words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); }
+#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8.5), 22vw) minmax(0, 1fr) calc(var(--space-5) * 6); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto;
+  --song-s-px: 18; --song-s: calc(var(--space-1) * 4.5); }
+:is(#words-lyrics,#words-film), #words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+#words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); background: var(--bg); }
 .words-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .words-head strong { font-size: var(--text-lg); }
 .words-head > :last-child { margin-left: auto; }
-.words-line { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.words-crumb { font-size: var(--text-md); }
+.words-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.words-spacer { flex: 1; }
+/* Narrow windows: the side columns tighten so the stage keeps its room. */
+@media (max-width: 70em) {
+  #view-design.active { grid-template-columns: calc(var(--space-5) * 7) minmax(0, 1fr) calc(var(--space-5) * 4.5); gap: var(--space-2); padding: var(--space-2); }
+}
+.words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
 .words-band { --band: var(--tone-transcript); display: flex; align-items: flex-start; gap: var(--space-2); height: calc(var(--len-s) * var(--song-s)); padding: var(--space-1) var(--space-2);
@@ -986,85 +997,55 @@ body.at-home .app-footer { display:none; }
 .words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
 .words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
 .words-band > .meta { color: var(--faint); }
-.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); align-content: flex-start; gap: var(--space-1); overflow: auto; }
-.words-tl > .first { margin-top: var(--text-xl); height: calc(var(--len-s) * var(--song-s) - var(--text-xl) - var(--space-1)); }
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 2.4), 1fr)); grid-auto-rows: max-content;
+  align-content: start; gap: var(--space-1); padding-left: var(--space-1); border-left: medium solid transparent; overflow: hidden; cursor: pointer; }
+.words-tl > .words-line.active { border-left-color: var(--accent); }
+.words-tl > .first { margin-top: var(--space-5); height: calc(var(--len-s) * var(--song-s) - var(--space-5) - var(--space-1)); }
 .words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }
+/* An instrumental: a quiet hatched block where nothing is sung. */
+.words-tl > .words-gap { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1);
+  border: thin dashed var(--line); border-radius: var(--radius-sm); color: var(--faint); font-size: var(--text-sm); letter-spacing: .08em; text-transform: uppercase;
+  background: repeating-linear-gradient(135deg, transparent 0 var(--space-2), color-mix(in srgb, var(--line) 35%, transparent) var(--space-2) calc(var(--space-2) + var(--space-1))); }
+.words-gap > .meta { text-transform: none; letter-spacing: 0; font-size: var(--text-xs); }
+.words-roll > .words-gap { left: var(--space-4); right: var(--space-4); }
 /* The film roll: sprocket holes down both edges, a time mark every ten seconds. */
-.words-roll { padding-inline: var(--space-4); border-radius: var(--radius-sm);
-  background: radial-gradient(circle, var(--line) 35%, transparent 40%) left top / var(--space-4) var(--text-xl) repeat-y,
-    radial-gradient(circle, var(--line) 35%, transparent 40%) right top / var(--space-4) var(--text-xl) repeat-y, var(--bg); }
-.words-roll > .words-band { left: var(--space-4); right: var(--space-4); }
+.words-roll { padding-inline: var(--space-4); border-radius: var(--radius-sm); box-shadow: inset 0 0 0 thin color-mix(in srgb, black 60%, var(--line));
+  background: radial-gradient(ellipse 34% 26%, color-mix(in srgb, var(--surface-2) 70%, black) 92%, transparent 100%) left top / var(--space-4) var(--text-xl) repeat-y,
+    radial-gradient(ellipse 34% 26%, color-mix(in srgb, var(--surface-2) 70%, black) 92%, transparent 100%) right top / var(--space-4) var(--text-xl) repeat-y,
+    color-mix(in srgb, var(--bg) 70%, black); }
+.words-roll > .words-band { left: var(--space-4); right: var(--space-4); border-top-width: thin; background: none; }
+.words-roll > .words-band > strong { position: relative; z-index: 2; padding: 0 var(--space-1); background: color-mix(in srgb, var(--bg) 70%, black); font-size: var(--text-xs); }
 .words-roll > .words-tick { left: var(--space-4); right: var(--space-4); border-top: thin dashed var(--surface-2); color: var(--faint); font-size: var(--text-xs); text-align: right; }
-.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--space-1);
-  padding: var(--space-1); overflow: hidden; border: thin solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
-.words-roll > .words-frame { left: calc(var(--space-4) + var(--space-1)); right: calc(var(--space-4) + var(--space-1)); }
-.words-frame:hover, .words-frame.active { border-color: var(--accent); }
-.words-tag { padding: 0 var(--space-1); border-radius: var(--radius-sm); background: var(--tag, var(--tone-lyrics)); color: var(--accent-ink); font-size: var(--text-xs); }
-.words-tag[data-track="motion"] { --tag: var(--tone-animate); }
-/* The section's minimal lanes; the selected one decides what shows below them. */
+/* A frame fills the strip's width, edge to edge; the strip's black shows as the gap between frames. */
+.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); padding: 0; overflow: hidden; border: 0; border-radius: 0;
+  background: color-mix(in srgb, var(--tone-lyrics) 14%, white); cursor: pointer; }
+.words-roll > .words-frame { left: var(--space-4); right: var(--space-4); }
+.words-frame:hover, .words-frame.active { box-shadow: inset 0 0 0 medium var(--accent); }
+/* The line's minimal lanes: when its words are sung, when items move, when strokes draw. */
 .words-lanes { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); cursor: pointer; }
+.words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); }
 .words-lanes > .lane[data-track="motion"] { --lane-fill: var(--tone-animate); }
-.words-lanes > .lane[aria-selected="true"] { background: var(--surface-2); }
+.words-lanes > .lane[data-track="draw"] { --lane-fill: var(--tone-assets); }
 .words-lanes .lane-track { background: var(--bg); }
-.lane-name { display: flex; flex-direction: column; min-width: 0; color: var(--text); }
-.lane-name > .meta { color: var(--faint); font-size: var(--text-xs); }
+.lane-name { min-width: 0; color: var(--text); }
 .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 7), 1fr)); gap: var(--space-2); max-height: calc(var(--space-5) * 10); overflow: auto; }
-/* Design has no parts or assets; its effects sit under the lanes. */
+/* Design has no parts or assets; its options sit under the lanes. */
 body:has(#view-design.active) #magic-parts-pane { display: none; }
-.words-inspector { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.words-inspector .group-label { width: 100%; }
-
-/* Skills registry view. */
-#view-skills.active { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); overflow: auto; }
-.skills-head { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: thin solid var(--line); }
-.skills-head h2 { margin: 0; font-size: var(--text-lg); }
-.skills-head .muted { margin: 0; font-size: var(--text-sm); }
-.skills-list { display: flex; flex-direction: column; gap: var(--space-2); overflow: auto; min-height: calc(var(--space-1) * 30); }
-.skills-add { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: calc(var(--space-1) * 155); }
-.skills-add h3 { margin: 0; font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-
-.skill-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.skill-card-title { font-weight: 600; font-size: var(--text-lg); }
-.skill-card-meta { margin-left: auto; font-size: var(--text-xs); color: var(--muted); font-family: ui-monospace, monospace; }
-.skill-status { font-size: var(--text-xs); padding: var(--space-1) var(--radius-sm); border-radius: 100vh; border: thin solid; }
-.skill-status[title="Implemented"] { color: var(--check-green); border-color: var(--check-green); background: color-mix(in srgb, var(--check-green) 12%, transparent); }
-.skill-status[title="Researching"] { color: var(--amber); border-color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent); }
-.skill-status[title="Not implemented"] { color: var(--faint); border-color: var(--line); background: transparent; }
-.skill-body { display: flex; flex-direction: column; gap: var(--space-2); }
-.skill-desc { margin: 0; font-size: var(--text-sm); color: var(--text); }
-.skill-field { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-sm); }
-.skill-field strong { color: var(--muted); min-width: calc(var(--space-1) * 20 - var(--space-1) / 2); }
-.skill-value { color: var(--text); flex: 1; font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
-.skill-actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
-.skill-action-btn { font-size: var(--text-xs); padding: var(--space-1) var(--space-2); }
-
-@media (prefers-reduced-motion: reduce) {
-  .skill-card { transition: none; }
-}
-.words-library { display: flex; flex-direction: column; gap: var(--space-1); width: 100%; }
 .effect[aria-checked="true"] { border-color: var(--accent); background: var(--surface-2); }
-
-.dot[data-signal="0"] { background: none; box-shadow: none; width: auto; height: auto; line-height: 1; }
-.dot[hidden] { display: none; }
-
-@media (max-width: 62.5em) {
-  :root { --workspace-narrow: 1; }
-  #view-design.active { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #words-main { position: static; grid-column: 1 / -1; grid-row: 1; }
-  .brand-word, .project-chip { display: none; }
-  .tabs { min-width: 0; overflow-x: auto; }
-  .tab { white-space: nowrap; }
-  body:not(.workstation-collapsed) .blocks { min-width: 0; width: calc(var(--space-5) * 2); padding: var(--space-2) var(--space-1); }
-  body:not(.workstation-collapsed) .blocks .block-body,
-  body:not(.workstation-collapsed) .blocks .title,
-  body:not(.workstation-collapsed) .blocks .meta,
-  body:not(.workstation-collapsed) .blocks .chev,
-  body:not(.workstation-collapsed) .blocks .panel-rail { display: none; }
-  body:not(.workstation-collapsed) .blocks .panel-head { padding: var(--space-2) var(--space-1); gap: var(--space-1); }
-}
-
-.media-preview { width:100%; height:100%; object-fit:contain; }
-.thumb { background-image:var(--thumbnail-image,none); }
-
-.theatre-ruler span { left:var(--tick-position,0%); }
+/* The line designer: a composition-sized world, scaled into the stage; items and strokes carry
+   their place, size, ink and motion as custom properties. */
+.lyric-canvas { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone-lyrics) 14%, white); }
+.lyric-world, .lyric-scene { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform: scale(var(--scale, 0)); transform-origin: 0 0; }
+.lyric-world { font-family: var(--family); }
+.lyric-scene { border: 0; pointer-events: none; }
+.lyric-item { position: absolute; left: var(--x); top: var(--y); font-size: var(--size); color: var(--ink); rotate: var(--rot); opacity: var(--o, 1);
+  white-space: nowrap; line-height: 1.05; font-weight: 400; cursor: grab; user-select: none; touch-action: none; }
+.lyric-item[data-weight="700"] { font-weight: 700; }
+.lyric-item[data-italic="true"] { font-style: italic; }
+.lyric-item[data-font="serif"] { font-family: serif; }
+.lyric-item[data-font="sans"] { font-family: sans-serif; }
+.lyric-item[data-outline] { -webkit-text-stroke: calc(var(--size) * 0.07) var(--outline); paint-order: stroke fill; }
+.lyric-item > span { display: inline-block; white-space: pre; transform-origin: 50% 100%; translate: var(--tx, 0) var(--ty, 0); scale: var(--sx, 1) var(--sy, 1); rotate: var(--lr, 0deg); }
+.lyric-item.active { outline: medium dashed var(--accent); outline-offset: var(--space-3); }
+.lyric-draw { position: absolute; left: var(--x); top: var(--y); width: var(--dw); height: var(--dh); overflow: visible; pointer-events: none; }

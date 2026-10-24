@@ -79,8 +79,8 @@
       "indicator": "hidden"
     },
     "sb-chips": {
-      "component": "storyboard",
-      "label": "Storyboard",
+      "component": "chips",
+      "label": "Storyboard pages",
       "indicator": "hidden"
     },
     "sb-cards": {

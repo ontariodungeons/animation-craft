@@ -127,6 +127,9 @@ pub(crate) fn edit_text(s:&mut Session,p:&Value)->Result<Value>{
  let mut edit=target.clone();edit["value"]=json!(value);
  if let Some(old)=edits.iter_mut().find(|e|e["page"]==page && e["id"]==target["id"]){*old=edit;}else{edits.push(edit);}
  doc["dirty"]=json!(true);write(&draft(s)?,&doc)?;
+ // save=false keeps the edit in the draft so a batch ends with one storyboard.save_version: each saved
+ // version is a whole document (tens of MB), so saving per field multiplied it per edit.
+ if p["save"]==json!(false){return Ok(json!({"ok":true,"page":page,"field":field,"value":value,"saved":false,"dirty":true}));}
  let result=save(s,&json!({}))?;
  Ok(json!({"ok":true,"page":page,"field":field,"value":value,"saved":true,"deck":result["deck"],"pdf":result["pdf"],"dirty":false}))
 }
