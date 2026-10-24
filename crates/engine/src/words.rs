@@ -331,6 +331,62 @@ fn load(dir: &Path) -> Result<Option<Value>> {
 /// line (`by: "line"`). Every heard word appears once, in order, in its own wording and time (the
 /// transcript the workshop imports it with); a heard word aligned to no printed word stays with the
 /// group it is sung in.
+/// The artist's printed words with their sung timing, one caption group per printed line (a line over
+/// six words shows in two halves). A printed word the singer left out is placed between its sung
+/// neighbours; heard words outside the printed lines are not shown.
+fn printed_caption_words(aligned: &Value) -> (Vec<Value>, Vec<[usize; 2]>) {
+    let src: Vec<&Value> = aligned["words"].as_array().into_iter().flatten().collect();
+    let mut words: Vec<Value> = src.iter().map(|w| json!({"text": w["text"], "start": w["start"], "end": w["end"]})).collect();
+    let mut i = 0;
+    while i < words.len() {
+        if words[i]["start"].is_f64() { i += 1; continue; }
+        let j = (i..words.len()).find(|&k| words[k]["start"].is_f64()).unwrap_or(words.len());
+        let prev = if i > 0 { words[i - 1]["end"].as_f64().unwrap_or(0.0) } else { 0.0 };
+        let next = words.get(j).and_then(|w| w["start"].as_f64()).unwrap_or(prev + 0.3 * (j - i) as f64);
+        let step = (next - prev).max(0.0) / (j - i) as f64;
+        for (n, w) in words[i..j].iter_mut().enumerate() {
+            w["start"] = json!(prev + step * n as f64);
+            w["end"] = json!(prev + step * (n + 1) as f64);
+        }
+        i = j;
+    }
+    let mut groups = Vec::new();
+    let mut start = 0;
+    for k in 0..src.len() {
+        let line_ends = k + 1 == src.len() || src[k + 1]["sung_id"] != src[k]["sung_id"] || src[k + 1]["occurrence"] != src[k]["occurrence"];
+        if line_ends {
+            let n = k + 1 - start;
+            if n > 6 { groups.push([start, start + n.div_ceil(2) - 1]); groups.push([start + n.div_ceil(2), k]); } else { groups.push([start, k]); }
+            start = k + 1;
+        }
+    }
+    (words, groups)
+}
+
+/// `words.captions to=video`: the video's caption track shows the artist's printed lines. The
+/// earlier caption source is kept beside it as `captions.vN.html`.
+fn captions_to_video(s: &Session, dir: &Path, aligned: &Value) -> Result<Value> {
+    let (words, groups) = printed_caption_words(aligned);
+    if words.is_empty() { return Err(invalid("No printed words to caption")); }
+    let comp = dir.join("hyperframes/compositions");
+    let dest = comp.join("captions.html");
+    let kept = if dest.is_file() {
+        let version = (1..).map(|n| comp.join(format!("captions.v{n}.html"))).find(|p| !p.exists()).unwrap();
+        fs::copy(&dest, &version)?;
+        Some(version)
+    } else { None };
+    let duration = crate::video_target::probe_audio_duration(s.song_audio.as_deref())
+        .max(words.iter().filter_map(|w| w["end"].as_f64()).fold(0.0, f64::max));
+    crate::video_target::write_caption_source(&dest, &words, &groups, duration)?;
+    let digest = format!("{:x}", Sha256::digest(serde_json::to_vec(&words).map_err(|e| invalid(e.to_string()))?));
+    let receipt = dir.join("hyperframes/.magicstudio-captions.json");
+    fs::write(&receipt, serde_json::to_vec_pretty(&json!({"source_kind":"artist_lines","input_sha256":digest,"word_count":words.len(),
+        "groups":groups.len(),"duration":duration,"previous_source":kept,"grouping":"one group per printed line; long lines in two halves"}))
+        .map_err(|e| invalid(e.to_string()))?)?;
+    Ok(json!({"ok":true,"source":dest,"previous_source":kept,"provenance":receipt,"words":words.len(),"groups":groups.len(),
+        "first":words.first(),"last":words.last(),"next":"hyperframes snapshot <project>/hyperframes --at <t> to check, then render"}))
+}
+
 pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let aligned = aligned(s)?;
@@ -353,6 +409,7 @@ pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
         let text = words.iter().filter_map(|w| w["text"].as_str().or_else(|| w["word"].as_str())).collect::<Vec<_>>().join(" ");
         srt.push_str(&format!("{}\n{} --> {}\n{text}\n\n", n + 1, clock(start), clock(end.max(start + 0.1))));
     }
+    if p["to"] == "video" { return captions_to_video(s, &dir, &aligned); }
     let out = p["out"].as_str().map(PathBuf::from).unwrap_or_else(|| dir.join("lyrics.captions.srt"));
     if let Some(parent) = out.parent() { fs::create_dir_all(parent)?; }
     fs::write(&out, &srt)?;
@@ -742,6 +799,19 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn printed_captions_keep_artist_text_and_place_skipped_words() {
+        let w = |text: &str, line: &str, t: Option<(f64, f64)>| json!({"text":text,"sung_id":line,"occurrence":1,
+            "start":t.map(|t| t.0),"end":t.map(|t| t.1)});
+        let aligned = json!({"words":[w("Oh","l1",None),w("the","l1",Some((1.0,1.2))),w("big","l1",Some((1.2,1.4))),
+            w("one","l2",Some((2.0,2.2))),w("two","l2",Some((2.2,2.4))),w("three","l2",Some((2.4,2.6))),w("four","l2",Some((2.6,2.8))),
+            w("five","l2",Some((2.8,3.0))),w("six","l2",Some((3.0,3.2))),w("seven","l2",Some((3.2,3.4)))]});
+        let (words, groups) = printed_caption_words(&aligned);
+        assert_eq!(words[0]["text"], "Oh");
+        assert_eq!((words[0]["start"].as_f64(), words[0]["end"].as_f64()), (Some(0.0), Some(1.0)));
+        assert_eq!(groups, vec![[0, 2], [3, 6], [7, 9]]);
+    }
     use super::*;
 
     fn project(name: &str) -> (PathBuf, Session) {

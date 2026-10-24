@@ -311,7 +311,7 @@ pub(crate) fn ensure_video_target_project(s: &Session, dir: &Path, target: &str)
     }
 }
 
-fn probe_audio_duration(audio: Option<&Path>) -> f64 {
+pub(crate) fn probe_audio_duration(audio: Option<&Path>) -> f64 {
     if let Some(audio) = audio
         && let Ok(out) = std::process::Command::new("ffprobe")
             .args([
@@ -346,6 +346,13 @@ fn is_managed_video_server_pid(pid: u64) -> bool {
     text.contains("remotion") || text.contains("http.server") || text.contains("hyperframes")
 }
 
+/// The official caption component bound to timed words (`{text,start,end}`) shown in the given index groups.
+pub(crate) fn write_caption_source(dest:&Path,words:&[Value],groups:&[[usize;2]],duration:f64)->Result<()>{
+    let text=serde_json::to_string(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?.replace('<',"\\u003c");
+    let html=include_str!("../../../pipeline/templates/hyperframes-captions.html").replace("__AC_WORDS__",&text).replace("__AC_GROUPS__",&serde_json::to_string(groups).unwrap()).replace("__AC_DURATION__",&duration.to_string());
+    std::fs::create_dir_all(dest.parent().unwrap())?;std::fs::write(dest,html)?;Ok(())
+}
+
 /// Deterministic binding of native timed words into the official reusable caption component.
 /// Existing edited caption sources/visual overrides are never replaced on unchanged input.
 fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
@@ -368,12 +375,11 @@ fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
     let reused=dest.is_file();
     if reused {
         let state:Value=std::fs::read(&receipt).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        if state["source_kind"]=="artist_lines" {return Ok(json!({"ready":true,"preserved_existing_caption_track":true,"source":dest,"provenance":receipt}));}
         if state["input_sha256"]!=digest {return Err(EngineError::InvalidParams(format!("Existing caption source {} differs from this transcript or has no matching provenance; preserved without overwrite. Review that source before replacing timing",dest.display())));}
     } else {
         let groups:Vec<[usize;2]>=(0..words.len()).step_by(5).map(|start|[start,(start+4).min(words.len()-1)]).collect();
-        let text=serde_json::to_string(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?.replace('<',"\\u003c");
-        let html=include_str!("../../../pipeline/templates/hyperframes-captions.html").replace("__AC_WORDS__",&text).replace("__AC_GROUPS__",&serde_json::to_string(&groups).unwrap()).replace("__AC_DURATION__",&duration.to_string());
-        std::fs::create_dir_all(dest.parent().unwrap())?;std::fs::write(&dest,html)?;
+        write_caption_source(&dest,words,&groups,duration)?;
         std::fs::write(&receipt,serde_json::to_vec_pretty(&json!({"input_sha256":digest,"transcript":transcript,"word_count":words.len(),"duration":duration,"grouping":"provisional deterministic batches of five; no semantic or listening review claimed","source":"official caption-highlight; native caption-group classes"})).unwrap())?;
     }
     let marker="data-composition-src=\"compositions/captions.html\"";
