@@ -95,27 +95,29 @@ const tests = [
     assert.equal(typeof report.revision, 'number');
     assert.ok(Array.isArray(report.items));
     assert.ok(Array.isArray(report.unconfigured));
-    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, open: false, busy: false, dirty: false });
-    assert.deepEqual(Object.keys(report.items[0]), ['id', 'label', 'look', 'signal', 'open', 'busy', 'dirty']);
+    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, busy: false });
+    assert.deepEqual(Object.keys(report.items[0]), ['id', 'label', 'look', 'signal', 'busy']);
   }],
   ['revision unchanged when nothing changed', () => {
     const { boxes } = fixture();
     boxes.register('block-song', { label: 'Song' });
     const first = boxes.panels().revision;
     assert.equal(boxes.panels().revision, first);
-    boxes.flag('block-song', 'open', false);
-    assert.equal(boxes.panels().revision, first);
+    boxes.fact({ id: 'block-song', state: 'ready' });
+    const afterFact = boxes.panels().revision;
+    boxes.fact({ id: 'block-song', state: 'ready' });
+    assert.equal(boxes.panels().revision, afterFact, 'the same fact again changes nothing');
   }],
   ['revision bumps once per real change', () => {
     const { boxes } = fixture();
     boxes.register('block-song', { label: 'Song' });
     const before = boxes.panels().revision;
-    boxes.flag('block-song', 'busy', true);
+    boxes.fact({ id: 'block-song', state: 'working' });
     const after = boxes.panels().revision;
     assert.equal(after, before + 1);
-    boxes.flag('block-song', 'busy', true);
+    boxes.fact({ id: 'block-song', state: 'working' });
     assert.equal(boxes.panels().revision, after);
-    boxes.flag('block-song', 'dirty', true);
+    boxes.fact({ id: 'block-song', state: 'needs-attention' });
     assert.equal(boxes.panels().revision, after + 1);
   }],
   ['every components.json look is in looks and every density is in densities', () => {
@@ -135,17 +137,6 @@ const tests = [
     boxes.register('block-song', { label: 'Song', look: 'control', density: 'normal' });
     assert.equal(boxes.panels().items[0].look, 'control');
   }],
-  ['open follows the panel element', () => {
-    const { boxes, elements } = fixture();
-    boxes.register('block-song', { label: 'Song' });
-    const panel = element('section', { attrs: { 'data-box-id': 'block-song' } });
-    elements.push(panel);
-    assert.equal(boxes.panels().items[0].open, true, 'a rendered panel is open');
-    panel.setAttribute('aria-expanded', 'false');
-    assert.equal(boxes.panels().items[0].open, false, 'a collapsed panel is not open');
-    panel.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 0, height: 0 });
-    assert.equal(boxes.panels().items[0].open, false, 'a panel that is not rendered is not open');
-  }],
   ['busy follows the working state', () => {
     const { boxes } = fixture();
     boxes.register('block-song', { label: 'Song' });
@@ -154,20 +145,6 @@ const tests = [
     const item = boxes.panels().items[0];
     assert.equal(item.busy, true, 'work in flight is busy');
     assert.equal(item.signal, 1, 'work in flight is in use');
-  }],
-  ['dirty follows a draft field inside the panel', () => {
-    const { boxes, elements } = fixture();
-    boxes.register('block-song', { label: 'Song' });
-    const panel = element('section', { attrs: { 'data-box-id': 'block-song' } });
-    const field = element('input', { id: 'field-1' });
-    field.parent = panel;
-    field.parentElement = panel;
-    elements.push(panel, field);
-    assert.equal(boxes.panels().items[0].dirty, false, 'a panel without a draft field is clean');
-    boxes.drafts(['field-1']);
-    assert.equal(boxes.panels().items[0].dirty, true, 'a draft field inside the panel makes it dirty');
-    boxes.drafts(['field-elsewhere']);
-    assert.equal(boxes.panels().items[0].dirty, false, 'a draft field elsewhere does not');
   }],
   ['element without an entry is untracked', () => {
     const { boxes, bridge, elements } = fixture();
@@ -228,27 +205,12 @@ const tests = [
     assert.equal(boxes.panels().unconfigured.length, 0);
     assert.equal(boxes.panels().items[0].id, 'block-song');
   }],
-  ['panel() refuses flag with no handler', () => {
-    const { boxes, bridge } = fixture();
-    boxes.register('block-song', { label: 'Song' });
-    assert.throws(() => bridge.panel('block-song', 'open', true), /^Error: panel block-song does not accept open$/);
-    let seen = null;
-    boxes.register('block-lyrics', { label: 'Lyrics', on: { busy: (value) => { seen = value; } } });
-    bridge.panel('block-lyrics', 'busy', true);
-    assert.equal(seen, true);
-  }],
   ['panels() reports only the current project', () => {
     const { boxes } = fixture();
     boxes.register('old-panel', { label: 'Old', project: '/p/Old.magic' });
     boxes.register('block-song', { label: 'Song', project: '/p/Study.magic' });
     boxes.register('shared', { label: 'Shared' });
     assert.deepEqual(plain(boxes.panels().items.map(item => item.id)), ['block-song', 'shared']);
-  }],
-  ['a failing handler leaves the flag unchanged', () => {
-    const { boxes, bridge } = fixture();
-    boxes.register('block-song', { label: 'Song', on: { busy: () => { throw new Error('render refused'); } } });
-    assert.throws(() => bridge.panel('block-song', 'busy', true), /render refused/);
-    assert.equal(boxes.panels().items[0].busy, false);
   }],
 ];
 

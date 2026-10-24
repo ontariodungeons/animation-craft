@@ -11,8 +11,6 @@ function feedbackSnapshot(){
  // where it came from and when it was seen; a stale or closed-app observation
  // is marked, never invented as a failure. No new poller and no new command.
  const boxes=window.companionBoxes?window.companionBoxes.snapshot({project:typeof state==='undefined'?null:state.project}):[];
- // The draft fields the page already knows about; a panel holding one is dirty.
- if(window.companionBoxes&&typeof window.companionBoxes.drafts==='function')window.companionBoxes.drafts(changed);
  // The one standard record per panel: flags, a revision that changes only when
  // a flag changes, and the clickable controls that belong to no known panel.
  const panels=window.companionBoxes?window.companionBoxes.panels():null;

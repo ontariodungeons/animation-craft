@@ -95,19 +95,6 @@ window.magicBridge = {
     });
     return rows.slice(0, 64);
   },
-  // The generic flag setter: `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>`.
-  // The panel's own handler does the work; a flag it does not accept is refused.
-  panel(id, flag, value) {
-    const registry = window.companionBoxes;
-    const record = registry && typeof registry.get === "function" ? registry.get(id) : null;
-    if (!record) throw new Error(`panel ${id} is not registered`);
-    const handler = record.on && record.on[flag];
-    if (typeof handler !== "function") throw new Error(`panel ${id} does not accept ${flag}`);
-    // The flag records what the handler did, so it is set only once the handler succeeds.
-    handler(!!value);
-    if (typeof registry.flag === "function") registry.flag(id, flag, !!value);
-    return { panel: id, flag, value: !!value };
-  },
   click(target) {
     const node = find(target);
     node.scrollIntoView({ block: "nearest" });
