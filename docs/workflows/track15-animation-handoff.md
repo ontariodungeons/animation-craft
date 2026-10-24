@@ -33,3 +33,12 @@ The running Studio (pid 1280318) predates both. After it runs this build: `mc --
 - mc adapters requested (Beaker/Fozzie): `video.snapshot at=[s…] out_dir=<dir>` → `{frames:[path]}` and `video.render out=<mp4>` → `{file, duration, receipt}` over the installed HyperFrames CLI.
 - Blender and pose-replacement comparisons of the song cast were not run; `animation.source.from_rig` does not exist and the existing Blender bridge builds a fixed humanoid (gap per `track15-animation-sequence.md`).
 - Seen in the Studio: setting the Animation object picker over the bridge needed a relaunch once to show the new object; the Layers guard needed the specs inside the project (now moved).
+
+## Lyrics panel (Rizzo owns words.js, Words CSS, words engine)
+
+Committed, not yet seen in the combined Studio:
+- 9937ce4c: the left column shows each sung line in its own lettering (the line design's font, weight, slant, colour and size) on paper; click a word to pick it, Shift-click adds or drops words in that line; Look edits (lettering, colour, outline, size, tilt) apply to every picked word. Stage about two thirds of the width; film roll wider. Text stays the sheet's. Test: `apps/magicstudio-shell/tests/words-lettering.mjs` (in the pre-commit hook).
+- 67d41400 + sheet edit: the sung ending repeat is its own section (verse 5, second time, lines 1–2), so it gets its own design and words in the panel.
+- e5bc1512: `words.captions to=video` puts the printed lines in the video's caption track.
+
+When the combined Studio is up: open Design, check the column on Three Times Around (seven sections now), style a few words, Save, then `mc --bridge 19971 exec words.captions to=video` and snapshot 20, 52, 120 s.
