@@ -1203,7 +1203,7 @@ fn main() {
                 // GITHUB HEALTH: what an agent did to the repository's GitHub state.
                 let repo = github_health::repo_root(&std::env::current_dir().unwrap_or_default());
                 let health = github_health::inspect(&repo);
-                outln!("{}", serde_json::to_string_pretty(&health.report()).unwrap_or_default());
+                outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
                 return;
             }
             if a.flag_report {
