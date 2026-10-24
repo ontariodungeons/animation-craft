@@ -1,0 +1,11 @@
+{
+  "hex_outside_root": 52,
+  "hand_built_dots": 9,
+  "retired": {
+    "dot-colours": 8,
+    "magic-part-dot": 5,
+    "panel-heads": 60,
+    "panel-empties": 31,
+    "panel-statuses": 6
+  }
+}

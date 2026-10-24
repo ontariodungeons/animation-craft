@@ -20,6 +20,7 @@ cargo test --offline -p magicstudio-engine --test agent_security --quiet -- --te
 node apps/magicstudio-shell/tests/agent-selection.mjs
 node apps/magicstudio-shell/tests/panels.mjs
 node apps/magicstudio-shell/tests/companions.mjs
+node apps/magicstudio-shell/tests/ui-lint.mjs
 
 # 2. If Rust files are staged, run workspace compile check + test suite on commit
 RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
