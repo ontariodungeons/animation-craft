@@ -178,7 +178,7 @@ function wordsRender() {
   sizeInput.value = String(size);
   sizeInput.defaultValue = String(anim.style?.size ?? 120); // only a moved slider is an unsaved edit
   const changes = wordsPanel.pending.size + Object.keys(wordsPanel.styleEdits).length;
-  const save = el("button", { class: "start", id: "words-save", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
+  const save = el("button", { class: "start", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
   save.disabled = !changes;
 
   const stage = wordsStage(anim);
@@ -187,12 +187,28 @@ function wordsRender() {
       el("strong", {}, wordsLabel(anim)),
       el("span", { class: "meta" }, `${anim.words.length} words · ${(anim.authored_duration || 0).toFixed(1)} s · rev ${anim.source_revision}${wordsPanel.read.saved ? "" : " · not saved yet"}`),
       el("label", { class: "field-row" }, "Size", sizeInput),
+      ...wordsStyleFields(anim),
       save),
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
     stage, sheet, inspector);
   view.replaceChildren(side, main);
   wordsEffectsPane(anim);
   wordsFit();
+}
+
+// The section's other style settings words.save accepts: font, colours and background.
+function wordsStyleFields(anim) {
+  const field = (key, label, type, fallback) => {
+    const saved = anim.style?.[key] ?? fallback;
+    const input = el("input", { type, "aria-label": label, oninput: (e) => {
+      if (e.target.value === saved) delete wordsPanel.styleEdits[key]; else wordsPanel.styleEdits[key] = e.target.value; } ,
+      onchange: () => wordsRender() });
+    input.value = wordsPanel.styleEdits[key] ?? saved;
+    input.defaultValue = saved; // only a changed field is an unsaved edit
+    return el("label", { class: "field-row" }, label, input);
+  };
+  return [field("font", "Font", "text", ""), field("color", "Colour", "color", "#ffffff"), field("emphasis_color", "Emphasis", "color", "#ffd078"),
+    field("outline_color", "Outline", "color", "#173b43"), field("background", "Background", "text", "")];
 }
 
 // The stage is the finished video, kept across re-renders so editing never reloads it.
