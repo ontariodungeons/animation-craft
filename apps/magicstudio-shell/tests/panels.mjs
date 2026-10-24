@@ -51,6 +51,7 @@ function element(tag, { id = '', title = '', text = '', attrs = {}, parent = nul
       return null;
     },
     getBoundingClientRect() { return { x: 0, y: 0, left: 0, top: 0, width: 120, height: 24 }; },
+    contains(node) { for (let n = node; n; n = n.parentElement) if (n === el) return true; return false; },
   };
   return el;
 }
@@ -63,7 +64,7 @@ function fixture() {
     createElement: () => element('span'),
     querySelector: () => null,
     querySelectorAll: (selector) => elements.filter(el => el.matches(selector)),
-    getElementById: () => null,
+    getElementById: (id) => elements.find(el => el.id === id) || null,
     addEventListener() {},
   };
   const ctx = vm.createContext({
@@ -133,6 +134,40 @@ const tests = [
     const { boxes } = fixture();
     boxes.register('block-song', { label: 'Song', look: 'control', density: 'normal' });
     assert.equal(boxes.panels().items[0].look, 'control');
+  }],
+  ['open follows the panel element', () => {
+    const { boxes, elements } = fixture();
+    boxes.register('block-song', { label: 'Song' });
+    const panel = element('section', { attrs: { 'data-box-id': 'block-song' } });
+    elements.push(panel);
+    assert.equal(boxes.panels().items[0].open, true, 'a rendered panel is open');
+    panel.setAttribute('aria-expanded', 'false');
+    assert.equal(boxes.panels().items[0].open, false, 'a collapsed panel is not open');
+    panel.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 0, height: 0 });
+    assert.equal(boxes.panels().items[0].open, false, 'a panel that is not rendered is not open');
+  }],
+  ['busy follows the working state', () => {
+    const { boxes } = fixture();
+    boxes.register('block-song', { label: 'Song' });
+    assert.equal(boxes.panels().items[0].busy, false);
+    boxes.fact({ id: 'block-song', state: 'working' });
+    const item = boxes.panels().items[0];
+    assert.equal(item.busy, true, 'work in flight is busy');
+    assert.equal(item.signal, 1, 'work in flight is in use');
+  }],
+  ['dirty follows a draft field inside the panel', () => {
+    const { boxes, elements } = fixture();
+    boxes.register('block-song', { label: 'Song' });
+    const panel = element('section', { attrs: { 'data-box-id': 'block-song' } });
+    const field = element('input', { id: 'field-1' });
+    field.parent = panel;
+    field.parentElement = panel;
+    elements.push(panel, field);
+    assert.equal(boxes.panels().items[0].dirty, false, 'a panel without a draft field is clean');
+    boxes.drafts(['field-1']);
+    assert.equal(boxes.panels().items[0].dirty, true, 'a draft field inside the panel makes it dirty');
+    boxes.drafts(['field-elsewhere']);
+    assert.equal(boxes.panels().items[0].dirty, false, 'a draft field elsewhere does not');
   }],
   ['element without an entry is untracked', () => {
     const { boxes, bridge, elements } = fixture();

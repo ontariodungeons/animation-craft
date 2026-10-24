@@ -34,6 +34,7 @@ function createCompanionBoxes() {
   const listeners = new Set();
   let quiet = false;
   let changeSeq = 0;
+  let draftFields = [];
   let panelRevision = 0;
   let panelSignature = "";
 
@@ -95,6 +96,13 @@ function createCompanionBoxes() {
     }
     if (on) for (const flag of Object.keys(on)) box.on[flag] = on[flag];
     return box;
+  }
+
+  // The draft fields the page already knows about. A panel that holds one
+  // holds an unsaved edit, so it is dirty. The list is data, never a guess.
+  function drafts(ids) {
+    draftFields = Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : [];
+    return draftFields;
   }
 
   // A panel's flag is a fact about that panel: open, busy or dirty. The same
@@ -210,17 +218,37 @@ function createCompanionBoxes() {
     const items = [];
     // Boxes survive a project switch; the report is about the project on screen.
     const current = typeof globalThis.state === "undefined" ? null : globalThis.state?.project ?? null;
+    // The panel elements, by box id: what is on screen decides open and dirty.
+    const elements = new Map();
+    for (const node of document.querySelectorAll("[data-box-id]")) {
+      const id = node.getAttribute && node.getAttribute("data-box-id");
+      if (id && !elements.has(id)) elements.set(id, node);
+    }
     for (const box of boxes.values()) {
       if (current && box.project && box.project !== current) continue;
+      const node = elements.get(box.id) || null;
+      const rect = node && typeof node.getBoundingClientRect === "function" ? node.getBoundingClientRect() : null;
+      const rendered = !!rect && rect.width > 0 && rect.height > 0;
+      // A panel that is on screen and not collapsed is open.
+      const expanded = node && typeof node.getAttribute === "function" ? node.getAttribute("aria-expanded") : null;
+      const open = rendered && expanded !== "false";
+      // Work in flight is the working state.
       const busy = !!box.busy || box.state === "working";
+      // A draft field inside the panel means the panel holds unsaved edits.
+      const dirty = !!node && draftFields.some(id => {
+        const field = document.getElementById ? document.getElementById(id) : null;
+        if (!field) return false;
+        if (field === node) return true;
+        return typeof node.contains === "function" ? node.contains(field) : false;
+      });
       items.push({
         id: box.id,
         label: box.label ?? null,
         look: box.look ?? null,
         signal: Math.max(SIGNAL[box.state] ?? 0, busy ? 1 : 0),
-        open: !!box.open,
+        open: open || !!box.open,
         busy,
-        dirty: !!box.dirty,
+        dirty: dirty || !!box.dirty,
       });
     }
     items.sort((a, b) => a.id.localeCompare(b.id));
@@ -259,7 +287,7 @@ function createCompanionBoxes() {
     return () => listeners.delete(fn);
   }
 
-  return { register, flag, fact, readiness, recordReceipt, get, snapshot, panels, clear, states: BOX_STATES, flags: PANEL_FLAGS, signal, dot, subscribe };
+  return { register, flag, drafts, fact, readiness, recordReceipt, get, snapshot, panels, clear, states: BOX_STATES, flags: PANEL_FLAGS, signal, dot, subscribe };
 }
 
 // One shared registry, created before the app renders, so every control can
