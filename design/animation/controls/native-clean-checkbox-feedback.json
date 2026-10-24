@@ -1,0 +1,127 @@
+{
+  "ack_engine_revision": 1,
+  "active_project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+  "chat_selection": {
+    "agent": "opencode",
+    "model": "",
+    "provider": "",
+    "runtime_model_verified": false,
+    "source": "active engine selection"
+  },
+  "chat_selector": {
+    "agent": "opencode",
+    "model": null,
+    "provider": null,
+    "source": "rendered selector; may include unsaved edits"
+  },
+  "command_revisions": [
+    {
+      "id": "project.open",
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+      "request_id": "studio-1315084-1792786502284-0",
+      "revision": 1
+    },
+    {
+      "id": "motion.pose.export",
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+      "request_id": "ambient-1792786519282-18",
+      "revision": 2
+    }
+  ],
+  "companions": {
+    "animating": false,
+    "dedupe": 0,
+    "enabled": false,
+    "gaffer": {
+      "command": null,
+      "destination": "artwork",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": null,
+      "destination": "chat",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    }
+  },
+  "connection": "connected",
+  "dirty_reasons": [],
+  "draft_fields": [],
+  "engine_revision": 2,
+  "engine_unsaved": false,
+  "errors": [],
+  "frontend_report_age_ms": 940,
+  "identity": {
+    "application": "Magic Studio",
+    "build_id": "99523e0-1792786483",
+    "executable": "/run/media/jesse/Speedy/Work/omhas-animation/.worktrees/full-animation-verification/target/debug/magicstudio-shell",
+    "frontend": "Tauri",
+    "pid": 1315084,
+    "version": "0.1.0"
+  },
+  "last_command": {
+    "engine_finished_unix_ms": 1792786519307,
+    "id": "motion.pose.export",
+    "ok": true,
+    "request_id": "ambient-1792786519282-18",
+    "revision": 2,
+    "ui_ack": "pending"
+  },
+  "last_frontend_command": {
+    "id": "agent.log",
+    "status": "success",
+    "transport": "engine_command"
+  },
+  "observed_unix_ms": 1792786559415,
+  "ok": true,
+  "pending_invokes": 0,
+  "phase": "ready",
+  "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+  "project_guard_version": 1,
+  "project_id": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+  "project_identity_kind": "canonical project path",
+  "rendered": false,
+  "session_project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+  "theatre": {
+    "availability": "ready",
+    "error": null,
+    "live_edits": "no_observed_interaction",
+    "native_playing": false,
+    "native_selected_part": "paper",
+    "package_version": "0.7.0",
+    "persistence": "no_saved_state",
+    "saved_snapshot_unix_ms": null,
+    "selected_objects": [
+      {
+        "part": "paper",
+        "sheet": "puppet / wave"
+      }
+    ],
+    "sequence_playing": false,
+    "sequence_position_seconds": 2,
+    "value_update": {
+      "part": "paper",
+      "property": "rotation",
+      "received_unix_ms": 1792786512271,
+      "render_call_completed": true,
+      "value": 0
+    },
+    "visual_quality": "not_assessed"
+  },
+  "ui_acknowledgement": "pending",
+  "ui_ready": false,
+  "ui_revision": 297,
+  "unsaved_edits": 0,
+  "unsaved_state": "no_detected_unsaved_changes",
+  "updated_unix_ms": 1792786558475,
+  "view": "animation"
+}

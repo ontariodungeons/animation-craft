@@ -1,0 +1,22 @@
+{
+  "available": false,
+  "backend": "opentoonz",
+  "controls": [
+    "first",
+    "last",
+    "step",
+    "shrink",
+    "nthreads"
+  ],
+  "reason": "invalid parameters: OpenToonz tcomposer is not installed or not on PATH. Set OPENTOONZ_TCOMPOSER to its absolute path; no installation was attempted",
+  "stuff": null,
+  "tcomposer": null,
+  "tcomposer_sha256": null,
+  "unsupported": [
+    "fps, width and height overrides (use the scene's output settings)",
+    "rig, bone or Plastic authoring",
+    "action names"
+  ],
+  "version": null,
+  "version_note": "tcomposer has no version flag; record the package or build version at deployment"
+}

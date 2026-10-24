@@ -1,0 +1,33 @@
+{
+  "checkboxes": [
+    {
+      "checked": false,
+      "defaultChecked": false,
+      "id": "authoring-loop"
+    },
+    {
+      "checked": false,
+      "defaultChecked": false,
+      "id": "motion-preview-loop"
+    }
+  ],
+  "label": "Paper wave",
+  "selected": "paper",
+  "theatre": {
+    "availability": "loading",
+    "error": null,
+    "live_edits": "no_observed_interaction",
+    "native_playing": false,
+    "native_selected_part": "paper",
+    "package_version": "0.7.0",
+    "persistence": "not_loaded",
+    "saved_snapshot_unix_ms": null,
+    "selected_objects": [],
+    "sequence_playing": null,
+    "sequence_position_seconds": 2,
+    "value_update": null,
+    "visual_quality": "not_assessed"
+  },
+  "time": 2,
+  "track": "wave"
+}

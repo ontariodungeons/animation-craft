@@ -1,0 +1,25 @@
+{
+  "available": true,
+  "backend": "synfig",
+  "controls": [
+    "first_frame",
+    "last_frame",
+    "fps",
+    "width",
+    "height"
+  ],
+  "executable": "/usr/bin/synfig",
+  "formats": [
+    "sif",
+    "sifz"
+  ],
+  "install_dependency": "synfig CLI (Arch package synfig); python-pillow; ffmpeg with libvpx-vp9",
+  "limitations": [
+    "Saved root canvas only; unpack .sfg into a self-contained .sif bundle first",
+    "External canvas links, symlinks and assets outside bundle are rejected",
+    "System fonts and renderer modules are runtime dependencies, not bundled assets"
+  ],
+  "selections": [],
+  "version": null,
+  "version_note": "Queried inside the bounded render job; discovery does not launch the renderer"
+}

@@ -1,0 +1,264 @@
+{
+  "errors": [],
+  "image": "asset://localhost/%2Frun%2Fmedia%2Fjesse%2FSpeedy%2FWork%2Fomhas-animation%2Fdesign%2Fanimation%2Fcontrols%2Fgeneric-native-fixture%2Fassets%2Fgenerated-poses%2Fpose-1792786519294739404%2Fpose.png",
+  "imageLoaded": true,
+  "pose": {
+    "character": "puppet",
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+    "result": {
+      "_ui_engine_revision": 2,
+      "amount": 100,
+      "approval": "pending",
+      "asset_id": "pose_1792786519294739404",
+      "canvas": [
+        64,
+        64
+      ],
+      "image_sha256": "7649907c209e7877e6a02da037fdbe3a3b54325b89ad45933cbfb2ca12c6e2dd",
+      "layers": [
+        {
+          "base_geometry": {
+            "canvas": [
+              64,
+              64
+            ],
+            "crop": [
+              14,
+              14,
+              34,
+              42
+            ],
+            "pivot": [
+              24,
+              28
+            ]
+          },
+          "crop": [
+            14,
+            14,
+            34,
+            42
+          ],
+          "file": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/.layered_preview_cache/rig/00_paper_crop.png",
+          "id": "paper",
+          "image_sha256": null,
+          "label": "paper",
+          "order": 1,
+          "parent": null,
+          "pivot": [
+            24,
+            28
+          ],
+          "source_file": null,
+          "source_size": null,
+          "state": {
+            "name": "paper",
+            "solo": false,
+            "verified": false,
+            "visible": true
+          }
+        }
+      ],
+      "ok": true,
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/assets/generated-poses/pose-1792786519294739404/pose.png",
+      "project_saved": false,
+      "receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/assets/generated-poses/pose-1792786519294739404/pose.json",
+      "reference": null,
+      "rest": false,
+      "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+      "sample": {
+        "bounds": [
+          14,
+          14,
+          34,
+          42
+        ],
+        "character": "puppet",
+        "duration": 2,
+        "effective_parents": [
+          null
+        ],
+        "fps": 24,
+        "frames": [
+          {
+            "layers": [
+              {
+                "matrix": [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0
+                ],
+                "opacity": 1,
+                "position": [
+                  0,
+                  0
+                ],
+                "rotation": 0,
+                "scale": [
+                  1,
+                  1
+                ]
+              }
+            ],
+            "time": 0.5
+          }
+        ],
+        "loop": false,
+        "ok": true,
+        "rest": false,
+        "track": "wave"
+      },
+      "sampler": "motion.sample",
+      "sampling": "nearest-neighbor affine PNG; saved canvas, clipped to canvas",
+      "source_character": "puppet",
+      "theatre_applied": false,
+      "time": 0.5,
+      "track": "wave"
+    },
+    "track": "wave"
+  },
+  "selection": {
+    "amount": 100,
+    "backend": "subject",
+    "character": "puppet",
+    "duration": 2,
+    "last_edit": null,
+    "last_pose": {
+      "character": "puppet",
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+      "result": {
+        "_ui_engine_revision": 2,
+        "amount": 100,
+        "approval": "pending",
+        "asset_id": "pose_1792786519294739404",
+        "canvas": [
+          64,
+          64
+        ],
+        "image_sha256": "7649907c209e7877e6a02da037fdbe3a3b54325b89ad45933cbfb2ca12c6e2dd",
+        "layers": [
+          {
+            "base_geometry": {
+              "canvas": [
+                64,
+                64
+              ],
+              "crop": [
+                14,
+                14,
+                34,
+                42
+              ],
+              "pivot": [
+                24,
+                28
+              ]
+            },
+            "crop": [
+              14,
+              14,
+              34,
+              42
+            ],
+            "file": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/.layered_preview_cache/rig/00_paper_crop.png",
+            "id": "paper",
+            "image_sha256": null,
+            "label": "paper",
+            "order": 1,
+            "parent": null,
+            "pivot": [
+              24,
+              28
+            ],
+            "source_file": null,
+            "source_size": null,
+            "state": {
+              "name": "paper",
+              "solo": false,
+              "verified": false,
+              "visible": true
+            }
+          }
+        ],
+        "ok": true,
+        "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/assets/generated-poses/pose-1792786519294739404/pose.png",
+        "project_saved": false,
+        "receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/assets/generated-poses/pose-1792786519294739404/pose.json",
+        "reference": null,
+        "rest": false,
+        "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+        "sample": {
+          "bounds": [
+            14,
+            14,
+            34,
+            42
+          ],
+          "character": "puppet",
+          "duration": 2,
+          "effective_parents": [
+            null
+          ],
+          "fps": 24,
+          "frames": [
+            {
+              "layers": [
+                {
+                  "matrix": [
+                    1,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0
+                  ],
+                  "opacity": 1,
+                  "position": [
+                    0,
+                    0
+                  ],
+                  "rotation": 0,
+                  "scale": [
+                    1,
+                    1
+                  ]
+                }
+              ],
+              "time": 0.5
+            }
+          ],
+          "loop": false,
+          "ok": true,
+          "rest": false,
+          "track": "wave"
+        },
+        "sampler": "motion.sample",
+        "sampling": "nearest-neighbor affine PNG; saved canvas, clipped to canvas",
+        "source_character": "puppet",
+        "theatre_applied": false,
+        "time": 0.5,
+        "track": "wave"
+      },
+      "track": "wave"
+    },
+    "loop": false,
+    "open_sections": {
+      "Action": true,
+      "Export & integrations": true,
+      "Expression & pose": true,
+      "Layers": true
+    },
+    "playing": false,
+    "refresh_error": null,
+    "rest": false,
+    "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+    "selected_layer": "paper",
+    "speed": 1,
+    "time": 0.5,
+    "track": "wave"
+  },
+  "status": "Captured pose · pending approval; project Save is explicit."
+}

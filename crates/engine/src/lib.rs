@@ -42,6 +42,7 @@ pub mod photocraft;
 pub mod panels;
 pub mod project;
 pub mod project_settings;
+pub mod skills_registry;
 pub mod rig;
 pub mod sequence;
 pub mod sheets;

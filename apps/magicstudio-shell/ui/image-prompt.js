@@ -59,8 +59,10 @@ function imagePromptBlock() {
   model.addEventListener('input', () => {
     draft.model = model.value; updateCommand();
     if (!draft.busy && !draft.result && !draft.error) {
-      section.querySelector('.meta').textContent = draft.model;
-      section.querySelector('.panel-head.control').title = `Gaffer · Artwork · ${draft.model}`;
+      if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
+        const _hdr = document.getElementById('magic-image-toggle');
+        if (_hdr) _hdr.title = `Gaffer · Artwork · ${draft.model}`;
+      }
     }
   });
   const command = el('code', { id: 'image-command' });
@@ -118,19 +120,15 @@ function imagePromptBlock() {
     el('details', {}, el('summary', {}, 'CLI command'), command, copy)];
   if (draft.result?.image) body.push(el('img', { class: 'image-result', src: convertFileSrc(draft.result.image), alt: 'Generated candidate artwork · needs visual review' }),
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
-  const section = block('image', '🐈', 'Gaffer · Artwork', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : draft.model, false, body, draft.error ? 'needs' : 'empty');
-  section.classList.add('image-prompt-block');
+  const section = el('div', { class: 'block-inner image-prompt-block', box: 'magic-image-tools' }, body);
+  const imageState = draft.error ? 'failed' : draft.busy ? 'working' : draft.result ? 'ready' : 'idle';
   section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
-  const indicator = section.querySelector('.panel-head.control .dot');
-  if (indicator) {
-    if (draft.result) {
-      const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');
-      indicator.replaceWith(success);
-    } else {
-      const next = window.companionBoxes.dot(draft.error ? 'failed' : draft.busy ? 'working' : 'idle');
-      next.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
-      indicator.replaceWith(next);
-    }
+  const header = (typeof document !== 'undefined' && typeof document.getElementById === 'function') ? document.getElementById('magic-image-toggle') : null;
+  const indicator = window.companionBoxes.dot(imageState, '', 'magic-image-toggle');
+  indicator.title = draft.error ? 'Failed' : draft.busy ? 'Working' : draft.result ? 'Candidate ready for review' : 'Not started';
+  if (header) {
+    const previous = header.querySelector('.dot');
+    if (previous) previous.replaceWith(indicator); else header.prepend(indicator);
   }
   return section;
 }

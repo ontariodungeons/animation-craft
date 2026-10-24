@@ -1,0 +1,8 @@
+<!doctype html><link rel="stylesheet" href="file:///run/media/jesse/Speedy/Work/omhas-animation/.worktrees/inspector-usability/apps/magicstudio-shell/ui/style.css"><div id="fixtures"></div><pre id="result"></pre><script>
+const failures=[];
+for(const width of [160,190,230,270]){
+ const pane=document.createElement('aside');pane.style.width=width+'px';pane.innerHTML=`<details open class="motion-section"><summary><span class="motion-section-icon"><svg></svg></span><span>Expression & pose</span><span class="motion-section-chevron"><svg></svg></span></summary><div class="motion-section-body"><label class="motion-range"><span>Start size<output>200%</output></span><input type="range"></label><div class="motion-actions-grid">${['Rest','Forward and back','Clockwise','Counterclockwise'].map(t=>'<button class="motion-action">'+t+'</button>').join('')}</div><div class="motion-path-actions"><button class="icon">↶</button><button class="icon">↶</button><button class="start">Apply path</button></div></div></details>`;document.querySelector('#fixtures').append(pane);
+ const bounds=pane.getBoundingClientRect();for(const n of pane.querySelectorAll('button,svg,output,summary>span')){const r=n.getBoundingClientRect();if(r.left<bounds.left-1||r.right>bounds.right+1)failures.push(width+': '+n.outerHTML);}
+}
+document.querySelector('#result').textContent=failures.length?'FAIL '+JSON.stringify(failures):'PASS: all icons, values, labels and actions contained at 160/190/230/270px';
+</script>

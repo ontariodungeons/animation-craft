@@ -1,0 +1,41 @@
+{
+  "assets": [
+    {
+      "id": "cards",
+      "kind": "cutout_rig",
+      "name": "Overlapping cards",
+      "parts": [
+        {
+          "name": "parent-card",
+          "solo": false,
+          "verified": false,
+          "visible": true
+        },
+        {
+          "name": "child-card",
+          "solo": false,
+          "verified": false,
+          "visible": true
+        }
+      ],
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/rig.json",
+      "preset": null
+    },
+    {
+      "id": "pose_1792788925855345639",
+      "kind": "image",
+      "name": "cards · hold at 0.5s (pending)",
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/assets/generated-poses/pose-1792788925855345639/pose.png",
+      "preset": null
+    }
+  ],
+  "format": "magicstudio.project",
+  "name": "Generic",
+  "version": 1,
+  "workshop": {
+    "audio": null,
+    "draft_approved": false,
+    "target": "remotion",
+    "video_project": null
+  }
+}

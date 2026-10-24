@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Pterodactyl lyric design</title>
+<style>
+@font-face{font-family:Story;src:url(files/fonts/story-italic.ttf);font-style:italic;font-weight:400}
+@font-face{font-family:Story;src:url(files/fonts/story-bold.ttf);font-style:normal;font-weight:700}
+@font-face{font-family:Quiet;src:url(files/fonts/quiet-regular.ttf)}
+:root{--bg:#0b1017;--surface:#141c28;--surface-2:#1c2a3b;--line:#2b3b50;--text:#e9eef6;--muted:#9cafc6;--faint:#667487;--accent:#35e1c0;
+ --t-words:#ffd078;--t-accent:#baa5eb;--t-draw:#f4a07b;--playhead:#e8f6ff;--PX:26px}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 Inter,system-ui,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.app{display:grid;grid-template-columns:270px minmax(0,1fr) 250px;gap:12px;padding:12px;align-items:start}
+.col{min-width:0;display:flex;flex-direction:column;gap:8px}
+#mid{position:sticky;top:12px;z-index:2;background:var(--bg);max-height:calc(100vh - 24px);overflow:auto}
+.lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:600;margin:4px 0}
+/* the song clock shared by left and right */
+.tl{position:relative}
+.tl>*{position:absolute;left:0;right:0;top:calc(var(--at)*var(--PX))}
+.band{height:calc(var(--len)*var(--PX));border-top:2px solid var(--c);background:none;border-radius:0 0 6px 6px;cursor:pointer;padding:2px 6px;text-align:left;color:var(--c);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+.band.on{background:none;border-top-width:3px}
+.band small{color:var(--faint);text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
+.chips{left:6px;right:6px;margin-top:22px}
+/* lyric tags: no fill, soft square corners, laid on a grid so words line up */
+.chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:6px 6px;align-items:start}
+.chip{display:flex;flex-direction:column;gap:1px;padding:3px 7px;border:1px solid var(--line);border-radius:3px;cursor:pointer;font-size:12px;line-height:1.25;position:relative;min-width:0}
+.chip.long{grid-column:span 2}
+.chip small{font-size:9px;color:var(--faint);letter-spacing:.02em}
+.chip.hero{border-color:color-mix(in srgb,var(--t-words) 45%,var(--line))}.chip.hero small{color:var(--t-accent)}
+.chip:hover{border-color:var(--muted)}
+.chip.on{border-color:var(--accent);color:var(--accent)}
+.chip.changed::after{content:"";position:absolute;right:4px;top:4px;width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.head{height:0;border-top:2px solid var(--playhead);box-shadow:0 0 6px var(--playhead);pointer-events:none;z-index:3;top:calc(var(--now,0)*var(--PX))}
+.roll{padding:0 16px;background:radial-gradient(circle,var(--line) 35%,transparent 40%) left top/16px 18px repeat-y,radial-gradient(circle,var(--line) 35%,transparent 40%) right top/16px 18px repeat-y,#07090d;border-radius:4px}
+.roll>*{left:16px;right:16px}
+.tick{border-top:1px dashed var(--surface-2);color:var(--faint);font-size:9px;text-align:right}
+.frame{height:calc(var(--len)*var(--PX) - 4px);border:1px solid var(--line);border-radius:4px;overflow:hidden;cursor:pointer;background:#000;padding:0}
+.frame.on,.frame:hover{border-color:var(--accent)}
+.frame .cap{position:absolute;left:4px;bottom:2px;font-size:10px;color:#fff;text-shadow:0 1px 2px #000}
+.frame .mini{position:absolute;inset:0}
+/* stage: a 1920x1080 world scaled to fit */
+.stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:8px;border:1px solid var(--line);background:#000}
+.world{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+.bgimg{position:absolute;inset:0;background-size:cover;background-position:center}
+.it{position:absolute;white-space:nowrap;line-height:1.05;cursor:grab;user-select:none}
+.it>span{display:inline-block;transform-origin:50% 100%}
+.it.sel{outline:3px dashed var(--accent);outline-offset:8px}
+.f-quiet{font-family:Quiet}.f-bold{font-family:Story;font-weight:700}.f-italic{font-family:Story;font-style:italic}
+.drw{position:absolute;overflow:visible;pointer-events:none}
+.card{position:absolute;background:rgba(255,248,224,.9);border-radius:14px}
+.mini .it{cursor:pointer}.mini .it.sel{outline:none}
+.crumb{font-size:14px}.crumb b{color:var(--accent)}
+.transport{display:flex;align-items:center;gap:10px}.transport input{flex:1}
+.play{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#0b1017;font-weight:700}
+.lanes{display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--surface)}
+.lane{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center}
+.lane .nm{font-size:12px;border-left:3px solid var(--c);padding-left:6px}
+.track{position:relative;height:20px;background:#0f1722;border-radius:4px;overflow:hidden}
+.blk{position:absolute;top:2px;bottom:2px;border-radius:3px;background:var(--c);font-size:9px;color:#0b1017;padding:0 3px;overflow:hidden;white-space:nowrap;cursor:pointer}
+.blk.on{outline:2px solid #fff}
+.lh{position:absolute;top:0;bottom:0;width:2px;background:var(--playhead);left:var(--p,0%)}
+.tabs{display:flex;gap:6px}.tabs button{border:1px solid var(--line);border-radius:6px;padding:6px 14px;background:var(--surface)}
+.tabs button.on{background:var(--surface-2);border-color:var(--accent);color:var(--accent)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
+.fx{text-align:left;border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:var(--surface)}
+.fx:hover{border-color:var(--muted)}.fx.on{border-color:var(--accent);background:var(--surface-2)}
+.fx b{display:block;font-size:12px}.fx small{color:var(--muted);font-size:10px}
+.fx .demo{display:block;font-size:22px;margin:2px 0;color:#f3e6c4}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sw{width:26px;height:26px;border-radius:50%;border:2px solid var(--line)}.sw.on{border-color:var(--accent)}
+.note{color:var(--faint);font-size:11px}
+select{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:4px;padding:2px 4px}
+</style></head><body>
+<div class="app">
+ <div class="col"><div class="lbl">Lyrics · the song clock</div><div class="tl" id="left"></div></div>
+ <div class="col" id="mid">
+  <div class="crumb" id="crumb"></div>
+  <div class="stage" id="stage"></div>
+  <div class="transport"><button class="play" id="play">▶</button><label class="note"><input type="checkbox" id="scene"> Show scene</label><input type="range" id="scrub" min="0" step="0.01"><span class="note" id="time"></span></div>
+  <div class="lanes" id="lanes"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="panel"></div>
+ </div>
+ <div class="col"><div class="lbl">Film roll · the whole song</div><div class="tl roll" id="roll"></div></div>
+</div>
+<audio id="song" src="files/pterodactyl-song.mp3" preload="auto"></audio>
+<script>
+const $=id=>document.getElementById(id), audio=$("song");
+const clamp=x=>Math.max(0,Math.min(1,x)), eOut3=x=>1-(1-x)**3, eOut2=x=>1-(1-x)**2, eSin=x=>.5-.5*Math.cos(Math.PI*x);
+const fmt=t=>`${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,"0")}`;
+const norm=w=>w.toLowerCase().replace(/[^a-z']/g,"");
+// The moves, as the Pterodactyl source defines them (lyric-motion.tsx).
+const MOVES=[["quiet","Quiet","fades in and holds"],["sleep","Sleep","letters sink one by one"],["settle","Settle","drops and squashes into place"],["fall","Fall","drops down"],
+ ["pop","Pop","a quick swell on the beat"],["rise","Rise","arcs up and away"],["east","East","slides right"],["west","West","slides left"],["loop","Loop","makes one loop"]];
+const LOOKS=[["bold","Story Bold","hero word, strong"],["italic","Story Italic","hero word, expressive"],["quiet","Quiet","context words, small"]];
+const COLORS=["#173F49","#8B3D26","#B68B50","#fff8e0"];
+let D,ORIG,cur=0,sel=null,tab="look",T=0,dragging=null,scene=false;
+fetch("files/design.json").then(r=>r.json()).then(d=>{D=d;ORIG=JSON.parse(JSON.stringify(d));
+ D.phrases.forEach(p=>{p.design="poster";p.sung=D.words.slice(p.first,p.first+p.count);});
+ select(0);});
+
+const bgAt=t=>{const c=D.cuts;return (t<c.hill||(t>=c.returnInside&&t<c.outsideFlight)||t>=c.home)?"cave.png":"exterior.png";};
+const phraseAt=t=>D.phrases.findIndex(p=>t>=p.from&&t<p.to);
+const pose=p=>p.to-.05; // the settled look of a phrase: everything drawn, every accent done
+
+// One frame of a phrase at song time t, drawn into a 1920x1080 world.
+function drawWorld(world,p,t,interactive){
+ world.replaceChildren();
+ const bg=document.createElement("div");bg.className="bgimg";
+ if(scene)bg.style.backgroundImage=`url(files/${bgAt(Math.min(t,p.to-.01))})`;else bg.style.background="#f3ead6";world.append(bg);
+ const lt=t-p.from;
+ if(p.card)world.insertAdjacentHTML("beforeend",`<div class="card" style="left:${p.card.x}px;top:${p.card.y}px;width:${p.card.w}px;height:${p.card.h}px"></div>`);
+ for(const d of p.draws){if(d.off)continue;
+  const s=document.createElementNS("http://www.w3.org/2000/svg","svg");s.setAttribute("viewBox",d.viewBox);s.setAttribute("class","drw");
+  Object.assign(s.style,{left:d.x+"px",top:d.y+"px",width:d.w+"px",height:d.h+"px"});
+  for(const q of d.paths){const u=clamp((lt-q.from)/Math.max(.01,q.to-q.from));
+   s.insertAdjacentHTML("beforeend",`<path d="${q.d}" pathLength="1" fill="none" stroke="${q.stroke}" stroke-width="${q.width}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="1" stroke-dashoffset="${1-u}"/>`);}
+  world.append(s);}
+ p.items.forEach((it,i)=>{
+  const e=document.createElement("div");e.className=`it f-${it.font}`+(interactive&&sel?.i===i&&sel.p===D.phrases.indexOf(p)?" sel":"");
+  Object.assign(e.style,{left:it.x+"px",top:it.y+"px",fontSize:it.size+"px",color:it.color,rotate:(it.rotate||0)+"deg",opacity:eOut2(clamp(lt/.4))});
+  const a=it.accent,st=eOut3(clamp((lt-a)/.65)),arc=clamp((lt-a)/.75);
+  const pulse=lt<a?1:lt<a+.13?1+.12*(lt-a)/.13:lt<a+.43?1.12-.12*(lt-a-.13)/.3:1;
+  const m=it.motion;
+  if(m==="sleep"){[...it.text].forEach((ch,k)=>{const u=eSin(clamp((lt-a-k*.035)/.8));const s=document.createElement("span");s.textContent=ch;s.style.whiteSpace="pre";
+    s.style.transform=`translateY(${7*u+3*Math.sin(k*.6)*Math.sin(u*Math.PI)}px) rotate(${-.6*u}deg)`;e.append(s);});}
+  else{const s=document.createElement("span");s.textContent=it.text;
+   const [x,y]=m==="settle"?[0,6*st]:m==="fall"?[0,20*st]:m==="rise"?[24*st,-22*Math.sin(arc*Math.PI)-18*st]:m==="east"?[18*st,0]:m==="west"?[-18*st,0]:m==="loop"?[12*Math.sin(arc*Math.PI*2),7*(Math.cos(arc*Math.PI*2)-1)]:[0,0];
+   s.style.transform=`translate(${x}px,${y}px) scale(${m==="pop"?pulse:1},${m==="settle"?1-.035*st:m==="pop"?pulse:1})`;e.append(s);}
+  if(interactive){e.onpointerdown=ev=>{selectItem(i);const sc=$("stage").clientWidth/1920;dragging={i,sx:ev.clientX,sy:ev.clientY,x:it.x,y:it.y,sc};ev.preventDefault();};}
+  world.append(e);});
+}
+
+// An item differs from what was imported.
+const changed=(pi,ii)=>{const a=D.phrases[pi].items[ii],b=ORIG.phrases[pi].items[ii];return !b||["x","y","size","font","color","rotate","motion","accent"].some(k=>Math.abs((+a[k]||0)-(+b[k]||0))>.01||(typeof a[k]==="string"&&a[k]!==b[k]));};
+addEventListener("keydown",e=>{if(e.target.tagName==="INPUT"||e.target.tagName==="SELECT")return;const p=D.phrases[cur];
+ if(e.key==="Escape"){sel={p:cur,i:null};render();}
+ if(e.key==="ArrowRight"||e.key==="ArrowLeft"){const n=p.items.length,i=sel?.i==null?(e.key==="ArrowRight"?0:n-1):(sel.i+(e.key==="ArrowRight"?1:n-1))%n;selectItem(i);e.preventDefault();}});
+function select(i,keep){cur=i;if(!keep)sel={p:i,i:null};const p=D.phrases[i];seek(pose(p));render();}
+function selectItem(i){sel={p:cur,i};render();}
+function render(){renderLeft();renderRoll();renderMid();}
+function place(e,at,len){e.style.setProperty("--at",at);if(len!=null)e.style.setProperty("--len",len);return e;}
+const end=()=>D.duration+1;
+function renderLeft(){const L=$("left");L.style.height=`calc(${end()} * var(--PX))`;L.replaceChildren();
+ D.phrases.forEach((p,i)=>{const b=place(document.createElement("button"),p.from,p.to-p.from);b.className="band"+(i===cur?" on":"");b.style.setProperty("--c",i%2?"var(--t-words)":"#8dbfe7");
+  b.innerHTML=`${p.id}<small>${fmt(p.from)}</small>`;b.onclick=()=>select(i);L.append(b);
+  const c=place(document.createElement("div"),p.from);c.className="chips";
+  p.sung.forEach(w=>{const it=itemFor(p,w),ch=document.createElement("span");
+   const item=it!=null?p.items[it]:null,hero=item&&item.font!=="quiet";
+   ch.className="chip"+(hero?" hero":"")+(w.text.length>9?" long":"")+(sel?.p===i&&it===sel.i&&it!=null?" on":"")+(it!=null&&changed(i,it)?" changed":"");
+   ch.innerHTML=`${w.text}<small>${item?(hero?`${LOOKS.find(l=>l[0]===item.font)[1]} · ${item.motion}`:"quiet"):""}</small>`;
+   ch.title=`${w.text} · sung at ${fmt(w.at)}`;ch.onclick=e=>{e.stopPropagation();if(i!==cur)select(i);if(it!=null)selectItem(it);seek(w.at);};c.append(ch);});
+  L.append(c);});
+ L.insertAdjacentHTML("beforeend",`<div class="head" id="lhead"></div>`);
+}
+// The lettered item a sung word belongs to: the n-th item (in order) whose text holds the word.
+function itemFor(p,w){const k=p.sung.indexOf(w);let pos=0;
+ for(let i=0;i<p.items.length;i++){const toks=p.items[i].text.split(/\s+/).map(norm);for(const t of toks){if(pos===k)return norm(w.text)===t?i:null;pos++;}}return null;}
+function renderRoll(){const R=$("roll");R.style.height=`calc(${end()} * var(--PX))`;R.replaceChildren();
+ for(let t=0;t<end();t+=5)R.insertAdjacentHTML("beforeend",`<div class="tick" style="--at:${t}">${fmt(t).replace(/\.\d$/,"")}</div>`);
+ D.phrases.forEach((p,i)=>{const f=place(document.createElement("button"),p.from,p.to-p.from);f.className="frame"+(i===cur?" on":"");
+  const mini=document.createElement("div");mini.className="mini";const w=document.createElement("div");w.className="world";mini.append(w);f.append(mini);
+  f.insertAdjacentHTML("beforeend",`<span class="cap">${p.id} · ${p.design}</span>`);f.onclick=()=>select(i);R.append(f);
+  requestAnimationFrame(()=>{w.style.transform=`scale(${f.clientWidth/1920})`;drawWorld(w,p,pose(p),false);
+   w.querySelectorAll(".it").forEach((e,k)=>e.onclick=ev=>{ev.stopPropagation();if(i!==cur)select(i);selectItem(k);});});});
+ R.insertAdjacentHTML("beforeend",`<div class="head" id="rhead"></div>`);
+}
+function renderMid(){const p=D.phrases[cur],it=sel?.i!=null?p.items[sel.i]:null;
+ $("crumb").innerHTML=it?`Changing: ${p.id} › <b>“${it.text}”</b> <span class="note">${it.note}</span>`:`Changing: <b>${p.id}</b> · the whole line <span class="note">click a word on the stage or the left to change just it</span>`;
+ const st=$("stage");st.replaceChildren();const w=document.createElement("div");w.className="world";w.id="world";st.append(w);fitStage();
+ $("scrub").min=0;$("scrub").max=D.duration;
+ // lanes: sung words, accents, drawings — timing only
+ const span=p.to-p.from,pc=t=>`${100*(t-p.from)/span}%`;
+ const lane=(name,c,blocks)=>`<div class="lane" style="--c:${c}"><div class="nm">${name}</div><div class="track">${blocks}<span class="lh"></span></div></div>`;
+ $("lanes").innerHTML=lane("Sung words","var(--t-words)",p.sung.map(x=>`<span class="blk" style="left:${pc(x.at)};width:${100*(x.end-x.at)/span}%" data-t="${x.at}">${x.text}</span>`).join(""))
+  +lane("Accents","var(--t-accent)",p.items.map((x,i)=>x.motion==="quiet"?"":`<span class="blk${sel?.i===i?" on":""}" style="left:${pc(p.from+x.accent)};width:5%" data-i="${i}">${x.motion}</span>`).join(""))
+  +lane("Drawings","var(--t-draw)",p.draws.filter(d=>!d.off).flatMap(d=>d.paths).map(q=>`<span class="blk" style="left:${pc(p.from+q.from)};width:${100*(q.to-q.from)/span}%" data-t="${p.from+q.from}">${q.name}</span>`).join(""));
+ $("lanes").querySelectorAll(".blk").forEach(b=>b.onclick=()=>{if(b.dataset.i)selectItem(+b.dataset.i);else seek(+b.dataset.t);});
+ $("tabs").innerHTML=[["look","Look"],["move","Move"],["draw","Draw"]].map(([k,n])=>`<button class="${tab===k?"on":""}" data-k="${k}">${n}</button>`).join("");
+ $("tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{tab=b.dataset.k;renderMid();});
+ renderPanel(p,it);seek(T);
+}
+const card=(on,title,desc,demo,cls="")=>`<button class="fx${on?" on":""}">${demo?`<span class="demo ${cls}">${demo}</span>`:""}<b>${title}</b><small>${desc}</small></button>`;
+function renderPanel(p,it){const P=$("panel");
+ if(tab==="look"&&!it){
+  P.innerHTML=`<div class="lbl">Line designs · ${p.id}</div><div class="cards">${[["poster","Poster","hero words big, context words small, placed in the art (imported from the Pterodactyl film)"],
+   ["card","Caption card","the line set on a cream card, top left"],["plain","Plain line","one quiet line across the bottom"]].map(([k,n,d])=>card(p.design===k,n,d)).join("")}</div>`;
+  P.querySelectorAll(".fx").forEach((b,i)=>b.onclick=()=>{design(p,["poster","card","plain"][i]);render();});return;}
+ if(tab==="look"){
+  P.innerHTML=`<div class="lbl">Lettering for “${it.text}”</div><div class="cards">${LOOKS.map(([k,n,d])=>card(it.font===k,n,d,"fly",`f-${k}`)).join("")}</div>
+   <div class="row" style="margin-top:8px"><span class="note">Colour</span>${COLORS.map(c=>`<button class="sw${it.color===c?" on":""}" style="background:${c}" data-c="${c}"></button>`).join("")}
+   <span class="note">Size</span><input type="range" min="28" max="220" value="${it.size}" id="size"><span class="note">${it.size}px</span>
+   <span class="note">Tilt</span><input type="range" min="-15" max="15" value="${it.rotate||0}" id="tilt"></div>`;
+  P.querySelectorAll(".fx").forEach((b,i)=>b.onclick=()=>{it.font=LOOKS[i][0];render();});
+  P.querySelectorAll(".sw").forEach(b=>b.onclick=()=>{it.color=b.dataset.c;render();});
+  $("size").oninput=e=>{it.size=+e.target.value;renderStageOnly();};$("size").onchange=()=>render();
+  $("tilt").oninput=e=>{it.rotate=+e.target.value;renderStageOnly();};$("tilt").onchange=()=>render();return;}
+ if(tab==="move"&&!it){
+  P.innerHTML=`<div class="lbl">Moves in ${p.id}</div><div class="cards">${p.items.map((x,i)=>card(false,`“${x.text}”`,`${MOVES.find(m=>m[0]===x.motion)[1]} · ${x.motion==="quiet"?"no accent":"accent "+fmt(p.from+x.accent)}`)).join("")}</div>`;
+  P.querySelectorAll(".fx").forEach((b,i)=>b.onclick=()=>selectItem(i));return;}
+ if(tab==="move"){
+  const opts=p.sung.map(w=>`<option value="${w.at-p.from}"${Math.abs(w.at-p.from-it.accent)<.2?" selected":""}>${w.text} · ${fmt(w.at)}</option>`).join("");
+  P.innerHTML=`<div class="lbl">How “${it.text}” moves</div><div class="cards">${MOVES.map(([k,n,d])=>card(it.motion===k,n,d)).join("")}</div>
+   <div class="row" style="margin-top:8px"><span class="note">Accent lands on the sung word</span><select id="acc"><option value="${it.accent}">as imported · ${fmt(p.from+it.accent)}</option>${opts}</select>
+   <button class="fx" id="preview" style="padding:4px 10px">▶ Preview the move</button></div>`;
+  P.querySelectorAll(".cards .fx").forEach((b,i)=>b.onclick=()=>{it.motion=MOVES[i][0];render();previewItem(p,it);});
+  $("acc").onchange=e=>{it.accent=+e.target.value;render();};$("preview").onclick=()=>previewItem(p,it);return;}
+ // draw
+ const all=D.phrases.flatMap(q=>q.draws.map(d=>[q,d]));
+ P.innerHTML=`<div class="lbl">Drawings in ${p.id} · they draw on in time with the line</div><div class="cards">${p.draws.map(d=>card(!d.off,d.name,`${d.paths.length} stroke${d.paths.length>1?"s":""} · draws ${fmt(p.from+Math.min(...d.paths.map(q=>q.from)))}–${fmt(p.from+Math.max(...d.paths.map(q=>q.to)))} · click to ${d.off?"show":"hide"}`)).join("")}</div>
+  <div class="lbl" style="margin-top:8px">Drawing library · add one ${it?`next to “${it.text}”`:"to this line"}</div><div class="cards">${all.filter(([q])=>q!==p).map(([q,d])=>card(false,d.name,`from ${q.id}`)).join("")}</div>`;
+ const cs=P.querySelectorAll(".cards");
+ cs[0].querySelectorAll(".fx").forEach((b,i)=>b.onclick=()=>{p.draws[i].off=!p.draws[i].off;render();});
+ cs[1].querySelectorAll(".fx").forEach((b,i)=>b.onclick=()=>{const [q,d]=all.filter(([q])=>q!==p)[i];const c=JSON.parse(JSON.stringify(d));
+  if(it){c.x=it.x;c.y=it.y+it.size*1.1;}const t0=Math.min(...c.paths.map(x=>x.from)),shift=(it?it.accent:.6)-t0;c.paths.forEach(x=>{x.from+=shift;x.to+=shift;});
+  c.name+=` (from ${q.id})`;p.draws.push(c);render();previewItem(p,it);});
+}
+// Re-lay a phrase in one of the line designs. Poster restores the imported layout.
+function design(p,kind){const o=ORIG.phrases[D.phrases.indexOf(p)];p.design=kind;p.card=null;
+ if(kind==="poster"){p.items=JSON.parse(JSON.stringify(o.items));p.draws.forEach(d=>d.off=false);return;}
+ p.draws.forEach(d=>d.off=true);
+ const size=kind==="card"?60:56,maxW=kind==="card"?760:1500;let x=0,y=0,lines=[[]];
+ p.items.forEach(it=>{const w=it.text.length*size*.5;if(x+w>maxW&&x>0){lines.push([]);x=0;}lines.at(-1).push([it,x,w]);x+=w+size*.35;});
+ const H=size*1.25,top=kind==="card"?110:1080-90-lines.length*H;
+ lines.forEach((ln,r)=>{const width=ln.at(-1)[1]+ln.at(-1)[2],left=kind==="card"?150:(1920-width)/2;
+  ln.forEach(([it,lx])=>Object.assign(it,{x:left+lx,y:top+r*H,size,font:"quiet",color:"#173F49",rotate:0,motion:it.motion==="quiet"?"quiet":"pop"}));});
+ if(kind==="card")p.card={x:110,y:80,w:maxW+80,h:lines.length*H+60};
+}
+function previewItem(p){audio.pause();const a=p.from;let t0=performance.now();const run=()=>{const t=a+(performance.now()-t0)/1000;if(t>p.to){seek(pose(p));return;}seek(t);requestAnimationFrame(run);};run();}
+function fitStage(){const w=$("world");if(w)w.style.transform=`scale(${$("stage").clientWidth/1920})`;}
+addEventListener("resize",()=>{fitStage();renderRoll();});
+function renderStageOnly(){seek(T);}
+function seek(t){T=t;const p=D.phrases[cur];const w=$("world");if(w)drawWorld(w,p,t,true);
+ $("scrub").value=t;$("time").textContent=`${fmt(t)} / ${fmt(D.duration)}`;
+ document.querySelectorAll(".lh").forEach(h=>h.style.setProperty("--p",`${100*clamp((t-p.from)/(p.to-p.from))}%`));
+ document.body.style.setProperty("--now",t);
+ if(!audio.paused){const h=$("lhead");if(h){const r=h.getBoundingClientRect();if(r.top<80||r.top>innerHeight-80)scrollBy({top:r.top-innerHeight/2});}}}
+addEventListener("pointermove",e=>{if(!dragging)return;const it=D.phrases[cur].items[dragging.i];it.x=dragging.x+(e.clientX-dragging.sx)/dragging.sc;it.y=dragging.y+(e.clientY-dragging.sy)/dragging.sc;seek(T);});
+addEventListener("pointerup",()=>{if(dragging){dragging=null;render();}});
+$("play").onclick=()=>{if(!audio.paused){audio.pause();return;}const p=D.phrases[cur];audio.currentTime=T>=pose(p)-.1?p.from:T;audio.play();$("play").textContent="❚❚";
+ const tick=()=>{if(audio.paused){$("play").textContent="▶";return;}const t=audio.currentTime,i=phraseAt(t);if(i>=0&&i!==cur){cur=i;sel={p:i,i:null};render();}seek(t);requestAnimationFrame(tick);};requestAnimationFrame(tick);};
+$("scene").onchange=e=>{scene=e.target.checked;render();};
+$("scrub").oninput=e=>{audio.pause();const t=+e.target.value,i=phraseAt(t);if(i>=0&&i!==cur){cur=i;sel={p:i,i:null};render();}seek(t);};
+</script></body></html>

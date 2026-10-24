@@ -1,0 +1,35 @@
+{
+  "assets": [
+    {
+      "id": "puppet",
+      "kind": "cutout_rig",
+      "name": "Paper puppet",
+      "parts": [
+        {
+          "name": "paper",
+          "solo": false,
+          "verified": false,
+          "visible": true
+        }
+      ],
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+      "preset": null
+    },
+    {
+      "id": "pose_1792786519294739404",
+      "kind": "image",
+      "name": "puppet · wave at 0.5s (pending)",
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/assets/generated-poses/pose-1792786519294739404/pose.png",
+      "preset": null
+    }
+  ],
+  "format": "magicstudio.project",
+  "name": "Generic",
+  "version": 1,
+  "workshop": {
+    "audio": null,
+    "draft_approved": false,
+    "target": "remotion",
+    "video_project": null
+  }
+}

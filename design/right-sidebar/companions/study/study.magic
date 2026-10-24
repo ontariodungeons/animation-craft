@@ -1,0 +1,20 @@
+{
+  "assets": [
+    {
+      "id": "retry_artwork",
+      "kind": "image",
+      "name": "retry-artwork",
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png",
+      "preset": null
+    }
+  ],
+  "format": "magicstudio.project",
+  "name": "study",
+  "version": 1,
+  "workshop": {
+    "audio": null,
+    "draft_approved": false,
+    "target": "remotion",
+    "video_project": null
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "exited": false,
+  "ok": true,
+  "status": "close_requested",
+  "verification": "Check endpoint/process exit after this response; no force kill or silent discard."
+}

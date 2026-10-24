@@ -20,8 +20,9 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-view="project" role="tab" aria-selected="true">Project</button>
       <button class="tab" data-view="animation" role="tab" aria-selected="false" title="Animate objects and polish their motion">Animation</button>
-      <button class="tab" data-view="design" role="tab" aria-selected="false" title="Words and artwork that move with the song">Design</button>
+      <button class="tab" data-view="design" role="tab" aria-selected="false" title="Lyrics and motion graphics timed to the lyrics">Lyrics</button>
       <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
+      <button class="tab" id="tab-skills" data-view="skills" role="tab" aria-selected="false" title="Knowledge skills and tech tools discovered for this project">Skills</button>
       <span class="tab-ink" aria-hidden="true"></span>
     </nav>
     <button class="ghost agent-toggle" id="agent-toggle" aria-controls="magic-workstation" aria-pressed="false" title="Show or hide the right panel: Sproket, Gaffer, Parts &amp; assets (Ctrl+\)">
@@ -104,6 +105,41 @@
         <p>The studio is off.</p>
         <p class="muted">It only runs when you need it.</p>
         <button class="start" id="studio-start">Start the studio</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-skills" aria-label="Skills registry">
+      <div class="skills-body">
+        <header class="skills-head">
+          <h2>Skills &amp; tech tools</h2>
+          <p class="muted">Knowledge discovered for this project: what each skill does, whether it is implemented in Magic Studio, and where it plugs in.</p>
+        </header>
+        <div class="skills-list" id="skills-list">
+          <p class="muted">Loading skills…</p>
+        </div>
+        <div class="skills-add" id="skills-add">
+          <h3>Add a skill</h3>
+          <form id="skills-add-form">
+            <label>Skill id<input id="skill-id" placeholder="ffmpeg-skill" required /></label>
+            <label>Name<input id="skill-name" placeholder="ffmpeg-skill" required /></label>
+            <label>Description<input id="skill-description" placeholder="What it does" /></label>
+            <label>Status
+              <select id="skill-status" required>
+                <option value="researching">researching</option>
+                <option value="implemented">implemented</option>
+                <option value="not_implemented">not implemented</option>
+              </select>
+            </label>
+            <label>Source / URL<input id="skill-source" placeholder="https://github.com/..." /></label>
+            <label>Implemented at (commands)<input id="skill-implemented-at" placeholder="video.export, check.py" /></label>
+            <label>Implemented in (files)<input id="skill-implemented-in" placeholder="crates/engine/src/exports.rs" /></label>
+            <label>Integration notes<textarea id="skill-integration-notes" placeholder="Where it plugs into the engine / UI"></textarea></label>
+            <div class="sheet-actions">
+              <button type="button" class="ghost" id="skills-add-cancel">Cancel</button>
+              <button type="submit" class="start" id="skills-add-create">Register skill</button>
+            </div>
+          </form>
+        </div>
       </div>
     </section>
   </main>
@@ -196,6 +232,7 @@
   <script src="sequence.js"></script>
   <script src="agent.js"></script>
   <script src="home.js"></script>
+  <script src="skills.js"></script>
   <script src="bridge.js"></script>
   <script src="companions.js"></script>
 </body>

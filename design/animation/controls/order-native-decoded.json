@@ -1,0 +1,16 @@
+{
+  "overlap_pixel": [
+    220,
+    40,
+    40,
+    255
+  ],
+  "pending": "pending",
+  "time": 0.5,
+  "layer_ids": [
+    "child-card",
+    "parent-card"
+  ],
+  "source": "cards",
+  "errors": []
+}

@@ -690,6 +690,7 @@ async function setView(view, action) {
   placeInk();
   if (view === "animation") { await invoke("studio_hide"); await animationOpen(); }
   else if (view === "design") { await invoke("studio_hide"); await wordsOpen(); }
+  else if (view === "skills") { await invoke("studio_hide"); if (typeof renderSkills === "function") renderSkills(); }
   else if (view !== "project" && serverUrl()) { await new Promise(requestAnimationFrame); await showStudio(); }
   else {
     await invoke("studio_hide");
@@ -755,6 +756,7 @@ async function toggleServer() {
 
 async function load() {
   await loadComponents();
+  if (typeof setupSkillsAdd === "function") setupSkillsAdd();
   const start = await invoke("startup");
   state.studioUrl = start.studio || null;
   if (!start.project) return showHome();

@@ -1,0 +1,11 @@
+{
+  "audioNote": "MLT exports the audio selected in the saved timeline. HyperFrames picture placement stays muted; it does not route that audio into the film soundtrack.",
+  "backend": "mlt",
+  "capability": "",
+  "command": "mlt.start",
+  "errors": [],
+  "mltVisible": true,
+  "synfigVisible": false,
+  "timelineMounted": true,
+  "toonzVisible": false
+}

@@ -1,0 +1,17 @@
+Magic Studio right-sidebar design proposal
+
+Jesse requests an agent-designed polish proposal in FigCraft and a review link. All task-created files MUST live under /run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/. No /tmp, other worktrees, home exports or cloud uploads for deliverables/logs/scripts. Automatic tool caches aside, explicitly direct every output here.
+
+Source reference: current-ui.png and current-ui-state.json captured from Fozzie’s live frontend. Build dff092b has identical source tree to integration/blender-animation62fe814; draft PR https://github.com/ontariodungeons/animation-craft/pull/25. App control19927 belongs to Fozzie; do not operate/restart it. Source layout files may be READ in /run/media/jesse/Speedy/Work/wt-blender-animation-integration/apps/magicstudio-shell/ui. No app-code changes.
+
+Design goal: retain the good calm dark/teal interface while making room for the expanding right-sidebar responsibilities. The dog assistant (currently labelled Sproket in app; don’t invent a spelling change) talks with humans and coordinates. Gaffer the cat is the native Codex/Luna artwork assistant; its name stays stable when model choice changes. Human, cat, dog and AI collaborate to make magic happen. Keep useful artwork focus, not technical clutter.
+
+Responsibilities to organize: conversation/context, model/settings tucked away; Gaffer prompt/template/reference inputs, generation/cancel/progress; candidate preview and approve/apply/history; selected object/part context; parts/assets browsing; clear source/current candidate distinctions. Future templates and part editing must be labelled proposed, not represented as implemented. Backstage remains separate and owns deep metrics. Preserve access to options without showing all controls at once.
+
+Produce one recommended approach and one meaningfully different alternative, not a large speculative redesign. Include 340px and280px sidebar contexts and at least generating/review states. Consider single active workspace vs current stacked panes; maintain persistent selected-target identity and job state. Avoid duplicate nested headers and ambiguous competing teal primary actions. Keep typographic contrast, reachable settings/controls, and the drawing/video canvas usable.
+
+Read FigCraft skill /home/jesse/.agents/skills/figcraft/SKILL.md and current shell UI skill in the integration tree. Use actual native FigCraft layers/components/frames; save editable .figcraft. Export PNGs and inspect pixels. Do not deliver only a generated image or a hand-coded screenshot pretending to be FigCraft.
+
+Deliver sidebar-proposal.figcraft, inspected PNGs, and index.html review page with images, concise rationale/tradeoffs, and a relative download link to the native document. The HTML is a simple review page, not production UI or a renderer. All files and any CLI batch input/scripts/logs stay in this directory. Existing current-ui reference must be preserved.
+
+Task is design-only. No installs, source edits, generated media in Git source commits, backend work, tests or audits of other agents. Use installed FigCraft MCP or figcraft-cli. No need to create a separate worktree because you only write this explicitly assigned artifact directory. Keep user focus unchanged. Fozzie will host/check review link and review the pixels. Report file paths and native document verification. Stop after the deliverable.

@@ -1,11 +1,7 @@
 //! Booth presentation consumes cached observations; drawing never drives the app.
 use super::*;
 
-pub(super) fn panel(title:impl Into<String>,active:bool)->Block<'static>{
- Block::default().borders(Borders::ALL).border_type(ratatui::widgets::BorderType::Rounded)
-  .border_style(Style::default().fg(DESK_LINE).add_modifier(if active{Modifier::BOLD}else{Modifier::empty()}))
-  .title(Span::styled(format!(" {} ",title.into()),MUTED))
-}
+pub(super) fn panel(title:impl Into<String>,active:bool)->Block<'static>{quiet_panel(title,active)}
 pub(super) fn age_label(ms:u64)->String{
  let seconds=ms/1000;if seconds<60{format!("{seconds}s")}else if seconds<3600{format!("{}m {}s",seconds/60,seconds%60)}else{format!("{}h {}m",seconds/3600,seconds/60%60)}
 }

@@ -1,0 +1,24 @@
+{
+  "checked": true,
+  "companionRects": [
+    [
+      "companion-gaffer",
+      349.734375,
+      14.5,
+      34,
+      18
+    ],
+    [
+      "companion-sproket",
+      525.625,
+      72.84375,
+      34,
+      18
+    ]
+  ],
+  "label": " Ambient ASCII companions (off by default)",
+  "viewport": [
+    725,
+    1385
+  ]
+}

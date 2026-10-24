@@ -1,0 +1,149 @@
+diff --git c/apps/magicstudio-shell/tests/blender-placement.mjs i/apps/magicstudio-shell/tests/blender-placement.mjs
+new file mode 100644
+index 0000000..8486bcb
+--- /dev/null
++++ i/apps/magicstudio-shell/tests/blender-placement.mjs
+@@ -0,0 +1,32 @@
++// Generic application fixture: real placement controls, synthetic registry boundary; no render/media writes.
++import vm from 'node:vm';
++import assert from 'node:assert/strict';
++import {existsSync,readFileSync} from 'node:fs';
++const source=new URL('../ui/blender-placement.js',import.meta.url);
++function fixture(options={}){
++ const nodes=new Map(),calls=[],copied=[];let live=true,job={state:'completed',partial:false,job:'magicstudio-blender-fixture',character:'paper-puppet',track:'wave',canvas:[64,96],clip_seconds:3,...options.job};
++ const el=(tag,attrs={},...children)=>{const n={tag,...attrs,children:children.flat(),style:{},events:{},textContent:children.filter(c=>typeof c==='string').join(''),_value:attrs.value,
++  append(...c){this.children.push(...c)},replaceChildren(...c){this.children=c},addEventListener(type,fn){this.events[type]=fn},setAttribute(k,v){this[k]=v},
++  get options(){return this.children.filter(c=>c?.tag==='option')},get value(){return this._value??this.options[0]?.value??''},set value(v){this._value=String(v)},
++ };if(attrs.id)nodes.set(attrs.id,n);return n;};
++ const context=vm.createContext({console,JSON,el,navigator:{clipboard:{writeText:async text=>copied.push(text)}},motionCommand:async(id,params)=>{
++  calls.push({id,params});if(id==='storyboard.toc'){if(options.sceneError)throw Error('Scene source unavailable');return {chapters:options.empty?[]:[{scene:7,title:'Opening'},{scene:9,title:'Bridge'}]};}
++  if(id==='storyboard.read')return params.scene===7?{scene:7,start:12,end:14}:{scene:9,start:18,end:21};
++  if(id==='video.place_track'){if(options.place)return options.place(params);return {...params,ok:true,canvas_rect:params.rect,media:'/generic/hyperframes/assets/animation/placed.webm',backup:'/generic/hyperframes/.magicstudio-history/index.html',track_index:2};}
++  throw Error(`Unexpected command ${id}`);
++ }});
++ if(existsSync(source))vm.runInContext(readFileSync(source,'utf8'),context);
++ assert.equal(typeof context.blenderPlacementControls,'function','Place in scene controls must exist');
++ const panel=context.blenderPlacementControls({project:'/generic/Study.magic',getJob:()=>job,current:()=>live});
++ return {panel,nodes,calls,copied,setJob:value=>{job=value;panel.refresh()},close:()=>{live=false},change:async(id,value)=>{const n=nodes.get(id);n.value=value;await (n.events.change||n.events.input)?.()},click:id=>nodes.get(id).onclick(),status:()=>nodes.get('blender-place-status').textContent};
++}
++const tests=[
++ ['uses authored scenes and exact frozen-job request/CLI, confirms actual returned placement',async()=>{const f=fixture();await f.panel.load();assert.equal(f.nodes.get('blender-place-scene').options[0].value,'7');assert.equal(f.nodes.get('blender-place-start').value,'12');assert.equal(f.nodes.get('blender-place-duration').value,'2');const command="mc exec video.place_track 'project=/generic/Study.magic' 'id=blender-scene-7-wave' 'blender_job=magicstudio-blender-fixture' 'scene=7' 'start=12' 'duration=2' 'rect=[0,0,64,96]' 'playback_rate=1' 'character=paper-puppet' 'track=wave'";assert.equal(f.nodes.get('blender-place-command').textContent,command);await f.click('blender-place-copy');assert.equal(f.copied[0],command);await f.click('blender-place-submit');const p=f.calls.find(c=>c.id==='video.place_track').params;assert.equal(JSON.stringify(p),JSON.stringify({id:'blender-scene-7-wave',blender_job:'magicstudio-blender-fixture',scene:7,start:12,duration:2,rect:[0,0,64,96],playback_rate:1,character:'paper-puppet',track:'wave'}));assert.match(f.status(),/Placed.*scene 7.*track 2/);const readback=JSON.parse(f.nodes.get('blender-place-result').textContent);assert.equal(readback.blender_job,p.blender_job);assert.equal(readback.track_index,2);assert.ok(readback.backup)}],
++ ['partial/missing/running receipts cannot be placed',async()=>{for(const job of [{partial:true},{state:'running'},{partial:undefined}]){const f=fixture({job});await f.panel.load();assert.equal(f.nodes.get('blender-place-submit').disabled,true);await f.click('blender-place-submit');assert.equal(f.calls.some(c=>c.id==='video.place_track'),false);assert.match(f.status(),/full|completed/i)}}],
++ ['duration honors playback rate and invalid rect/id never dispatch',async()=>{const f=fixture();await f.panel.load();await f.change('blender-place-rate',2);await f.click('blender-place-submit');assert.match(f.status(),/covers.*1.5/);assert.equal(f.calls.some(c=>c.id==='video.place_track'),false);await f.change('blender-place-duration',1);await f.change('blender-place-width',0);await f.click('blender-place-submit');assert.match(f.status(),/rectangle/i);await f.change('blender-place-width',64);await f.change('blender-place-id','bad id');await f.click('blender-place-submit');assert.match(f.status(),/ID/);assert.equal(f.calls.some(c=>c.id==='video.place_track'),false)}],
++ ['scene change uses authored timing and preserves a user placement ID',async()=>{const f=fixture();await f.panel.load();await f.change('blender-place-id','existing-placement');await f.change('blender-place-scene',9);assert.equal(f.nodes.get('blender-place-start').value,'18');assert.equal(f.nodes.get('blender-place-duration').value,'3');assert.equal(f.nodes.get('blender-place-id').value,'existing-placement')}],
++ ['no authored scenes and scene read errors stay visible',async()=>{for(const opts of [{empty:true},{sceneError:true}]){const f=fixture(opts);await f.panel.load();assert.equal(f.nodes.get('blender-place-submit').disabled,true);assert.match(f.status(),/scene/i);assert.equal(f.calls.some(c=>c.id==='video.place_track'),false)}}],
++ ['backend errors and incomplete success cannot masquerade as placed',async()=>{for(const place of [()=>{throw Error('Clip hash mismatch')},()=>({ok:false,error:'Missing composition'}),()=>({ok:true})]){const f=fixture({place});await f.panel.load();await f.click('blender-place-submit');assert.doesNotMatch(f.status(),/^Placed/);assert.match(f.status(),/hash mismatch|Missing composition|confirmation/);assert.equal(f.nodes.get('blender-place-status').className,'image-error')}}],
++ ['pending placement is single-flight; stale completion cannot update another selection',async()=>{let finish;const f=fixture({place:()=>new Promise(resolve=>finish=resolve)});await f.panel.load();const p=f.click('blender-place-submit');await f.click('blender-place-submit');assert.equal(f.calls.filter(c=>c.id==='video.place_track').length,1);f.close();finish({ok:true});await p;assert.doesNotMatch(f.status(),/^Placed/)}],
++];
++let failed=0;for(const [name,test] of tests){try{await test();console.log('PASS placement: '+name)}catch(e){failed++;console.error('FAIL placement: '+name+'\n'+e.stack)}}assert.equal(failed,0,`${failed} placement regressions failed`);
+diff --git c/apps/magicstudio-shell/ui/blender-placement.js i/apps/magicstudio-shell/ui/blender-placement.js
+new file mode 100644
+index 0000000..e457da7
+--- /dev/null
++++ i/apps/magicstudio-shell/ui/blender-placement.js
+@@ -0,0 +1,105 @@
++// Place only a completed full receipt. The backend verifies media and maps the canvas rectangle.
++function blenderPlacementControls({project,getJob,current}){
++ let scene=null,placing=false,renderBusy=false,lastJob=null,defaultId='',sceneRevision=0;
++ const field=(name,label,value,type='number')=>{
++  const input=el('input',{id:`blender-place-${name}`,type,value:String(value),step:'any','aria-label':label,style:'width:100%;min-width:0;box-sizing:border-box'});
++  return {input,node:el('label',{},label,input)};
++ };
++ const scenePicker=el('select',{id:'blender-place-scene','aria-label':'Destination scene'});
++ const id=field('id','Placement ID','','text'),start=field('start','Start (absolute seconds)',0),duration=field('duration','Duration (seconds)',1),rate=field('rate','Playback rate',1);
++ const rect=[field('x','X (video pixels)',0),field('y','Y (video pixels)',0),field('width','Width (video pixels)',0),field('height','Height (video pixels)',0)];
++ const jobInfo=el('p',{class:'muted',id:'blender-place-job'});
++ const status=el('p',{id:'blender-place-status',role:'status','aria-live':'polite',class:'muted'});
++ const command=el('code',{id:'blender-place-command',style:'white-space:pre-wrap;overflow-wrap:anywhere'});
++ const readback=el('pre',{id:'blender-place-result','aria-label':'Placement result',style:'white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto'});
++ const place=el('button',{id:'blender-place-submit',class:'ghost','data-commands':'video.place_track',disabled:true},'Place in scene');
++ const copy=el('button',{id:'blender-place-copy',class:'ghost',disabled:true},'Copy placement command');
++ const inputs=[scenePicker,id.input,start.input,duration.input,rate.input,...rect.map(f=>f.input)];
++ const message=(text,error=false)=>{status.textContent=text;status.className=error?'image-error':'muted';};
++ const number=(input,label)=>{if(!String(input.value).trim())throw Error(`Enter ${label}`);const v=Number(input.value);if(!Number.isFinite(v))throw Error(`Invalid ${label}`);return v;};
++ function request(){
++  const job=getJob();
++  if(!job||job.state!=='completed'||job.partial!==false)throw Error('Render a completed full action before placing it in a scene.');
++  if(renderBusy)throw Error('Wait for the current render before placing.');
++  if(!scene)throw Error('Choose an authored scene before placing.');
++  if(!/^[a-zA-Z0-9_-]+$/.test(id.input.value))throw Error('Placement ID must use letters, numbers, underscores or hyphens.');
++  const t=number(start.input,'start'),d=number(duration.input,'duration'),r=number(rate.input,'playback rate'),box=rect.map(f=>number(f.input,'rectangle'));
++  if(t<0||d<=0)throw Error('Start must be nonnegative and duration positive.');
++  if(r<=0||r>16)throw Error('Playback rate must be in (0,16].');
++  if(box[2]<=0||box[3]<=0)throw Error('Placement rectangle width and height must be positive.');
++  if(!Number.isFinite(job.clip_seconds)||job.clip_seconds<=0)throw Error('Completed receipt has no valid clip duration.');
++  if(d>job.clip_seconds/r+1e-6)throw Error(`Clip covers ${(job.clip_seconds/r).toFixed(3)}s at this playback rate; shorten the duration or lower the rate.`);
++  if(!job.job||!job.character||!job.track)throw Error('Completed receipt is missing its job or source action identity.');
++  return {id:id.input.value,blender_job:job.job,scene:scene.scene,start:t,duration:d,rect:box,playback_rate:r,character:job.character,track:job.track};
++ }
++ const quote=value=>`'${String(value).replaceAll("'","'\\''")}'`;
++ function update(){
++  for(const input of inputs)input.disabled=placing||renderBusy;
++  try{
++   const params=request();
++   command.textContent=`mc exec video.place_track ${quote(`project=${project}`)} ${Object.entries(params).map(([key,value])=>quote(`${key}=${Array.isArray(value)?JSON.stringify(value):value}`)).join(' ')}`;
++   place.disabled=copy.disabled=placing;
++  }catch(error){place.disabled=copy.disabled=true;command.textContent='';if(!placing)message(String(error),true);}
++ }
++ function sceneId(){
++  if(!scene)return;
++  const next=`blender-scene-${scene.scene}-${getJob()?.track||'action'}`.replace(/[^a-zA-Z0-9_-]/g,'-');
++  if(!id.input.value||id.input.value===defaultId)id.input.value=next;
++  defaultId=next;
++ }
++ function refresh(){
++  const job=getJob();
++  if((job?.job||null)!==lastJob){
++   lastJob=job?.job||null;readback.textContent='';
++   const canvas=job?.canvas;
++   if(Array.isArray(canvas)&&canvas.length===2&&canvas.every(v=>Number.isFinite(v)&&v>0)){
++    rect.forEach((f,i)=>{f.input.value=String([0,0,...canvas][i]);});
++   }
++   sceneId();
++  }
++  jobInfo.textContent=job?`${job.character||''} · ${job.track||''} · ${job.job} · ${job.partial===false?'full action':'preview'}`:'No completed action selected.';
++  update();
++ }
++ async function selectScene(){
++  const revision=++sceneRevision,n=Number(scenePicker.value);scene=null;update();
++  try{
++   const value=await motionCommand('storyboard.read',{scene:n});
++   if(!current()||revision!==sceneRevision)return;
++   if(value.scene!==n||!Number.isFinite(value.start)||!Number.isFinite(value.end)||value.end<=value.start)throw Error('Scene has no valid authored timing.');
++   scene=value;start.input.value=String(value.start);duration.input.value=String(value.end-value.start);sceneId();message('Ready to place. Start uses absolute project time.');refresh();
++  }catch(error){if(current()&&revision===sceneRevision){message(String(error),true);place.disabled=copy.disabled=true;}}
++ }
++ async function load(){
++  try{
++   const toc=await motionCommand('storyboard.toc');if(!current())return;
++   const chapters=(toc.chapters||[]).filter(s=>Number.isSafeInteger(s.scene)&&s.scene>0);
++   scenePicker.replaceChildren(...chapters.map(s=>el('option',{value:String(s.scene)},s.title||`Scene ${s.scene}`)));
++   if(!chapters.length){scene=null;update();message('No authored scenes. Add storyboard scenes, then reopen Animation.',true);return;}
++   scenePicker.value=String(chapters[0].scene);await selectScene();
++  }catch(error){if(current()){scene=null;update();message(`Cannot read scenes: ${String(error)}`,true);}}
++ }
++ scenePicker.addEventListener('change',selectScene);
++ for(const input of inputs.filter(n=>n!==scenePicker))input.addEventListener('input',()=>{message('Ready to place.');update();});
++ copy.onclick=async()=>{try{request();await navigator.clipboard.writeText(command.textContent);if(current())message('Exact placement command copied; nothing executed.');}catch(error){if(current())message(String(error),true);}};
++ place.onclick=async()=>{
++  if(placing||!current())return;
++  let params;try{params=request();}catch(error){message(String(error),true);return;}
++  placing=true;update();message('Placing rendered action…');
++  try{
++   const result=await motionCommand('video.place_track',params);
++   if(!current()||getJob()?.job!==params.blender_job)return;
++   readback.textContent=JSON.stringify(result,null,2);
++   if(result.ok!==true)throw Error(result.error||'Placement command did not confirm success.');
++   if(result.id!==params.id||result.blender_job!==params.blender_job||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
++   message(`Placed ${result.id} · scene ${params.scene} · track ${result.track_index}.`);
++  }catch(error){if(current()&&getJob()?.job===params.blender_job)message(String(error),true);}
++  finally{placing=false;if(current())update();}
++ };
++ const node=el('details',{id:'blender-placement',class:'motion-section'},el('summary',{},'Place in scene'),
++  el('div',{class:'card',style:'padding:8px;display:grid;gap:8px'},jobInfo,el('label',{},'Authored scene',scenePicker),id.node,
++   el('p',{class:'muted'},'An existing placement with this ID is replaced. Rectangle frames the original canvas in video pixels; the backend maps the rendered frame.'),
++   start.node,duration.node,rate.node,el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:6px'},...rect.map(f=>f.node)),place,status,
++   el('details',{},el('summary',{},'Exact CLI command'),command,copy),el('details',{},el('summary',{},'Placement result'),readback)));
++ refresh();
++ return {node,load,refresh,setBusy(value){renderBusy=value;update();}};
++}

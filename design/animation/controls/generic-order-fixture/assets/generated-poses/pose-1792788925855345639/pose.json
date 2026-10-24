@@ -1,0 +1,181 @@
+{
+  "amount": 100.0,
+  "approval": "pending",
+  "asset_id": "pose_1792788925855345639",
+  "canvas": [
+    64,
+    64
+  ],
+  "image_sha256": "319d2700a630ef72fe145e8cea060dc77c71e57f002eebdd0d3f7b346cc784fc",
+  "layers": [
+    {
+      "base_geometry": {
+        "canvas": [
+          64,
+          64
+        ],
+        "crop": [
+          22,
+          22,
+          58,
+          58
+        ],
+        "pivot": [
+          32.0,
+          32.0
+        ]
+      },
+      "crop": [
+        22,
+        22,
+        58,
+        58
+      ],
+      "depth": 0,
+      "file": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/.layered_preview_cache/rig/00_child-card_crop.png",
+      "id": "child-card",
+      "image_sha256": null,
+      "label": "child-card",
+      "order": 0,
+      "parent": "parent-card",
+      "pivot": [
+        32.0,
+        32.0
+      ],
+      "source_file": null,
+      "source_size": null,
+      "state": {
+        "name": "child-card",
+        "solo": false,
+        "verified": false,
+        "visible": true
+      }
+    },
+    {
+      "base_geometry": {
+        "canvas": [
+          64,
+          64
+        ],
+        "crop": [
+          6,
+          6,
+          50,
+          50
+        ],
+        "pivot": [
+          32.0,
+          32.0
+        ]
+      },
+      "crop": [
+        6,
+        6,
+        50,
+        50
+      ],
+      "depth": 1,
+      "file": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/.layered_preview_cache/rig/01_parent-card_crop.png",
+      "id": "parent-card",
+      "image_sha256": null,
+      "label": "parent-card",
+      "order": 1,
+      "parent": null,
+      "pivot": [
+        32.0,
+        32.0
+      ],
+      "source_file": null,
+      "source_size": null,
+      "state": {
+        "name": "parent-card",
+        "solo": false,
+        "verified": false,
+        "visible": true
+      }
+    }
+  ],
+  "ok": true,
+  "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/assets/generated-poses/pose-1792788925855345639/pose.png",
+  "project_saved": false,
+  "receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/assets/generated-poses/pose-1792788925855345639/pose.json",
+  "reference": null,
+  "rest": false,
+  "rig_sha256": "622751823682259c1561bdf6c671403086a14518b70d95fe635002a8dd7a3cd0",
+  "sample": {
+    "bounds": [
+      6.0,
+      6.0,
+      58.0,
+      58.0
+    ],
+    "character": "cards",
+    "duration": 1.0,
+    "effective_parents": [
+      "parent-card",
+      null
+    ],
+    "fps": 24.0,
+    "frames": [
+      {
+        "layers": [
+          {
+            "matrix": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "opacity": 1.0,
+            "position": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "matrix": [
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            "opacity": 1.0,
+            "position": [
+              0.0,
+              0.0
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ]
+          }
+        ],
+        "time": 0.5
+      }
+    ],
+    "layer_ids": [
+      "child-card",
+      "parent-card"
+    ],
+    "loop": false,
+    "ok": true,
+    "rest": false,
+    "track": "hold"
+  },
+  "sampler": "motion.sample",
+  "sampling": "nearest-neighbor affine PNG; saved canvas, clipped to canvas",
+  "source_character": "cards",
+  "theatre_applied": false,
+  "time": 0.5,
+  "track": "hold"
+}

@@ -19,10 +19,14 @@ mod center;
 mod dials;
 mod find;
 mod logo;
+mod mcp_presence;
+mod mcp_watch;
 mod local_ui;
 mod snapshot;
 mod studios;
 mod telemetry;
+mod touch;
+mod theme;
 mod tui;
 mod scope;
 mod worker;
@@ -186,7 +190,18 @@ fn bridge_timeout(id: &str) -> std::time::Duration {
     std::time::Duration::from_secs(if long { 3600 } else { 30 })
 }
 
+/// Names the caller on a command: the herdr pane it runs in. Every UI action goes through the
+/// CLI, so the journal can say which agent touched which element. Unverified, never overwritten.
+fn with_client(mut params: Value) -> Value {
+    if let (true, Ok(pane)) = (params.is_object() && params["_client"].is_null(), std::env::var("HERDR_PANE_ID")) {
+        params["_client"] = json!(format!("herdr:{pane}"));
+    }
+    params
+}
+
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
+    let params = with_client(params);
+    touch::record(id, &params);
     if let Some(scope)=scope::current()?{
         let params=scope.params(id,params)?;
         if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
@@ -413,6 +428,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
     let mut session = Session::user_session();
+    let _presence = mcp_presence::announce(bridge.as_deref());
     let mut stop_after_reply = false;
     for line in stdin.lock().lines().map_while(Result::ok) {
         let trimmed = line.trim();
@@ -438,7 +454,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         "name": "mc",
                         "version": env!("CARGO_PKG_VERSION")
                     },
-                    "instructions": if scope::current().ok().flatten().is_some(){"Project-assigned Booth. Only the granted project tools are available. Project identity is fixed; Workshop and global controls belong to Jesse and Gonzo."}else{MCP_INSTRUCTIONS}
+                    "instructions": format!("{}{}",if scope::current().ok().flatten().is_some(){"Project-assigned Booth. Only the granted project tools are available. Project identity is fixed; Workshop and global controls belong to Jesse and Gonzo."}else{MCP_INSTRUCTIONS},mcp_presence::orientation(bridge.as_deref()))
                 }
             }),
             "tools/list" => {
@@ -656,6 +672,8 @@ fn base64(bytes: &[u8]) -> String {
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
 pub(crate) fn dispatch(session:&mut Session,id:&str,params:Value)->Result<Value,String>{
+ let params=with_client(params);
+ touch::record(id,&params);
  if let Some(scope)=scope::current()?{
   let params=scope.params(id,params)?;
   if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
@@ -791,7 +809,7 @@ fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String>
 fn main() {
     let a = args::Args::parse(cli_args().iter().cloned().skip(1));
     let assignment=scope::current().unwrap_or_else(|e|fail(e));
-    if assignment.is_some()&&a.help{outln!("Project Booth: mc booth | tui | commands | exec <granted command> | run | mcp. Views: BOOTH / MOPS / ANIMAL. Workshop and global controls belong to Jesse and Gonzo.");return;}
+    if assignment.is_some()&&a.help{outln!("Project Booth: mc booth | tui | commands | exec <granted command> | run | mcp. Views: BOOTH / MOPS / MAYHEM. Workshop and global controls belong to Jesse and Gonzo.");return;}
     if a.help {
         outln!("{HELP}");
         return;
@@ -1256,6 +1274,15 @@ mod tests {
 
 #[cfg(test)]
 mod project_argument_tests {
+    #[test]
+    fn a_call_names_its_herdr_pane_without_overwriting_a_supplied_label() {
+        // HERDR_PANE_ID is set by herdr for every pane; with it unset nothing is invented.
+        let pane = std::env::var("HERDR_PANE_ID").ok();
+        let stamped = with_client(json!({"a": 1}));
+        assert_eq!(stamped["_client"].as_str().map(str::to_owned), pane.map(|p| format!("herdr:{p}")));
+        assert_eq!(with_client(json!({"_client": "me"}))["_client"], "me");
+        assert_eq!(with_client(json!("not an object")), json!("not an object"));
+    }
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     fn temp(name: &str) -> std::path::PathBuf {

@@ -1,0 +1,25 @@
+{
+  "animating": false,
+  "dedupe": 7,
+  "enabled": false,
+  "gaffer": {
+    "command": "project.save",
+    "destination": "animation",
+    "key": "[\"project.save\",null,null,null,null,null,null,null,null]",
+    "reason": "completed: project.save",
+    "request": "studio-906994-1792779937075-3",
+    "status": "completed"
+  },
+  "hidden": false,
+  "jobs": 0,
+  "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+  "reducedMotion": false,
+  "sproket": {
+    "command": "project.add_asset",
+    "destination": "chat",
+    "key": null,
+    "reason": "Resolved: project.add_asset",
+    "request": "ambient-1792779836438-98",
+    "status": "resolved"
+  }
+}

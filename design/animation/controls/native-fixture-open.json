@@ -1,0 +1,142 @@
+{
+  "_ui_engine_revision": 3,
+  "assets": [
+    {
+      "id": "puppet",
+      "kind": "cutout_rig",
+      "name": "Paper puppet",
+      "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+      "preset": null
+    }
+  ],
+  "missing": [],
+  "ok": true,
+  "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+  "warnings": [],
+  "workshop": {
+    "asset_files": [],
+    "complete": false,
+    "ok": true,
+    "project_dir": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture",
+    "stages": [
+      {
+        "brief": "No studio intent yet: write it in /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/intent.md or STUDIO.md beside the projects.\nProject folder: /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture\nWorkshop state: mc exec workshop.status (run project.open path=<the .magic> first)\nStoryboard (read it first): /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf — pdfcraft-cli text <pdf> --page N\n\nStage 1 — Song. Point the project at the song (never copy audio) and add the artist's liner notes.\n  mc exec workshop.set_audio path=<song>\n  mc exec workshop.add kind=liner_notes paths='[\"<file>\"]'",
+        "done": false,
+        "id": "song",
+        "inputs": [],
+        "outputs": [
+          {
+            "exists": false,
+            "name": "remotion/generic",
+            "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/remotion",
+            "target": "remotion"
+          }
+        ],
+        "title": "Song",
+        "why": "Choose the song's audio."
+      },
+      {
+        "brief": "No studio intent yet: write it in /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/intent.md or STUDIO.md beside the projects.\nProject folder: /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture\nWorkshop state: mc exec workshop.status (run project.open path=<the .magic> first)\nStoryboard (read it first): /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf — pdfcraft-cli text <pdf> --page N\n\nStage 2 — Transcription & transcoding. FilmCraft speech-to-text, headless; it also writes <song>.fcproj with the song on a sequence.\n  mc exec audio.transcribe\nAlready have a transcript? mc exec workshop.import_transcript path=<file> (it is checked first).\nVideo target: remotion.",
+        "document": null,
+        "done": false,
+        "id": "transcript",
+        "inputs": [],
+        "outputs": [
+          {
+            "exists": false,
+            "name": "remotion/generic",
+            "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/remotion",
+            "target": "remotion"
+          }
+        ],
+        "target": {
+          "chip": {
+            "exists": false,
+            "name": "remotion/generic",
+            "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/remotion",
+            "target": "remotion"
+          },
+          "path": null,
+          "ready": false,
+          "target": "remotion"
+        },
+        "title": "Transcription & transcoding",
+        "why": "Transcribe the song to timestamp lyrics and initialize the video project."
+      },
+      {
+        "approved": false,
+        "brief": "No studio intent yet: write it in /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/intent.md or STUDIO.md beside the projects.\nProject folder: /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture\nWorkshop state: mc exec workshop.status (run project.open path=<the .magic> first)\nStoryboard (read it first): /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf — pdfcraft-cli text <pdf> --page N\n\nStage 3 — Reference art. Template: storyboard/panel-NN.png (+ panel-NN.prompt.md with the exact prompt), storyboard/storyboard.pdf, assets/<name>.png (static, transparent).\nPanel N illustrates line N of each verse. Follow the studio intent above for style and image rules.\n  mc exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>\n  mc exec workshop.build_storyboard\nCut-outs with PhotoCraft only: mc exec intake.validate image=<panel> asset=<name>",
+        "done": false,
+        "id": "reference",
+        "inputs": [],
+        "outputs": [
+          {
+            "exists": false,
+            "name": "storyboard.pdf",
+            "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf"
+          }
+        ],
+        "pdf": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf",
+        "title": "Reference art",
+        "why": "Add storyboard panels (split a storyboard grid or add panel images)."
+      },
+      {
+        "assets": [
+          {
+            "animatable": false,
+            "controls": [],
+            "id": "puppet",
+            "kind": "cutout_rig",
+            "name": "Paper puppet",
+            "parts": null,
+            "path": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+            "tracks": null
+          }
+        ],
+        "brief": "No studio intent yet: write it in /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/intent.md or STUDIO.md beside the projects.\nProject folder: /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture\nWorkshop state: mc exec workshop.status (run project.open path=<the .magic> first)\nStoryboard (read it first): /run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/storyboard/storyboard.pdf — pdfcraft-cli text <pdf> --page N\n\nStage 4 — Animate assets. One animated subject at a time over its background; not every asset animates.\nExport layered files for the video target (remotion); never render or encode video.\nSkills: /run/media/jesse/Speedy/Work/omhas-animation/.worktrees/authoring-controls/.agents/skills/layered-motion/SKILL.md",
+        "done": true,
+        "id": "animate",
+        "inputs": [],
+        "optional": true,
+        "title": "Animate assets",
+        "why": "Pick an animated subject to rig or preview; static assets stay on video tracks."
+      }
+    ],
+    "studio": {
+      "intent": null,
+      "name": null,
+      "source": null
+    },
+    "targets": [
+      {
+        "exists": false,
+        "path": null,
+        "selected": true,
+        "target": "remotion"
+      },
+      {
+        "exists": false,
+        "path": null,
+        "selected": false,
+        "target": "filmcraft"
+      },
+      {
+        "exists": false,
+        "path": null,
+        "selected": false,
+        "target": "hyperframes"
+      }
+    ],
+    "video_project": null,
+    "video_project_path": null,
+    "video_server": {
+      "managed": false,
+      "pid": null,
+      "port": null,
+      "running": false,
+      "target": "remotion",
+      "url": null
+    },
+    "video_target": "remotion"
+  }
+}

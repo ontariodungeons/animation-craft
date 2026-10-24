@@ -44,6 +44,10 @@
       "component": "workspace",
       "label": "Studio"
     },
+    "view-skills": {
+      "component": "workspace",
+      "label": "Skills"
+    },
     "blocks": {
       "component": "workspace",
       "label": "Song workflow"
@@ -189,6 +193,10 @@
     "words-video-frame": {
       "component": "stage",
       "label": "The finished video"
+    },
+    "tab-skills": {
+      "component": "workspace",
+      "label": "Skills tab"
     }
   }
 }

@@ -1,0 +1,34 @@
+{
+  "edit": {
+    "character": "puppet",
+    "command": "motion.part.set",
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+    "result": {
+      "_ui_engine_revision": 4,
+      "character": "puppet",
+      "ok": true,
+      "project_saved": false,
+      "rig_saved": true,
+      "rig_sha256": "68e564851fa783e704831e7b057c71ae8fa065cbce348c042e4705262e8aee9d",
+      "spec": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+      "undo": "1792786126700815480",
+      "undo_receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/.motion-authoring/e1503d834dbe9343bcef0ef2aba7d4df5c5a9088e7937d10a09eef6dea0cd310/1792786126700815480.json"
+    },
+    "track": "wave"
+  },
+  "hash": "68e564851fa783e704831e7b057c71ae8fa065cbce348c042e4705262e8aee9d",
+  "override": {
+    "paper": {
+      "position": [
+        0,
+        0
+      ],
+      "rotation": 20,
+      "scale": [
+        100,
+        100
+      ]
+    }
+  },
+  "status": "Rig saved · undo receipt available · project Save remains explicit."
+}

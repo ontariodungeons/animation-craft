@@ -1,0 +1,42 @@
+{
+  "label": "feature-completion-tail",
+  "seconds": 8.012071416014805,
+  "process_tree_cpu_seconds": 0.13,
+  "one_core_cpu_percent": 1.6225516879461597,
+  "pids": [
+    906994,
+    907029,
+    907014
+  ],
+  "dom": {
+    "companions": {
+      "animating": false,
+      "dedupe": 6,
+      "enabled": true,
+      "gaffer": {
+        "command": "image.generate",
+        "destination": "artwork",
+        "key": "[\"image.generate\",null,null,null,null,null,null,null,null]",
+        "reason": "completed: image.generate",
+        "request": "image-retry_artwork",
+        "status": "completed"
+      },
+      "hidden": false,
+      "jobs": 0,
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+      "reducedMotion": false,
+      "sproket": {
+        "command": "project.add_asset",
+        "destination": "chat",
+        "key": null,
+        "reason": "Resolved: project.add_asset",
+        "request": "ambient-1792779836438-98",
+        "status": "resolved"
+      }
+    },
+    "mutations": {
+      "all": 4,
+      "companions": 4
+    }
+  }
+}

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magic Studio Proposal</title>
+<style>
+  :root { --bg:#0b1017; --surface:#141c28; --line:#2b3b50; --text:#e9eef6; --muted:#9cafc6; --faint:#667487; --accent:#35e1c0; --amber:#f0a83c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 system-ui, sans-serif; }
+  main { max-width:1240px; margin:0 auto; padding:32px 16px 64px; }
+  nav { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 0; z-index:1; display:flex; gap:18px; flex-wrap:wrap; }
+  nav a { color:var(--muted); text-decoration:none; font-size:14px; }
+  nav a:hover { color:var(--accent); }
+  h1 { font-size:26px; margin:0 0 6px; }
+  h2 { font-size:21px; margin:52px 0 6px; padding-top:8px; }
+  h3 { font-size:15px; margin:22px 0 4px; color:var(--muted); font-weight:600; }
+  p, li { color:var(--muted); max-width:80ch; }
+  a { color:var(--accent); }
+  code { font-size:13px; }
+  .note { border:1px solid var(--line); background:var(--surface); border-radius:10px; padding:12px 16px; margin:18px 0; }
+  .note b { color:var(--text); }
+  .full img { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:10px; }
+  .row { display:flex; gap:20px; overflow-x:auto; padding:10px 0 8px; align-items:flex-start; }
+  figure { margin:0; flex:0 0 auto; }
+  .row img { display:block; height:auto; border:1px solid var(--line); border-radius:10px; }
+  .w-desktop { width:620px; } .w-mid { width:470px; } .w-narrow { width:350px; } .w-side { width:340px; } .w-side-c { width:280px; }
+  figcaption { font-size:13px; color:var(--faint); margin-top:6px; }
+  table { border-collapse:collapse; width:100%; margin-top:10px; font-size:14px; }
+  th, td { border-top:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; color:var(--muted); }
+  th { color:var(--text); font-weight:600; }
+  .tag { color:var(--amber); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Magic Studio · whole-system design proposal</h1>
+  <p>This proposal covers all four views (Home, Project, Animation and Studio), each at full screen (1920) and at the widths the shell skill says to test: 1261, 941 and 700px. The right sidebar (Sproket, Gaffer, Parts) is part of every project view and keeps its own page, with a recommended layout and an alternative. Nothing here is implemented.</p>
+  <nav><a href="#system">System</a><a href="#home">Home</a><a href="#project">Project</a><a href="#animation">Animation</a><a href="#studio">Studio</a><a href="#sidebar">Right sidebar</a><a href="#files">Files</a></nav>
+  <div class="note">
+    <b>Native document:</b> <a href="sidebar-proposal.figcraft" download>sidebar-proposal.figcraft</a> has six pages of editable FigCraft layers: Right sidebar, System, Home, Project, Animation and Studio. The System page has real components. Every image below is exported from that file.<br>
+    <b>Honesty notes:</b> Gaffer's candidate art is a <b>placeholder</b> (the original tail). Storyboard lyric lines are placeholders. The Studio preview is a real HyperFrames frame from an earlier test placement of the fish clip, not a finished film. Items in <span class="tag">dashed amber</span> are <b>proposed</b> features (templates, part editing). Colors come from <code>apps/magicstudio-shell/ui/style.css</code>, and icons from <code>ui/app.js</code>.
+  </div>
+
+  <h2 id="system">System</h2>
+  <p>The rules every view follows: one teal action on screen, a selection that is always named, and job state that never scrolls away. Setup and metrics stay out of the way (Backstage owns the metrics).</p>
+  <div class="full"><img src="exports/system/responsive-rules.png" alt="Responsive rules for full screen, desktop, mid and narrow widths"></div>
+  <div class="row">
+    <figure><img style="width:760px" src="exports/system/tokens.png" alt="Color tokens"><figcaption>Tokens</figcaption></figure>
+    <figure><img style="width:760px" src="exports/system/components.png" alt="Components: primary and ghost buttons, icon button, chips, status dots, block"><figcaption>Components (native FigCraft components)</figcaption></figure>
+  </div>
+
+  <h2 id="home">Home</h2>
+  <p>A <b>Continue</b> card puts the project you were last in, with its stage lights, above the recent grid. There's one teal action, <em>New song</em>. Missing projects say so in plain words (Turn study: “folder moved”) instead of showing a raw error. The grid goes from 5 columns at full screen to 4, 3 and 2.</p>
+  <div class="full"><img src="exports/home/home-1920-1080-full-screen.png" alt="Home at 1920"></div>
+  <div class="row">
+    <figure><img class="w-desktop" src="exports/home/home-1261-820.png" alt="Home at 1261"><figcaption>1261</figcaption></figure>
+    <figure><img class="w-mid" src="exports/home/home-941-760.png" alt="Home at 941"><figcaption>941</figcaption></figure>
+    <figure><img class="w-narrow" src="exports/home/home-700-760.png" alt="Home at 700"><figcaption>700: actions move under the title</figcaption></figure>
+  </div>
+
+  <h2 id="project">Project</h2>
+  <p>On the left are the song workflow blocks (Song, Lyrics &amp; notes, Transcription, Storyboard, Animate, Studio), with only the active one open. Storyboard pages fill the middle. Sproket's conversation is on the right, and its header names the current selection (<em>Storyboard › p3 · Verse 1</em>). Below 1200px the blocks fold into an icon rail with the same status dots.</p>
+  <div class="full"><img src="exports/project/project-1920-1080-full-screen.png" alt="Project at 1920"></div>
+  <div class="row">
+    <figure><img class="w-desktop" src="exports/project/project-1261-820.png" alt="Project at 1261"><figcaption>1261</figcaption></figure>
+    <figure><img class="w-mid" src="exports/project/project-941-760.png" alt="Project at 941"><figcaption>941: icon rail, sidebar 280</figcaption></figure>
+    <figure><img class="w-narrow" src="exports/project/project-700-760.png" alt="Project at 700"><figcaption>700: the sidebar becomes a drawer (closed)</figcaption></figure>
+  </div>
+
+  <h2 id="animation">Animation</h2>
+  <p>Controls are on the left, as approved on 2026-10-21, and the stage gets the room. The sidebar shows Gaffer's review. <b>One teal on screen:</b> while a review is pending, <em>Render preview</em> steps down to a ghost button so <em>Apply to tail</em> is the only primary. At 700 the sidebar becomes a drawer over the dimmed stage. When the drawer is closed, the job pill moves into the top bar.</p>
+  <div class="full"><img src="exports/animation/animation-1920-1080-full-screen.png" alt="Animation at 1920"></div>
+  <div class="row">
+    <figure><img class="w-desktop" src="exports/animation/animation-1261-820.png" alt="Animation at 1261"><figcaption>1261</figcaption></figure>
+    <figure><img class="w-mid" src="exports/animation/animation-941-760.png" alt="Animation at 941"><figcaption>941: rail, compact sidebar</figcaption></figure>
+    <figure><img class="w-narrow" src="exports/animation/animation-700-760.png" alt="Animation at 700"><figcaption>700: drawer closed, job pill in the top bar</figcaption></figure>
+    <figure><img class="w-narrow" src="exports/animation/animation-700-760-drawer-open-generating.png" alt="Animation at 700 with drawer open"><figcaption>700: drawer open while Gaffer paints</figcaption></figure>
+  </div>
+
+  <h2 id="studio">Studio</h2>
+  <p>The HyperFrames studio is embedded with the preview on top and a simple timeline below (captions, the character clip, the song), and Sproket stays on the right. When the studio is off, the view is a calm card with one teal button.</p>
+  <div class="full"><img src="exports/studio/studio-1920-1080-full-screen.png" alt="Studio at 1920"></div>
+  <div class="row">
+    <figure><img class="w-desktop" src="exports/studio/studio-1261-820.png" alt="Studio at 1261"><figcaption>1261</figcaption></figure>
+    <figure><img class="w-desktop" src="exports/studio/studio-1261-820-off.png" alt="Studio off at 1261"><figcaption>1261: studio off</figcaption></figure>
+    <figure><img class="w-mid" src="exports/studio/studio-941-760.png" alt="Studio at 941"><figcaption>941: two tracks</figcaption></figure>
+    <figure><img class="w-narrow" src="exports/studio/studio-700-760.png" alt="Studio at 700"><figcaption>700</figcaption></figure>
+  </div>
+
+  <h2 id="sidebar">Right sidebar · recommended A and alternative B</h2>
+  <p><b>A (used in every view above)</b> has one header that always names the target and the job, one switch for Sproket, Gaffer or Parts, the model behind the gear, and one teal action per state. <b>B</b> keeps today's stacking as an accordion with one pane open and a docked job bar.</p>
+  <div class="row">
+    <figure><img class="w-side" src="exports/a-340px-generating.png" alt="A, 340px, generating"><figcaption>A · 340 · generating</figcaption></figure>
+    <figure><img class="w-side" src="exports/a-340px-review.png" alt="A, 340px, review"><figcaption>A · 340 · review</figcaption></figure>
+    <figure><img class="w-side-c" src="exports/a-280px-generating.png" alt="A, 280px, generating"><figcaption>A · 280 · generating</figcaption></figure>
+    <figure><img class="w-side-c" src="exports/a-280px-review.png" alt="A, 280px, review"><figcaption>A · 280 · review</figcaption></figure>
+    <figure><img class="w-side" src="exports/a-settings-tucked-behind-gear.png" alt="A, settings sheet"><figcaption>A · settings behind the gear</figcaption></figure>
+  </div>
+  <div class="row">
+    <figure><img class="w-side" src="exports/b-340px-generating.png" alt="B, 340px, generating"><figcaption>B · 340 · generating</figcaption></figure>
+    <figure><img class="w-side" src="exports/b-340px-review.png" alt="B, 340px, review"><figcaption>B · 340 · review</figcaption></figure>
+    <figure><img class="w-side-c" src="exports/b-280px-generating.png" alt="B, 280px, generating"><figcaption>B · 280 · generating</figcaption></figure>
+    <figure><img class="w-side-c" src="exports/b-280px-review.png" alt="B, 280px, review"><figcaption>B · 280 · review</figcaption></figure>
+    <figure><img class="w-side" src="exports/ambient-indicator-concept-optional.png" alt="Ambient indicator concept"><figcaption>Optional ambient hound/cat strip (Scooter builds it separately)</figcaption></figure>
+  </div>
+  <table>
+    <tr><th></th><th>A · one workspace (recommended)</th><th>B · stacked, one open</th></tr>
+    <tr><td>Selected target</td><td>Always in the single header</td><td>Lives in Gaffer's header; out of view when Gaffer is closed</td></tr>
+    <tr><td>Job state</td><td>Header pill (in the top bar when the drawer is closed)</td><td>Docked bar, always visible</td></tr>
+    <tr><td>Comparing</td><td>Side by side at 340, stacked at 280</td><td>Toggle on one large preview</td></tr>
+    <tr><td>Change from today</td><td>Larger: replaces stacked panes with a switch</td><td>Smaller: today's panes become an accordion</td></tr>
+  </table>
+
+  <h3>Today, for reference</h3>
+  <div class="full"><img src="current-ui.png" alt="Current Magic Studio Animation view"></div>
+
+  <h2 id="files">Files</h2>
+  <ul>
+    <li><a href="sidebar-proposal.figcraft" download>sidebar-proposal.figcraft</a>: the native, editable document (six pages)</li>
+    <li><code>exports/</code>: every frame as PNG (sidebar frames at 2×, views at 1×), one folder per page</li>
+    <li><code>build/build_proposal.py</code> writes <code>build/sidebar.jsonl</code>, which <code>figcraft-cli run</code> executes (log: <code>build/run.log</code>); <code>build/export.sh</code> re-exports the images</li>
+  </ul>
+</main>
+</body>
+</html>

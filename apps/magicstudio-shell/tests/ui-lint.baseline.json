@@ -2,14 +2,14 @@
   "method": 3,
   "files": {
     "style.css": {
-      "px_outside_root": 906,
+      "px_outside_root": 904,
       "hex_outside_root": 0,
       "ms_outside_root": 4,
-      "raw_px_in_component_rules": 128,
-      "outside_in_overrides": 52,
-      "lines": 981,
-      "rules": 672,
-      "selectors": 702
+      "raw_px_in_component_rules": 130,
+      "outside_in_overrides": 54,
+      "lines": 1017,
+      "rules": 699,
+      "selectors": 742
     },
     "agent.js": {
       "hand_built_dots": 0,
@@ -46,10 +46,10 @@
       "retired": 0,
       "ids_without_config_entry": 15,
       "class_from_code": 0,
-      "style_attributes": 1,
+      "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 907
+      "lines": 915
     },
     "blender-placement.js": {
       "hand_built_dots": 0,
@@ -149,7 +149,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 136
+      "lines": 134
     },
     "motion-authoring.js": {
       "hand_built_dots": 0,
@@ -170,6 +170,16 @@
       "style_writes": 7,
       "geometry_without_custom_property": 6,
       "lines": 284
+    },
+    "skills.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "ids_without_config_entry": 4,
+      "class_from_code": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 108
     },
     "studio-caption-compat.js": {
       "hand_built_dots": 0,
@@ -204,12 +214,12 @@
     "words.js": {
       "hand_built_dots": 0,
       "retired": 0,
-      "ids_without_config_entry": 7,
+      "ids_without_config_entry": 1,
       "class_from_code": 0,
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 257
+      "lines": 365
     }
   }
 }

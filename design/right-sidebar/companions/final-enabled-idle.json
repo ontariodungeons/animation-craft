@@ -1,0 +1,42 @@
+{
+  "label": "final-enabled-idle",
+  "seconds": 8.02063459501369,
+  "process_tree_cpu_seconds": 0.15,
+  "one_core_cpu_percent": 1.8701762089155987,
+  "pids": [
+    929840,
+    929874,
+    929859
+  ],
+  "dom": {
+    "companions": {
+      "animating": false,
+      "dedupe": 0,
+      "enabled": true,
+      "gaffer": {
+        "command": null,
+        "destination": "artwork",
+        "key": null,
+        "reason": "Home",
+        "request": null,
+        "status": "home"
+      },
+      "hidden": false,
+      "jobs": 0,
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+      "reducedMotion": false,
+      "sproket": {
+        "command": null,
+        "destination": "chat",
+        "key": null,
+        "reason": "Home",
+        "request": null,
+        "status": "home"
+      }
+    },
+    "mutations": {
+      "all": 3,
+      "companions": 0
+    }
+  }
+}

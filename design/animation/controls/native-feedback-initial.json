@@ -1,0 +1,112 @@
+{
+  "ack_engine_revision": 1,
+  "active_project": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+  "chat_selection": {
+    "agent": "opencode",
+    "model": "",
+    "provider": "",
+    "runtime_model_verified": false,
+    "source": "active engine selection"
+  },
+  "chat_selector": {
+    "agent": "opencode",
+    "model": null,
+    "provider": null,
+    "source": "rendered selector; may include unsaved edits"
+  },
+  "command_revisions": [
+    {
+      "id": "project.open",
+      "project": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+      "request_id": "studio-1278480-1792786054506-0",
+      "revision": 1
+    }
+  ],
+  "companions": {
+    "animating": false,
+    "dedupe": 0,
+    "enabled": false,
+    "gaffer": {
+      "command": null,
+      "destination": "artwork",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": null,
+      "destination": "chat",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    }
+  },
+  "connection": "connected",
+  "dirty_reasons": [
+    "engine state differs from saved project"
+  ],
+  "draft_fields": [],
+  "engine_revision": 1,
+  "engine_unsaved": true,
+  "errors": [],
+  "frontend_report_age_ms": 474,
+  "identity": {
+    "application": "Magic Studio",
+    "build_id": "bb9cdb7-1792785973",
+    "executable": "/run/media/jesse/Speedy/Work/omhas-animation/.worktrees/authoring-controls/target/debug/magicstudio-shell",
+    "frontend": "Tauri",
+    "pid": 1278480,
+    "version": "0.1.0"
+  },
+  "last_command": {
+    "engine_finished_unix_ms": 1792786054540,
+    "id": "project.open",
+    "ok": true,
+    "request_id": "studio-1278480-1792786054506-0",
+    "revision": 1,
+    "ui_ack": "DOM_applied; visual review separate"
+  },
+  "last_frontend_command": {
+    "id": "agent.log",
+    "status": "success",
+    "transport": "engine_command"
+  },
+  "observed_unix_ms": 1792786098120,
+  "ok": true,
+  "pending_invokes": 0,
+  "phase": "ready",
+  "project": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+  "project_guard_version": 1,
+  "project_id": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+  "project_identity_kind": "canonical project path",
+  "rendered": true,
+  "session_project": "/tmp/scooter-generic-controls-mwywrj27/Generic.magic",
+  "theatre": {
+    "availability": "loading",
+    "error": null,
+    "live_edits": "no_observed_interaction",
+    "native_playing": false,
+    "native_selected_part": null,
+    "package_version": "0.7.0",
+    "persistence": "not_loaded",
+    "saved_snapshot_unix_ms": null,
+    "selected_objects": [],
+    "sequence_playing": null,
+    "sequence_position_seconds": null,
+    "value_update": null,
+    "visual_quality": "not_assessed"
+  },
+  "ui_acknowledgement": "DOM_applied; visual review separate",
+  "ui_ready": true,
+  "ui_revision": 162,
+  "unsaved_edits": 1,
+  "unsaved_state": "unsaved_or_pending",
+  "updated_unix_ms": 1792786097646,
+  "view": "animation"
+}

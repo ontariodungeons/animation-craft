@@ -1,0 +1,925 @@
+{
+ "duration": 39.288163265306125,
+ "cuts": {
+  "hill": 9.466666666666667,
+  "returnInside": 13.9,
+  "outsideFlight": 22.066666666666666,
+  "home": 33.4
+ },
+ "words": [
+  {
+   "id": "w00",
+   "text": "All",
+   "at": 5.12,
+   "end": 5.37
+  },
+  {
+   "id": "w01",
+   "text": "the",
+   "at": 5.54,
+   "end": 5.79
+  },
+  {
+   "id": "w02",
+   "text": "pterodactyls",
+   "at": 5.66,
+   "end": 7.02
+  },
+  {
+   "id": "w03",
+   "text": "were",
+   "at": 7.24,
+   "end": 7.49
+  },
+  {
+   "id": "w04",
+   "text": "sleeping",
+   "at": 7.68,
+   "end": 7.93
+  },
+  {
+   "id": "w05",
+   "text": "very",
+   "at": 8.28,
+   "end": 8.53
+  },
+  {
+   "id": "w06",
+   "text": "still",
+   "at": 8.76,
+   "end": 9.01
+  },
+  {
+   "id": "w07",
+   "text": "Down",
+   "at": 9.88,
+   "end": 10.13
+  },
+  {
+   "id": "w08",
+   "text": "in",
+   "at": 10.48,
+   "end": 10.73
+  },
+  {
+   "id": "w09",
+   "text": "the",
+   "at": 10.76,
+   "end": 11.01
+  },
+  {
+   "id": "w10",
+   "text": "cave",
+   "at": 11.2,
+   "end": 11.45
+  },
+  {
+   "id": "w11",
+   "text": "at",
+   "at": 11.74,
+   "end": 11.99
+  },
+  {
+   "id": "w12",
+   "text": "the",
+   "at": 11.98,
+   "end": 12.23
+  },
+  {
+   "id": "w13",
+   "text": "bottom",
+   "at": 12.54,
+   "end": 12.79
+  },
+  {
+   "id": "w14",
+   "text": "of",
+   "at": 12.88,
+   "end": 13.13
+  },
+  {
+   "id": "w15",
+   "text": "a",
+   "at": 13.18,
+   "end": 13.43
+  },
+  {
+   "id": "w16",
+   "text": "hill",
+   "at": 13.5,
+   "end": 13.75
+  },
+  {
+   "id": "w17",
+   "text": "When",
+   "at": 14.3,
+   "end": 14.55
+  },
+  {
+   "id": "w18",
+   "text": "all",
+   "at": 14.64,
+   "end": 14.89
+  },
+  {
+   "id": "w19",
+   "text": "of",
+   "at": 15.18,
+   "end": 15.43
+  },
+  {
+   "id": "w20",
+   "text": "a",
+   "at": 15.48,
+   "end": 15.73
+  },
+  {
+   "id": "w21",
+   "text": "sudden",
+   "at": 15.94,
+   "end": 16.189999999999998
+  },
+  {
+   "id": "w22",
+   "text": "one",
+   "at": 16.82,
+   "end": 17.07
+  },
+  {
+   "id": "w23",
+   "text": "of",
+   "at": 17.02,
+   "end": 17.27
+  },
+  {
+   "id": "w24",
+   "text": "them",
+   "at": 17.3,
+   "end": 17.55
+  },
+  {
+   "id": "w25",
+   "text": "did",
+   "at": 17.74,
+   "end": 17.99
+  },
+  {
+   "id": "w26",
+   "text": "cry",
+   "at": 18.1,
+   "end": 18.35
+  },
+  {
+   "id": "w27",
+   "text": "Wake",
+   "at": 19.16,
+   "end": 19.41
+  },
+  {
+   "id": "w28",
+   "text": "up",
+   "at": 19.46,
+   "end": 19.71
+  },
+  {
+   "id": "w29",
+   "text": "pterodactyls",
+   "at": 19.56,
+   "end": 21.1
+  },
+  {
+   "id": "w30",
+   "text": "and",
+   "at": 21.18,
+   "end": 21.43
+  },
+  {
+   "id": "w31",
+   "text": "fly,",
+   "at": 21.5,
+   "end": 21.76
+  },
+  {
+   "id": "w32",
+   "text": "fly,",
+   "at": 22.14,
+   "end": 22.39
+  },
+  {
+   "id": "w33",
+   "text": "fly",
+   "at": 22.62,
+   "end": 22.87
+  },
+  {
+   "id": "w34",
+   "text": "Fly",
+   "at": 23.9,
+   "end": 24.15
+  },
+  {
+   "id": "w35",
+   "text": "to",
+   "at": 24.36,
+   "end": 24.61
+  },
+  {
+   "id": "w36",
+   "text": "the",
+   "at": 24.7,
+   "end": 24.95
+  },
+  {
+   "id": "w37",
+   "text": "east",
+   "at": 25.18,
+   "end": 25.43
+  },
+  {
+   "id": "w38",
+   "text": "and",
+   "at": 25.64,
+   "end": 25.89
+  },
+  {
+   "id": "w39",
+   "text": "fly",
+   "at": 26.16,
+   "end": 26.41
+  },
+  {
+   "id": "w40",
+   "text": "to",
+   "at": 26.74,
+   "end": 26.99
+  },
+  {
+   "id": "w41",
+   "text": "the",
+   "at": 27.08,
+   "end": 27.33
+  },
+  {
+   "id": "w42",
+   "text": "west",
+   "at": 27.5,
+   "end": 27.75
+  },
+  {
+   "id": "w43",
+   "text": "Fly",
+   "at": 28.5,
+   "end": 28.75
+  },
+  {
+   "id": "w44",
+   "text": "all",
+   "at": 29.2,
+   "end": 29.45
+  },
+  {
+   "id": "w45",
+   "text": "around",
+   "at": 29.8,
+   "end": 30.05
+  },
+  {
+   "id": "w46",
+   "text": "and",
+   "at": 30.16,
+   "end": 30.41
+  },
+  {
+   "id": "w47",
+   "text": "then",
+   "at": 30.44,
+   "end": 30.69
+  },
+  {
+   "id": "w48",
+   "text": "fly",
+   "at": 30.84,
+   "end": 31.09
+  },
+  {
+   "id": "w49",
+   "text": "back",
+   "at": 31.3,
+   "end": 31.55
+  },
+  {
+   "id": "w50",
+   "text": "to",
+   "at": 31.7,
+   "end": 31.95
+  },
+  {
+   "id": "w51",
+   "text": "your",
+   "at": 32.24,
+   "end": 32.49
+  },
+  {
+   "id": "w52",
+   "text": "nest",
+   "at": 33.04,
+   "end": 33.29
+  }
+ ],
+ "phrases": [
+  {
+   "id": "sleep",
+   "first": 0,
+   "count": 7,
+   "from": 4.72,
+   "to": 9.48,
+   "items": [
+    {
+     "text": "All the pterodactyls were",
+     "note": "quiet context",
+     "x": 860.0,
+     "y": 105.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "sleeping",
+     "note": "gently sinking letters",
+     "x": 835.0,
+     "y": 150.0,
+     "size": 174.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "sleep",
+     "accent": 2.95
+    },
+    {
+     "text": "very",
+     "note": "quiet context",
+     "x": 1025.0,
+     "y": 340.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "still.",
+     "note": "settle into stillness",
+     "x": 1135.0,
+     "y": 295.0,
+     "size": 132.0,
+     "font": "bold",
+     "color": "#8B3D26",
+     "rotate": 0,
+     "motion": "settle",
+     "accent": 4.03
+    }
+   ],
+   "draws": [
+    {
+     "name": "Sleepy eyes \u2014 hand-drawn lyric illustration",
+     "viewBox": "0 0 300 180",
+     "x": 1480.0,
+     "y": 180.0,
+     "w": 300.0,
+     "h": 180.0,
+     "paths": [
+      {
+       "name": "Left sleepy eyelid",
+       "d": "M 24 84 Q 55 113 91 83",
+       "stroke": "#173F49",
+       "width": 6.0,
+       "from": 0.4,
+       "to": 1.1666666666666667
+      },
+      {
+       "name": "Right sleepy eyelid",
+       "d": "M 151 84 Q 185 111 221 80",
+       "stroke": "#173F49",
+       "width": 6.0,
+       "from": 0.9,
+       "to": 1.6666666666666667
+      },
+      {
+       "name": "Left sleepy lashes",
+       "d": "M 34 94 L 27 104 M 54 99 L 52 113 M 76 94 L 81 106",
+       "stroke": "#173F49",
+       "width": 5.0,
+       "from": 1.2333333333333334,
+       "to": 2.033333333333333
+      },
+      {
+       "name": "Right sleepy lashes",
+       "d": "M 163 94 L 159 106 M 184 97 L 185 111 M 207 91 L 214 103",
+       "stroke": "#173F49",
+       "width": 5.0,
+       "from": 1.7,
+       "to": 2.466666666666667
+      }
+     ]
+    },
+    {
+     "name": "Still \u2014 drawing comes to rest",
+     "viewBox": "0 0 280 30",
+     "x": 1125.0,
+     "y": 440.0,
+     "w": 280.0,
+     "h": 30.0,
+     "paths": [
+      {
+       "name": "Hand-drawn still underline",
+       "d": "M 5 14 Q 61 5 125 13 T 269 10",
+       "stroke": "#B68B50",
+       "width": 6.0,
+       "from": 4.033333333333333,
+       "to": 4.566666666666666
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "cave",
+   "first": 7,
+   "count": 10,
+   "from": 9.48,
+   "to": 13.9,
+   "items": [
+    {
+     "text": "Down",
+     "note": "follow the direction",
+     "x": 125.0,
+     "y": 60.0,
+     "size": 142.0,
+     "font": "bold",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "fall",
+     "accent": 0.41
+    },
+    {
+     "text": "in the cave",
+     "note": "quiet context",
+     "x": 145.0,
+     "y": 235.0,
+     "size": 52.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "at the bottom of a",
+     "note": "quiet context",
+     "x": 185.0,
+     "y": 345.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "hill.",
+     "note": "little landscape",
+     "x": 545.0,
+     "y": 290.0,
+     "size": 128.0,
+     "font": "italic",
+     "color": "#8B3D26",
+     "rotate": 0,
+     "motion": "settle",
+     "accent": 4.03
+    }
+   ],
+   "draws": [
+    {
+     "name": "Hand-drawn downward arrow",
+     "viewBox": "0 0 160 330",
+     "x": 20.0,
+     "y": 100.0,
+     "w": 130.0,
+     "h": 300.0,
+     "paths": [
+      {
+       "name": "Downward wandering stroke",
+       "d": "M 73 13 C 27 67 104 129 66 196 Q 47 231 61 289 M 30 264 L 61 294 L 87 260",
+       "stroke": "#8B3D26",
+       "width": 6.0,
+       "from": 0.4,
+       "to": 1.7333333333333334
+      }
+     ]
+    },
+    {
+     "name": "Hill shape grows beneath the word",
+     "viewBox": "0 0 410 95",
+     "x": 505.0,
+     "y": 420.0,
+     "w": 410.0,
+     "h": 95.0,
+     "paths": [
+      {
+       "name": "Rounded hill contour",
+       "d": "M 7 77 Q 73 72 118 32 Q 171 -8 228 31 Q 279 75 400 76",
+       "stroke": "#8B3D26",
+       "width": 5.0,
+       "from": 1.9,
+       "to": 3.6333333333333333
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sudden",
+   "first": 17,
+   "count": 10,
+   "from": 13.9,
+   "to": 18.76,
+   "items": [
+    {
+     "text": "When all of a",
+     "note": "quiet anticipation",
+     "x": 850.0,
+     "y": 75.0,
+     "size": 42.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "sudden,",
+     "note": "a quick surprise",
+     "x": 835.0,
+     "y": 125.0,
+     "size": 132.0,
+     "font": "bold",
+     "color": "#8B3D26",
+     "rotate": -3.0,
+     "motion": "pop",
+     "accent": 2.04
+    },
+    {
+     "text": "one of them did",
+     "note": "quiet context",
+     "x": 1000.0,
+     "y": 305.0,
+     "size": 42.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "cry,",
+     "note": "the call",
+     "x": 1410.0,
+     "y": 235.0,
+     "size": 136.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "pop",
+     "accent": 4.2
+    }
+   ],
+   "draws": [
+    {
+     "name": "The call carries outward",
+     "viewBox": "0 0 230 210",
+     "x": 1645.0,
+     "y": 190.0,
+     "w": 230.0,
+     "h": 210.0,
+     "paths": [
+      {
+       "name": "First call ray",
+       "d": "M 20 100 Q 56 95 99 86",
+       "stroke": "#8B3D26",
+       "width": 6.0,
+       "from": 4.2,
+       "to": 4.466666666666667
+      },
+      {
+       "name": "Upper and lower call rays",
+       "d": "M 18 68 Q 52 45 80 13 M 22 134 Q 63 152 92 182",
+       "stroke": "#8B3D26",
+       "width": 5.0,
+       "from": 4.333333333333333,
+       "to": 4.766666666666667
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "wake",
+   "first": 27,
+   "count": 7,
+   "from": 18.76,
+   "to": 23.5,
+   "items": [
+    {
+     "text": "Wake",
+     "note": "spring awake",
+     "x": 865.0,
+     "y": 70.0,
+     "size": 132.0,
+     "font": "bold",
+     "color": "#8B3D26",
+     "rotate": 0,
+     "motion": "pop",
+     "accent": 0.39
+    },
+    {
+     "text": "up",
+     "note": "quiet companion",
+     "x": 1215.0,
+     "y": 115.0,
+     "size": 48.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "pterodactyls",
+     "note": "quiet context",
+     "x": 900.0,
+     "y": 225.0,
+     "size": 52.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "and",
+     "note": "quiet connector",
+     "x": 915.0,
+     "y": 345.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "fly,",
+     "note": "rising arc",
+     "x": 1065.0,
+     "y": 320.0,
+     "size": 94.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "rise",
+     "accent": 2.73
+    },
+    {
+     "text": "fly,",
+     "note": "higher arc",
+     "x": 1310.0,
+     "y": 250.0,
+     "size": 104.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "rise",
+     "accent": 3.37
+    },
+    {
+     "text": "fly!",
+     "note": "take to the sky",
+     "x": 1560.0,
+     "y": 175.0,
+     "size": 116.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "rise",
+     "accent": 3.85
+    }
+   ],
+   "draws": [
+    {
+     "name": "Flight trail from low to high",
+     "viewBox": "0 0 790 160",
+     "x": 1030.0,
+     "y": 310.0,
+     "w": 790.0,
+     "h": 160.0,
+     "paths": [
+      {
+       "name": "Rising swoop beneath the fly words",
+       "d": "M 10 145 Q 126 170 217 93 T 438 58 Q 578 29 756 7 M 730 5 L 761 5 L 746 29",
+       "stroke": "#B68B50",
+       "width": 5.0,
+       "from": 2.7333333333333334,
+       "to": 4.5
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "directions",
+   "first": 34,
+   "count": 9,
+   "from": 23.5,
+   "to": 28.1,
+   "items": [
+    {
+     "text": "Fly to the",
+     "note": "quiet context",
+     "x": 105.0,
+     "y": 65.0,
+     "size": 44.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "east",
+     "note": "travel right",
+     "x": 230.0,
+     "y": 120.0,
+     "size": 142.0,
+     "font": "bold",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "east",
+     "accent": 1.68
+    },
+    {
+     "text": "and fly to the",
+     "note": "quiet context",
+     "x": 1080.0,
+     "y": 65.0,
+     "size": 44.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "west.",
+     "note": "travel left",
+     "x": 1230.0,
+     "y": 120.0,
+     "size": 152.0,
+     "font": "italic",
+     "color": "#8B3D26",
+     "rotate": 0,
+     "motion": "west",
+     "accent": 4.0
+    }
+   ],
+   "draws": [
+    {
+     "name": "East and west arrows",
+     "viewBox": "0 0 1740 65",
+     "x": 90.0,
+     "y": 300.0,
+     "w": 1740.0,
+     "h": 65.0,
+     "paths": [
+      {
+       "name": "East arrow points right",
+       "d": "M 15 33 Q 208 17 409 30 T 650 26 M 625 6 L 655 26 L 626 49",
+       "stroke": "#173F49",
+       "width": 6.0,
+       "from": 1.6666666666666667,
+       "to": 2.6
+      },
+      {
+       "name": "West arrow points left",
+       "d": "M 1710 26 Q 1510 45 1321 31 T 1073 33 M 1099 9 L 1068 33 L 1098 54",
+       "stroke": "#8B3D26",
+       "width": 6.0,
+       "from": 4.0,
+       "to": 4.566666666666666
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "return",
+   "first": 43,
+   "count": 10,
+   "from": 28.1,
+   "to": 34.14,
+   "items": [
+    {
+     "text": "Fly all",
+     "note": "quiet context",
+     "x": 850.0,
+     "y": 95.0,
+     "size": 42.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "around",
+     "note": "make one loop",
+     "x": 820.0,
+     "y": 150.0,
+     "size": 130.0,
+     "font": "italic",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "loop",
+     "accent": 1.7
+    },
+    {
+     "text": "and then fly back",
+     "note": "quiet context",
+     "x": 1250.0,
+     "y": 95.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "to your",
+     "note": "quiet context",
+     "x": 1260.0,
+     "y": 260.0,
+     "size": 40.0,
+     "font": "quiet",
+     "color": "#173F49",
+     "rotate": 0,
+     "motion": "quiet",
+     "accent": 0
+    },
+    {
+     "text": "nest.",
+     "note": "settle into home",
+     "x": 1420.0,
+     "y": 170.0,
+     "size": 132.0,
+     "font": "bold",
+     "color": "#8B3D26",
+     "rotate": 0,
+     "motion": "settle",
+     "accent": 4.94
+    }
+   ],
+   "draws": [
+    {
+     "name": "Looping return trail",
+     "viewBox": "0 0 1000 150",
+     "x": 790.0,
+     "y": 305.0,
+     "w": 1000.0,
+     "h": 150.0,
+     "paths": [
+      {
+       "name": "One playful loop",
+       "d": "M 15 20 C 110 95 425 95 455 40 C 485 -4 350 -3 352 37 C 355 95 515 85 602 50 M 579 33 L 608 49 L 586 73",
+       "stroke": "#173F49",
+       "width": 5.0,
+       "from": 1.7,
+       "to": 3.8333333333333335
+      },
+      {
+       "name": "Draw the nest beneath nest",
+       "d": "M 605 55 Q 770 129 970 50 M 620 70 Q 780 141 955 70 M 640 56 L 674 102 M 700 80 L 735 123 M 795 84 L 831 123 M 885 79 L 916 107 M 650 105 L 711 70 M 760 130 L 812 86 M 867 118 L 916 69",
+       "stroke": "#8B3D26",
+       "width": 5.0,
+       "from": 3.933333333333333,
+       "to": 5.833333333333333
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
