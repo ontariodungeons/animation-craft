@@ -687,6 +687,7 @@ async function setView(view, action) {
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${page}`));
   placeInk();
   if (view === "animation") { await invoke("studio_hide"); await animationOpen(); }
+  else if (view === "design") { await invoke("studio_hide"); await wordsOpen(); }
   else if (view !== "project" && serverUrl()) { await new Promise(requestAnimationFrame); await showStudio(); }
   else {
     await invoke("studio_hide");
@@ -875,7 +876,9 @@ function renderDesignPlacements(){
  for(const item of entries){
   const page=$(`sb-sheet-${item.page-1}`);if(!page)continue;
   const [x,y,w,h]=item.rect;
-  const node=el('div',{id:item.id,class:'design-placement',title:'Drag to move · grab an edge to scale',style:`left:${100*x/size[0]}%;top:${100*y/size[1]}%;width:${100*w/size[0]}%;height:${100*h/size[1]}%`});
+  const node=el('div',{id:item.id,class:'design-placement',title:'Drag to move · grab an edge to scale'});
+  const place=(px,py,pw,ph)=>{node.style.setProperty('--x',`${100*px/size[0]}%`);node.style.setProperty('--y',`${100*py/size[1]}%`);if(pw!=null){node.style.setProperty('--w',`${100*pw/size[0]}%`);node.style.setProperty('--h',`${100*ph/size[1]}%`);}};
+  place(x,y,w,h);
   node.append(el('img',{src:convertFileSrc(item.path),alt:'Placed design asset',draggable:'false'}));
   for(const [hx,hy] of [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]]){
    const handle=el('button',{class:'design-handle',title:'Drag to scale', 'aria-label':'Scale placed image',style:`left:${(hx+1)*50}%;top:${(hy+1)*50}%;cursor:${hx===0?'ns':hy===0?'ew':hx===hy?'nwse':'nesw'}-resize`});
@@ -887,7 +890,7 @@ function renderDesignPlacements(){
      const factor=hx===0?1+hy*dy/h:hy===0?1+hx*dx/w:1+(hx*dx/w+hy*dy/h)/2;
      const nw=Math.max(20,Math.min(size[0],w*factor)),nh=nw*h/w;
      rect=[hx<0?x+w-nw:hx===0?x+(w-nw)/2:x,hy<0?y+h-nh:hy===0?y+(h-nh)/2:y,nw,nh];
-     node.style.left=`${rect[0]/size[0]*100}%`;node.style.top=`${rect[1]/size[1]*100}%`;node.style.width=`${nw/size[0]*100}%`;node.style.height=`${nh/size[1]*100}%`;
+     place(rect[0],rect[1],nw,nh);
     };
     handle.onpointerup=async()=>{handle.onpointermove=null;handle.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,placement:item.id,x:rect[0],y:rect[1],width:rect[2]});}catch(error){toast(String(error));}};
    });node.append(handle);
@@ -895,7 +898,7 @@ function renderDesignPlacements(){
   node.addEventListener('pointerdown',e=>{
    selectedPlacement=item.id;
    e.preventDefault();node.setPointerCapture(e.pointerId);const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let nx=x,ny=y;
-   node.onpointermove=event=>{nx=x+(event.clientX-start[0])*size[0]/r.width;ny=y+(event.clientY-start[1])*size[1]/r.height;node.style.left=`${nx/size[0]*100}%`;node.style.top=`${ny/size[1]*100}%`;};
+   node.onpointermove=event=>{nx=x+(event.clientX-start[0])*size[0]/r.width;ny=y+(event.clientY-start[1])*size[1]/r.height;place(nx,ny);};
    node.onpointerup=async()=>{node.onpointermove=null;node.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,x:nx,y:ny,width:w,placement:item.id});}catch(error){toast(String(error));}};
   });const remove=el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×');
   remove.style.setProperty('--x',`${100*(x+w)/size[0]}%`);remove.style.setProperty('--y',`${100*y/size[1]}%`);page.append(node,remove);

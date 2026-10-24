@@ -5,12 +5,20 @@
       "control",
       "bar",
       "ruler",
-      "inline"
+      "inline",
+      "item"
     ],
     "panel-empty": [
       "card",
       "overlay",
       "inline"
+    ],
+    "segmented": [],
+    "field-row": [],
+    "transport": [],
+    "stage": [],
+    "chip": [
+      "word"
     ]
   },
   "densities": [
@@ -159,6 +167,10 @@
       "look": "bar",
       "density": "normal",
       "label": "Parts and assets"
+    },
+    "view-design": {
+      "component": "workspace",
+      "label": "Design"
     }
   }
 }

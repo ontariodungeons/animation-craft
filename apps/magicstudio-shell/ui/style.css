@@ -109,6 +109,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .panel-head.pane { flex: none; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); color: var(--text); font-size: var(--text-md); font-weight: 600; }
 .panel-head.tiny { position: sticky; top: 0; z-index: 2; height: var(--text-xl); background: var(--bg); color: var(--faint); font-size: var(--text-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .panel-head.inline { margin-bottom: var(--space-3); }
+.panel-head.item { width: 100%; padding: var(--space-2) var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; }
+.panel-head.item.active { border-color: var(--accent); }
 
 /* One empty state. The base is the shared shape; a modifier carries the
    place it fills. */
@@ -128,6 +130,25 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .panel-status { color: var(--faint); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-status.tight { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-xs); }
 .panel-status.row { display: flex; gap: var(--space-1); flex: none; }
+
+/* One segmented switch: a row of tabs in a well; the selected tab is raised. */
+.segmented { display: flex; gap: var(--space-1); padding: var(--space-1); border: thin solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.segmented > button { flex: 1; padding: var(--space-1) var(--space-2); border-radius: var(--radius); color: var(--muted); font-size: var(--text-sm); }
+.segmented > button[aria-selected=true] { background: var(--surface-2); color: var(--accent); font-weight: 600; }
+.segmented > button[aria-disabled=true] { color: var(--faint); cursor: default; }
+
+/* One field row: a label beside its control. */
+.field-row { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+
+/* One transport: play, a scrubber that takes the free width, the time. */
+.transport { display: flex; align-items: center; gap: var(--space-3); }
+.transport > input[type=range] { flex: 1; }
+
+/* One stage: a 16:9 window onto a composition; the frame's size and scale
+   come from the composition as --w, --h and --scale. */
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius);
+  background: radial-gradient(120% 90% at 50% 35%, var(--surface-2), var(--surface) 55%, var(--bg)); }
+.stage > iframe { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform: scale(var(--scale)); transform-origin: 0 0; border: 0; background: transparent; }
 .magic-image-ok { display: inline-grid; width: 12px; height: 12px; place-items: center; color: var(--muted); font-size: 12px; line-height: 1; flex: none; }
 .magic-image-review { color: var(--amber); }
 @keyframes pulse { to { opacity: .35; } }
@@ -182,6 +203,12 @@ main { flex: 1; min-height: 0; position: relative; }
 .chip.chapter { font-size: 11px; padding: 4px 10px; border-left: 3px solid transparent; }
 .chip.chapter.active { border-left-color: var(--accent-ink); }
 .chip.scene { min-width: 130px; }
+.chip.word { display: inline-flex; align-items: center; gap: var(--space-2); max-width: none; color: var(--text); font-size: var(--text-lg); }
+.chip.word.active { background: var(--surface); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 calc(var(--space-1) / 2) color-mix(in srgb, var(--accent) 30%, transparent); }
+.chip.word[data-emphasis] { font-weight: 700; }
+.chip.word[data-heard=differs] { text-decoration: underline wavy var(--amber); text-underline-offset: var(--space-1); }
+.chip.word[data-timing=differs] { border-style: dotted; border-color: var(--amber); }
+.chip-action { color: var(--accent); font-size: var(--text-sm); }
 .sb-nav { display: flex; align-items: center; gap: 4px; color: var(--muted); flex: none; }
 .icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); transition: all var(--fast) var(--ease); }
 .icon:hover { background: var(--surface-2); color: var(--text); }
@@ -562,7 +589,7 @@ body.movie-document:not(.project-details-open) #blocks { display:none; }
 #design-scale-value { min-width:34px; font:11px ui-monospace,monospace; }
 
 .sb-sheet .design-placement img { width:100%;height:100%;object-fit:contain;pointer-events:none;box-shadow:none; }
-.design-placement { outline:1px solid color-mix(in srgb,var(--accent) 55%,transparent); }
+.design-placement { left:var(--x); top:var(--y); width:var(--w); height:var(--h); outline:1px solid color-mix(in srgb,var(--accent) 55%,transparent); }
 .design-handle { position:absolute; width:10px;height:10px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);transform:translate(-50%,-50%);touch-action:none;z-index:5;padding:0; }
 .design-handle:hover { background:var(--accent); }
 
@@ -815,22 +842,22 @@ body.at-home .app-footer { display:none; }
 .magic-reader .panel-head.pane > span:first-child { flex: 1; }
 .reader-body { overflow: auto; padding: 4px 14px 14px; line-height: 1.7; }
 .reader-line { margin: 0 0 6px; }
-.reader-time { color: var(--faint); font: 11px ui-monospace, monospace; margin-right: 8px; background: none; border: 0; cursor: pointer; }
+.reader-time { color: var(--faint); font: var(--text-sm) ui-monospace, monospace; margin-right: var(--space-2); background: none; border: 0; cursor: pointer; }
 .reader-time:hover { color: var(--accent); }
 .reader-word.now { color: var(--accent-ink); background: var(--accent); border-radius: 4px; }
 /* Lyric sheet: the artist's words first; timing cues sit apart, never glued to the text. */
 .lyric-source { color: var(--faint); font-size: 12px; margin: 0; }
-.artist-note { margin: 0; padding: 8px 12px; border-left: 3px solid var(--tone-lyrics); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.artist-note { margin: 0; padding: var(--space-2) var(--space-3); border-left: 3px solid var(--tone-lyrics); background: var(--surface-2); border-radius: 0 8px 8px 0; }
 .artist-note p { margin: 0; font-style: italic; }
 .artist-note cite { color: var(--muted); font-size: 12px; font-style: normal; }
-.lyric-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lyric-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .not-linked { color: var(--amber); font-size: 12px; }
-.lyric-sheet, .reader-body { display: flex; flex-direction: column; gap: 12px; }
+.lyric-sheet, .reader-body { display: flex; flex-direction: column; gap: var(--space-3); }
 .lyric-stanza { display: flex; flex-direction: column; gap: 2px; }
 .stanza-label { color: var(--faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
 .lyric-line { display: flex; align-items: baseline; gap: 10px; }
 .lyric-text { flex: 1; min-width: 0; line-height: 1.5; }
-.lyric-line .cue { flex: none; color: var(--faint); font: 11px ui-monospace, monospace; }
+.lyric-line .cue { flex: none; color: var(--faint); font: var(--text-sm) ui-monospace, monospace; }
 
 .native-backend-fields[hidden] { display:none; }
 
@@ -907,3 +934,18 @@ body.at-home .app-footer { display:none; }
 .companion-note { color: var(--faint); font-size: 11px; }
 .companion-state { margin: 2px 0 6px; padding-left: 18px; color: var(--muted); font-size: 11px; }
 .companion-state li { margin: 1px 0; }
+
+/* Design > Words: the workspace. Sections on the left; preview, words and the
+   selected word's motion on the right. */
+#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8), 22vw) minmax(0, 1fr); align-content: start; gap: var(--space-3); padding: var(--space-3); overflow: auto; }
+.words-side, .words-main, .words-preview, .words-lines { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.words-main { gap: var(--space-3); }
+.words-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.words-head strong { font-size: var(--text-lg); }
+.words-head > :last-child { margin-left: auto; }
+.words-line, .words-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.words-actions { width: 100%; }
+.words-reference { display: flex; flex-direction: column; gap: var(--space-2); margin-top: auto; padding: var(--space-3); border: thin dashed var(--line); border-radius: var(--radius); }
+.words-reference p { margin: 0; font-size: var(--text-sm); }
+.words-inspector { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.words-inspector .group-label { width: 100%; }
