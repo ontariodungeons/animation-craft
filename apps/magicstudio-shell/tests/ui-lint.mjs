@@ -42,10 +42,27 @@ const RETIRED = [
   { name: 'panel-statuses', re: /(?<![\w-])(?:agent-status|magic-part-status|footer-status)(?![\w-])/g },
 ];
 
+// A retired name counts where it names a class: in a CSS selector, or in a
+// class string in the scripts. An id that happens to read the same is a hook,
+// not a second convention.
+const classStrings = source => {
+  const found = [];
+  for (const re of [/class\s*:\s*["'`]([^"'`]*)["'`]/g, /class\s*=\s*["'`]([^"'`]*)["'`]/g, /classList\.(?:add|remove|toggle)\(\s*["'`]([^"'`]*)["'`]/g]) {
+    for (const match of source.matchAll(re)) found.push(match[1]);
+  }
+  return found.join(' ');
+};
+
 const retired = {};
 for (const { name, re } of RETIRED) {
   let count = 0;
-  for (const source of sources.values()) count += (source.match(re) || []).length;
+  for (const [file, source] of sources) {
+    if (file === 'style.css') {
+      count += (source.replace(/#[\w-]+/g, '').match(re) || []).length;
+    } else {
+      count += (classStrings(source).match(re) || []).length;
+    }
+  }
   retired[name] = count;
 }
 

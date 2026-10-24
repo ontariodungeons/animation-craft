@@ -159,7 +159,7 @@ function animationControls(){
    el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${name}`}):el('div',{class:'panel-empty compare'},'No candidate yet'),
     el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'}${size(candidate.result.width,candidate.result.height)}`:'Candidate'))));
   const statusText=dimensionsMatch?'Sizes match · the original stays until you replace it':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${name} needs ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}`:'Generate a candidate or save an edit in PhotoCraft';
-  const actionStatus=el('p',{class:'magic-part-status',id:'part-image-status',title:statusText,role:'status'},statusText);
+  const actionStatus=el('p',{class:'panel-status tight',id:'part-image-status',title:statusText,role:'status'},statusText);
   const undoKey=`magic.part-image-undo.${state.project}.${motion.character}.${selected.id}`;
   const savedUndo=localStorage.getItem(undoKey);
   const replaceButton=el('button',{class:'start',id:'part-image-replace','aria-label':`Replace ${name} with reviewed candidate`,title:!dimensionsMatch?'Candidate must have the same pixel dimensions as this part':'Replace only this captured part; motion and pivot are preserved',onclick:async()=>{

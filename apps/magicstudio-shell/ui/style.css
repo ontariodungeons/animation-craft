@@ -93,6 +93,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .panel-empty.motion p { max-width: 360px; }
 .panel-empty.compare { width: 100%; height: 80px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background-color: var(--bg); background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: 16px 16px; background-position: 0 0,0 8px,8px -8px,-8px 0; padding: 8px; color: var(--faint); font-size: 10px; }
 .panel-empty.inline { margin: auto; padding: 16px; font-size: 12px; }
+
+/* One status row. The base is the shared shape; a modifier carries the
+   density or the alignment that differs. */
+.panel-status { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-status.tight { margin: 6px 0 0; color: var(--muted); font-size: 10.5px; }
+.panel-status.row { display: flex; gap: 4px; flex: none; }
 .magic-image-ok { display: inline-grid; width: 12px; height: 12px; place-items: center; color: var(--muted); font-size: 12px; line-height: 1; flex: none; }
 .magic-image-review { color: var(--amber); }
 @keyframes pulse { to { opacity: .35; } }
@@ -247,7 +253,6 @@ body.agent-docked main { margin-right: min(400px, 92vw); }
 .ghost { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); transition: all var(--fast) var(--ease); }
 .ghost:hover { color: var(--accent); border-color: var(--accent); }
 .ghost svg { width: 15px; height: 15px; }
-.agent-status { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-watch { color: var(--faint); font: 10.5px ui-monospace, monospace; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-watch:hover { color: var(--muted); }
 /* Pointing: dim the app, ring what is under the mouse. */
@@ -662,7 +667,6 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 
 /* Compare: strip on top, small frames, one status line, one row of actions. */
 .magic-part-compare .magic-parts-strip { padding:0 0 6px; }
-.magic-part-status { margin:6px 0 0; color:var(--muted); font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .magic-part-actionbar { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
 .magic-part-actionbar button { flex:1 1 auto; margin:0; padding:4px 7px; font-size:10.5px; border-radius:6px; white-space:nowrap; }
 
@@ -687,7 +691,6 @@ body.at-home .app-footer { display:none; }
 .footer-stage:hover, button.footer-item:hover { background:var(--surface-2); color:var(--text); }
 .app-footer .dot { --dot-size:6px; box-shadow:none; }
 .footer-context { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; }
-.footer-status { display:flex; gap:4px; flex:none; }
 @media (max-width: 1000px) { .footer-stage { font-size:0; gap:0; padding:4px; } }
 
 /* ---- Design polish (magic-studio-timeline.figcraft) ------------------------------------------- */
