@@ -203,6 +203,34 @@ pub fn cmd_words_lyrics_view(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"src":src,"file":file,"written":written,"video_sha256":format!("{:x}", Sha256::digest(html.as_bytes()))}))
 }
 
+/// Each track kind and the registry search that finds its effects.
+const EFFECT_KINDS: &[(&str, &str)] = &[
+    ("text", "word by word text reveal"),
+    ("drawing", "hand drawn line drawing"),
+    ("background", "animated background texture"),
+];
+
+/// `words.effects`: ready-made effects from the HyperFrames registry for each track kind (or one,
+/// with `kind`), searched with the project's pinned HyperFrames. Reads only; installs nothing.
+pub fn cmd_words_effects(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let hf = dir.join("hyperframes");
+    let cli = crate::video_target::hyperframes_cli(p["hyperframes_cli"].as_str(), Some(&hf))?;
+    let wanted = p["kind"].as_str();
+    if let Some(kind) = wanted && !EFFECT_KINDS.iter().any(|(k, _)| *k == kind) {
+        return Err(invalid(format!("kind must be one of {}", EFFECT_KINDS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "))));
+    }
+    let mut kinds = serde_json::Map::new();
+    for (kind, query) in EFFECT_KINDS.iter().filter(|(k, _)| wanted.is_none_or(|w| w == *k)) {
+        let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["catalog".into(), "--query".into(), (*query).into(), "--json".into()])?;
+        let found: Value = serde_json::from_str(&out).map_err(|e| invalid(format!("HyperFrames catalog answered with something other than JSON: {e}")))?;
+        let effects: Vec<Value> = found["results"].as_array().into_iter().flatten()
+            .map(|r| json!({"name":r["name"],"type":r["type"],"title":r["title"],"description":r["description"],"tags":r["tags"]})).collect();
+        kinds.insert((*kind).into(), json!({"query":query,"tier":found["tier"],"effects":effects}));
+    }
+    Ok(json!({"source":"hyperframes registry","kinds":kinds}))
+}
+
 /// One animation per printed section occurrence; nothing styled or moving until edited.
 fn default_document(report: &Value) -> Value {
     let mut animations: Vec<Value> = Vec::new();
@@ -456,6 +484,26 @@ mod tests {
         assert_eq!(cmd_words_lyrics_view(&mut s, &json!({})).unwrap()["written"], false, "unchanged video, nothing rewritten");
         fs::write(dir.join("hyperframes/index.html"), "<html><head></head><body><div data-composition-id=\"main\"></div></body></html>").unwrap();
         assert!(cmd_words_lyrics_view(&mut s, &json!({})).is_err(), "no lyric clips, nothing to show");
+    }
+
+    #[test]
+    fn effects_come_from_the_registry_per_track_kind() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, mut s) = project("effects");
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        // A stand-in for the HyperFrames CLI: answers a catalog search with one effect named after the query.
+        let cli = dir.join("fake-hyperframes");
+        fs::write(&cli, "#!/bin/sh\nprintf '{\"tier\":\"words\",\"results\":[{\"name\":\"%s\",\"type\":\"component\",\"title\":\"T\",\"description\":\"D\",\"tags\":[\"x\"]}]}' \"$3\"\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let params = json!({"hyperframes_cli": cli});
+        let all = cmd_words_effects(&mut s, &params).unwrap();
+        let mut kinds: Vec<_> = all["kinds"].as_object().unwrap().keys().cloned().collect();
+        kinds.sort();
+        assert_eq!(kinds, ["background", "drawing", "text"]);
+        assert_eq!(all["kinds"]["text"]["effects"][0]["name"], "word by word text reveal", "the kind's search reaches the catalog");
+        let one = cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "drawing"})).unwrap();
+        assert_eq!(one["kinds"].as_object().unwrap().len(), 1);
+        assert!(cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "sparkles"})).is_err());
     }
 
     #[test]
