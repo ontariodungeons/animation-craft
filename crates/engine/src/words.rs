@@ -175,6 +175,34 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"source":path,"clip_count":clips.len(),"sections":sections,"unmatched":unmatched}))
 }
 
+/// The style a lyrics-only view adds: everything in the video is hidden except its lyric word
+/// clips, on a plain ground, so the lyrics can be judged on their own.
+const LYRICS_ONLY_STYLE: &str = r#"<style data-magicstudio="lyrics-only">
+[data-composition-id] * { visibility: hidden !important; }
+.lyric-word-clip, .lyric-word-clip * { visibility: visible !important; }
+html, body, [data-composition-id] { background: #1b2430 !important; }
+</style>"#;
+
+/// `words.lyrics_view`: a derived copy of the video showing only its lyric word clips, for the
+/// Design stage. Written beside the Words compositions and rewritten only when the video changes;
+/// the video itself is never touched.
+pub fn cmd_words_lyrics_view(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let hf = dir.join("hyperframes");
+    let html = fs::read_to_string(hf.join("index.html")).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
+    if !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
+    let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
+    let derived = format!("{}{LYRICS_ONLY_STYLE}\n{}", &html[..head], &html[head..]);
+    let src = "compositions/words/lyrics-only.html";
+    let file = hf.join(src);
+    let written = fs::read_to_string(&file).ok().as_deref() != Some(derived.as_str());
+    if written {
+        fs::create_dir_all(file.parent().unwrap())?;
+        fs::write(&file, &derived)?;
+    }
+    Ok(json!({"src":src,"file":file,"written":written,"video_sha256":format!("{:x}", Sha256::digest(html.as_bytes()))}))
+}
+
 /// One animation per printed section occurrence; nothing styled or moving until edited.
 fn default_document(report: &Value) -> Value {
     let mut animations: Vec<Value> = Vec::new();
@@ -410,6 +438,24 @@ mod tests {
         assert_eq!((chorus[0]["text"].clone(), chorus[0]["clip_id"].clone()), (json!("Hey"), json!("kinetic-ch-l1-0")));
         assert_eq!((sections[1]["start"].clone(), sections[1]["end"].clone()), (json!(4.0), json!(4.8)));
         assert_eq!(track["unmatched"], json!(["kinetic-x-9"]), "a clip outside the sheet is reported, not dropped");
+    }
+
+    #[test]
+    fn lyrics_view_derives_a_lyrics_only_copy_and_leaves_the_video_alone() {
+        let (dir, mut s) = project("lyrics-view");
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        let video = r#"<html><head><title>v</title></head><body><div data-composition-id="main"><img id="sea" class="clip" data-start="0" data-duration="9">
+<div id="kinetic-ch-l1-0" class="clip lyric-word-clip" data-start="4" data-duration="1"><span>Hey</span></div></div></body></html>"#;
+        fs::write(dir.join("hyperframes/index.html"), video).unwrap();
+        let first = cmd_words_lyrics_view(&mut s, &json!({})).unwrap();
+        assert_eq!((first["src"].clone(), first["written"].clone()), (json!("compositions/words/lyrics-only.html"), json!(true)));
+        let derived = fs::read_to_string(dir.join("hyperframes/compositions/words/lyrics-only.html")).unwrap();
+        assert!(derived.contains(r#"data-magicstudio="lyrics-only""#) && derived.contains(".lyric-word-clip, .lyric-word-clip *"));
+        assert!(derived.find("lyrics-only").unwrap() < derived.find("</head>").unwrap(), "the style sits in the head");
+        assert_eq!(fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(), video, "the video is untouched");
+        assert_eq!(cmd_words_lyrics_view(&mut s, &json!({})).unwrap()["written"], false, "unchanged video, nothing rewritten");
+        fs::write(dir.join("hyperframes/index.html"), "<html><head></head><body><div data-composition-id=\"main\"></div></body></html>").unwrap();
+        assert!(cmd_words_lyrics_view(&mut s, &json!({})).is_err(), "no lyric clips, nothing to show");
     }
 
     #[test]
