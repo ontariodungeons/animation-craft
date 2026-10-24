@@ -449,6 +449,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("words.studio_track", "Lyric Clips in the Video", "{}", crate::words::cmd_words_studio_track),
         cmd!("words.lyrics_view", "Lyrics-Only View of the Video", ["Design"], None, "{}", always, crate::words::cmd_words_lyrics_view),
         query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
+        cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
         cmd!("words.save", "Save Words Animation", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"expected_source_revision\":0,\"style\":{\"size\":120},\"words\":[{\"word_id\":\"ch1-l1/w5\",\"action\":\"cry\",\"emphasis\":true}]}", always, crate::words::cmd_words_save),
         cmd!("words.compose", "Compose Words Track (HyperFrames)", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"instance_id\":\"optional: isolated composition for a repeated placement\"}", always, crate::words::cmd_words_compose),
         query!("workshop.files", "Workshop Files", "{\"filter\": \"optional substring\", \"group\": \"optional audio|liner_notes|transcript|storyboard|assets|other\"}", cmd_workshop_files),

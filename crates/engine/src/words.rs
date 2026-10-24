@@ -337,6 +337,12 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
             word[key] = checked;
         }
     }
+    if let Some(effects) = p.get("effects").filter(|v| !v.is_null()) {
+        for (track, choice) in effects.as_object().ok_or_else(|| invalid("effects must be an object of track: effect"))? {
+            if track != "text" { return Err(invalid(format!("effects.{track}: only the text track takes registry effects so far"))); }
+            anim["effects"][track] = if choice.is_null() { Value::Null } else { text_effect(&dir.join("hyperframes"), choice)? };
+        }
+    }
     anim["source_revision"] = json!(current + 1);
     anim["origin"] = p.get("origin").filter(|v| v.is_string()).cloned().unwrap_or(json!("magicstudio"));
     let saved = anim.clone();
@@ -346,6 +352,83 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
     fs::write(&temporary, serde_json::to_vec_pretty(&doc).map_err(|e| invalid(e.to_string()))?)?;
     fs::rename(&temporary, &path)?;
     Ok(json!({"ok":true,"conflict":false,"path":path,"animation":saved}))
+}
+
+/// A registry component's declared variables, read from its `data-composition-variables`.
+fn declared_variables(component: &str) -> Vec<Value> {
+    let Some(at) = component.find("data-composition-variables='") else { return Vec::new() };
+    let rest = &component[at + "data-composition-variables='".len()..];
+    rest.split('\'').next().and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default()
+}
+
+/// Check a text-track effect against the installed component: it must take the line as a string
+/// content variable; `cues` (word landings) is used when it declares one. Only declared variables
+/// may be set, and the text and cues are always the song's, never stored.
+fn text_effect(hf: &Path, choice: &Value) -> Result<Value> {
+    let name = choice["name"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .ok_or_else(|| invalid("effect name must be letters, digits or '-'"))?;
+    let src = format!("compositions/components/{name}.html");
+    let component = fs::read_to_string(hf.join(&src)).map_err(|_| invalid(format!("{name} is not installed in this project; run words.effect_install first")))?;
+    let declared = declared_variables(&component);
+    let text = declared.iter().find(|v| v["type"] == "string" && v["role"] == "content").and_then(|v| v["id"].as_str())
+        .ok_or_else(|| invalid(format!("{name} takes no text, so it cannot show a lyric line")))?;
+    let cues = declared.iter().any(|v| v["id"] == "cues");
+    let mut variables = serde_json::Map::new();
+    for (key, value) in choice["variables"].as_object().into_iter().flatten() {
+        if key == text || key == "cues" || !declared.iter().any(|v| v["id"] == json!(key)) {
+            return Err(invalid(format!("{name} has no settable variable {key}")));
+        }
+        variables.insert(key.clone(), value.clone());
+    }
+    Ok(json!({"name":name,"src":src,"text_variable":text,"cues":cues,"variables":variables}))
+}
+
+/// `words.effect_install`: install one HyperFrames registry effect into the project with the
+/// pinned HyperFrames (`hyperframes add`). Needs the network; already-installed effects are left as they are.
+pub fn cmd_words_effect_install(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let hf = dir.join("hyperframes");
+    let name = p["name"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .ok_or_else(|| invalid("name must be a registry effect name (letters, digits or '-')"))?;
+    let src = format!("compositions/components/{name}.html");
+    if hf.join(&src).is_file() { return Ok(json!({"name":name,"src":src,"installed":false,"already":true})); }
+    let cli = crate::video_target::hyperframes_cli(p["hyperframes_cli"].as_str(), Some(&hf))?;
+    let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into()])?;
+    if !hf.join(&src).is_file() { return Err(invalid(format!("hyperframes add {name} did not write {src}: {}", out.trim()))); }
+    Ok(json!({"name":name,"src":src,"installed":true,"already":false,"receipt":serde_json::from_str::<Value>(&out).unwrap_or(json!(out.trim()))}))
+}
+
+/// The section composed with its text effect: one mount per sung line, at the line's time, with
+/// the line's text and (when the effect takes them) each word's landing as cues from the mount start.
+fn effect_composition(anim: &Value, composition_id: &str, width: u64, height: u64, duration: f64, local: &dyn Fn(f64) -> f64) -> String {
+    let effect = &anim["effects"]["text"];
+    let name = effect["name"].as_str().unwrap_or_default();
+    let mut lines: Vec<(String, Vec<&Value>)> = Vec::new();
+    for w in anim["words"].as_array().into_iter().flatten() {
+        let line = w["line_id"].as_str().unwrap_or_default().to_owned();
+        if lines.last().is_none_or(|(id, _)| *id != line) { lines.push((line, Vec::new())); }
+        lines.last_mut().unwrap().1.push(w);
+    }
+    let attr = |v: &str| v.replace('&', "&amp;").replace('\'', "&#39;").replace('<', "&lt;");
+    let mut mounts = String::new();
+    for (i, (_, words)) in lines.iter().enumerate() {
+        let start = local(words[0]["start"].as_f64().unwrap_or(0.0));
+        let last = local(words.last().unwrap()["end"].as_f64().unwrap_or(0.0)) + HOLD;
+        let end = lines.get(i + 1).map_or(last, |(_, next)| last.min(local(next[0]["start"].as_f64().unwrap_or(last))));
+        let text = words.iter().filter_map(|w| w["text"].as_str()).collect::<Vec<_>>().join(" ");
+        let mut values = effect["variables"].as_object().cloned().unwrap_or_default();
+        values.insert(effect["text_variable"].as_str().unwrap_or("text").into(), json!(text));
+        if effect["cues"] == true {
+            let cues: Vec<String> = words.iter().filter_map(|w| w["start"].as_f64()).map(|t| format!("{:.3}", (local(t) - start).max(0.0))).collect();
+            values.insert("cues".into(), json!(cues.join(",")));
+        }
+        mounts.push_str(&format!("  <div class=\"line\" data-composition-id=\"{name}\" data-composition-src=\"../components/{name}.html\" data-start=\"{start:.6}\" data-duration=\"{:.6}\" data-variable-values='{}'></div>\n",
+            (end - start).max(0.1), attr(&Value::Object(values).to_string())));
+    }
+    format!("<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\" /></head>\n<body>\n<!-- Derived by `mc exec words.compose` from design/words.json with the {name} effect; regenerate rather than hand-edit. -->\n\
+<div data-composition-id=\"{composition_id}\" data-width=\"{width}\" data-height=\"{height}\" data-duration=\"{duration:.6}\" class=\"words-track\">\n\
+  <style>[data-composition-id=\"{composition_id}\"] {{ position: relative; width: {width}px; height: {height}px; overflow: hidden; }}\n\
+  [data-composition-id=\"{composition_id}\"] > .line {{ position: absolute; left: 6%; right: 6%; top: 62%; height: 26%; }}</style>\n{mounts}</div>\n</body>\n</html>\n")
 }
 
 fn composition_size(hf: &Path) -> (u64, u64) {
@@ -383,10 +466,11 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let (width, height) = composition_size(&hf);
     let data = json!({"composition_id":composition_id,"animation_id":id,"source_revision":anim["source_revision"],"duration":duration,
         "hold":anim["hold"],"style":anim["style"],"words":words});
-    let html = include_str!("../../../pipeline/templates/words-composition.html")
+    let html = if anim["effects"]["text"].is_object() { effect_composition(anim, &composition_id, width, height, duration, &local) }
+        else { include_str!("../../../pipeline/templates/words-composition.html")
         .replace("__COMPOSITION_ID__", &composition_id).replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string())
         .replace("__DURATION__", &format!("{duration:.6}"))
-        .replace("__DATA__", &serde_json::to_string(&data).map_err(|e| invalid(e.to_string()))?.replace("</", "<\\/"));
+        .replace("__DATA__", &serde_json::to_string(&data).map_err(|e| invalid(e.to_string()))?.replace("</", "<\\/")) };
     let file = hf.join("compositions/words").join(format!("{composition_id}.html"));
     fs::create_dir_all(file.parent().unwrap())?;
     fs::write(&file, &html)?;
@@ -504,6 +588,37 @@ mod tests {
         let one = cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "drawing"})).unwrap();
         assert_eq!(one["kinds"].as_object().unwrap().len(), 1);
         assert!(cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "sparkles"})).is_err());
+    }
+
+    #[test]
+    fn a_registry_text_effect_mounts_once_per_line_with_text_and_cues() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, mut s) = project("effect");
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        fs::write(dir.join("hyperframes/index.html"), r#"<div data-composition-id="main" data-width="1280" data-height="720"></div>"#).unwrap();
+        // A stand-in `hyperframes add`: writes the component the registry would.
+        let cli = dir.join("fake-hyperframes");
+        fs::write(&cli, "#!/bin/sh\nmkdir -p compositions/components\nprintf '%s' '<html data-composition-variables='\"'\"'[{\"id\":\"text\",\"type\":\"string\",\"role\":\"content\"},{\"id\":\"cues\",\"type\":\"string\",\"role\":\"timing\"},{\"id\":\"accent\",\"type\":\"enum\",\"role\":\"style\"}]'\"'\"'><template></template></html>' > compositions/components/$2.html\necho '{\"ok\":true}'\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+        let effect = json!({"name":"rise","variables":{"accent":"blue"}});
+        assert!(cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"effects":{"text":effect}})).is_err(), "not installed yet");
+        let installed = cmd_words_effect_install(&mut s, &json!({"name":"rise","hyperframes_cli":cli})).unwrap();
+        assert_eq!((installed["installed"].clone(), installed["src"].clone()), (json!(true), json!("compositions/components/rise.html")));
+        assert_eq!(cmd_words_effect_install(&mut s, &json!({"name":"rise","hyperframes_cli":cli})).unwrap()["already"], true);
+        for bad in [json!({"name":"rise","variables":{"glow":1}}), json!({"name":"rise","variables":{"text":"x"}})] {
+            assert!(cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"effects":{"text":bad}})).is_err());
+        }
+        let saved = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"effects":{"text":effect}})).unwrap();
+        assert_eq!((saved["animation"]["effects"]["text"]["text_variable"].clone(), saved["animation"]["effects"]["text"]["cues"].clone()), (json!("text"), json!(true)));
+        let composed = cmd_words_compose(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap();
+        let html = fs::read_to_string(composed["file"].as_str().unwrap()).unwrap();
+        assert_eq!(html.matches("class=\"line\"").count(), 1, "one mount per sung line");
+        assert!(html.contains(r#"data-composition-src="../components/rise.html""#) && html.contains(r#"data-start="0.400000""#));
+        assert!(html.contains(r#""text":"Hey ho don&#39;t cry.""#), "the line's own words, escaped for the attribute: {html}");
+        assert!(html.contains(r#""cues":"0.000,0.300,0.600,0.900""#) && html.contains(r#""accent":"blue""#), "{html}");
+        let cleared = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"effects":{"text":null}})).unwrap();
+        assert!(cleared["animation"]["effects"]["text"].is_null());
+        assert!(fs::read_to_string(cmd_words_compose(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap()["file"].as_str().unwrap()).unwrap().contains("__DATA__") == false);
     }
 
     #[test]
