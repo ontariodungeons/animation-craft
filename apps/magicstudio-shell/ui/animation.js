@@ -248,8 +248,8 @@ function partsDrawer(compare,assetsGrid){
  });
  const panels={parts:cards.length?el('div',{class:'magic-part-cards'},cards):el('p',{class:'why'},'This object has no rig parts.'),compare,assets:assetsGrid};
  const body=el('div',{class:'magic-parts-panel',role:'tabpanel'},panels[motion.partsTab]||compare);
- const tab=(key,label)=>el('button',{class:`magic-parts-tab${motion.partsTab===key?' active':''}`,role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
- return el('div',{class:'magic-parts-drawer'},el('div',{class:'magic-parts-tabs',role:'tablist','aria-label':'Parts and assets'},
+ const tab=(key,label)=>el('button',{class:motion.partsTab===key?'active':'',role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
+ return el('div',{class:'magic-parts-drawer'},el('div',{class:'segmented',role:'tablist','aria-label':'Parts and assets'},
   tab('parts',`Parts (${(meta.layers||[]).length})`),tab('compare','Compare'),tab('assets',`Assets (${(motion.assets||[]).length})`)),body);
 }
 // PhotoCraft edits a draft copy; the live layer only changes through part.replace_image.
