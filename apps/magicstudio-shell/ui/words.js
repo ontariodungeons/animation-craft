@@ -1,16 +1,22 @@
 // Design > Words: the visible lyric track, edited one verse/chorus at a time.
 // Words and timing come from the artist's sheet and the hidden transcript reference; this panel
-// changes only style, emphasis and motion (words.save), and previews the composed HyperFrames
-// track (words.compose) against the song itself. One project, one clock, no preview server.
-const wordsPanel = { read: null, align: null, selected: null, word: null, pending: new Map(), styleEdits: {}, preview: null, frame: 0, stage: null };
+// changes only style, emphasis and motion (words.save). The stage plays the finished HyperFrames
+// video itself, one section at a time, through the preview player's control messages; its
+// lyric clips come from words.studio_track. One project, one clock, the song's own.
+const wordsPanel = { read: null, align: null, studio: null, selected: null, word: null, pending: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null };
 const WORD_ACTIONS = [["none", "Still"], ["wave", "Wave"], ["tiny", "Small"], ["swim", "Swim"], ["no", "Shake"], ["cry", "Droop"], ["big", "Grow"], ["float", "Float"]];
 const WORD_ENTRANCES = ["pop", "fade", "rise", "none"];
 const WORD_EXITS = ["fade", "drop", "none"];
+const wordsCommand = (command, params = {}) => invoke("engine_command", { id: command, params });
 
 const wordsSongPath = () => state.data?.status?.stages?.find((s) => s.id === "song")?.inputs?.[0]?.path;
 const wordsCurrent = () => wordsPanel.read?.document?.animations?.find((a) => a.animation_id === wordsPanel.selected);
 const wordsMismatch = (id) => wordsPanel.align?.words?.find((w) => w.word_id === id && w.status !== "match");
 const wordsDisagree = (id) => wordsPanel.align?.timing_disagreements?.find((d) => d.word_id === id);
+// The same printed section in the finished video: its span on the song clock and its lyric clips.
+const wordsStudioSection = (anim) => wordsPanel.studio?.sections?.find((s) => s.section === anim?.scope?.section && s.occurrence === anim?.scope?.occurrence);
+const wordsClip = (id) => wordsPanel.studio?.sections?.flatMap((s) => s.clips).find((c) => c.word_id === id);
+const wordsClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 // The one indicator, from the box state; the title says why.
 const wordsDot = (state, title) => Object.assign(window.companionBoxes.dot(state), { title });
 
@@ -25,15 +31,17 @@ async function wordsOpen() {
   if (!view) return;
   view.replaceChildren(el("p", { class: "panel-empty inline" }, "Loading the words…"));
   try {
-    const [read, align] = await Promise.all([
-      invoke("engine_command", { id: "words.read", params: {} }),
-      invoke("engine_command", { id: "words.align", params: {} }),
+    const [read, align, studio] = await Promise.all([
+      wordsCommand("words.read"),
+      wordsCommand("words.align"),
+      wordsCommand("words.studio_track").catch((error) => ({ error: String(error).replace(/^.*?: /, "") })),
     ]);
     wordsPanel.read = read;
     wordsPanel.align = align;
+    wordsPanel.studio = studio;
     if (!wordsCurrent()) wordsPanel.selected = read.document.animations[0]?.animation_id || null;
     wordsRender();
-    wordsPreview();
+    wordsVideoRange();
   } catch (error) {
     view.replaceChildren(el("div", { class: "panel-empty boxed" },
       el("p", {}, "Words starts from the artist's lyric sheet."),
@@ -48,7 +56,7 @@ function wordsSelect(id) {
   }
   wordsPanel.pending.clear(); wordsPanel.styleEdits = {}; wordsPanel.word = null; wordsPanel.selected = id;
   wordsRender();
-  wordsPreview();
+  wordsVideoRange();
 }
 
 // The effective value of a word field: the pending edit if any, else the saved value.
@@ -79,7 +87,7 @@ function wordsRender() {
     ...animations.map((a) => el("button", { class: `panel-head item${a.animation_id === wordsPanel.selected ? " active" : ""}`, "data-section": a.animation_id, onclick: () => wordsSelect(a.animation_id) },
       wordsDot(mismatchedIn(a) ? "needs-attention" : "ready", mismatchedIn(a) ? "Some words differ from what was heard" : "Words match the timing reference"),
       el("span", { class: "title" }, wordsLabel(a)),
-      el("span", { class: "meta" }, `rev ${a.source_revision}`))),
+      el("span", { class: "meta" }, (() => { const v = wordsStudioSection(a); return v ? `${wordsClock(v.start)} · ${v.clips.length} clips` : `rev ${a.source_revision}`; })()))),
     el("div", { class: "words-reference" },
       el("div", { class: "group-label" }, "Timing reference · hidden"),
       el("p", {}, `${reference.word_count ?? "?"} heard words · ${summary.matched ?? "?"} of ${summary.canonical_words ?? "?"} artist words match`),
@@ -98,7 +106,7 @@ function wordsRender() {
     const action = wordsValue(w, "action"), disagree = wordsDisagree(w.word_id);
     const chip = el("button", { class: `chip word${wordsPanel.word === w.word_id ? " active" : ""}`, "data-word-id": w.word_id, "data-action": action,
       title: `${w.text} · ${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s${heard ? ` · heard as “${heard.heard ?? "nothing"}”` : ""}${disagree ? ` · measured alignment says ${(+disagree.measured[0]).toFixed(2)} s` : ""}`,
-      onclick: () => { wordsPanel.word = w.word_id; wordsRender(); wordsSeek((+w.start) - (anim.song_anchor || 0), true); } },
+      onclick: () => { wordsPanel.word = w.word_id; wordsRender(); const clip = wordsClip(w.word_id); if (clip) wordsVideo("seek", { timeSeconds: clip.start, seekMode: "commit" }); } },
       w.text, action !== "none" ? el("span", { class: "chip-action" }, WORD_ACTIONS.find((x) => x[0] === action)?.[1] || action) : null);
     // Marks are states of the word, drawn by the chip's word look.
     if (heard) chip.dataset.heard = "differs";
@@ -137,23 +145,77 @@ function wordsRender() {
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
     stage, sheet, inspector);
   view.replaceChildren(side, main);
-  if (wordsPanel.preview?.html) wordsMount();
+  wordsFit();
 }
 
-// The preview stage survives re-renders of the same section, so editing never reloads it.
+// The stage is the finished video, kept across re-renders so editing never reloads it.
 function wordsStage(anim) {
-  if (wordsPanel.stage?.dataset.animation === anim.animation_id) return wordsPanel.stage;
-  const scrub = el("input", { type: "range", id: "words-scrub", min: "0", max: String(anim.authored_duration || 1), step: "0.01", "aria-label": "Preview time",
-    oninput: (e) => wordsSeek(Number(e.target.value), true) });
-  scrub.value = scrub.defaultValue = "0"; // a view control, never an unsaved edit
+  const section = wordsStudioSection(anim);
+  if (wordsPanel.stage && wordsPanel.stage.dataset.animation === anim.animation_id) return wordsPanel.stage;
+  const url = serverUrl();
+  if (!section || !url) {
+    wordsPanel.stage = null;
+    return el("p", { class: "panel-empty inline" }, !url ? "Start the Studio server to play the video here."
+      : wordsPanel.studio?.error ? `The video's lyric clips could not be read: ${wordsPanel.studio.error}` : "The video has no lyric clips for this section.");
+  }
+  const scrub = el("input", { type: "range", id: "words-scrub", min: String(section.start), max: String(section.end), step: "0.01", "aria-label": "Video time",
+    oninput: (e) => wordsVideo("seek", { timeSeconds: Number(e.target.value), seekMode: "commit" }) });
+  scrub.value = scrub.defaultValue = String(section.start); // a view control, never an unsaved edit
+  // The preview player of the HyperFrames server, same project id as the Studio link.
+  const server = new URL(url);
+  const project = server.hash.split("/")[1] || "hyperframes";
+  const frame = el("iframe", { id: "words-video-frame", title: "The finished video", allow: "autoplay", src: `${server.origin}/api/projects/${project}/preview` });
+  frame.addEventListener("load", wordsVideoRange);
   wordsPanel.stage = el("div", { class: "words-preview", "data-animation": anim.animation_id },
-    el("div", { class: "stage", id: "words-preview" }, el("iframe", { id: "words-preview-frame", title: "Words track preview", sandbox: "allow-scripts allow-same-origin" })),
+    el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
-      el("button", { class: "icon", id: "words-play", "aria-label": "Play preview", title: "Play with the song", onclick: wordsPlay, html: ICONS.play }),
+      el("button", { class: "icon", id: "words-play", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
-      el("span", { class: "meta", id: "words-time" }, `0.0 / ${(anim.authored_duration || 0).toFixed(1)} s`)));
+      el("span", { class: "meta", id: "words-time" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)));
   return wordsPanel.stage;
 }
+
+// One control message to the video's preview player.
+function wordsVideo(action, params = {}) {
+  $("words-video-frame")?.contentWindow?.postMessage({ source: "hf-parent", type: "control", action, ...params }, "*");
+}
+
+// Hold the player to the selected section: it plays and loops only that stretch of the song.
+function wordsVideoRange() {
+  const section = wordsStudioSection(wordsCurrent());
+  if (!section) return;
+  wordsVideo("pause");
+  wordsVideo("set-play-range", { startSeconds: section.start, endSeconds: section.end });
+  wordsVideo("seek", { timeSeconds: section.start, seekMode: "commit" });
+}
+
+// The video's own size, as data; the stage rule scales the frame to fit.
+function wordsFit(size = wordsPanel.size) {
+  const frame = $("words-video-frame"), box = $("words-preview");
+  if (!frame || !box || !size) return;
+  wordsPanel.size = size;
+  frame.style.setProperty("--w", `${size.width}px`); frame.style.setProperty("--h", `${size.height}px`);
+  frame.style.setProperty("--scale", String(box.clientWidth / size.width));
+}
+
+// The player reports its time, play state and stage size; the transport follows it.
+addEventListener("message", (event) => {
+  const frame = $("words-video-frame");
+  if (!frame || event.source !== frame.contentWindow || event.data?.source !== "hf-preview") return;
+  const data = event.data;
+  if (data.type === "stage-size") wordsFit({ width: data.width, height: data.height });
+  if (data.type === "state") {
+    wordsPanel.time = data.currentTime; wordsPanel.playing = !!data.isPlaying;
+    const scrub = $("words-scrub");
+    if (scrub) scrub.value = scrub.defaultValue = String(data.currentTime);
+    if ($("words-time")) $("words-time").textContent = wordsClock(data.currentTime);
+    $("words-play")?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
+  }
+});
+addEventListener("resize", () => wordsFit());
+// Leaving the Design view stops the video, so nothing plays behind another view.
+new MutationObserver(() => { if (!$("view-design")?.classList.contains("active") && wordsPanel.playing) wordsVideo("pause"); })
+  .observe(document.getElementById("view-design") || document.body, { attributes: true, attributeFilter: ["class"] });
 
 function wordsSelectField(options, value, onchange) {
   const select = el("select", { onchange: (e) => onchange(e.target.value) }, ...options.map((o) => el("option", { value: o }, o)));
@@ -168,74 +230,10 @@ async function wordsSave() {
     words: [...wordsPanel.pending].map(([word_id, edit]) => ({ word_id, ...edit })) };
   if (Object.keys(wordsPanel.styleEdits).length) params.style = wordsPanel.styleEdits;
   try {
-    const result = await invoke("engine_command", { id: "words.save", params });
+    const result = await wordsCommand("words.save", params);
     if (result.conflict) { toast("Someone changed these words first; reloaded the latest"); wordsPanel.pending.clear(); wordsPanel.styleEdits = {}; return wordsOpen(); }
     wordsPanel.pending.clear(); wordsPanel.styleEdits = {};
     toast(`Saved ${wordsLabel(anim)} · rev ${result.animation.source_revision}`);
     await wordsOpen();
   } catch (error) { toast(String(error)); }
-}
-
-// Compose the saved animation and show it on the song clock. Unsaved edits are not previewed.
-async function wordsPreview() {
-  const anim = wordsCurrent();
-  if (!anim) return;
-  try {
-    const receipt = await invoke("engine_command", { id: "words.compose", params: { animation_id: anim.animation_id } });
-    const html = await (await fetch(`${convertFileSrc(receipt.file)}?v=${receipt.sha256}`)).text();
-    wordsPanel.preview = { receipt, html: html.replace("<head>", "<head><style>html,body{margin:0;background:transparent;overflow:hidden}</style>") };
-    wordsMount();
-  } catch (error) {
-    wordsPanel.preview = null;
-    const box = $("words-preview");
-    box?.replaceChildren(el("p", { class: "panel-empty inline" }, `No preview yet: ${String(error).replace(/^.*?: /, "")}`));
-  }
-}
-
-function wordsMount() {
-  const frame = $("words-preview-frame"), box = $("words-preview");
-  if (!frame || !box || !wordsPanel.preview) return;
-  const { receipt, html } = wordsPanel.preview;
-  // Geometry from the composition, as data; the stage rule sizes and scales the frame.
-  frame.style.setProperty("--w", `${receipt.width}px`); frame.style.setProperty("--h", `${receipt.height}px`);
-  frame.style.setProperty("--scale", String(box.clientWidth / receipt.width));
-  if (frame.srcdoc !== html) frame.srcdoc = html;
-}
-
-function wordsTimeline() {
-  const r = wordsPanel.preview?.receipt;
-  return r && $("words-preview-frame")?.contentWindow?.__timelines?.[r.composition_id];
-}
-
-// `moveSong` is true for scrubbing; during playback the song leads and only the timeline follows.
-function wordsSeek(local, moveSong = false) {
-  const r = wordsPanel.preview?.receipt;
-  if (!r) return;
-  const t = Math.max(0, Math.min(local, r.authored_duration));
-  wordsTimeline()?.seek(t);
-  const audio = songPlayer.path ? songPlayer.audio : null;
-  if (moveSong && audio && !audio.paused) audio.currentTime = r.song_anchor + t;
-  if ($("words-scrub")) $("words-scrub").value = $("words-scrub").defaultValue = String(t);
-  if ($("words-time")) $("words-time").textContent = `${t.toFixed(1)} / ${r.authored_duration.toFixed(1)} s`;
-}
-
-// Play the real song from this section's anchor and follow it with the composed timeline.
-function wordsPlay() {
-  const r = wordsPanel.preview?.receipt, path = wordsSongPath();
-  if (!r || !path) return toast("Compose a preview and link the song first");
-  const audio = songAudio(path);
-  if (!audio.paused) { audio.pause(); return; }
-  const start = Number($("words-scrub")?.value || 0);
-  audio.currentTime = r.song_anchor + (start >= r.authored_duration - 0.05 ? 0 : start);
-  audio.play().catch((error) => toast(`Cannot play the song: ${error.message || error}`));
-  cancelAnimationFrame(wordsPanel.frame);
-  const follow = () => {
-    const t = audio.currentTime - r.song_anchor;
-    if (state.view !== "design") { audio.pause(); return; }
-    if (audio.paused) return;
-    if (t >= r.authored_duration) { audio.pause(); wordsSeek(r.authored_duration); return; }
-    wordsSeek(t);
-    wordsPanel.frame = requestAnimationFrame(follow);
-  };
-  wordsPanel.frame = requestAnimationFrame(follow);
 }
