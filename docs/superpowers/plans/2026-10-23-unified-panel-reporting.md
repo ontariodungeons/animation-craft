@@ -18,7 +18,7 @@
 | 2 | Beaker | Panel record + change-only revision + unconfigured list in `ui.feedback` | `ui/companion-boxes.js`, `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs`, `.githooks/pre-commit` | 1 |
 | 3 | Rizzo | Rust `panels` types; `studios.rs` on a `Studio` struct | `crates/engine/src/panels.rs`, `crates/engine/src/lib.rs`, `crates/engine/tests/panels.rs`, `apps/mc/src/studios.rs` | — |
 | 4 | Rizzo | `mc panels [--json\|--check]`; generic `ui.panel` setter | `apps/mc/src/main.rs`, `apps/mc/src/panels.rs`, `apps/magicstudio-shell/src/bridge.rs` | 2, 3 |
-| 5 | Gonzo | TUI panel rows + "Unconfigured UI" row, redraw on revision | `apps/mc/src/center.rs` | 3 |
+| 5 | Gonzo | TUI panel rows + "Unconfigured UI" row, redraw on revision | `apps/mc/src/center/panels.rs` (new), `apps/mc/src/center.rs` | 3 |
 | 6 | Rizzo | Per-pet timer + cooldown | `ui/companions.js`, `tests/companions.mjs` | 1 |
 | 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline in the hook | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
 
@@ -127,7 +127,7 @@ Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|b
 ### Task 5 (Gonzo): TUI panels section
 
 **Consumes:** Task 3 `PanelReport::from_feedback`, `Signal`.
-**Files:** Modify `apps/mc/src/center.rs` (refresh at `:65`, add `render_panels`; colour via one `fn signal_color(Signal) -> Color` using existing `GREEN/AMBER/RED/MUTED` constants).
+**Files:** Create `apps/mc/src/center/panels.rs` (rendering, following the `center/booth.rs` / `center/workshop.rs` split from merge `3642935`); modify `apps/mc/src/center.rs` (keep the report in `refresh` at `:110`; colour via one `fn signal_color(Signal) -> Color` using the existing `GREEN/AMBER/RED/MUTED` constants at `:750`).
 
 - [ ] Keep `PanelReport` + `last_panels_revision` on `Center`; rebuild panel lines only when `revision` differs (existing 1 s refresh stays).
 - [ ] Render: one row per panel (dot glyph coloured by signal, label, flags), an "Unconfigured UI: N" row that lists ids in details (`D`), "Panels unavailable" when `available` is false.
