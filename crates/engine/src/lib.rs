@@ -39,6 +39,7 @@ pub mod theatre;
 pub mod parts;
 pub mod part_replacement;
 pub mod photocraft;
+pub mod panels;
 pub mod project;
 pub mod project_settings;
 pub mod rig;
