@@ -42,20 +42,23 @@ def reusable(entry, fingerprint):
                     for path, checksum in entry['outputs'].items()))
 
 
-def render(command, mc, receipts):
+def render(command, mc, receipts, bridge=None, request_id=None):
     fingerprint, files = inputs_for(command)
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid4().hex[:8]
     folder = receipts / run_id
     folder.mkdir()
     actual = json.loads(json.dumps(command))
     actual['params']['out_dir'] = str(Path(command['params']['out_dir']).resolve() / run_id)
+    if request_id:
+        actual['params']['_request_id'] = request_id
     receipt = {'status': 'running', 'inputs': fingerprint, 'input_files': files,
                'command': actual, 'outputs': {}}
     write_json(folder / 'receipt.json', receipt)
     print(json.dumps({'scene': Path(command['params']['spec']).stem,
                       'status': 'rendering', 'receipt': str(folder / 'receipt.json')}), flush=True)
     try:
-        done = subprocess.run([mc, 'run', '-'], input=json.dumps(actual) + '\n',
+        native = [mc, '--bridge', str(bridge)] if bridge else [mc]
+        done = subprocess.run([*native, 'run', '-'], input=json.dumps(actual) + '\n',
                               capture_output=True, text=True)
         (folder / 'stdout.jsonl').write_text(done.stdout)
         (folder / 'stderr.log').write_text(done.stderr)
@@ -100,6 +103,9 @@ def place(args, scenes, selected, current, receipts):
     if len(commands) != len(selected):
         raise ValueError('placement recipe must place each selected scene exactly once')
     commands.append({'id': 'project.save', 'params': {}})
+    for command in commands:
+        if getattr(args, 'request_id', None):
+            command['params']['_request_id'] = args.request_id
     folder = receipts / ('place-' + uuid4().hex)
     folder.mkdir()
     (folder / 'commands.jsonl').write_text(''.join(json.dumps(command) + '\n' for command in commands))
@@ -131,6 +137,12 @@ def run(args):
     unknown = set(selected) - scenes.keys()
     if unknown:
         raise ValueError(f'unknown scenes: {sorted(unknown)}')
+    if getattr(args, 'project', None):
+        observed = subprocess.run([args.mc, '--bridge', str(args.bridge), 'exec', 'ui.state'],
+                                  capture_output=True, text=True)
+        state = json.loads(observed.stdout) if observed.returncode == 0 else {}
+        if not state.get('project') or Path(state['project']).resolve() != Path(args.project).resolve():
+            raise ValueError('Studio project does not match the requested project; no render or placement started')
     receipts = recipe.parent / 'receipts'
     receipts.mkdir(exist_ok=True)
     with (receipts / '.lock').open('w') as lock:
@@ -145,7 +157,8 @@ def run(args):
                 print(json.dumps({'scene': scene, 'status': 'reused',
                                   'receipt': current[scene]['receipt']}), flush=True)
                 continue
-            entry = render(command, args.mc, receipts)
+            entry = render(command, args.mc, receipts, getattr(args, 'bridge', None),
+                           getattr(args, 'request_id', None))
             if entry['status'] == 'complete':
                 current[scene] = {key: entry[key] for key in ('inputs', 'outputs', 'receipt')}
                 write_json(current_path, current)
@@ -167,9 +180,11 @@ def main():
     parser.add_argument('--force', action='store_true', help='rerender even when current inputs and outputs match')
     parser.add_argument('--place', help='placement JSONL; paths are resolved from matching receipts')
     parser.add_argument('--bridge', type=int, help='Studio control port for placement')
+    parser.add_argument('--project', help='require this exact project in the selected Studio')
+    parser.add_argument('--request-id', help='group native Studio events as one batch in Backstage')
     args = parser.parse_args()
-    if args.place and not args.bridge:
-        parser.error('--place requires an explicit --bridge')
+    if (args.place or args.project) and not args.bridge:
+        parser.error('--place and --project require an explicit --bridge')
     try:
         return run(args)
     except (OSError, ValueError, KeyError) as error:
