@@ -1167,6 +1167,50 @@ fn main() {
                     obj.insert("clean".to_string(), Value::Bool(true));
                 }
             }
+            if a.flag_health {
+                // Comprehensive health view: all magicstudio apps, MCP connections, TUI instances
+                let (rows, errors) = studios::rows();
+                let tui_instances = tui::call("instances", &json!({})).ok();
+                let mcp_procs: Vec<Value> = std::process::Command::new("pgrep")
+                    .args(["-af", "mc.*mcp"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.lines().map(|l| json!(l)).collect())
+                    .unwrap_or_default();
+                let health = json!({
+                    "ok": true,
+                    "studios": rows,
+                    "studio_errors": errors,
+                    "tui_instances": tui_instances,
+                    "mcp_bridge_count": mcp_procs.len(),
+                    "mcp_bridges": mcp_procs,
+                    "guidance": "Use --stop to kill all MCP bridges. Use --clean to remove stale endpoints."
+                });
+                outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+                return;
+            }
+            if a.flag_stop {
+                // Stop all MCP bridge processes
+                let output = std::process::Command::new("pkill")
+                    .args(["-f", "mc.*mcp"])
+                    .output();
+                let killed = output.as_ref().map(|o| o.status.success()).unwrap_or(false);
+                let remaining = std::process::Command::new("pgrep")
+                    .args(["-c", "-f", "mc.*mcp"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                outln!("{}", serde_json::to_string_pretty(&json!({
+                    "ok": true,
+                    "stopped": killed,
+                    "remaining_mcp_bridges": remaining,
+                    "message": if killed { "MCP bridges stopped" } else { "No MCP bridges found or kill failed" }
+                })).unwrap_or_default());
+                return;
+            }
             let mut s = Session::user_session();
             match s.execute("app.doctor", params) {
                 Ok(mut v) => {
