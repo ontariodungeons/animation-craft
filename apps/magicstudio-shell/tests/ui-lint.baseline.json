@@ -1,12 +1,12 @@
 {
   "files": {
     "style.css": {
-      "px_outside_root": 960,
+      "px_outside_root": 932,
       "hex_outside_root": 0,
       "ms_outside_root": 4,
-      "raw_px_in_component_rules": 173,
+      "raw_px_in_component_rules": 145,
       "outside_in_overrides": 49,
-      "lines": 899,
+      "lines": 909,
       "rules": 621,
       "selectors": 643
     },
@@ -37,10 +37,10 @@
     "app.js": {
       "hand_built_dots": 0,
       "retired": 0,
-      "style_attributes": 6,
-      "style_writes": 8,
-      "geometry_without_custom_property": 8,
-      "lines": 873
+      "style_attributes": 4,
+      "style_writes": 6,
+      "geometry_without_custom_property": 6,
+      "lines": 906
     },
     "blender-placement.js": {
       "hand_built_dots": 0,
@@ -64,7 +64,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 150
+      "lines": 167
     },
     "companion-boxes.js": {
       "hand_built_dots": 0,
@@ -72,7 +72,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 259
+      "lines": 264
     },
     "companion-rails.js": {
       "hand_built_dots": 0,

@@ -57,7 +57,7 @@ function createCompanionBoxes() {
 
   // Register (or update) a box. The id is stable; the project and context say
   // where the box lives, so an observation can be matched to it later.
-  function register(id, { project = null, context = null, priority = 0, title = null, label = null, on = null } = {}) {
+  function register(id, { project = null, context = null, priority = 0, title = null, label = null, on = null, look = null, density = null } = {}) {
     if (!id) return null;
     let box = boxes.get(id);
     if (!box) {
@@ -68,6 +68,8 @@ function createCompanionBoxes() {
         priority,
         title,
         label: label ?? title ?? null,
+        look,
+        density,
         on: {},
         open: false,
         busy: false,
@@ -88,6 +90,8 @@ function createCompanionBoxes() {
       if (priority) box.priority = priority;
       if (title != null) box.title = title;
       if (label != null) box.label = label;
+      if (look != null) box.look = look;
+      if (density != null) box.density = density;
     }
     if (on) for (const flag of Object.keys(on)) box.on[flag] = on[flag];
     return box;
@@ -209,6 +213,7 @@ function createCompanionBoxes() {
       items.push({
         id: box.id,
         label: box.label ?? null,
+        look: box.look ?? null,
         signal: Math.max(SIGNAL[box.state] ?? 0, busy ? 1 : 0),
         open: !!box.open,
         busy,

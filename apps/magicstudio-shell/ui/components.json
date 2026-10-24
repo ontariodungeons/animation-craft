@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "looks": {
+    "panel-head": [
+      "control",
+      "bar",
+      "ruler",
+      "inline"
+    ],
+    "panel-empty": [
+      "card",
+      "overlay",
+      "inline"
+    ]
+  },
+  "densities": [
+    "normal",
+    "compact"
+  ],
+  "elements": {
+    "view-home": {
+      "component": "workspace",
+      "label": "Home"
+    },
+    "view-project": {
+      "component": "workspace",
+      "label": "Project"
+    },
+    "view-animation": {
+      "component": "workspace",
+      "label": "Animation"
+    },
+    "view-studio": {
+      "component": "workspace",
+      "label": "Studio"
+    },
+    "blocks": {
+      "component": "workspace",
+      "label": "Song workflow"
+    },
+    "sb-chips": {
+      "component": "storyboard",
+      "label": "Storyboard"
+    },
+    "sb-cards": {
+      "component": "storyboard",
+      "label": "Storyboard cards"
+    },
+    "studio-empty": {
+      "component": "panel-empty",
+      "look": "overlay",
+      "label": "Studio not running"
+    },
+    "sb-empty": {
+      "component": "panel-empty",
+      "look": "card",
+      "label": "No storyboard yet"
+    },
+    "magic-chat-pane": {
+      "component": "workspace",
+      "label": "Sprocket chat"
+    },
+    "magic-image-pane": {
+      "component": "workspace",
+      "label": "Gaffer artwork"
+    },
+    "magic-parts-pane": {
+      "component": "workspace",
+      "label": "Parts and assets"
+    },
+    "agent": {
+      "component": "workspace",
+      "label": "Agent"
+    },
+    "agent-status": {
+      "component": "panel-status",
+      "label": "Agent status"
+    },
+    "footer-status": {
+      "component": "panel-status",
+      "label": "Footer status"
+    },
+    "block-song": {
+      "component": "panel-head",
+      "look": "control",
+      "density": "normal",
+      "label": "Song"
+    },
+    "block-animate": {
+      "component": "panel-head",
+      "look": "control",
+      "density": "normal",
+      "label": "Animate"
+    },
+    "block-assets": {
+      "component": "panel-head",
+      "look": "control",
+      "density": "normal",
+      "label": "Assets"
+    },
+    "theatre-ruler": {
+      "component": "panel-head",
+      "look": "ruler",
+      "density": "normal",
+      "label": "Timeline"
+    },
+    "motion-inspector": {
+      "component": "workspace",
+      "label": "Inspector"
+    },
+    "motion-stagebar": {
+      "component": "workspace",
+      "label": "Stage"
+    },
+    "motion-canvas": {
+      "component": "workspace",
+      "label": "Canvas"
+    },
+    "magic-image-tools": {
+      "component": "workspace",
+      "label": "Artwork tools"
+    },
+    "magic-parts-slot": {
+      "component": "workspace",
+      "label": "Parts"
+    },
+    "app-footer": {
+      "component": "workspace",
+      "label": "Footer"
+    },
+    "agent-log": {
+      "component": "workspace",
+      "label": "Agent log"
+    },
+    "agent-compose": {
+      "component": "workspace",
+      "label": "Agent compose"
+    },
+    "agent-head": {
+      "component": "panel-head",
+      "look": "bar",
+      "density": "compact",
+      "label": "Agent"
+    },
+    "magic-chat-head": {
+      "component": "panel-head",
+      "look": "bar",
+      "density": "compact",
+      "label": "Sprocket chat"
+    },
+    "magic-image-toggle": {
+      "component": "panel-head",
+      "look": "bar",
+      "density": "normal",
+      "label": "Gaffer artwork"
+    },
+    "magic-parts-head": {
+      "component": "panel-head",
+      "look": "bar",
+      "density": "normal",
+      "label": "Parts and assets"
+    }
+  }
+}

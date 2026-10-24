@@ -13,6 +13,17 @@ function regionNode(region) {
   return document.getElementById(region) || document.querySelector(region);
 }
 
+// A visual inline style: any property set on the element itself. Custom
+// properties carry data (geometry), not style.
+function visualInlineStyle(node) {
+  const style = node.style;
+  if (!style) return false;
+  const names = typeof style.length === "number" && typeof style.item === "function"
+    ? Array.from({ length: style.length }, (_, i) => style.item(i))
+    : Object.keys(style).filter(key => !key.startsWith("--"));
+  return names.some(name => !name.startsWith("--"));
+}
+
 function idOf(node) {
   return node.id || node.getAttribute("aria-label") || (node.innerText || node.value || node.placeholder || "").trim().split("\n")[0].slice(0, 60);
 }
@@ -58,23 +69,29 @@ window.magicBridge = {
         rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] };
     });
   },
-  // Every clickable control that is not inside a panel the registry knows:
-  // a control with no data-box-id ancestor (or one the registry never saw) is
-  // reported as unconfigured instead of being silently ignored.
+  // A control is tracked when it, or an ancestor, is a panel the registry
+  // knows or has an entry in the config. A control with neither is untracked.
+  // A control with a visual inline style is unstyled; geometry set as custom
+  // properties is data, not styling, and is never unstyled.
   unconfigured() {
     const registry = window.companionBoxes;
-    const known = (node) => {
-      const host = node.closest("[data-box-id]");
-      const boxId = host && host.getAttribute("data-box-id");
-      return !!(boxId && registry && typeof registry.get === "function" && registry.get(boxId));
+    const entries = (window.uiConfig && window.uiConfig.elements) || {};
+    const tracked = (node) => {
+      for (let n = node; n; n = n.parentElement) {
+        if (n.id && entries[n.id]) return true;
+        const host = n.getAttribute && n.getAttribute("data-box-id");
+        if (host && registry && typeof registry.get === "function" && registry.get(host)) return true;
+      }
+      return false;
     };
     const rows = [];
-    const nodes = [...document.querySelectorAll(CLICKABLE)];
+    const nodes = [...document.querySelectorAll(`${CLICKABLE}, [id]`)];
     nodes.forEach((node, i) => {
-      if (!visible(node) || known(node)) return;
+      const reason = !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
+      if (!reason) return;
       const tag = node.tagName.toLowerCase();
       const label = (node.title || node.getAttribute("aria-label") || node.textContent || "").trim().slice(0, 80);
-      rows.push({ id: node.id || `${tag}-${i + 1}`, tag, label: label || null });
+      rows.push({ id: node.id || `${tag}-${i + 1}`, tag, label: label || null, reason });
     });
     return rows.slice(0, 64);
   },

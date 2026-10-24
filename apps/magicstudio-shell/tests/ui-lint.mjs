@@ -69,6 +69,10 @@ function rules(source) {
   return found;
 }
 
+// Size metrics are reported, not judged: a file may grow while its violations
+// shrink. Only the violation counts gate the ratchet.
+const SIZE_KEYS = new Set(['lines', 'rules', 'selectors', 'classes']);
+
 const PX = /\b\d+(?:\.\d+)?px\b/g;
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 const MS = /\b\d+(?:\.\d+)?ms\b/g;
@@ -165,7 +169,7 @@ if (process.argv.includes('--write-baseline')) {
     if (!allowed) continue; // a new file is recorded, not judged, on this commit
     for (const [key, value] of Object.entries(fileCounts)) {
       const limit = allowed[key];
-      if (limit === undefined) continue;
+      if (limit === undefined || SIZE_KEYS.has(key)) continue;
       if (value > limit) problems.push(`${file} ${key}: ${value} > baseline ${limit}`);
     }
   }
@@ -184,11 +188,11 @@ if (process.argv.includes('--write-baseline')) {
       const before = previous[file];
       if (!before) continue; // a new file has no floor yet
       const now = counts[file];
-      const raised = Object.keys(now).filter(key => typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] > before[key]);
+      const raised = Object.keys(now).filter(key => !SIZE_KEYS.has(key) && typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] > before[key]);
       if (raised.length) problems.push(`${file} raised ${raised.join(', ')}`);
-      const had = Object.entries(before).some(([key, value]) => typeof value === 'number' && value > 0 && key !== 'lines');
+      const had = Object.entries(before).some(([key, value]) => !SIZE_KEYS.has(key) && typeof value === 'number' && value > 0);
       if (had) {
-        const lowered = Object.keys(now).some(key => typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] < before[key]);
+        const lowered = Object.keys(now).some(key => !SIZE_KEYS.has(key) && typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] < before[key]);
         if (!lowered) problems.push(`${file} has non-zero counts but lowered none`);
       }
     }

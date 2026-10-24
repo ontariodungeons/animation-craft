@@ -212,6 +212,30 @@ function toast(text) {
 // Box ids must be STABLE across renders, so they come from explicit intent
 // first (the `box` attribute, then the element's own id) and only fall back
 // to a label. Labels change; ids are contracts.
+// THE CONFIG. One entry per element id says which component it is, which look
+// it takes and how dense it is. el() reads it by id, so a look is chosen in
+// the config, never at the call site.
+const uiConfig = { version: 0, looks: {}, densities: [], elements: {} };
+window.uiConfig = uiConfig;
+
+async function loadComponents() {
+  const response = await fetch("components.json");
+  if (!response.ok) throw new Error(`components.json ${response.status}`);
+  Object.assign(uiConfig, await response.json());
+  for (const [id, entry] of Object.entries(uiConfig.elements)) {
+    const node = document.getElementById(id);
+    if (node) applyEntry(node, entry);
+  }
+  return uiConfig;
+}
+
+function applyEntry(node, entry) {
+  if (!entry) return node;
+  if (entry.look) node.dataset.look = entry.look;
+  if (entry.density) node.dataset.density = entry.density;
+  return node;
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   let box = null;
@@ -225,9 +249,11 @@ function el(tag, attrs = {}, ...children) {
   for (const c of children.flat()) if (c != null) node.append(c);
   const project = typeof state === "undefined" ? null : state.project;
   const boxId = box || attrs.id || null;
+  const entry = attrs.id ? uiConfig.elements[attrs.id] : null;
+  if (entry) applyEntry(node, entry);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
-    if (window.companionBoxes) window.companionBoxes.register(boxId, { project });
+    if (window.companionBoxes) window.companionBoxes.register(boxId, { project, look: entry?.look || null, density: entry?.density || null });
   }
   // A control may also be a rail slot. Declaring it here means the slot
   // inherits the same stable id and the same contract as the box.
@@ -420,7 +446,7 @@ function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
   const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention");
   dot.title = done ? "Ready" : "Needs work";
-  const head = el("button", { class: "panel-head control", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
+  const head = el("button", { class: "panel-head control", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
     dot,
     el("span", { class: "ico", html: icon }),
@@ -594,11 +620,17 @@ function renderStoryboard() {
     wrap.dataset.document=key;wrap.replaceChildren();wrap.classList.add("sb-page-wrap","document-pages");
     const size=sb.layout?.page_size||[595,842];
     pages.forEach((path,i)=>{
-      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet",style:`aspect-ratio:${size[0]}/${size[1]}`});
+      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet"});
+      page.style.setProperty('--ar',`${size[0]}/${size[1]}`);
       page.append(el("img",{src:convertFileSrc(path),alt:`Storyboard page ${i+1}`,loading:"lazy"}));
       for(const [j,link] of (sb.layout?.links||[]).entries())if(link.page===i+1){
         const [x,y,r,b]=link.rect;
-        page.append(el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${(r-x)/size[0]*100}%;height:${(b-y)/size[1]*100}%`,onclick:()=>showPage(link.to_page-1)}));
+        const linkButton=el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,onclick:()=>showPage(link.to_page-1)});
+        linkButton.style.setProperty('--x',`${x/size[0]*100}%`);
+        linkButton.style.setProperty('--y',`${y/size[1]*100}%`);
+        linkButton.style.setProperty('--w',`${(r-x)/size[0]*100}%`);
+        linkButton.style.setProperty('--h',`${(b-y)/size[1]*100}%`);
+        page.append(linkButton);
       }
       page.addEventListener('dragover',e=>{e.preventDefault();page.classList.add('drop-target');e.dataTransfer.dropEffect='copy';});
       page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
@@ -629,8 +661,8 @@ function showPage(n) {
 function placeInk() {
   const active = document.querySelector(".tab.active");
   const ink = document.querySelector(".tab-ink");
-  ink.style.width = `${active.offsetWidth - 16}px`;
-  ink.style.transform = `translateX(${active.offsetLeft + 8}px)`;
+  ink.style.setProperty('--ink-w', `${active.offsetWidth - 16}px`);
+  ink.style.setProperty('--ink-x', `${active.offsetLeft + 8}px`);
 }
 
 async function showStudio() {
@@ -722,6 +754,7 @@ async function toggleServer() {
 // ---- Startup ------------------------------------------------------------------------------
 
 async function load() {
+  await loadComponents();
   const start = await invoke("startup");
   state.studioUrl = start.studio || null;
   if (!start.project) return showHome();

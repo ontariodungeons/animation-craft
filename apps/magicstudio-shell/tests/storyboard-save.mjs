@@ -30,7 +30,7 @@ console.log("PASS: native Save acknowledges the rendered project revision");
 
 // Rendering after Save must retain the actual selected page, not just its toolbar number.
 const scrolled=[],nodes=new Map();
-function dom(id){return {id,children:[],dataset:{},classList:{toggle(){},add(){}},replaceChildren(){this.children=[];},append(...n){this.children.push(...n);},querySelector(){return null;},addEventListener(){},remove(){},scrollIntoView(){scrolled.push(this.id);}};}
+function dom(id){return {id,children:[],dataset:{},style:{setProperty(){}},classList:{toggle(){},add(){}},replaceChildren(){this.children=[];},append(...n){this.children.push(...n);},querySelector(){return null;},addEventListener(){},remove(){},scrollIntoView(){scrolled.push(this.id);},};}
 const get=id=>{if(!nodes.has(id))nodes.set(id,dom(id));return nodes.get(id);};
 const renderContext=vm.createContext({updateAppFooter(){},state:{project:'/fixture/test.magic',page:1,data:{storyboard:{template:'backlot',previews:['one','two','three'],scene_titles:['scene-1','scene-2'],first_scene_page:2}}},
  $:get,document:{body:{classList:{toggle(){}}}},el:(tag,attrs={})=>dom(attrs.id),convertFileSrc:p=>p,renderDesignPlacements(){},renderStoryboardText(){}});
