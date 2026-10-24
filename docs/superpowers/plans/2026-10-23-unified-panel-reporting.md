@@ -46,7 +46,8 @@ The design is locked by a ratchet, not by a big-bang rewrite. Any commit that to
 - Every count in `tests/ui-lint.mjs` is tracked **per file** in `ui-lint.baseline.json`. A commit may never raise a file's count, and a commit that edits a file with a non-zero count must lower at least one of that file's counts (`--write-baseline` records the new floor in the same commit).
 - Converting means using the contract, not inventing: the element gets an entry in `components.json` with a `look` from the fixed list, sizes come from the scale tokens, colours from palette tokens, lights from `dot(state)`, data geometry from custom properties. No inline styling.
 - Code that builds UI goes through `el()` with a `box`/`id` so it registers; `mc panels --check` must stay at 0 unconfigured for any view you touched.
-- If a needed look, token or state is missing from the contract, stop and ask the coordinator; do not add a one-off.
+- **When a component comes out generic, give it a new look** (Jesse's rule): add a named look to that component's list in `components.json` and its token set inside the component's one rule in `style.css`, reusing `:root` tokens. No need to stop and ask for that. Never accept a plain default and never write a one-off class.
+- A new **component**, **token** or **state** still goes through the coordinator, so it is added once, for everyone.
 
 ## Who does what
 
@@ -119,6 +120,8 @@ The Studio window is a web page (Tauri webview), so style works exactly as on th
 | `apps/magicstudio-shell/ui/style.css` | `:root` tokens at the top (palette, `--signal-*`, `--space-1..5` = 4/8/12/16/28px, `--text-xs..xl` = 10/11/13/15/18px, `--radius`, motion), then one block per component | literal values (hex, px, ms) only inside `:root`; component rules use `var()` only; a component's looks and densities set only its own tokens; no rule styles a component from the outside (no `.some-view .panel-head`) |
 
 Views are components too (`workspace`, `storyboard`, `timeline`, …): their layout is their component rule, with their own entry in `components.json`.
+
+New looks are cheap and expected: when a component looks generic somewhere, add a named look (tokens only) rather than accept a default or write an override.
 
 ```json
 {
