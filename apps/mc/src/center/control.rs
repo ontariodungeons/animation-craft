@@ -57,14 +57,15 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
                 }
             }
             if matches!(key.code,KeyCode::F(1)|KeyCode::F(2)|KeyCode::F(3)|KeyCode::F(4)){c.event_open=false;c.event_focus=false;c.details_open=false;}
-            if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;c.muppets_view=false;c.telemetry_view=false;return Flow::Continue;}
-            if key.code==KeyCode::F(3) && !c.show_form{c.muppets_view=true;c.control_view=false;c.telemetry_view=false;return Flow::Continue;}
+            if key.code==KeyCode::F(1){c.control_view=true;c.show_form=false;c.muppets_view=false;c.telemetry_view=false;c.config_view=false;return Flow::Continue;}
+            if key.code==KeyCode::F(3) && !c.show_form{c.muppets_view=true;c.control_view=false;c.telemetry_view=false;c.config_view=false;return Flow::Continue;}
             if key.code==KeyCode::F(2) && !c.show_form{if c.view_name()=="workshop"&&workshop::selected(c).is_some(){c.observe_selected();return Flow::Continue;}c.control_view=false;c.muppets_view=false;c.telemetry_view=false;return Flow::Continue;}
             if key.code==KeyCode::F(10){c.check_storyboard();return Flow::Continue;}
             // F4 is the telemetry tab: dials, processes and live log tails, sampled only
             // while it is open. F6 opens the intake form; F4 still closes it.
-            if key.code==KeyCode::F(4) && !c.show_form{c.telemetry_view=!c.telemetry_view;c.control_view=false;c.muppets_view=false;c.details_open=false;return Flow::Continue;}
+            if key.code==KeyCode::F(4) && !c.show_form{c.telemetry_view=!c.telemetry_view;c.control_view=false;c.muppets_view=false;c.config_view=false;c.details_open=false;return Flow::Continue;}
             if key.code==KeyCode::F(4) && c.show_form{c.show_form=false;return Flow::Continue;}
+            if key.code==KeyCode::F(5) && !c.show_form{c.config_view=!c.config_view;c.control_view=false;c.muppets_view=false;c.telemetry_view=false;c.details_open=false;return Flow::Continue;}
             if key.code==KeyCode::F(6) && !c.show_form{c.show_form=true;return Flow::Continue;}
             if !c.show_form&&c.view_name()=="workshop"{
                 match key.code{

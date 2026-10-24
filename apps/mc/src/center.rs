@@ -55,6 +55,7 @@ struct Center {
     studios_at: Option<std::time::Instant>,
     studios_receiver: Option<std::sync::mpsc::Receiver<Value>>,
     telemetry_view: bool,
+    config_view: bool,
     dials: Option<crate::dials::Host>,
     dials_at: Option<std::time::Instant>,
     proc_snapshot: Vec<crate::telemetry::Proc>,
@@ -111,7 +112,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
+        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
         match panels::load_config(){Ok(config)=>center.panel_config=config,Err(error)=>center.panel_config_error=Some(error),}
         center.scope=crate::scope::current()?.cloned();
         if let Some(scope)=&center.scope{
@@ -1648,7 +1649,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
   else if c.onboarding.is_some(){roles::render_onboarding(f,c,chunks[2]);}
   else if c.chat_editing{render_conversation(f,c,chunks[2]);}
   else if c.event_open{render_event(f,c,chunks[2]);}
-  else if c.telemetry_view{if c.scope.is_some(){roles::render_animal(f,c,chunks[2]);}else{render_telemetry(f,c,chunks[2]);}}
+  else if c.config_view{render_config(f,c,chunks[2]);}else if c.telemetry_view{if c.scope.is_some(){roles::render_animal(f,c,chunks[2]);}else{render_telemetry(f,c,chunks[2]);}}
   else if control&&!c.muppets_view{workshop::render(f,c,chunks[2]);}
   else if c.details_open{render_pulse(f,c,chunks[2]);}
   else if c.muppets_view{render_muppets(f,c,chunks[2]);}
@@ -1697,7 +1698,7 @@ fn tab_strip(c:&Center,width:usize)->Line<'static>{
  let tabs:Vec<_>=tabs.into_iter().filter(|(label,_,_)|c.scope.is_none()||*label!="WORKSHOP").collect();
  let required:usize=tabs.iter().map(|(label,key,_)|label.len()+key.len()+3).sum::<usize>()+9;
  for (index,(label,key,active)) in tabs.iter().enumerate(){
-  let label=if required<=width{*label}else if width>=50{match *label{"WORKSHOP"=>"Work","BOOTH"=>"Booth","MOPS"=>"MOPS",_=>"Mayhem"}}else{""};
+  let label=if required<=width{*label}else if width>=50{match *label{"WORKSHOP"=>"Work","BOOTH"=>"Booth","MOPS"=>"MOPS","MAYHEM"=>"Mayhem","CONFIG"=>"Config",_=>"?"}}else{""};
   if index>0{spans.push(Span::styled(" │ ",Style::default().fg(DIM)));}
   if *active{
    spans.push(Span::styled(format!(" {key} {label} "),Style::default().fg(DESK_BG).bg(TEAL).add_modifier(Modifier::BOLD)));
@@ -1731,6 +1732,31 @@ fn spark_glyph(value:Option<f64>)->char{
  ["▁","▂","▃","▄","▅","▆","▇","█"][level].chars().next().unwrap_or('·')
 }
 /// The telemetry tab: host dials, the busiest processes, live log tails, commits.
+/// CONFIG: TUI and app settings that can be modified without code changes.
+fn render_config(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ lines.push(styled("TUI & App Settings",TEAL));
+ lines.push(Line::raw(""));
+ lines.push(styled("Press Enter on a field to edit, Esc to cancel",MUTED));
+ lines.push(Line::raw(""));
+ lines.push(styled(format!("Process count in MAYHEM: {}", 18),DESK_FG));
+ lines.push(styled(format!("Agent refresh interval: {}s", 3),DESK_FG));
+ lines.push(styled(format!("Studio discovery interval: {}s", 3),DESK_FG));
+ lines.push(styled(format!("MCP scan interval: {}s", 3),DESK_FG));
+ lines.push(Line::raw(""));
+ lines.push(styled("Skills registered:",TEAL));
+ for s in &c.skills{
+  let id=s.get("id").and_then(Value::as_str).unwrap_or("skill");
+  let status=s.get("status").and_then(Value::as_str).unwrap_or("researching");
+  let colour=match status{"implemented"=>GREEN,"not_implemented"=>RED,_=>AMBER};
+  lines.push(styled(format!("  {} · {}",id,status),colour));
+ }
+ lines.push(Line::raw(""));
+ lines.push(styled("To change values, edit ~/.config/magicstudio/tui-settings.json",MUTED));
+ lines.push(styled("and restart the TUI. Values: process_count, agent_refresh_secs,",MUTED));
+ lines.push(styled("studio_discovery_secs, mcp_scan_secs",MUTED));
+ f.render_widget(Paragraph::new(lines).block(round_panel("CONFIG · F5 toggle · Pg Scroll",TEAL,false)),area);
+}
 fn render_telemetry(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if area.width<118{
   let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
@@ -2032,7 +2058,7 @@ mod feedback_tests {
         assert!(!c.message.contains("sent to beaker"),"a working agent is never sent the check-in");
     }
     pub(super) fn fixture()->Center{
-        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new(),skills:Vec::new()}
+        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new(),skills:Vec::new()}
     }
     fn panel_text(lines:&[Line])->String{lines.iter().map(|line|line.to_string()).collect::<Vec<_>>().join("\n")}
     fn panel_screen(c:&Center)->String{
