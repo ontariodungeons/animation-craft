@@ -87,18 +87,25 @@ fn aligned(s: &mut Session) -> Result<Value> {
         word["heard"] = found.map_or(Value::Null, |j| heard[j]["text"].clone());
         word["status"] = json!(status);
         word["start"] = start; word["end"] = end; word["timing_source"] = json!(source);
-        word.as_object_mut().unwrap().remove("forced");
     }
     let mut mismatches = Vec::new();
     for w in words.iter().filter(|w| w["status"] != "match") {
         mismatches.push(json!({"word_id":w["word_id"],"line_id":w["line_id"],"canonical":w["text"],"heard":w["heard"],"kind":w["status"]}));
     }
+    // Matched words keep the reference timing; where the measured alignment of the artist's text
+    // disagrees by more than half a second, say so rather than choose silently.
+    let disagreements: Vec<Value> = words.iter().filter(|w| w["timing_source"] == "reference").filter_map(|w| {
+        let forced = w["forced"].as_array()?;
+        let (rs, fs) = (w["start"].as_f64()?, forced[0].as_f64()?);
+        ((rs - fs).abs() > 0.5).then(|| json!({"word_id":w["word_id"],"text":w["text"],"reference":[w["start"], w["end"]],"measured":forced}))
+    }).collect();
+    for word in &mut words { word.as_object_mut().unwrap().remove("forced"); }
     let heard_used: Vec<usize> = map.iter().flatten().copied().collect();
     let unmatched_heard: Vec<Value> = (0..heard.len()).filter(|j| !heard_used.contains(j))
         .map(|j| json!({"ref_index":j,"heard":heard[j]["text"]})).collect();
     Ok(json!({"reference":{"kind":"transcript","path":ref_path,"sha256":ref_sha,"word_count":heard.len()},
         "canonical":{"sheet":lyrics["sheet"],"original":lyrics["original"]["path"]},
-        "words":words,"mismatches":mismatches,"unmatched_heard":unmatched_heard}))
+        "words":words,"mismatches":mismatches,"timing_disagreements":disagreements,"unmatched_heard":unmatched_heard}))
 }
 
 fn canonical_eq(word: &Value, heard: &str) -> bool { norm(word["text"].as_str().unwrap_or_default()) == heard }
@@ -108,7 +115,8 @@ pub fn cmd_words_align(s: &mut Session, _: &Value) -> Result<Value> {
     let mut report = aligned(s)?;
     let total = report["words"].as_array().map_or(0, Vec::len);
     let matched = report["words"].as_array().into_iter().flatten().filter(|w| w["status"] == "match").count();
-    report["summary"] = json!({"canonical_words":total,"matched":matched,"mismatched":total - matched});
+    report["summary"] = json!({"canonical_words":total,"matched":matched,"mismatched":total - matched,
+        "timing_disagreements":report["timing_disagreements"].as_array().map_or(0, Vec::len)});
     Ok(report)
 }
 
@@ -309,6 +317,22 @@ mod tests {
         assert!(kinds.contains(&("fish", "substituted")) || kinds.contains(&("in", "substituted")) || kinds.contains(&("the", "substituted")), "{kinds:?}");
         assert!(words.iter().filter(|w| w["status"] != "match").all(|w| w["timing_source"] != "reference"));
         assert_eq!(words[8]["word_id"], "ch-l1/w0");
+    }
+
+    #[test]
+    fn timing_disagreements_are_reported_not_chosen() {
+        let (dir, mut s) = project("disagree");
+        // The measured alignment of the artist's chorus puts "ho" 0.7 s after the reference; "Hey" agrees.
+        fs::write(dir.join("artifacts/lyric_timing_v1.json"), json!({"lines":[{"id":"ch-sung-1","section":"chorus","text":"Hey ho don't cry.",
+            "words":[{"word":"Hey","start":4.05,"end":4.2},{"word":"ho","start":5.0,"end":5.2},{"word":"don't","start":4.6,"end":4.8},{"word":"cry.","start":4.9,"end":5.3}]}]}).to_string()).unwrap();
+        let report = cmd_words_align(&mut s, &json!({})).unwrap();
+        let found = report["timing_disagreements"].as_array().unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0]["text"].clone(), found[0]["reference"].clone(), found[0]["measured"].clone()), (json!("ho"), json!([4.3, 4.5]), json!([5.0, 5.2])));
+        assert_eq!(report["summary"]["timing_disagreements"], 1);
+        let ho = report["words"].as_array().unwrap().iter().find(|w| w["word_id"] == found[0]["word_id"]).unwrap();
+        assert_eq!((ho["start"].clone(), ho["timing_source"].clone()), (json!(4.3), json!("reference")), "reference timing kept, not replaced");
+        assert!(report["words"].as_array().unwrap().iter().all(|w| w.get("forced").is_none()));
     }
 
     #[test]
