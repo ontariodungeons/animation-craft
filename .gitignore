@@ -68,3 +68,7 @@ blender-skills/
 .hermes/
 .mcp.json
 .mcp.json.bak-*
+
+# Agent advisor config and stray media in the checkout root.
+WATCHDOG.yml
+/*.mp4
