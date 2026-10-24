@@ -1,0 +1,3 @@
+report: css 1042 lines / 644 rules / 666 selectors / 287 classes / 100 px (0 outside :root) / 42 hex (0 outside :root) · js 4529 lines / 0 .style.x = / 0 style: attributes
+acceptance: css 1042/911 (+131) lines · selectors 666/673 · js 4529/4227 (+302) lines · px outside :root 0 · hex outside :root 0 · 0 .style.x = · 0 style: attributes
+PASS ui-lint: no count above its baseline
