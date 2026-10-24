@@ -133,7 +133,7 @@ const artworkContext = vm.createContext({
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
-  document: { querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
+  document: { querySelectorAll: () => [], querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
   magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
   updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
   invoke: async (id, args) => {

@@ -3,7 +3,7 @@ use super::*;
 use magicstudio_engine::panels::{Config, Panel, PanelReport, Reason};
 
 pub(super) fn load_config() -> Result<Config, String> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../magicstudio-shell/ui/components.json");
+    let path = crate::panels::config_path();
     Config::load(&path).map_err(|error| format!("{}: {error}", path.display()))
 }
 
@@ -53,6 +53,7 @@ fn health_line(report: &PanelReport) -> Line<'static> {
     if !report.available {
         return styled("UI health  Panels unavailable", AMBER);
     }
+    if report.truncated { return styled("UI health  Incomplete observation; read ui.controls pages", AMBER); }
     let untracked = report.count(Reason::Untracked);
     let unstyled = report.count(Reason::Unstyled);
     if untracked == 0 && unstyled == 0 {

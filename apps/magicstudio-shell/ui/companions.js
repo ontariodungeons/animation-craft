@@ -13,6 +13,7 @@ function createCompanions(frames, options = {}) {
   let enabled = localStorage.getItem("magic.companions") === "true";
   let project = null;
   let stage = null;
+  let settleTimer = null;
   // per-pet timers live on pets[name]
   const nodes = {};
   const pets = {};
@@ -48,7 +49,6 @@ function createCompanions(frames, options = {}) {
       holder.replaceChildren(img);
       holder.hidden = false;
     }
-    nodes[name].textContent = "";
     return holder;
   }
 
@@ -66,7 +66,8 @@ function createCompanions(frames, options = {}) {
   // A box declares where a pet may stand. No slot declared means the pet keeps
   // its place and only changes pose.
   function slotFor(name, boxId) {
-    if (!rails || !boxId) return null;
+    if (!rails) return null;
+    boxId ||= name === "sproket" ? "chat" : "artwork";
     const owner = [...document.querySelectorAll("[data-box-id]")].find(n => n.getAttribute("data-box-id") === boxId);
     const declared = owner?.getAttribute("data-companion-slot");
     if (declared) {
@@ -79,7 +80,7 @@ function createCompanions(frames, options = {}) {
   // ONE compositor transform per retarget. Nothing is measured per frame.
   function travel(name, slot) {
     const node = nodes[name];
-    if (!slot || !rails || pets[name].slot === slot.slotId) return;
+    if (!slot || !rails) return;
     const rect = rails.measure(slot.slotId);
     if (!rect) return;
     pets[name].slot = slot.slotId;
@@ -92,7 +93,7 @@ function createCompanions(frames, options = {}) {
     }
     if (node.parentElement !== stage) stage.append(node);
     node.classList.add("companion-traveling");
-    node.style.transform = `translate3d(${Math.round(rect.x)}px, ${Math.round(rect.y)}px, 0)`;
+    node.style.setProperty("--companion-position", `translate3d(${Math.round(rect.x - (name === "gaffer" && pets.sproket.slot === slot.slotId ? 30 : 0))}px, ${Math.round(rect.y)}px, 0)`);
     clearTimeout(travelling[name]);
     travelling[name] = setTimeout(() => {
       delete travelling[name];
@@ -105,7 +106,7 @@ function createCompanions(frames, options = {}) {
     if (!enabled || !project || document.hidden) { nodes[name].hidden = true; return; }
     if (useSprite(name)) {
       nodes[name].hidden = false;
-      travel(name, pet.box ? slotFor(name, pet.box) : null);
+      travel(name, slotFor(name, pet.box));
       return;
     }
     // ASCII fallback keeps its original inline behaviour: one anchor, no travel.
@@ -149,17 +150,21 @@ function createCompanions(frames, options = {}) {
     if (!boxes) return;
     if (!enabled) { for (const name of Object.keys(nodes)) nodes[name].hidden = true; return; }
     rails?.discover();
-    const rows = boxes.snapshot({ project: state.project }).filter(row => row.signal > 0);
+    const rows = boxes.panels().items.filter(row => row.signal > 0);
     const newestFirst = (a, b) => (b.seq ?? 0) - (a.seq ?? 0) || (b.observed_at ?? 0) - (a.observed_at ?? 0);
-    const worst = rows.filter(row => row.signal >= 2).sort((a, b) => b.signal - a.signal || newestFirst(a, b))[0] || null;
-    const newest = [...rows].sort(newestFirst)[0] || null;
+    const worst = rows.filter(row => row.signal >= 2).sort((a, b) => b.signal - a.signal || (b.priority || 0) - (a.priority || 0) || newestFirst(a, b))[0] || null;
+    const recent = rows.filter(row => row.state === "working" || (row.source !== "readiness" && row.source !== "light" && Date.now() - row.observed_at < 8000));
+    const newest = [...recent].sort(newestFirst)[0] || worst;
+    clearTimeout(settleTimer);
+    if (newest?.state === "ready") settleTimer = setTimeout(react, Math.max(1, 8000 - (Date.now() - newest.observed_at)));
     const next = {
       sproket: { box: worst?.id || null, signal: worst?.signal || 0, pose: worst ? (worst.signal === 3 ? "alert" : "work") : "rest" },
-      gaffer: { box: newest?.id || null, signal: newest?.signal || 0, pose: newest ? (newest.signal >= 2 ? "work" : "rest") : "asleep" },
+      gaffer: { box: newest?.id || null, signal: newest?.signal || 0, pose: newest ? (newest.state === "working" || newest.signal >= 2 ? "work" : "rest") : "asleep" },
     };
     for (const name of Object.keys(next)) {
       const pet = pets[name];
       const news = pet.box !== next[name].box || pet.pose !== next[name].pose;
+      if (news && next[name].signal < 2) { clearTimeout(pet.timer); pet.timer = null; }
       Object.assign(pet, next[name]);
       if (news && next[name].signal >= 2) burst(name);
     }
@@ -169,11 +174,12 @@ function createCompanions(frames, options = {}) {
   }
 
   function reset() {
+    clearTimeout(settleTimer);
     for (const name of Object.keys(pets)) clearTimeout(pets[name].timer);
     for (const name of Object.keys(pets)) pets[name] = { pose: "rest", box: null, slot: null, signal: 0, timer: null, step: 0, lastBurstAt: 0 };
     for (const name of Object.keys(nodes)) {
       nodes[name].hidden = true;
-      nodes[name].style.transform = "";
+      nodes[name].style.removeProperty("--companion-position");
       delete nodes[name].sprite;
       nodes[name].replaceChildren();
     }
@@ -195,9 +201,6 @@ function createCompanions(frames, options = {}) {
 
   return {
     nodes,
-    // Kept so existing callers keep working; signals come from boxes now.
-    event() {},
-    capture(command, params = {}) { return { command, params, project: state.project, view: state.view }; },
     sync,
     setEnabled(value) {
       enabled = !!value;
@@ -212,7 +215,7 @@ function createCompanions(frames, options = {}) {
         hidden: document.hidden,
         sproket: { ...pets.sproket },
         gaffer: { ...pets.gaffer },
-        boxes: boxes ? boxes.snapshot({ project }) : [],
+        boxes: boxes ? boxes.panels().items : [],
       };
     },
   };
@@ -232,7 +235,7 @@ async function initCompanions() {
   const list = document.getElementById("companion-state");
   const paint = () => {
     if (!list || !boxes) return;
-    const rows = boxes.snapshot({ project: state.project }).filter(row => row.signal > 0);
+    const rows = boxes.panels().items.filter(row => row.signal > 0);
     list.replaceChildren(...rows.slice(0, 6).map(row => {
       const item = document.createElement("li");
       item.textContent = `${row.id}: signal ${row.signal}${row.reason ? ` — ${row.reason}` : ""}`;

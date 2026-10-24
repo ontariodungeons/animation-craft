@@ -2,14 +2,14 @@
   "method": 3,
   "files": {
     "style.css": {
-      "px_outside_root": 906,
+      "px_outside_root": 905,
       "hex_outside_root": 0,
       "ms_outside_root": 4,
       "raw_px_in_component_rules": 128,
       "outside_in_overrides": 52,
-      "lines": 981,
-      "rules": 672,
-      "selectors": 702
+      "lines": 992,
+      "rules": 678,
+      "selectors": 708
     },
     "agent.js": {
       "hand_built_dots": 0,
@@ -46,10 +46,10 @@
       "retired": 0,
       "ids_without_config_entry": 15,
       "class_from_code": 0,
-      "style_attributes": 1,
+      "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 907
+      "lines": 916
     },
     "blender-placement.js": {
       "hand_built_dots": 0,
@@ -79,7 +79,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 155
+      "lines": 163
     },
     "companion-boxes.js": {
       "hand_built_dots": 0,
@@ -89,7 +89,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 259
+      "lines": 334
     },
     "companion-rails.js": {
       "hand_built_dots": 0,
@@ -99,7 +99,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 194
+      "lines": 202
     },
     "companion-sprites.js": {
       "hand_built_dots": 0,
@@ -117,9 +117,9 @@
       "ids_without_config_entry": 0,
       "class_from_code": 0,
       "style_attributes": 0,
-      "style_writes": 2,
-      "geometry_without_custom_property": 2,
-      "lines": 257
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 260
     },
     "feedback.js": {
       "hand_built_dots": 0,
@@ -129,7 +129,7 @@
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 60
+      "lines": 59
     },
     "home.js": {
       "hand_built_dots": 0,
@@ -204,12 +204,12 @@
     "words.js": {
       "hand_built_dots": 0,
       "retired": 0,
-      "ids_without_config_entry": 7,
+      "ids_without_config_entry": 1,
       "class_from_code": 0,
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 257
+      "lines": 365
     }
   }
 }

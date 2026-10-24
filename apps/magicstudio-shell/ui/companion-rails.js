@@ -54,9 +54,11 @@ function createCompanionRails({ root = document } = {}) {
     for (const element of railElements) {
       const id = element.getAttribute("data-companion-rail");
       if (!id) continue;
-      const accept = (element.getAttribute("data-companion-accept") || "yes").trim();
-      const roles = (element.getAttribute("data-companion-roles") || "").split(/[\s,]+/).filter(Boolean);
-      const priority = Number(element.getAttribute("data-companion-priority") || 0) || 0;
+      const config = window.uiConfig?.rails?.[id];
+      if (!config) continue;
+      const accept = config.accept || "yes";
+      const roles = config.roles || [];
+      const priority = Number(config.priority) || 0;
       const rail = {
         id,
         element,
@@ -75,12 +77,15 @@ function createCompanionRails({ root = document } = {}) {
       const railElement = element.closest("[data-companion-rail]");
       const railId = railElement ? railElement.getAttribute("data-companion-rail") : null;
       if (!railId || !rails.has(railId)) continue;
+      const config = window.uiConfig?.slots?.[id] || { target: element.getAttribute("data-companion-target") || id };
       const slot = {
         id,
         railId,
         element,
-        target: element.getAttribute("data-companion-target") || id,
-        priority: Number(element.getAttribute("data-companion-priority") || 0) || 0,
+        target: config.target || id,
+        anchor: config.anchor,
+        offset: config.offset || [0, 0],
+        priority: Number(config.priority) || 0,
         order: slots.size,
       };
       slots.set(id, slot);
@@ -156,8 +161,11 @@ function createCompanionRails({ root = document } = {}) {
     if (!slot) return null;
     const cached = measured.get(slotId);
     if (cached && cached.generation === generation) return cached.rect;
-    const rect = slot.element.getBoundingClientRect();
-    const value = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    const anchor = slot.anchor ? document.getElementById(slot.anchor) : slot.element;
+    if (!anchor) return null;
+    const rect = anchor.getBoundingClientRect();
+    if (!rect.width && !rect.height) return null;
+    const value = { x: rect.left + slot.offset[0], y: rect.top + slot.offset[1], width: rect.width, height: rect.height };
     measured.set(slotId, { generation, rect: value });
     return value;
   }

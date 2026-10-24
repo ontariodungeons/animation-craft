@@ -939,6 +939,7 @@ body.at-home .app-footer { display:none; }
 }
 
 .ambient-companion {
+  transform: var(--companion-position, none);
   position: absolute;
   margin: 0;
   padding: 0;
@@ -986,3 +987,6 @@ body.at-home .app-footer { display:none; }
 .words-reference p { margin: 0; font-size: var(--text-sm); }
 .words-inspector { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .words-inspector .group-label { width: 100%; }
+
+.dot[data-signal="0"] { background: none; box-shadow: none; width: auto; height: auto; line-height: 1; }
+.dot[hidden] { display: none; }

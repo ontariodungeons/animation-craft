@@ -1,0 +1,275 @@
+<title>Magic Studio Panel Contract</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column of sections; diagrams and tables break wider inside their own scroll boxes. */
+:root {
+  --bg: #f4f7f8; --surface: #ffffff; --line: #d5dde2; --fg: #16202a; --muted: #5a6875;
+  --accent: #0d9e86; --accent-soft: #d6f3ed;
+  --s0: #9aa6b1; --s1: #19b56f; --s2: #d99a1e; --s3: #d4483f; --info: #4d7fd6;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b1017; --surface: #121a24; --line: #253242; --fg: #e9eef6; --muted: #9cafc6;
+  --accent: #35e1c0; --accent-soft: #123a35;
+  --s0: #6f7d8c; --s1: #4fe88f; --s2: #f6c168; --s3: #ff7682; --info: #8dbfe7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0b1017; --surface: #121a24; --line: #253242; --fg: #e9eef6; --muted: #9cafc6;
+  --accent: #35e1c0; --accent-soft: #123a35;
+  --s0: #6f7d8c; --s1: #4fe88f; --s2: #f6c168; --s3: #ff7682; --info: #8dbfe7; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 17px/1.55 var(--body); }
+main { max-width: 860px; margin: 0 auto; padding-block: 40px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 44px; }
+section { display: grid; gap: 14px; min-width: 0; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; }
+h2 { font-size: 24px; font-weight: 700; }
+h3 { font-size: 17px; font-weight: 500; }
+p { margin: 0; max-width: 66ch; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.lede { font-size: 19px; color: var(--muted); }
+code, .mono { font-family: var(--mono); font-size: .86em; }
+p code, td code, li code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; font: 13.5px/1.55 var(--mono); }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; text-align: center; }
+.caption { font-size: 14px; color: var(--muted); }
+.table { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 12px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); white-space: nowrap; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+.dot.s0 { background: var(--s0); } .dot.s1 { background: var(--s1); } .dot.s2 { background: var(--s2); } .dot.s3 { background: var(--s3); }
+.dot.pulse { box-shadow: 0 0 0 3px color-mix(in srgb, var(--s1) 30%, transparent); }
+.chip { display: inline-block; font: 600 12px/1 var(--mono); padding: 4px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+.chip.done { color: var(--s1); } .chip.work { color: var(--info); } .chip.wait { color: var(--s0); } .chip.hold { color: var(--s2); }
+.strip { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 14px; color: var(--muted); }
+.strip span { display: inline-flex; gap: 6px; align-items: center; }
+.rules { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.rules li { padding-left: 16px; border-left: 2px solid var(--accent); max-width: 66ch; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.two > div { min-width: 0; display: grid; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<main>
+  <header style="display:grid;gap:12px">
+    <div class="eyebrow">Issue #23 · plan docs/superpowers/plans/2026-10-23-unified-panel-reporting.md · HEAD 08974b0</div>
+    <h1>Magic Studio Panel Contract</h1>
+    <p class="lede">Every panel in the Studio carries the same small record. The TUI and the CLI read that record for every panel, so a new panel needs no new command, no new feedback field and no new Rust code, and anything on screen without a record is reported as unconfigured.</p>
+    <div class="strip">
+      <span><span class="chip done">done</span> Tasks 1, 2, 7 · wiring 872a041</span>
+      <span><span class="chip work">working</span> Rizzo Task 3 · Beaker Task 8</span>
+      <span><span class="chip wait">waiting</span> Gonzo Task 5 on Task 3</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="eyebrow">The config</div>
+    <h2>One record per panel</h2>
+    <p>A panel is a header, a body and a status, with one light. Its state is four values. This is the whole thing the TUI and CLI ever need to know about a piece of UI.</p>
+    <pre class="code">{ "id": "block-song", "label": "Song",
+  "signal": 1,          <span style="color:var(--muted)">// 0 idle · 1 in use · 2 needs you · 3 problem</span>
+  "open":   true,       <span style="color:var(--muted)">// visible / expanded</span>
+  "busy":   false,      <span style="color:var(--muted)">// work in flight (drawn as a pulse)</span>
+  "dirty":  false,     <span style="color:var(--muted)">// unsaved edits</span>
+  "look":   "control" } <span style="color:var(--muted)">// style, chosen from a fixed list (Task 8)</span></pre>
+    <div class="table"><table>
+      <thead><tr><th>Signal</th><th>Light</th><th>Meaning</th><th>Comes from state</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0</td><td><span class="dot s0"></span>grey</td><td>idle, or off. A Studio that is off is grey, never red.</td><td><code>idle</code></td></tr>
+        <tr><td class="num">1</td><td><span class="dot s1"></span>green</td><td>in use. With <code>busy</code> it pulses <span class="dot s1 pulse"></span></td><td><code>ready</code>, <code>working</code></td></tr>
+        <tr><td class="num">2</td><td><span class="dot s2"></span>yellow</td><td>needs you</td><td><code>needs-attention</code></td></tr>
+        <tr><td class="num">3</td><td><span class="dot s3"></span>red</td><td>problem</td><td><code>failed</code></td></tr>
+      </tbody>
+    </table></div>
+    <p class="caption">The state-to-signal table exists once, in <code>companion-boxes.js</code>. CSS draws the light from <code>data-signal</code>; the TUI colours it from the Rust <code>Signal</code>; nobody else maps states.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Flow</div>
+    <h2>From the screen to the terminal</h2>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Shell["Studio window (JS)"]
+    P1["Panel: Song"] --> R
+    P2["Panel: Storyboard"] --> R
+    P3["Panel: Video"] --> R
+    X["stray button<br/>(no record)"] -. found by scan .-> R
+    R["Panel registry<br/>companion-boxes.js<br/>revision bumps only on change"]
+  end
+  R -->|"panels: {revision, items, unconfigured}"| F["ui.feedback<br/>(existing channel)"]
+  F --> T["PanelReport::from_feedback<br/>crates/engine/src/panels.rs"]
+  T --> TUI["TUI Booth rows<br/>redraw when revision changes"]
+  T --> CLI["mc panels<br/>--json · --check"]
+  T --> PET["Sproket and Gaffer<br/>read the same signals"]
+  CLI -->|"ui.panel id flag value"| B["bridge.rs → acBridge.panel"]
+  B -->|"calls the panel's own handler"| R
+    </pre></div>
+    <p class="caption">No new IPC and no new poller: the record rides the feedback payload the TUI already reads every second. The revision tells the TUI when to redraw. One generic setter replaces per-switch commands.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Types</div>
+    <h2>What every panel is made of</h2>
+    <p>Rust has no class inheritance, and the shell is plain JS, so "every panel inherits the contract" is done by composition: each panel <em>has</em> one record and is drawn by one component. The record is the only thing readers depend on.</p>
+    <div class="diagram"><pre class="mermaid">
+classDiagram
+  direction LR
+  class Signal {
+    &lt;&lt;enum u8&gt;&gt;
+    Idle = 0
+    InUse = 1
+    Attention = 2
+    Problem = 3
+    from_u64(v) Signal
+    label() str
+  }
+  class Panel {
+    id: String
+    label: Option~String~
+    signal: Signal
+    open: bool
+    busy: bool
+    dirty: bool
+  }
+  class Unconfigured {
+    id: String
+    tag: String
+    label: Option~String~
+  }
+  class PanelReport {
+    revision: u64
+    available: bool
+    items: Vec~Panel~
+    unconfigured: Vec~Unconfigured~
+    from_feedback(json) PanelReport
+    worst() Signal
+  }
+  class Studio {
+    endpoint, id, pid
+    project, view, ready, unsaved
+    name() / confirm_command() / is_clean()
+  }
+  class Studios {
+    live: Vec~Studio~
+    errors
+    discover() / find(target) / pinned()
+  }
+  PanelReport "1" *-- "0..64" Panel
+  PanelReport "1" *-- "0..64" Unconfigured
+  Panel --> Signal
+  Studios "1" *-- "*" Studio
+    </pre></div>
+    <p class="caption">Rust types in <code>crates/engine/src/panels.rs</code> (Rizzo, Task 3). <code>Studio</code> and <code>Studios</code> replace the untyped JSON rows in <code>apps/mc/src/studios.rs</code>, same output.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Design lock · round 1 done, round 2 running</div>
+    <h2>From 27 look-alikes to one component with a few looks</h2>
+    <p>Round 1 (Beaker, Task 7) is in: 27 class names became 3, every dot goes through <code>dot()</code>, and no hex colour is left outside <code>:root</code>. The variety moved into 11 modifiers with 69 raw px values and 18 overrides keyed on where a panel sits. Round 2 (Task 8) turns those into 7 named looks and 2 densities that only set tokens, read by one rule per part.</p>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph R1["Round 1 · done"]
+    H["head: control · divided · spread<br/>pane · tiny · inline"]
+    E["empty: boxed · compare · overlay<br/>motion · inline"]
+    O["69 raw px · 18 context overrides"]
+  end
+  subgraph R2["Round 2 · Task 8"]
+    LK["looks<br/>head: control · bar · ruler · inline<br/>empty: card · overlay · inline"]
+    DN["density: normal · compact"]
+  end
+  subgraph SS["Two files"]
+    CFG["components.json<br/>one entry per element id<br/>component · look · density · label"]
+    CSS["style.css<br/>:root tokens = the only literal values<br/>then one rule per component, var() only"]
+  end
+  H --> LK
+  E --> LK
+  O --> DN
+  LK --> CFG
+  DN --> CFG
+  CFG -->|"el() sets class + data-look"| CSS
+  CSS --> TUI["TUI palette<br/>test reads style.css :root"]
+  CFG -->|"read directly, no Studio needed"| MC["mc panels --check"]
+  LINT["ui-lint ratchet, per file<br/>touch a file, lower its count"] -. guards .-> SS
+    </pre></div>
+    <p class="caption">Two files hold all of it. Every element has an entry in <code>components.json</code> and inherits its look from its component in <code>style.css</code>. No inline styling: data geometry (a placement's x/y/w/h, a clip's start) is passed as CSS custom properties that the component rule reads. Refactor as you go: every commit that touches a UI file must lower one of that file's lint counts.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Who does what</div>
+    <h2>Tasks and owners</h2>
+    <div class="table"><table>
+      <thead><tr><th>#</th><th>Owner</th><th>Delivers</th><th>Main paths</th><th>Waits on</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Rizzo</td><td>Boxes survive a project switch</td><td><code>ui/companion-boxes.js</code>, <code>tests/companions.mjs</code></td><td>–</td><td><span class="chip done">46c304a</span></td></tr>
+        <tr><td class="num">2</td><td>Beaker</td><td>Panel record, change-only revision, unconfigured list</td><td><code>ui/feedback.js</code>, <code>ui/bridge.js</code>, <code>tests/panels.mjs</code></td><td>1</td><td><span class="chip done">edea6ea</span></td></tr>
+        <tr><td class="num">3</td><td>Rizzo</td><td>Rust <code>panels</code> types with reasons; typed <code>Studio</code></td><td><code>crates/engine/src/panels.rs</code>, <code>apps/mc/src/studios.rs</code></td><td>–</td><td><span class="chip work">working</span></td></tr>
+        <tr><td class="num">4</td><td>Rizzo</td><td><code>mc panels</code>; generic <code>ui.panel</code> setter</td><td><code>apps/mc/src/panels.rs</code>, <code>src/bridge.rs</code></td><td>2, 3</td><td><span class="chip wait">waiting</span></td></tr>
+        <tr><td class="num">5</td><td>Gonzo</td><td>TUI panel rows and a "UI health" row: untracked · no look · unstyled</td><td><code>apps/mc/src/center/panels.rs</code></td><td>3</td><td><span class="chip wait">orienting</span></td></tr>
+        <tr><td class="num">6</td><td>Rizzo</td><td>Per-pet timer and cooldown</td><td><code>ui/companions.js</code></td><td>1</td><td><span class="chip wait">waiting</span></td></tr>
+        <tr><td class="num">7</td><td>Beaker</td><td>One dot, one panel component, tokens, lint</td><td><code>ui/style.css</code>, <code>ui/*.js</code></td><td>2</td><td><span class="chip done">73ea47a…53d0fa2</span></td></tr>
+        <tr><td class="num">8</td><td>Beaker</td><td>One config entry per element, one stylesheet, no inline styling</td><td><code>ui/components.json</code>, <code>ui/style.css</code></td><td>7</td><td><span class="chip work">working</span></td></tr>
+        <tr><td class="num">W</td><td>Claude</td><td>Video project wiring (Tasks 0–3)</td><td><code>crates/engine/src/workshop.rs</code></td><td>T3 on 2</td><td><span class="chip done">T0–T1 872a041</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="diagram"><pre class="mermaid">
+flowchart LR
+  T1["1 · Rizzo<br/>registry fix"] --> T2["2 · Beaker<br/>panel record"]
+  T1 --> T6["6 · Rizzo<br/>pet timers"]
+  T3["3 · Rizzo<br/>Rust types"] --> T4["4 · Rizzo<br/>mc panels + setter"]
+  T2 --> T4
+  T3 --> T5["5 · Gonzo<br/>TUI rows"]
+  T2 --> T7["7 · Beaker<br/>one component + lint"]
+  T7 --> T8["8 · Beaker<br/>components.json + style.css"]
+  T8 -. palette test .-> T5
+  T2 --> W3["W3 · Claude<br/>video wiring as a panel"]
+  W1["W0–W1 · Claude<br/>stored video path"]:::done --> W2["W2 · Claude<br/>UI reads one field"]
+  T2 --> W2
+  classDef done stroke-width:3px
+    </pre></div>
+    <p class="caption">Paths under <code>ui/</code> and <code>tests/</code> live in <code>apps/magicstudio-shell/</code>. Claims are recorded as C35 in <code>design/coordination/handoff-ledger.md</code>. Shared files change one owner at a time, in this order.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Companion plan · done in part</div>
+    <h2>Video project: four answers became one</h2>
+    <div class="two">
+      <div>
+        <h3>What was wrong</h3>
+        <ul class="rules">
+          <li><code>workshop.status</code> returned the stored path and a guessed one side by side; the guess could be any <code>.fcproj</code> in the folder.</li>
+          <li><code>workshop.set_target</code> built the new target's project and threw the path away, so the old target's project stayed the answer.</li>
+          <li>The project catalog judged "editor ready" from the guess.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>What it is now (872a041)</h3>
+        <ul class="rules">
+          <li>Status returns <code>video_project_path</code> and <code>video_project_exists</code>, nothing guessed.</li>
+          <li><code>set_target</code> stores the project it builds.</li>
+          <li>Three regression tests in <code>crates/engine/tests/wiring_state.rs</code>, run by the commit hook.</li>
+          <li>Next: the UI reads that one field, then the video panel turns red when a target is set but its project is missing.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Rules every task keeps</div>
+    <ul class="rules">
+      <li>Facts only from events. Empty is not an error; a closed Studio is reported as unavailable, never as zero panels.</li>
+      <li>Nothing per panel in Rust or tests: readers loop over <code>items</code>.</li>
+      <li>Colours only as <code>:root</code> tokens. No silent fallbacks, such as a default green dot when the registry is missing.</li>
+      <li>Pets never move on their own clock: finite bursts, one timer each, a cooldown between bursts.</li>
+      <li>The TUI reports UI health: every flagged element carries a reason, <code>untracked</code> (no config entry) or <code>unstyled</code> (inline visual style), so random UI shows up as a count. Bad looks in <code>components.json</code> fail at commit time.</li>
+      <li>Source of truth: <code>docs/superpowers/plans/2026-10-23-unified-panel-reporting.md</code> (starts with the agent brief every session reads) and <code>…-magic-studio-wiring-refactor.md</code>. This page summarises them.</li>
+    </ul>
+  </section>
+</main>

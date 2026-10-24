@@ -62,3 +62,11 @@ fn config_loads_the_shell_components_file() {
         }
     }
 }
+
+#[test]
+fn invalid_config_is_reported_and_hidden_indicators_remain_configured() {
+    let mut config: Config = serde_json::from_value(json!({"elements":{"quiet":{"component":"workspace","indicator":"hidden"}}})).unwrap();
+    assert!(config.validate().is_ok());
+    config.elements.get_mut("quiet").unwrap().look = Some("missing".into());
+    assert!(config.validate().unwrap_err().contains("quiet"));
+}

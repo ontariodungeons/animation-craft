@@ -58,12 +58,26 @@ pub struct Panel {
     pub signal: Signal,
     #[serde(default)]
     pub busy: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub request: Option<String>,
+    #[serde(flatten)]
+    pub telemetry: std::collections::BTreeMap<String, Value>,
 }
 
 /// One element's entry in `apps/magicstudio-shell/ui/components.json`.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]
 pub struct Entry {
     pub component: String,
+    #[serde(default)]
+    pub indicator: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub priority: i64,
     #[serde(default)]
     pub look: Option<String>,
     #[serde(default)]
@@ -82,9 +96,28 @@ pub struct Config {
     pub looks: std::collections::BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub densities: Vec<String>,
+    #[serde(default)]
+    pub rails: Value,
+    #[serde(default)]
+    pub slots: Value,
+    #[serde(default)]
+    pub signals: Value,
 }
 
 impl Config {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.elements.is_empty() { return Err("no configured elements".into()); }
+        for (id, entry) in &self.elements {
+            if entry.component.trim().is_empty() { return Err(format!("{id}: missing component")); }
+            if let Some(look) = &entry.look {
+                if !self.looks.get(&entry.component).is_some_and(|looks| looks.contains(look)) { return Err(format!("{id}: unknown look {look}")); }
+            }
+            if entry.density.as_ref().is_some_and(|d| !self.densities.contains(d)) { return Err(format!("{id}: unknown density")); }
+            if entry.indicator.as_ref().is_some_and(|v| !matches!(v.as_str(), "icon" | "hidden")) { return Err(format!("{id}: unknown indicator")); }
+        }
+        Ok(())
+    }
+
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
@@ -122,6 +155,12 @@ pub struct PanelReport {
     pub items: Vec<Panel>,
     #[serde(default)]
     pub unconfigured: Vec<Unconfigured>,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default)]
+    pub total_items: usize,
+    #[serde(default)]
+    pub total_unconfigured: usize,
 }
 
 impl PanelReport {

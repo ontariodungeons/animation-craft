@@ -3,17 +3,18 @@
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
  const action=acFeedback.action;
- const companion=command==='engine_command'?window.magicCompanions?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ const companion=command==='engine_command'?window.uiRegistry?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ if(companion)window.uiRegistry?.event({...companion,phase:"start"});
  acFeedback.pending++;await acFeedback.report();
  if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id||params.params?._request_id||companion?.request}};}
  if(command==='project_create'||command==='project_open'){params={...params,request:params?.request??action?.request_id??null,control:params?.control??action?.control??null};}
  acFeedback.report(null,null,{stage:'handler_dispatch',control:action?.control||null,request_id:action?.request_id||null,command:params?.id||command});
  try{
   const result=await nativeInvoke(command,params);acFeedback.last={transport:command,id:params?.id||null,status:'success'};
-  if(companion)window.magicCompanions?.event({...companion,phase:'success',result});
+  if(companion)window.uiRegistry?.event({...companion,phase:'success',result});
   if(result?._ui_engine_revision) acFeedback.pendingRevision=result._ui_engine_revision;
   return result;
- }catch(error){if(companion)window.magicCompanions?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
+ }catch(error){if(companion)window.uiRegistry?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
  finally{acFeedback.pending--;await acFeedback.report();}
 }
 const $ = (id) => document.getElementById(id);
@@ -225,8 +226,9 @@ async function loadComponents() {
   Object.assign(uiConfig, await response.json());
   for (const [id, entry] of Object.entries(uiConfig.elements)) {
     const node = document.getElementById(id);
-    if (node) applyEntry(node, entry);
+    if (node) { applyEntry(node, entry); node.setAttribute("data-box-id", id); window.companionBoxes?.register(id, { project: state.project, ...entry }); }
   }
+  for (const node of document.body.querySelectorAll("*")) window.uiRegistry?.registerElement(node);
   return uiConfig;
 }
 
@@ -257,6 +259,7 @@ function el(tag, attrs = {}, ...children) {
     node.setAttribute("data-box-id", boxId);
     if (window.companionBoxes) window.companionBoxes.register(boxId, { project, label: entry?.label || null, look: entry?.look || null, density: entry?.density || null });
   }
+  window.uiRegistry?.registerElement(node);
   return node;
 }
 

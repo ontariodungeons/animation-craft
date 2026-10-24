@@ -11,10 +11,14 @@ function fixture() {
   const mediaListeners = [];
   let id = 0;
   const node = () => ({
-    id: '', className: '', hidden: false, textContent: '', dataset: {}, style: {},
+    children: [], parentElement: null,
+    get firstChild() { return this.children[0] || null; },
+    get textContent() { return this.text || ''; },
+    set textContent(value) { this.text = value; this.children = []; },
+    id: '', className: '', hidden: false, dataset: {}, style: { setProperty() {}, removeProperty() {} },
     classList: { add() {}, remove() {} },
     setAttribute() {}, getAttribute() { return null; },
-    replaceChildren() {}, append() {}, after() {}, closest() { return null; },
+    replaceChildren(...items) { this.children = items; for (const item of items) item.parentElement = this; }, append(item) { this.children.push(item); item.parentElement = this; }, after() {}, closest() { return null; },
     getBoundingClientRect() { return { x: 0, y: 0, width: 80, height: 24 }; },
   });
   const doc = {
@@ -38,6 +42,47 @@ function fixture() {
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
+  ['UI and bridge results update the same box, ignoring stale project events', async () => {
+    const { ctx, boxes } = fixture();
+    const owner = { getAttribute: () => 'task' };
+    const control = { getAttribute: () => 'fixture.run', closest: () => owner };
+    ctx.document.querySelectorAll = selector => selector === '[data-commands]' ? [control] : [];
+    boxes.register('task', { project: ctx.state.project });
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
+    const event = { ...boxes.capture('fixture.run', { _request_id: 'first' }), phase: 'start' };
+    boxes.event(event); await flush();
+    assert.equal(boxes.get('task').state, 'working');
+    boxes.event({ ...event, phase: 'error', error: 'Actual failure' }); await flush();
+    assert.equal(pets.snapshot().sproket.box, 'task');
+    boxes.event({ command: 'fixture.run', project: ctx.state.project, request: 'second', phase: 'success', result: { ok: true } }); await flush();
+    assert.equal(boxes.get('task').state, 'ready');
+    assert.equal(pets.snapshot().sproket.box, null);
+    boxes.event({ ...event, project: '/other.magic', phase: 'error' });
+    assert.equal(boxes.get('task').state, 'ready');
+  }],
+  ['sprite stays attached after drawing and updates', async () => {
+    const { ctx, boxes } = fixture();
+    const sprites = { has: () => true, image: () => ctx.document.createElement('img') };
+    const pets = ctx.createCompanions({ frames: {} }, { boxes, sprites });
+    pets.setEnabled(true);
+    for (const state of ['working', 'ready', 'failed']) {
+      boxes.fact({ id: 'work', project: '/p/Study.magic', state });
+      await flush();
+      for (const node of Object.values(pets.nodes)) assert.ok(node.firstChild?.firstChild, 'sprite image must stay in its holder');
+    }
+  }],
+  ['working is visibly different from completed work', async () => {
+    const { ctx, boxes } = fixture();
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
+    boxes.fact({ id: 'work', project: '/p/Study.magic', state: 'working' });
+    await flush();
+    assert.equal(pets.snapshot().gaffer.pose, 'work');
+    boxes.fact({ id: 'work', project: '/p/Study.magic', state: 'ready' });
+    await flush();
+    assert.equal(pets.snapshot().gaffer.pose, 'rest');
+  }],
   ['one number per state, and the light cannot disagree with it', () => {
     const { boxes } = fixture();
     const expect = { idle: 0, ready: 1, working: 1, 'needs-attention': 2, failed: 3 };
@@ -138,8 +183,8 @@ const tests = [
     const pets = ctx.createCompanions({ frames: {} }, { boxes });
     pets.setEnabled(true);
     const before = JSON.stringify(pets.snapshot().sproket);
-    pets.event({ command: 'blender.start', project: '/p/Study.magic', phase: 'error' });
-    pets.event({ command: 'agent.send', project: '/p/Study.magic', phase: 'error' });
+    boxes.event({ command: 'blender.start', project: '/p/Study.magic', phase: 'error' });
+    boxes.event({ command: 'agent.send', project: '/p/Study.magic', phase: 'error' });
     await flush();
     assert.equal(JSON.stringify(pets.snapshot().sproket), before);
   }],

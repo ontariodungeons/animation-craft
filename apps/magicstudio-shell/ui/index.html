@@ -7,9 +7,9 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="bar" data-companion-rail="top" data-companion-accept="yes" data-companion-priority="20">
-    <span class="companion-slot" data-companion-slot="bar-chat" data-companion-target="chat" data-companion-priority="10"></span>
-    <span class="companion-slot" data-companion-slot="bar-artwork" data-companion-target="artwork" data-companion-priority="10"></span>
+  <header class="bar" data-companion-rail="top">
+    <span class="companion-slot" data-companion-slot="bar-chat" data-companion-target="chat"></span>
+    <span class="companion-slot" data-companion-slot="bar-artwork" data-companion-target="artwork"></span>
     <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects" aria-label="Magic Studio · Home">
       <span class="brand-word" aria-hidden="true"><span class="brand-magic">Magic</span> <span class="brand-studio">Studio</span></span><span class="brand-spark" aria-hidden="true">✧</span>
     </div>
@@ -20,7 +20,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-view="project" role="tab" aria-selected="true">Project</button>
       <button class="tab" data-view="animation" role="tab" aria-selected="false" title="Animate objects and polish their motion">Animation</button>
-      <button class="tab" data-view="design" role="tab" aria-selected="false" title="Words and artwork that move with the song">Design</button>
+      <button class="tab" data-view="design" role="tab" aria-selected="false" title="Words and artwork that move with the song">Lyrics &amp; Motion Graphics</button>
       <button class="tab" data-view="studio" role="tab" aria-selected="false">Studio</button>
       <span class="tab-ink" aria-hidden="true"></span>
     </nav>
@@ -72,7 +72,7 @@
     <section class="view active" id="view-project" aria-label="Project workspace">
       <div class="project-body">
         <!-- Left rail: collapsible blocks (song workflow) -->
-        <aside class="blocks" id="blocks" aria-label="Song workflow" data-companion-rail="blocks" data-companion-accept="yes" data-companion-priority="5"></aside>
+        <aside class="blocks" id="blocks" aria-label="Song workflow" data-companion-rail="blocks"></aside>
 
         <!-- Main: storyboard title cards -->
         <section class="storyboard" aria-label="Storyboard">
@@ -97,7 +97,7 @@
     </section>
 
     <section class="view" id="view-animation" aria-label="Animation workspace"></section>
-    <section class="view" id="view-design" aria-label="Design: Words and Artwork"></section>
+    <section class="view" id="view-design" aria-label="Lyrics and motion graphics"></section>
     <section class="view" id="view-studio">
       <div class="studio-slot" id="studio-slot"></div>
       <div class="panel-empty" id="studio-empty">
@@ -109,9 +109,9 @@
   </main>
   <!-- One footer for every tab: workflow stages · what the active tab shows · save and studio state. -->
   <footer class="app-footer" id="app-footer" role="contentinfo" aria-label="Application status footer"
-          data-companion-rail="footer" data-companion-accept="yes" data-companion-priority="10">
-    <span class="companion-slot" data-companion-slot="footer-chat" data-companion-target="chat" data-companion-priority="10"></span>
-    <span class="companion-slot" data-companion-slot="footer-artwork" data-companion-target="artwork" data-companion-priority="10"></span>
+          data-companion-rail="footer">
+    <span class="companion-slot" data-companion-slot="footer-chat" data-companion-target="chat"></span>
+    <span class="companion-slot" data-companion-slot="footer-artwork" data-companion-target="artwork"></span>
     <nav class="footer-stages" id="footer-stages" aria-label="Workflow stages"></nav>
     <div class="footer-context" id="footer-context" aria-live="polite"></div>
     <div class="panel-status row" id="footer-status">
@@ -121,9 +121,9 @@
   </footer>
       <!-- The existing agent, image composer, and project parts share one right workstation. -->
       <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation"
-             data-companion-rail="dock" data-companion-accept="yes" data-companion-priority="30">
-        <span class="companion-slot" data-companion-slot="dock-chat" data-companion-target="chat" data-companion-priority="20"></span>
-        <span class="companion-slot" data-companion-slot="dock-artwork" data-companion-target="artwork" data-companion-priority="20"></span>
+             data-companion-rail="dock">
+        <span class="companion-slot" data-companion-slot="dock-chat" data-companion-target="chat"></span>
+        <span class="companion-slot" data-companion-slot="dock-artwork" data-companion-target="artwork"></span>
         <section class="magic-pane magic-chat-pane" id="magic-chat-pane" aria-label="Sproket chat">
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
         <div class="panel-head spread" id="agent-head">

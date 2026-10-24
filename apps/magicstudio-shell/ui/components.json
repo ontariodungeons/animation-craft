@@ -30,165 +30,390 @@
   "elements": {
     "view-home": {
       "component": "workspace",
-      "label": "Home"
+      "label": "Home",
+      "indicator": "hidden"
     },
     "view-project": {
       "component": "workspace",
-      "label": "Project"
+      "label": "Project",
+      "indicator": "hidden"
     },
     "view-animation": {
       "component": "workspace",
-      "label": "Animation"
+      "label": "Animation",
+      "indicator": "hidden"
     },
     "view-studio": {
       "component": "workspace",
-      "label": "Studio"
+      "label": "Studio",
+      "indicator": "hidden"
     },
     "blocks": {
       "component": "workspace",
-      "label": "Song workflow"
+      "label": "Song workflow",
+      "indicator": "hidden"
     },
     "sb-chips": {
       "component": "storyboard",
-      "label": "Storyboard"
+      "label": "Storyboard",
+      "indicator": "hidden"
     },
     "sb-cards": {
       "component": "storyboard",
-      "label": "Storyboard cards"
+      "label": "Storyboard cards",
+      "indicator": "hidden"
     },
     "studio-empty": {
       "component": "panel-empty",
       "look": "overlay",
-      "label": "Studio not running"
+      "label": "Studio not running",
+      "indicator": "hidden"
     },
     "sb-empty": {
       "component": "panel-empty",
       "look": "card",
-      "label": "No storyboard yet"
+      "label": "No storyboard yet",
+      "indicator": "hidden"
     },
     "magic-chat-pane": {
       "component": "workspace",
-      "label": "Sprocket chat"
+      "label": "Sprocket chat",
+      "indicator": "hidden"
     },
     "magic-image-pane": {
       "component": "workspace",
-      "label": "Gaffer artwork"
+      "label": "Gaffer artwork",
+      "indicator": "hidden"
     },
     "magic-parts-pane": {
       "component": "workspace",
-      "label": "Parts and assets"
+      "label": "Parts and assets",
+      "indicator": "hidden"
     },
     "agent": {
       "component": "workspace",
-      "label": "Agent"
+      "label": "Agent",
+      "indicator": "hidden"
     },
     "agent-status": {
       "component": "panel-status",
-      "label": "Agent status"
+      "label": "Agent status",
+      "indicator": "icon"
     },
     "footer-status": {
       "component": "panel-status",
-      "label": "Footer status"
+      "label": "Footer status",
+      "indicator": "icon"
     },
     "block-song": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Song"
+      "label": "Song",
+      "indicator": "icon",
+      "target": "song"
     },
     "block-animate": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Animate"
+      "label": "Animate",
+      "indicator": "icon",
+      "target": "animate"
     },
     "block-assets": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Assets"
+      "label": "Assets",
+      "indicator": "icon",
+      "target": "assets"
     },
     "theatre-ruler": {
       "component": "panel-head",
       "look": "ruler",
       "density": "normal",
-      "label": "Timeline"
+      "label": "Timeline",
+      "indicator": "hidden"
     },
     "motion-inspector": {
       "component": "workspace",
-      "label": "Inspector"
+      "label": "Inspector",
+      "indicator": "hidden"
     },
     "motion-stagebar": {
       "component": "workspace",
-      "label": "Stage"
+      "label": "Stage",
+      "indicator": "hidden"
     },
     "motion-canvas": {
       "component": "workspace",
-      "label": "Canvas"
+      "label": "Canvas",
+      "indicator": "hidden"
     },
     "magic-image-tools": {
       "component": "workspace",
-      "label": "Artwork tools"
+      "label": "Artwork tools",
+      "indicator": "hidden"
     },
     "magic-parts-slot": {
       "component": "workspace",
-      "label": "Parts"
+      "label": "Parts",
+      "indicator": "hidden"
     },
     "app-footer": {
       "component": "workspace",
-      "label": "Footer"
+      "label": "Footer",
+      "indicator": "hidden"
     },
     "agent-log": {
       "component": "workspace",
-      "label": "Agent log"
+      "label": "Agent log",
+      "indicator": "hidden"
     },
     "agent-compose": {
       "component": "workspace",
-      "label": "Agent compose"
+      "label": "Agent compose",
+      "indicator": "hidden"
     },
     "agent-head": {
       "component": "panel-head",
       "look": "bar",
       "density": "compact",
-      "label": "Agent"
+      "label": "Agent",
+      "indicator": "hidden"
     },
     "magic-chat-head": {
       "component": "panel-head",
       "look": "bar",
       "density": "compact",
-      "label": "Sprocket chat"
+      "label": "Sprocket chat",
+      "indicator": "hidden"
     },
     "magic-image-toggle": {
       "component": "panel-head",
       "look": "bar",
       "density": "normal",
-      "label": "Gaffer artwork"
+      "label": "Gaffer artwork",
+      "indicator": "hidden"
     },
     "magic-parts-head": {
       "component": "panel-head",
       "look": "bar",
       "density": "normal",
-      "label": "Parts and assets"
+      "label": "Parts and assets",
+      "indicator": "hidden"
     },
     "view-design": {
       "component": "workspace",
-      "label": "Design"
+      "label": "Lyrics & Motion Graphics",
+      "indicator": "hidden"
     },
     "theatre-timeline": {
       "component": "workspace",
-      "label": "Theatre timeline"
+      "label": "Theatre timeline",
+      "indicator": "hidden"
     },
     "motion-scrub": {
       "component": "transport",
-      "label": "Animation scrubber"
+      "label": "Animation scrubber",
+      "indicator": "hidden"
     },
     "words-scrub": {
       "component": "transport",
-      "label": "Video time"
+      "label": "Video time",
+      "indicator": "hidden"
     },
     "words-video-frame": {
       "component": "stage",
-      "label": "The finished video"
+      "label": "The finished video",
+      "indicator": "hidden"
+    },
+    "song": {
+      "component": "workspace",
+      "label": "Song",
+      "indicator": "icon",
+      "priority": 100
+    },
+    "footer-stage-song": {
+      "component": "panel-status",
+      "label": "Song",
+      "indicator": "icon",
+      "target": "song"
+    },
+    "lyrics": {
+      "component": "workspace",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "priority": 90
+    },
+    "block-lyrics": {
+      "component": "panel-status",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "target": "lyrics"
+    },
+    "footer-stage-lyrics": {
+      "component": "panel-status",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "target": "lyrics"
+    },
+    "transcript": {
+      "component": "workspace",
+      "label": "Transcript",
+      "indicator": "icon",
+      "priority": 80
+    },
+    "block-transcript": {
+      "component": "panel-status",
+      "label": "Transcript",
+      "indicator": "icon",
+      "target": "transcript"
+    },
+    "footer-stage-transcript": {
+      "component": "panel-status",
+      "label": "Transcript",
+      "indicator": "icon",
+      "target": "transcript"
+    },
+    "storyboard": {
+      "component": "workspace",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "priority": 70
+    },
+    "block-storyboard": {
+      "component": "panel-status",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "target": "storyboard"
+    },
+    "footer-stage-storyboard": {
+      "component": "panel-status",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "target": "storyboard"
+    },
+    "animate": {
+      "component": "workspace",
+      "label": "Animate",
+      "indicator": "icon",
+      "priority": 60
+    },
+    "footer-stage-animate": {
+      "component": "panel-status",
+      "label": "Animate",
+      "indicator": "icon",
+      "target": "animate"
+    },
+    "assets": {
+      "component": "workspace",
+      "label": "Assets",
+      "indicator": "icon",
+      "priority": 50
+    },
+    "footer-stage-assets": {
+      "component": "panel-status",
+      "label": "Assets",
+      "indicator": "icon",
+      "target": "assets"
+    }
+  },
+  "rails": {
+    "top": {
+      "accept": "yes",
+      "priority": 20
+    },
+    "blocks": {
+      "accept": "yes",
+      "priority": 5
+    },
+    "footer": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "dock": {
+      "accept": "yes",
+      "priority": 30
+    }
+  },
+  "slots": {
+    "bar-chat": {
+      "target": "chat",
+      "priority": 10
+    },
+    "bar-artwork": {
+      "target": "artwork",
+      "priority": 10
+    },
+    "footer-chat": {
+      "target": "chat",
+      "priority": 10
+    },
+    "footer-artwork": {
+      "target": "artwork",
+      "priority": 10
+    },
+    "dock-chat": {
+      "target": "chat",
+      "priority": 20,
+      "anchor": "agent-head",
+      "offset": [
+        -30,
+        2
+      ]
+    },
+    "dock-artwork": {
+      "target": "artwork",
+      "priority": 20,
+      "anchor": "magic-image-toggle",
+      "offset": [
+        -30,
+        2
+      ]
+    },
+    "block-song": {
+      "target": "song",
+      "priority": 100
+    },
+    "block-lyrics": {
+      "target": "lyrics",
+      "priority": 90
+    },
+    "block-transcript": {
+      "target": "transcript",
+      "priority": 80
+    },
+    "block-storyboard": {
+      "target": "storyboard",
+      "priority": 70
+    },
+    "block-animate": {
+      "target": "animate",
+      "priority": 60
+    },
+    "block-assets": {
+      "target": "assets",
+      "priority": 50
+    }
+  },
+  "signals": {
+    "0": {
+      "label": "Idle",
+      "icon": "\ud83d\udca4"
+    },
+    "1": {
+      "label": "Active / ready",
+      "icon": "\ud83d\udfe2"
+    },
+    "2": {
+      "label": "Needs attention",
+      "icon": "\ud83d\udfe1"
+    },
+    "3": {
+      "label": "Error",
+      "icon": "\ud83d\udd34"
     }
   }
 }
