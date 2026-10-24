@@ -29,6 +29,7 @@ pub struct Args {
     pub flag_keep_going: bool,
     pub flag_clean: bool,
     pub flag_health: bool,
+    pub flag_report: bool,
     pub flag_stop: bool,
     inner: CliArgs,
 }
@@ -107,6 +108,7 @@ impl Args {
             flag_keep_going: inner.flag("--keep-going"),
             flag_clean: inner.flag("--clean") || inner.flag("-c"),
             flag_health: inner.flag("--health") || inner.flag("-H"),
+            flag_report: inner.flag("--report") || inner.flag("-R"),
             flag_stop: inner.flag("--stop") || inner.flag("-S"),
             inner,
         }

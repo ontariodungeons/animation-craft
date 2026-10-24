@@ -58,6 +58,7 @@ struct Center {
     config_view: bool,
     dials: Option<crate::dials::Host>,
     dials_at: Option<std::time::Instant>,
+    metrics_at: Option<std::time::Instant>,
     proc_snapshot: Vec<crate::telemetry::Proc>,
     mcp_servers: Vec<crate::mcp_watch::Server>,
     mcp_sessions: Vec<Value>,
@@ -113,7 +114,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::load(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
+        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::load(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
         match panels::load_config(){Ok(config)=>center.panel_config=config,Err(error)=>center.panel_config_error=Some(error),}
         center.scope=crate::scope::current()?.cloned();
         if let Some(scope)=&center.scope{
@@ -179,6 +180,13 @@ impl Center {
                             self.dials=Some(host);
                         }
                         self.dials_at=Some(std::time::Instant::now());
+                    }
+                    // One measured sample per minute: enough to see a trend, cheap to keep.
+                    if self.metrics_at.map(|t|t.elapsed().as_secs()>=60).unwrap_or(true){
+                        let studios=self.studios["sessions"].as_array().map(|v|v.len()).unwrap_or(0);
+                        let stale=self.studios["errors"].as_array().map(|v|v.len()).unwrap_or(0);
+                        crate::mayhem::record(&crate::mayhem::Sample::capture(&self.mcp_servers,studios,stale));
+                        self.metrics_at=Some(std::time::Instant::now());
                     }
                     if self.logs_at.map(|t|t.elapsed().as_secs()>=5).unwrap_or(true){
                         let blender=self.state["animation_worker"]["log"].as_str().unwrap_or("").to_string();
@@ -1762,15 +1770,57 @@ fn render_config(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_telemetry(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if area.width<118{
-  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
-  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_logs(f,c,p[5]);render_agent_usage(f,c,p[6]);
+  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
+  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_trend(f,c,p[5]);render_logs(f,c,p[6]);
   return;
  }
  let p=Layout::vertical([Constraint::Min(12),Constraint::Length(16)]).split(area);
  let columns=Layout::horizontal([Constraint::Length(42),Constraint::Length(48),Constraint::Min(30)]).split(p[0]);
  render_host(f,c,columns[0]);render_known_apps(f,c,columns[1]);render_logs(f,c,columns[2]);
- let bottom=Layout::horizontal([Constraint::Percentage(25),Constraint::Percentage(25),Constraint::Percentage(25),Constraint::Percentage(25)]).split(p[1]);
- render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_agent_usage(f,c,bottom[3]);
+ let bottom=Layout::horizontal([Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20)]).split(p[1]);
+ render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_trend(f,c,bottom[3]);render_agent_usage(f,c,bottom[4]);
+}
+/// The measured trend since the first recorded sample: are we closing processes and
+/// using less memory, or not? Every number comes from a recorded sample.
+fn render_trend(f:&mut Frame,_c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ let history=crate::mayhem::history();
+ let now=history.last().cloned();
+ let Some(now)=now else {
+  lines.push(styled("No sample recorded yet. Open MAYHEM to start measuring.",MUTED));
+  f.render_widget(Paragraph::new(lines).block(round_panel("TREND · are we improving?",TEAL,false)),area);
+  return;
+ };
+ lines.push(styled(format!("{} servers · {} agents · {} MiB MCP RAM",now.mcp_servers,now.mcp_agents,now.mcp_rss_kb/1024),DESK_FG));
+ lines.push(styled(format!("{} collisions · {} studios · {} stale",now.mcp_collisions,now.studios,now.stale_studios),DESK_FG));
+ lines.push(styled(format!("Host RAM {} MiB / {} MiB",now.host_mem_used_kb/1024,now.host_mem_total_kb/1024),MUTED));
+ lines.push(Line::raw(""));
+ match crate::mayhem::trend(){
+  Some(trend)=>{
+   let span=trend.span_ms/1000;
+   let row=|label:&str,delta:i64,unit:&str|{
+    let better=crate::mayhem::improved(delta);
+    let colour=if delta==0{MUTED}else if better{GREEN}else{RED};
+    let arrow=if better{"▼"}else if delta<0{"▲"}else{"▲"};
+    Line::from(vec![
+     Span::styled(format!("{label:<14}"),Style::default().fg(MUTED)),
+     Span::styled(format!("{arrow} {:>12}",crate::mayhem::delta_text(delta,unit)),Style::default().fg(colour)),
+    ])
+   };
+   lines.push(styled(format!("Over {} samples / {}s:",trend.samples,span),MUTED));
+   lines.push(row("MCP servers",trend.servers_delta,"servers"));
+   lines.push(row("MCP agents",trend.agents_delta,"agents"));
+   lines.push(row("MCP memory",trend.rss_delta_kb,"MiB"));
+   lines.push(row("Collisions",trend.collisions_delta,"collisions"));
+   lines.push(row("Stale studios",trend.stale_delta,"stale"));
+   lines.push(row("Host RAM",trend.host_mem_delta_kb,"MiB"));
+   let better=trend.servers_delta<0||trend.rss_delta_kb<0;
+   lines.push(Line::raw(""));
+   lines.push(styled(if better{"IMPROVING: fewer processes / less memory"}else{"NOT YET: the footprint has not shrunk"},if better{GREEN}else{AMBER}));
+  }
+  None=>lines.push(styled("One sample so far; a trend needs two. Open MAYHEM again in a minute.",MUTED)),
+ }
+ f.render_widget(Paragraph::new(lines).block(round_panel("TREND · are we improving?",TEAL,false)),area);
 }
 fn render_host(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines:Vec<Line<'static>>=Vec::new();
@@ -2061,7 +2111,7 @@ mod feedback_tests {
         assert!(!c.message.contains("sent to beaker"),"a working agent is never sent the check-in");
     }
     pub(super) fn fixture()->Center{
-        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::default(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}
+        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::default(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}
     }
     fn panel_text(lines:&[Line])->String{lines.iter().map(|line|line.to_string()).collect::<Vec<_>>().join("\n")}
     fn panel_screen(c:&Center)->String{
