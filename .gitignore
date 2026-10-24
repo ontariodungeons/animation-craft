@@ -50,3 +50,21 @@ npm-debug.log*
 # Exported binary assets (too large for git)
 exports/
 blender-skills/
+
+# Agent tooling installed into the checkout (per-agent skill copies and configs).
+# The repo's own skills under .agents/skills/ stay tracked; skills-lock.json records the rest.
+.agents/threejs-*/
+.agents/.threejs-*
+.agents/skills/*
+!.agents/skills/asset-sheets/
+!.agents/skills/craft-app-lifecycle/
+!.agents/skills/layered-motion/
+!.agents/skills/magicstudio-shell-ui/
+!.agents/skills/storyboard/
+.github/skills/
+.claude/
+.opencode/
+.commandcode/
+.hermes/
+.mcp.json
+.mcp.json.bak-*
