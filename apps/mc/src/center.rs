@@ -1733,15 +1733,15 @@ fn spark_glyph(value:Option<f64>)->char{
 /// The telemetry tab: host dials, the busiest processes, live log tails, commits.
 fn render_telemetry(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if area.width<118{
-  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
-  render_host(f,c,p[0]);render_processes(f,c,p[1]);render_mcp_servers(f,c,p[2]);render_logs(f,c,p[3]);render_agent_usage(f,c,p[4]);
+  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
+  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_logs(f,c,p[5]);render_agent_usage(f,c,p[6]);
   return;
  }
- let p=Layout::vertical([Constraint::Min(12),Constraint::Length(14)]).split(area);
+ let p=Layout::vertical([Constraint::Min(12),Constraint::Length(16)]).split(area);
  let columns=Layout::horizontal([Constraint::Length(42),Constraint::Length(48),Constraint::Min(30)]).split(p[0]);
- render_host(f,c,columns[0]);render_processes(f,c,columns[1]);render_logs(f,c,columns[2]);
- let bottom=Layout::horizontal([Constraint::Percentage(55),Constraint::Percentage(45)]).split(p[1]);
- render_mcp_servers(f,c,bottom[0]);render_agent_usage(f,c,bottom[1]);
+ render_host(f,c,columns[0]);render_known_apps(f,c,columns[1]);render_logs(f,c,columns[2]);
+ let bottom=Layout::horizontal([Constraint::Percentage(25),Constraint::Percentage(25),Constraint::Percentage(25),Constraint::Percentage(25)]).split(p[1]);
+ render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_agent_usage(f,c,bottom[3]);
 }
 fn render_host(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let mut lines:Vec<Line<'static>>=Vec::new();
@@ -1827,6 +1827,34 @@ fn mcp_lines(servers:&[crate::mcp_watch::Server],rows:usize)->Vec<Line<'static>>
  }
  if hidden>0{lines.push(styled(format!("+{hidden} more"),MUTED));}
  lines
+}
+/// Magic Studio apps open: every Studio window's project and endpoint, so you can see
+/// what is running and disconnect stale sessions.
+fn render_studios(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ let sessions=c.studios["sessions"].as_array().cloned().unwrap_or_default();
+ let errors=c.studios["errors"].as_array().cloned().unwrap_or_default();
+ if sessions.is_empty() && errors.is_empty(){
+  lines.push(styled("No Magic Studio apps open",MUTED));
+ } else {
+  for s in sessions.iter().take(8){
+   let project=s["active_project"].as_str().or(s["canonical_project"].as_str()).map(|p|p.rsplit('/').next().unwrap_or(p)).unwrap_or("?");
+   let endpoint=s["endpoint"].as_str().unwrap_or("?");
+   let pid=s["pid"].as_u64().map(|p|p.to_string()).unwrap_or_default();
+   lines.push(Line::from(vec![
+    Span::styled(format!("{:<20}",fit_text(project,18)),Style::default().fg(DESK_FG)),
+    Span::styled(format!(" pid {pid}"),Style::default().fg(MUTED)),
+   ]));
+   lines.push(styled(format!("  {}",fit_text(endpoint,area.width.saturating_sub(4) as usize)),MUTED));
+  }
+  for e in errors.iter().take(4){
+   let endpoint=e["endpoint"].as_str().unwrap_or("?");
+   let state=e["state"].as_str().unwrap_or("error");
+   lines.push(styled(format!("! {} ({})",fit_text(endpoint,area.width.saturating_sub(12) as usize),state),AMBER));
+  }
+  if sessions.len()>8{lines.push(styled(format!("+{} more",sessions.len()-8),MUTED));}
+ }
+ f.render_widget(Paragraph::new(lines).block(round_panel("MAGIC STUDIO APPS · open windows",TEAL,false)),area);
 }
 /// MCP servers by family: how many, from which agents, and what collides. Sampled with the tab.
 fn render_mcp_servers(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
@@ -2456,4 +2484,71 @@ mod feedback_tests {
         }}
     }
 
+}
+
+/// Known apps that we watch specifically: magicstudio-shell, *-craft, blender, mc, opencode.
+/// Returns (pid, name, argv_string, rss_kb).
+fn known_app_procs() -> Vec<(u32, String, String, u64)> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else { return out; };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue; };
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        let argv: Vec<String> = raw.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+        if argv.is_empty() { continue; }
+        let joined = argv.join(" ");
+        let base = argv[0].rsplit('/').next().unwrap_or(&argv[0]);
+        let name = if base == "magicstudio-shell" {
+            // Show the project name from argv
+            let proj = argv.iter().find(|a| a.ends_with(".magic")).map(|p| p.rsplit('/').next().unwrap_or(p).trim_end_matches(".magic")).unwrap_or("magicstudio");
+            format!("magicstudio · {}", proj)
+        } else if base.ends_with("-craft") || base.ends_with("craft") {
+            base.to_owned()
+        } else if base == "blender" || joined.contains("blender") {
+            "blender".to_owned()
+        } else if base == "mc" {
+            // Identify subcommand
+            let sub = argv.get(1).map(String::as_str).unwrap_or("");
+            if sub == "tui" || sub == "backstage" || sub == "booth" || sub == "center" {
+                format!("mc · {}", sub)
+            } else if argv.iter().any(|x| x == "mcp") {
+                "mc · mcp".to_owned()
+            } else {
+                continue // skip generic mc invocations
+            }
+        } else if base == "opencode" {
+            "opencode".to_owned()
+        } else {
+            continue // not a known app
+        };
+        // Get RSS
+        let rss_kb = std::fs::read_to_string(format!("/proc/{pid}/status"))
+            .ok()
+            .and_then(|s| s.lines().find_map(|l| l.strip_prefix("VmRSS:")).and_then(|v| v.split_whitespace().next()).and_then(|v| v.parse().ok()))
+            .unwrap_or(0);
+        out.push((pid, name, joined, rss_kb));
+    }
+    out.sort_by(|a, b| b.3.cmp(&a.3)); // sort by RSS descending
+    out
+}
+
+/// Opinionated process watch: only known apps (craft, blender, magicstudio, mc, opencode).
+fn render_known_apps(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let apps = known_app_procs();
+    if apps.is_empty() {
+        lines.push(styled("No known apps running", MUTED));
+    } else {
+        lines.push(styled(format!("{:<8}{:<28}{:>8}", "PID", "APP", "RSS"), MUTED));
+        for (pid, name, _argv, rss_kb) in apps.iter().take(12) {
+            let rss = if *rss_kb >= 1024 { format!("{:.0}M", *rss_kb as f64 / 1024.0) } else { format!("{}K", rss_kb) };
+            let colour = if *rss_kb > 500_000 { AMBER } else { DESK_FG };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:<8}", pid), Style::default().fg(MUTED)),
+                Span::styled(format!("{:<28}", fit_text(name, 26)), Style::default().fg(colour)),
+                Span::styled(format!("{:>8}", rss), Style::default().fg(MUTED)),
+            ]));
+        }
+    }
+    f.render_widget(Paragraph::new(lines).block(round_panel("KNOWN APPS · craft/blender/magicstudio/mc/opencode", TEAL, false)), area);
 }
