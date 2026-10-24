@@ -1,24 +1,15 @@
 ## Change
+One observable result.
 
-What problem does this solve, and what should the user observe?
+## Run
+- Files:
+- Exact `mc` command:
+- Expected result:
 
-## Ownership and integration
+## Commit hook
+- Normal `git commit` result and log:
 
-- Base revision:
-- Feature commit(s):
-- Owned files / subsystem:
-- Related PRs or agent-owned dependencies:
-- Concurrent changes preserved:
+Add tests, then commit; the hook runs checks. Do not pretest or bypass it.
 
-## Verification
-
-- [ ] Behavior tests and exact commands/results are recorded below.
-- [ ] Relevant failure paths were exercised; tests do not silently pass without fixtures.
-- [ ] UI changes include a rendered check, narrow-layout check, and automation IDs.
-- [ ] UI callers and help text match the engine contracts at the base revision.
-
-Evidence:
-
-## Known limitations
-
-List inherited failures, required external tools, and any work owned by another agent.
+## Remaining
+Actual blockers or unverified behavior only.

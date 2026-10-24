@@ -36,6 +36,20 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - Beaker monitors completed agent work, reviews its changes and follows each PR
   through integration to main. Do not leave a handoff dependent on an old chat.
 
+## Static image to animatable asset
+
+- Begin with the repository image-to-animation skill and read the applicable asset
+  sheet, rigging, pose, motion and animation QA instructions completely before work.
+  Use the actual current native CLI contracts; flag stale instructions instead of
+  silently substituting an older renderer or application.
+- A few cut image portions, pieces rotating independently, unwanted overlaps or a
+  rendered scene clip do not establish an editable animatable asset. The result must
+  retain connected joints/part coverage through the required poses and transitions,
+  with adjustable values in both Studio and the native CLI, and survive save/reopen.
+- Demonstrate the requested humanoid, insect, animal and prop workflow. Keep missing
+  anatomy, sheets, controls, joint continuity or unreviewed transitions marked incomplete.
+  Review source images and results before assigning the next bounded agent task.
+
 ## Isolate source only when needed
 
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
