@@ -75,7 +75,8 @@ Companion plan: `docs/superpowers/plans/2026-10-23-magic-studio-wiring-refactor.
   "items": [
     { "id": "block-song", "label": "Song", "signal": 1, "open": true, "busy": false, "dirty": false }
   ],
-  "unconfigured": [ { "id": "button-17", "tag": "button", "label": "Export" } ]
+  "unconfigured": [ { "id": "button-17", "tag": "button", "label": "Export", "reason": "untracked" },
+                    { "id": "block-song", "tag": "section", "label": "Song", "reason": "unknown-look" } ]
 }
 ```
 
@@ -86,6 +87,7 @@ Companion plan: `docs/superpowers/plans/2026-10-23-magic-studio-wiring-refactor.
 - Flags: `open` (visible/expanded), `busy` (work in flight), `dirty` (unsaved edits). Default set chosen in chat; Jesse may change it. Adding a flag later = one field in JS + one field in `Panel`.
 - `revision` increments only when an item's flags or the unconfigured list actually change. The 1 s feedback heartbeat must NOT bump it.
 - `items` and `unconfigured` are each capped at 64.
+- `reason` is one of: `untracked` (no registered panel above it), `no-look` (registered panel without a `look`), `unknown-look` (look not in the fixed list), `unstyled` (inline `style` attribute on a registered panel or its head/empty/status). The TUI and `mc panels` show a count per reason; this is the map of random, untracked and unstyled UI.
 - No Studio / closed page → readers report `available: false`, never zero panels or invented failures.
 
 Rust (`crates/engine/src/panels.rs`, `pub mod panels;` in lib.rs):
@@ -95,9 +97,10 @@ Rust (`crates/engine/src/panels.rs`, `pub mod panels;` in lib.rs):
 impl Signal { pub fn from_u64(v: u64) -> Signal; pub fn label(self) -> &'static str; } // "idle" "in use" "attention" "problem"
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct Panel { pub id: String, pub label: Option<String>, pub signal: Signal, pub open: bool, pub busy: bool, pub dirty: bool }
-pub struct Unconfigured { pub id: String, pub tag: String, pub label: Option<String> }
+pub enum Reason { Untracked, NoLook, UnknownLook, Unstyled } // serde kebab-case
+pub struct Unconfigured { pub id: String, pub tag: String, pub label: Option<String>, pub reason: Reason }
 pub struct PanelReport { pub revision: u64, pub available: bool, pub items: Vec<Panel>, pub unconfigured: Vec<Unconfigured> }
-impl PanelReport { pub fn from_feedback(feedback: &serde_json::Value) -> PanelReport; pub fn worst(&self) -> Signal; }
+impl PanelReport { pub fn from_feedback(feedback: &serde_json::Value) -> PanelReport; pub fn worst(&self) -> Signal; pub fn count(&self, reason: Reason) -> usize; }
 ```
 
 Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>` → shell `bridge.rs` routes to page `acBridge.panel(id, flag, value)` → calls the handler the panel registered for that flag; a flag without a handler is refused with `"panel <id> does not accept <flag>"`.
@@ -180,7 +183,7 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 
 **Produces:** the Rust types in the contract; `studios::Studio { endpoint, id, pid, project: Option<PathBuf>, view, ready, unsaved }` with `name()`, `confirm_command()`, `is_clean()`; `studios::Studios::discover() -> Studios { live: Vec<Studio>, errors: Vec<Value> }` with `find(&str)`, `pinned()`.
 
-- [ ] Tests: `from_feedback_reads_contract_example` (the JSON above → 1 item, signal InUse, 1 unconfigured); `missing_panels_key_is_unavailable`; `signal_out_of_range_is_problem_not_panic` (signal 9 → Problem); `worst_of_empty_is_idle`.
+- [ ] Tests: `from_feedback_reads_contract_example` (the JSON above → 1 item, signal InUse, 2 unconfigured, `count(Untracked) == 1`, `count(UnknownLook) == 1`); `unknown_reason_string_is_untracked_not_panic`; `missing_panels_key_is_unavailable`; `signal_out_of_range_is_problem_not_panic` (signal 9 → Problem); `worst_of_empty_is_idle`.
 - [ ] Implement with serde; `Signal` deserializes from the number.
 - [ ] Refactor `studios.rs` onto `Studio`; `mc studios`, `--json`, `--check`, pin output byte-identical (existing tests stay green).
 - [ ] Commit `feat(engine): typed panel report; mc studios reads typed Studios (#23)`.
@@ -190,7 +193,7 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 **Consumes:** Task 2 `acBridge.panel`, Task 3 `PanelReport`.
 **Files:** Modify `apps/mc/src/main.rs` (subcommand + SUBCOMMANDS + help), create `apps/mc/src/panels.rs`; modify `apps/magicstudio-shell/src/bridge.rs:93-96` (route `ui.panel` → `page(app, "panel", [id, flag, value])`), register `ui.panel` wherever `ui.set` is registered for MCP/command_list.
 
-- [ ] `mc panels` prints `SIGNAL  ID  LABEL  open busy dirty` rows + `N unconfigured: ids…`; `--json` prints the `PanelReport`; `--check` exits 1 when `unconfigured` is non-empty or `available` is false, 0 otherwise. Help line in `mc help` + one README example.
+- [ ] `mc panels` prints `SIGNAL  ID  LABEL  LOOK  open busy dirty` rows + one line per non-zero reason (`untracked 3: ids…`); `--json` prints the `PanelReport`; `--check` exits 1 when `unconfigured` is non-empty or `available` is false, 0 otherwise. Help line in `mc help` + one README example.
 - [ ] Rust unit tests on the formatter with a fixture `PanelReport` (no live Studio).
 - [ ] Delete `boxes` from `feedbackSnapshot()` once nothing reads it (grep `"boxes"`).
 - [ ] Commit `feat(cli): mc panels lists and checks every panel; ui.panel sets a flag (#23)`.
@@ -201,7 +204,7 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 **Files:** Create `apps/mc/src/center/panels.rs` (rendering, following the `center/booth.rs` / `center/workshop.rs` split from merge `3642935`); modify `apps/mc/src/center.rs` (keep the report in `refresh` at `:110`; colour via one `fn signal_color(Signal) -> Color` using the existing `GREEN/AMBER/RED/MUTED` constants at `:750`).
 
 - [ ] Keep `PanelReport` + `last_panels_revision` on `Center`; rebuild panel lines only when `revision` differs (existing 1 s refresh stays).
-- [ ] Render: one row per panel (dot glyph coloured by signal, label, flags), an "Unconfigured UI: N" row that lists ids in details (`D`), "Panels unavailable" when `available` is false.
+- [ ] Render: one row per panel (dot glyph coloured by signal, label, flags), a "UI health" row with one count per reason (`untracked 3 · no look 1 · unstyled 2`, all-zero shows `all panels tracked and styled`), ids per reason in details (`D`), "Panels unavailable" when `available` is false.
 - [ ] Tests in `center.rs` `feedback_tests`: `panels_unavailable_renders_unavailable`, `same_revision_does_not_rebuild`, `unconfigured_count_shown`.
 - [ ] Commit `feat(tui): Booth shows every panel's flags and unconfigured UI (#23)`.
 
