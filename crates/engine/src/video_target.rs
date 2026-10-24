@@ -156,11 +156,47 @@ pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
     })
 }
 
-/// Resolve only an explicitly selected executable, HYPERFRAMES_CLI, or PATH; never install with npx.
-pub(crate) fn hyperframes_cli(explicit: Option<&str>) -> Result<PathBuf> {
+/// The HyperFrames version a video project pins (`hyperframes@X` in its package.json scripts,
+/// or a `hyperframes` dependency), if it pins one.
+pub(crate) fn pinned_hyperframes(project: &Path) -> Option<String> {
+    let text=std::fs::read_to_string(project.join("package.json")).ok()?;
+    let json:Value=serde_json::from_str(&text).ok()?;
+    let scripts=json["scripts"].as_object().into_iter().flatten().filter_map(|(_,v)|v.as_str());
+    scripts.filter_map(|cmd|cmd.split("hyperframes@").nth(1).map(|rest|rest.chars().take_while(|c|c.is_ascii_digit()||*c=='.').collect::<String>()))
+        .find(|v|!v.is_empty())
+        .or_else(||json["dependencies"]["hyperframes"].as_str().or(json["devDependencies"]["hyperframes"].as_str()).map(|v|v.trim_start_matches(['^','~','=']).to_string()))
+}
+
+/// An already-downloaded executable of exactly `version`: the project's own node_modules, then
+/// the npm cache under `npx_root`. Nothing is installed or fetched.
+pub(crate) fn pinned_cli(project: &Path, npx_root: &Path, version: &str) -> Option<PathBuf> {
+    let matches=|modules:&Path|{
+        let manifest=std::fs::read_to_string(modules.join("hyperframes/package.json")).ok()?;
+        let found=serde_json::from_str::<Value>(&manifest).ok()?["version"].as_str()?.to_string();
+        let bin=modules.join(".bin/hyperframes");
+        (found==version && bin.is_file()).then_some(bin)
+    };
+    matches(&project.join("node_modules")).or_else(||{
+        let mut caches:Vec<PathBuf>=std::fs::read_dir(npx_root).ok()?.filter_map(|e|e.ok()).map(|e|e.path().join("node_modules")).collect();
+        caches.sort();
+        caches.iter().find_map(|modules|matches(modules))
+    })
+}
+
+/// Resolve an explicitly selected executable, HYPERFRAMES_CLI, PATH, or an already-downloaded copy
+/// of the version the project pins; never install with npx. A failure says exactly what to do.
+pub(crate) fn hyperframes_cli(explicit: Option<&str>, project: Option<&Path>) -> Result<PathBuf> {
     let configured=explicit.map(PathBuf::from).or_else(||std::env::var_os("HYPERFRAMES_CLI").map(PathBuf::from));
-    let path=configured.or_else(||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file())))
-        .ok_or_else(||EngineError::InvalidParams("HyperFrames executable unavailable. Pass hyperframes_cli=/absolute/path or set HYPERFRAMES_CLI to an existing official executable; no install or npx lookup was attempted".into()))?;
+    let on_path=||std::env::var_os("PATH").and_then(|v|std::env::split_paths(&v).map(|d|d.join("hyperframes")).find(|p|p.is_file()));
+    let pinned=project.and_then(|dir|pinned_hyperframes(dir).map(|version|(dir,version)));
+    let cached=||pinned.as_ref().and_then(|(dir,version)|{
+        let npx=PathBuf::from(std::env::var_os("HOME")?).join(".npm/_npx");
+        pinned_cli(dir,&npx,version)
+    });
+    let path=configured.or_else(on_path).or_else(cached).ok_or_else(||EngineError::InvalidParams(match &pinned {
+        Some((dir,version))=>format!("HyperFrames {version} not found. This project pins it in {}. Install it with `npm i -g hyperframes@{version}`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.",dir.join("package.json").display()),
+        None=>"HyperFrames executable not found on PATH. Install it with `npm i -g hyperframes`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.".into(),
+    }))?;
     if !path.is_absolute() || !path.is_file() {return Err(EngineError::InvalidParams(format!("HyperFrames executable must be an existing absolute file: {}",path.display())));}
     Ok(path)
 }
@@ -174,7 +210,7 @@ fn generated_files(root:&Path, relative:&Path, files:&mut Vec<PathBuf>) -> Resul
 }
 
 fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>, replace_scaffold:bool) -> Result<PathBuf> {
-    let cli=hyperframes_cli(executable)?;
+    let cli=hyperframes_cli(executable,Some(&dir.join("hyperframes")))?;
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|EngineError::InvalidParams(e.to_string()))?.as_nanos();
     let stage=dir.join(format!(".hyperframes-init-{}-{stamp}",std::process::id()));
     let mut args=vec!["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
@@ -401,7 +437,7 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     status["video_project_path"]=json!(s.video_project_path);
     if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
     status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
-    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
+    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?);}
     Ok(status)
 }
 
@@ -442,7 +478,7 @@ pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> 
             let work_dir = dir.join("hyperframes");
             // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
             // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
-            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str())?)
+            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&work_dir))?)
                 .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", &work_dir.to_string_lossy()])
                 .current_dir(&work_dir)
                 .env("PWD", &work_dir)
@@ -674,4 +710,35 @@ fn animation_job_request(s:&mut Session,params:&Value,job:&Value)->Result<Value>
     }
     request["rendered_source"]=frozen;
     Ok(request)
+}
+
+#[cfg(test)]
+mod hyperframes_cli_tests {
+    use super::*;
+    fn temp(name:&str)->PathBuf{let d=std::env::temp_dir().join(format!("hf-cli-{name}-{}",std::process::id()));let _=std::fs::remove_dir_all(&d);std::fs::create_dir_all(&d).unwrap();d}
+    fn install(modules:&Path,version:&str){
+        std::fs::create_dir_all(modules.join("hyperframes")).unwrap();std::fs::create_dir_all(modules.join(".bin")).unwrap();
+        std::fs::write(modules.join("hyperframes/package.json"),format!("{{\"version\":\"{version}\"}}")).unwrap();
+        std::fs::write(modules.join(".bin/hyperframes"),"#!/bin/sh\n").unwrap();
+    }
+    #[test]
+    fn the_pinned_version_comes_from_the_project_scripts(){
+        let p=temp("pin");
+        std::fs::write(p.join("package.json"),r#"{"scripts":{"dev":"npx --yes hyperframes@0.8.166 preview"}}"#).unwrap();
+        assert_eq!(pinned_hyperframes(&p).as_deref(),Some("0.8.166"));
+        std::fs::write(p.join("package.json"),r#"{"dependencies":{"hyperframes":"^0.8.181"}}"#).unwrap();
+        assert_eq!(pinned_hyperframes(&p).as_deref(),Some("0.8.181"));
+        std::fs::remove_dir_all(p).unwrap();
+    }
+    #[test]
+    fn only_a_downloaded_copy_of_exactly_the_pinned_version_is_used(){
+        let p=temp("proj");let npx=temp("npx");
+        install(&npx.join("aaa/node_modules"),"0.8.189");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),None,"another version is never used");
+        install(&npx.join("bbb/node_modules"),"0.8.166");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),Some(npx.join("bbb/node_modules/.bin/hyperframes")));
+        install(&p.join("node_modules"),"0.8.166");
+        assert_eq!(pinned_cli(&p,&npx,"0.8.166"),Some(p.join("node_modules/.bin/hyperframes")),"the project's own copy wins");
+        std::fs::remove_dir_all(p).unwrap();std::fs::remove_dir_all(npx).unwrap();
+    }
 }

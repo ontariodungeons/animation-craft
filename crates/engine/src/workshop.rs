@@ -1555,7 +1555,7 @@ pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
         .or_else(|| s.song_audio.clone())
         .filter(|p| p.is_file())
         .ok_or_else(|| EngineError::InvalidParams("no song audio: pass audio=<file> or workshop.set_audio".into()))?;
-    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str())?;
+    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str(), project_dir(s).ok().map(|d| d.join("hyperframes")).as_deref())?;
     let runtime = runtime.to_str().ok_or_else(|| EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?;
     let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
     let hf = project_dir(s)?.join("hyperframes");
