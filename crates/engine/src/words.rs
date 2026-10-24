@@ -244,6 +244,21 @@ pub fn cmd_words_effects(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// One animation per printed section occurrence; nothing styled or moving until edited.
+/// A saved document gains the sung section occurrences it lacks (a repeat added to the sheet later), in
+/// sung order; its existing sections and designs stay as they are.
+fn with_sung_sections(mut doc: Value, report: &Value) -> Value {
+    let fresh = default_document(report)["animations"].as_array().cloned().unwrap_or_default();
+    let ids: Vec<Value> = fresh.iter().map(|a| a["animation_id"].clone()).collect();
+    if let Some(list) = doc["animations"].as_array_mut() {
+        for (k, anim) in fresh.into_iter().enumerate() {
+            if list.iter().any(|a| a["animation_id"] == anim["animation_id"]) { continue; }
+            let at = list.iter().position(|a| ids.iter().position(|id| *id == a["animation_id"]).is_some_and(|j| j > k)).unwrap_or(list.len());
+            list.insert(at, anim);
+        }
+    }
+    doc
+}
+
 fn default_document(report: &Value) -> Value {
     let mut animations: Vec<Value> = Vec::new();
     for w in report["words"].as_array().into_iter().flatten() {
@@ -341,8 +356,9 @@ fn printed_caption_words(aligned: &Value) -> (Vec<Value>, Vec<[usize; 2]>) {
     while i < words.len() {
         if words[i]["start"].is_f64() { i += 1; continue; }
         let j = (i..words.len()).find(|&k| words[k]["start"].is_f64()).unwrap_or(words.len());
-        let prev = if i > 0 { words[i - 1]["end"].as_f64().unwrap_or(0.0) } else { 0.0 };
-        let next = words.get(j).and_then(|w| w["start"].as_f64()).unwrap_or(prev + 0.3 * (j - i) as f64);
+        let before = if i > 0 { words[i - 1]["end"].as_f64().unwrap_or(0.0) } else { 0.0 };
+        let next = words.get(j).and_then(|w| w["start"].as_f64()).unwrap_or(before + 0.3 * (j - i) as f64);
+        let prev = before.max(next - 0.35 * (j - i) as f64);  // a skipped word sits just before its sung neighbour
         let step = (next - prev).max(0.0) / (j - i) as f64;
         for (n, w) in words[i..j].iter_mut().enumerate() {
             w["start"] = json!(prev + step * n as f64);
@@ -433,7 +449,7 @@ pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
 /// Reports when the hidden reference changed since the document was saved.
 pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
-    let (mut doc, saved) = match load(&dir)? { Some(doc) => (doc, true), None => (default_document(&aligned(s)?), false) };
+    let (mut doc, saved) = match load(&dir)? { Some(doc) => (with_sung_sections(doc, &aligned(s)?), true), None => (default_document(&aligned(s)?), false) };
     let (_, current_sha, _) = reference(&dir)?;
     let stale = saved && doc["reference"]["sha256"].as_str() != Some(current_sha.as_str());
     if let Some(id) = p["animation_id"].as_str() {
@@ -469,7 +485,7 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let id = p["animation_id"].as_str().ok_or_else(|| invalid("animation_id is required"))?;
     let expected = p["expected_source_revision"].as_u64().ok_or_else(|| invalid("expected_source_revision is required"))?;
-    let mut doc = match load(&dir)? { Some(doc) => doc, None => default_document(&aligned(s)?) };
+    let mut doc = match load(&dir)? { Some(doc) => with_sung_sections(doc, &aligned(s)?), None => default_document(&aligned(s)?) };
     let anim = doc["animations"].as_array_mut().and_then(|a| a.iter_mut().find(|x| x["animation_id"] == id))
         .ok_or_else(|| invalid(format!("No Words animation {id}")))?;
     let current = anim["source_revision"].as_u64().unwrap_or(0);
@@ -852,6 +868,18 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests {
 
     #[test]
+    fn a_saved_document_gains_a_sung_repeat_in_order_and_keeps_its_designs() {
+        let w = |section: &str, occurrence: u64, id: &str| json!({"section":section,"occurrence":occurrence,"word_id":id,"text":"x","line_id":id,"sung_id":id});
+        let report = json!({"words":[w("verse_1",1,"a"),w("verse_2",1,"b"),w("verse_1",2,"c")]});
+        let mut saved = default_document(&json!({"words":[w("verse_1",1,"a"),w("verse_2",1,"b")]}));
+        saved["animations"][0]["design"] = json!({"a":{"items":[],"draws":[]}});
+        let doc = with_sung_sections(saved, &report);
+        let ids: Vec<&str> = doc["animations"].as_array().unwrap().iter().map(|a| a["animation_id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["words-verse-1-1", "words-verse-2-1", "words-verse-1-2"]);
+        assert!(doc["animations"][0]["design"]["a"].is_object(), "existing designs stay");
+    }
+
+    #[test]
     fn printed_captions_keep_artist_text_and_place_skipped_words() {
         let w = |text: &str, line: &str, t: Option<(f64, f64)>| json!({"text":text,"sung_id":line,"occurrence":1,
             "start":t.map(|t| t.0),"end":t.map(|t| t.1)});
@@ -860,7 +888,7 @@ mod tests {
             w("five","l2",Some((2.8,3.0))),w("six","l2",Some((3.0,3.2))),w("seven","l2",Some((3.2,3.4)))]});
         let (words, groups) = printed_caption_words(&aligned);
         assert_eq!(words[0]["text"], "Oh");
-        assert_eq!((words[0]["start"].as_f64(), words[0]["end"].as_f64()), (Some(0.0), Some(1.0)));
+        assert!((words[0]["start"].as_f64().unwrap() - 0.65).abs() < 1e-9 && words[0]["end"].as_f64() == Some(1.0), "a skipped word sits just before its sung neighbour");
         assert_eq!(groups, vec![[0, 2], [3, 6], [7, 9]]);
     }
     use super::*;
