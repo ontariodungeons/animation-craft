@@ -633,7 +633,7 @@ pub fn cmd_words_effect_install(s: &mut Session, p: &Value) -> Result<Value> {
     let found = || [format!("compositions/components/{name}.html"), format!("compositions/{name}.html")].into_iter().find(|p| hf.join(p).is_file());
     if let Some(src) = found() { return Ok(json!({"name":name,"src":src,"installed":false,"already":true})); }
     let cli = crate::video_target::hyperframes_cli(p["hyperframes_cli"].as_str(), Some(&hf))?;
-    let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into()])?;
+    let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into(), "--no-clipboard".into()])?;  // the clipboard copy never returns headless
     let src = found().ok_or_else(|| invalid(format!("hyperframes add {name} wrote no {name}.html: {}", out.trim())))?;
     Ok(json!({"name":name,"src":src,"installed":true,"already":false,"receipt":serde_json::from_str::<Value>(&out).unwrap_or(json!(out.trim()))}))
 }
