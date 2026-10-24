@@ -261,6 +261,8 @@ The panel record carries `look` from the entry. The TUI signal colours come from
 
 Each Task 8 commit message ends with the `--report` line before → after.
 
+**Re-based bar (2026-10-23 23:40, after Statler's Words port 3a1c433 added +42 CSS lines / ~35 rules / +244 JS lines of new feature):** Task 8 is done when `ui-lint --report` shows CSS ≤ **911** lines and ≤ **673** selectors, UI JS ≤ **4227** lines, px and hex only in `:root`, and **0** `.style.x =` / **0** `style:` attributes. Measured at HEAD 73555d1c: 955 / 703 / 4289 / 923 px outside `:root` / 24 / 9.
+
 **Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/components.json` (new), `ui/style.css`, `ui/app.js` (`el()` reads the entry), `ui/companion-boxes.js` (items carry `look`; unconfigured `reason`), the ~34 inline-style sites listed above, `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: Task 9. No `tokens.css` / `components.css` / `views.css`.
 
 - [ ] Tests: `panels.mjs` — `every components.json look is in looks`; `every density is in densities`; `el() applies class and data-look from the entry`; `element without an entry is untracked`; `visual inline style is unstyled`; `geometry custom properties are not unstyled`. `ui-lint.mjs` new counts, per file: `inline_visual_styles` (≈14), `geometry_without_custom_property` (≈20), `raw_px_in_component_rules` (69), `outside_in_overrides` (18). Baseline today; target 0.
