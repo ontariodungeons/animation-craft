@@ -1150,6 +1150,35 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result)
 }
 
+/// One song section in one call: the drawn path becomes a clip the motion gate passed, placed at the
+/// section's time in the HyperFrames video. A clip that fails the gate is reported, never placed.
+pub fn cmd_motion_place_section(s: &mut Session, p: &Value) -> Result<Value> {
+    let clip = p["id"].as_str().filter(|id| !id.is_empty()).ok_or_else(|| invalid("Name the video clip id"))?;
+    let duration = p["duration"].as_f64().ok_or_else(|| invalid("Give the section duration"))?;
+    let mut path = p.clone();
+    if let Some(obj) = path.as_object_mut() {
+        obj.remove("id");
+    }
+    let drawn = cmd_motion_path(s, &path)?;
+    let character = drawn["character"].clone();
+    let track = drawn["track"].clone();
+    let exported = cmd_motion_export_track(
+        s,
+        &json!({"character":character,"track":track,"duration":duration,"amount":p["amount"].as_f64().unwrap_or(100.0)}),
+    )?;
+    let output = &exported["outputs"][0];
+    let file = output["file"].as_str().ok_or_else(|| invalid("The export wrote no clip"))?;
+    if output["validation"]["ok"] != json!(true) {
+        return Ok(json!({"ok":false,"placed":false,"character":character,"track":track,"file":file,"validation":output["validation"]}));
+    }
+    let mut place = json!({"id":clip,"path":file,"start":p["start"].as_f64().unwrap_or(0.0),"duration":duration,"character":character,"track":track});
+    if let Some(rect) = p.get("rect") {
+        place["rect"] = rect.clone();
+    }
+    let placed = crate::video_target::cmd_video_place_track(s, &place)?;
+    Ok(json!({"ok":true,"placed":true,"character":character,"track":track,"file":file,"validation":output["validation"],"placement":placed}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

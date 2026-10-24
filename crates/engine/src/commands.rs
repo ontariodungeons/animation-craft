@@ -100,6 +100,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"synfig.start"
             | b"motion.pose.export"
             | b"motion.export_track"
+            | b"motion.place_section"
             | b"sequence.render"
             | b"animation.source.render"
             | b"video.init"
@@ -259,6 +260,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("agent.models", "Available Chat Models", "{\"agent\":\"optional catalog adapter: opencode\"}", cmd_agent_models),
         cmd!("agent.new_chat", "New Agent Chat", ["Agent"], None, "{\"free_only\":false,\"image_task\":false}", always, cmd_agent_new_chat),
         cmd!("motion.export_track", "Export a preview action as transparent video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"track id\",\"amount\":35,\"rest\":false,\"duration\":2.58}", always, crate::motion::cmd_motion_export_track),
+        cmd!("motion.place_section", "Animate a song section: draw the path, export, gate and place it in the video", ["Animation"], None, "{\"character\":\"asset id\",\"track\":\"source track (default the first)\",\"layer\":\"optional root layer\",\"points\":[[0,0],[100,100]],\"start_size\":100,\"end_size\":100,\"amount\":100,\"id\":\"video clip id\",\"start\":0,\"duration\":3,\"rect\":[0,0,1920,1080]}", always, crate::motion::cmd_motion_place_section),
         query!("motion.tracks", "Inspect animation tracks and layers", "{\"character\":\"asset id\"}", crate::motion::cmd_motion_tracks),
         query!("motion.sample", "Sample engine motion for drawing", "{\"character\":\"asset id\",\"track\":\"track id\",\"fps\":30,\"rest\":false,\"amount\":100,\"time\":0}", crate::motion::cmd_motion_sample),
         query!("motion.theatre.read", "Read native Theatre state", "{\"expected_project\":\"optional selected .magic identity\"}", crate::theatre::read),
