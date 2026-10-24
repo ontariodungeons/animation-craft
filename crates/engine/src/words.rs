@@ -190,6 +190,28 @@ html, body, [data-composition-id] { background: #1b2430 !important; }
 
 /// The opposite view: the video's scene with its lyric word clips hidden, for designing new lyrics
 /// over the picture they will sit in.
+/// The lyrics page's stage: the scene's backdrop, the music and the lyrics (designed sections and their
+/// overlays). A picture or video clip is a backdrop when no lower track plays under it at its time;
+/// every other picture or video (the cast) is hidden. Timing stays the saved video's.
+fn stage_only_style(html: &str) -> String {
+    let mut visuals: Vec<(String, u64, f64, f64)> = Vec::new();
+    let mut from = 0;
+    while let Some(open) = html[from..].find('<').map(|i| i + from) {
+        let close = html[open..].find('>').map_or(html.len(), |i| i + open + 1);
+        let tag = &html[open..close];
+        from = close;
+        if !(tag.starts_with("<video") || tag.starts_with("<img")) || !tag_attr(tag, "class").is_some_and(|c| c.split_whitespace().any(|c| c == "clip")) { continue; }
+        let num = |k: &str| tag_attr(tag, k).and_then(|v| v.parse::<f64>().ok());
+        if let (Some(id), Some(start)) = (tag_attr(tag, "id"), num("data-start")) {
+            visuals.push((id.to_owned(), num("data-track-index").unwrap_or(0.0) as u64, start, start + num("data-duration").unwrap_or(f64::MAX)));
+        }
+    }
+    let cast: Vec<String> = visuals.iter().filter(|(_, track, a, b)| visuals.iter().any(|(_, t, x, y)| t < track && x < b && a < y))
+        .map(|(id, ..)| format!("#{id}")).collect();
+    let hide = if cast.is_empty() { String::new() } else { format!("{} {{ visibility: hidden !important; }}\n", cast.join(", ")) };
+    format!("<style data-magicstudio=\"stage\">\n{hide}.lyric-word-clip, .lyric-word-clip * {{ visibility: hidden !important; }}\n</style>")
+}
+
 const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
 .lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: hidden !important; }
 </style>"#;
@@ -198,15 +220,17 @@ const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
 /// (`show: "lyrics"`, the default) or only its scene (`show: "scene"`). Written beside the Words
 /// compositions and rewritten only when the video changes; the video itself is never touched.
 pub fn cmd_words_lyrics_view(s: &mut Session, p: &Value) -> Result<Value> {
-    let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
-        "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
-        "scene" => (SCENE_ONLY_STYLE, "scene-only"),
-        other => return Err(invalid(format!("show must be lyrics or scene, not {other}"))),
-    };
     let dir = crate::workshop::project_dir(s)?;
     let hf = dir.join("hyperframes");
     let html = fs::read_to_string(hf.join("index.html")).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
-    if !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
+    let stage_style;
+    let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
+        "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
+        "scene" => (SCENE_ONLY_STYLE, "scene-only"),
+        "stage" => { stage_style = stage_only_style(&html); (stage_style.as_str(), "stage") }
+        other => return Err(invalid(format!("show must be stage, lyrics or scene, not {other}"))),
+    };
+    if name != "stage" && !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
     let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
     let derived = format!("{}{style}\n{}", &html[..head], &html[head..]);
     let src = format!("compositions/words/{name}.html");
@@ -976,6 +1000,17 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_stage_keeps_the_backdrop_and_hides_the_cast() {
+        let html = r#"<video id="bg-a" class="clip" data-start="0" data-duration="10" data-track-index="18"></video>
+<video id="bg-b" class="clip" data-start="10" data-duration="10" data-track-index="19"></video>
+<video id="ship" class="clip" data-start="2" data-duration="6" data-track-index="22"></video>
+<img id="crab" class="clip" data-start="12" data-duration="3" data-track-index="30">"#;
+        let style = stage_only_style(html);
+        assert!(style.contains("#ship") && style.contains("#crab"), "the cast is hidden: {style}");
+        assert!(!style.contains("#bg-a") && !style.contains("#bg-b"), "backdrops stay");
+    }
 
     #[test]
     fn kinetic_designs_use_the_library_and_the_section_words() {

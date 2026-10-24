@@ -453,7 +453,7 @@ pub fn build() -> Vec<CommandSpec> {
         query!("words.align", "Artist Words vs Timing Reference", "{}", crate::words::cmd_words_align),
         query!("words.read", "Words Animations", "{\"animation_id\":\"optional\"}", crate::words::cmd_words_read),
         query!("words.studio_track", "Lyric Clips in the Video", "{}", crate::words::cmd_words_studio_track),
-        cmd!("words.lyrics_view", "Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"scene\"}", always, crate::words::cmd_words_lyrics_view),
+        cmd!("words.lyrics_view", "Stage, Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"stage (the backdrop, music and lyrics), lyrics or scene\"}", always, crate::words::cmd_words_lyrics_view),
         query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
         cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
         cmd!("words.captions", "Captions by the Artist's Lines", ["Design"], None, "{\"by\":\"section (default) or line\",\"out\":\"optional .srt path; default lyrics.captions.srt in the project\",\"to\":\"video: the video's caption track shows the printed lines (earlier source kept as captions.vN.html)\"}", always, crate::words::cmd_words_captions),

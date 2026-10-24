@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "full", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
 // How a designed lyric item moves on its accent word (the engine's MOVES), and what each does.
 const WORDS_MOVES = [["quiet", "Quiet", "Fades in and holds"], ["sleep", "Sleep", "Letters sink one by one"], ["settle", "Settle", "Drops and squashes into place"],
   ["fall", "Fall", "Drops down"], ["pop", "Pop", "A quick swell on the beat"], ["rise", "Rise", "Arcs up and away"], ["east", "East", "Slides right"],
@@ -620,7 +620,7 @@ function wordsStage(anim) {
   const view = (show, label) => el("button", { role: "tab", "data-show": show, "aria-selected": String(wordsPanel.show === show), onclick: () => wordsShow(show) }, label);
   wordsPanel.stage = el("div", { class: "words-preview", "data-animation": anim.animation_id },
     el("div", { class: "segmented", role: "tablist", "aria-label": "What the stage shows" },
-      view("full", "Full video"), view("lyrics", "Lyrics only"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
+      view("stage", "Stage"), view("full", "Full video"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
     el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
       wordsPanel.playButton = el("button", { class: "icon", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
@@ -631,7 +631,7 @@ function wordsStage(anim) {
   return wordsPanel.stage;
 }
 
-// The stage shows the whole video, a derived copy with only its lyric clips (words.lyrics_view),
+// The stage shows the scene's backdrop with the music and the lyrics (words.lyrics_view show=stage), the whole video,
 // or the section as edited (its composition from words.compose). The edited section starts at its
 // song_anchor, so its times are offset from the song's.
 async function wordsShow(show, frame = $("words-video-frame")) {
@@ -642,7 +642,7 @@ async function wordsShow(show, frame = $("words-video-frame")) {
   let src = wordsPanel.player;
   wordsPanel.offset = show === "edited" ? anim.song_anchor || 0 : 0;
   try {
-    if (show === "lyrics") src = `${wordsPanel.player}/comp/${(await wordsCommand("words.lyrics_view")).src}`;
+    if (show === "lyrics" || show === "stage") src = `${wordsPanel.player}/comp/${(await wordsCommand("words.lyrics_view", { show })).src}`;
     if (show === "edited") src = `${wordsPanel.player}/comp/${(await wordsCommand("words.compose", { animation_id: anim.animation_id })).src}`;
   } catch (error) { toast(String(error).replace(/^.*?: /, "")); return wordsShow("full", frame); }
   if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
