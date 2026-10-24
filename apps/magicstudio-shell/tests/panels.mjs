@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const read = name => readFileSync(new URL(`../ui/${name}`, import.meta.url), 'utf8');
+// The vm has its own realm: compare plain data, not cross-realm objects.
+const plain = value => JSON.parse(JSON.stringify(value));
 
 function element(tag, { id = '', title = '', text = '', attrs = {}, parent = null, role = '' } = {}) {
   const attributes = { ...attrs };
@@ -88,7 +90,7 @@ const tests = [
     assert.equal(typeof report.revision, 'number');
     assert.ok(Array.isArray(report.items));
     assert.ok(Array.isArray(report.unconfigured));
-    assert.deepEqual(report.items[0], { id: 'block-song', label: 'Song', signal: 0, open: false, busy: false, dirty: false });
+    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', signal: 0, open: false, busy: false, dirty: false });
     assert.deepEqual(Object.keys(report.items[0]), ['id', 'label', 'signal', 'open', 'busy', 'dirty']);
   }],
   ['revision unchanged when nothing changed', () => {
@@ -131,7 +133,7 @@ const tests = [
     const inside = element('button', { text: 'Export', parent: panel });
     elements.push(panel, inside);
     boxes.register('block-song', { label: 'Song' });
-    assert.deepEqual(boxes.panels().unconfigured, []);
+    assert.equal(boxes.panels().unconfigured.length, 0);
     assert.equal(boxes.panels().items[0].id, 'block-song');
   }],
   ['panel() refuses flag with no handler', () => {

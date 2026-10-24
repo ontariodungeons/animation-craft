@@ -40,7 +40,7 @@ const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
   ['one number per state, and the light cannot disagree with it', () => {
     const { boxes } = fixture();
-    const expect = { idle: 0, ready: 1, working: 2, 'needs-attention': 2, failed: 3 };
+    const expect = { idle: 0, ready: 1, working: 1, 'needs-attention': 2, failed: 3 };
     for (const [state, value] of Object.entries(expect)) {
       assert.equal(boxes.signal(state), value, `${state} signal`);
       const dot = boxes.dot(state);

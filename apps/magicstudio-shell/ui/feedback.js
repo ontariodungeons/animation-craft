@@ -11,7 +11,10 @@ function feedbackSnapshot(){
  // where it came from and when it was seen; a stale or closed-app observation
  // is marked, never invented as a failure. No new poller and no new command.
  const boxes=window.companionBoxes?window.companionBoxes.snapshot({project:typeof state==='undefined'?null:state.project}):[];
- return {companions:window.magicCompanions?.snapshot()||null,boxes,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
+ // The one standard record per panel: flags, a revision that changes only when
+ // a flag changes, and the clickable controls that belong to no known panel.
+ const panels=window.companionBoxes?window.companionBoxes.panels():null;
+ return {companions:window.magicCompanions?.snapshot()||null,boxes,panels,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
 }
 acFeedback.report=async function(phase,ack,event){
  if(phase)acFeedback.phase=phase;if(ack)acFeedback.ack=Math.max(acFeedback.ack,ack);

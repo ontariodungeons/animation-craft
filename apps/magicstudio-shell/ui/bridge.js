@@ -86,6 +86,7 @@ window.acBridge = {
     if (!record) throw new Error(`panel ${id} is not registered`);
     const handler = record.on && record.on[flag];
     if (typeof handler !== "function") throw new Error(`panel ${id} does not accept ${flag}`);
+    if (typeof registry.flag === "function") registry.flag(id, flag, !!value);
     handler(!!value);
     return { panel: id, flag, value: !!value };
   },
