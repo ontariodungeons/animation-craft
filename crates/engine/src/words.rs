@@ -204,11 +204,7 @@ pub fn cmd_words_lyrics_view(s: &mut Session, _: &Value) -> Result<Value> {
 }
 
 /// Each track kind and the registry search that finds its effects.
-const EFFECT_KINDS: &[(&str, &str)] = &[
-    ("text", "word by word text reveal"),
-    ("drawing", "hand drawn line drawing"),
-    ("background", "animated background texture"),
-];
+const EFFECT_KINDS: &[(&str, &str)] = &[("text", "word by word text reveal")];
 
 /// `words.effects`: ready-made effects from the HyperFrames registry for each track kind (or one,
 /// with `kind`), searched with the project's pinned HyperFrames. Reads only; installs nothing.
@@ -598,11 +594,9 @@ mod tests {
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
         let params = json!({"hyperframes_cli": cli});
         let all = cmd_words_effects(&mut s, &params).unwrap();
-        let mut kinds: Vec<_> = all["kinds"].as_object().unwrap().keys().cloned().collect();
-        kinds.sort();
-        assert_eq!(kinds, ["background", "drawing", "text"]);
+        assert_eq!(all["kinds"].as_object().unwrap().keys().collect::<Vec<_>>(), ["text"], "lyrics only: text effects");
         assert_eq!(all["kinds"]["text"]["effects"][0]["name"], "word by word text reveal", "the kind's search reaches the catalog");
-        let one = cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "drawing"})).unwrap();
+        let one = cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "text"})).unwrap();
         assert_eq!(one["kinds"].as_object().unwrap().len(), 1);
         assert!(cmd_words_effects(&mut s, &json!({"hyperframes_cli": cli, "kind": "sparkles"})).is_err());
     }

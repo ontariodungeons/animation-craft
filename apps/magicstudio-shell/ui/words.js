@@ -8,17 +8,6 @@ const WORD_ACTIONS = [["none", "Still"], ["wave", "Wave"], ["tiny", "Small"], ["
 const WORD_ENTRANCES = ["pop", "fade", "rise", "none"];
 const WORD_EXITS = ["fade", "drop", "none"];
 const wordsCommand = (command, params = {}) => invoke("engine_command", { id: command, params });
-// Effects: recipes that set several words at once from the moves Words already has. Applying one
-// fills the section's unsaved edits; Save sends them. `fields(word, last)` says what a word gets;
-// `last` is true for the last word of its line. Nothing here is special to one song.
-const WORD_EFFECTS = [
-  { key: "rise-float", name: "Rise and float", about: "Each word rises in, drifts while it is sung, then fades.", fields: () => ({ entrance: "rise", action: "float", exit: "fade" }) },
-  { key: "pop-fade", name: "Pop in, fade out", about: "Words pop on at their onset and fade at the end.", fields: () => ({ entrance: "pop", action: "none", exit: "fade" }) },
-  { key: "wave", name: "Wave the line", about: "Every word waves while it is sung.", fields: () => ({ action: "wave" }) },
-  { key: "swim", name: "Swim through", about: "Words fade in and swim.", fields: () => ({ entrance: "fade", action: "swim" }) },
-  { key: "last-grows", name: "Last word grows", about: "The last word of each line grows and is emphasised.", fields: (w, last) => (last ? { action: "big", emphasis: true } : {}) },
-  { key: "still", name: "Still", about: "Plain words that fade in and out.", fields: () => ({ entrance: "fade", action: "none", exit: "fade", emphasis: false }) },
-];
 
 const wordsSongPath = () => state.data?.status?.stages?.find((s) => s.id === "song")?.inputs?.[0]?.path;
 const wordsCurrent = () => wordsPanel.read?.document?.animations?.find((a) => a.animation_id === wordsPanel.selected);
@@ -87,17 +76,6 @@ function wordsEdit(word, key, value) {
   wordsRender();
 }
 
-// Apply one effect to every word of the selected section, as unsaved edits.
-function wordsApplyEffect(effect) {
-  const anim = wordsCurrent();
-  if (!anim) return;
-  anim.words.forEach((w, i) => {
-    const last = anim.words[i + 1]?.line_id !== w.line_id;
-    for (const [key, value] of Object.entries(effect.fields(w, last))) wordsSetField(w, key, value);
-  });
-  toast(`${effect.name} on ${wordsLabel(anim)} · save to keep it`);
-  wordsRender();
-}
 
 // While Design is open, the workstation's lower pane holds the effects; leaving gives it back.
 function wordsEffectsPane(anim) {
@@ -110,14 +88,12 @@ function wordsEffectsPane(anim) {
   slot.replaceChildren(
     el("div", { class: "group-label" }, `Text effects for ${wordsLabel(anim)} · HyperFrames`),
     current ? el("button", { class: "effect", "data-effect": "", onclick: () => wordsApplyRegistry(null) },
-      el("strong", {}, `Using ${current}`), el("span", { class: "muted" }, "Click to go back to the Words moves below.")) : null,
+      el("strong", {}, `Using ${current}`), el("span", { class: "muted" }, "Click to remove this effect.")) : null,
     wordsPanel.effects?.error ? el("p", { class: "muted" }, wordsPanel.effects.error)
       : !wordsPanel.effects ? el("p", { class: "muted" }, "Finding effects…") : null,
     ...registry.filter((e) => e.name !== current).map((e) => el("button", { class: "effect", "data-effect": e.name, title: (e.tags || []).join(" · "), onclick: () => wordsApplyRegistry(e.name) },
       el("strong", {}, e.title || e.name), el("span", { class: "muted" }, e.description || ""))),
-    el("div", { class: "group-label" }, "Words moves · one click sets every word"),
-    ...WORD_EFFECTS.map((effect) => el("button", { class: "effect", "data-effect": effect.key, onclick: () => wordsApplyEffect(effect) },
-      el("strong", {}, effect.name), el("span", { class: "muted" }, effect.about))));
+    null);
   if (!wordsPanel.effects) {
     wordsPanel.effects = { loading: true };
     wordsCommand("words.effects", { kind: "text" }).catch((error) => ({ error: String(error).replace(/^.*?: /, "") }))
@@ -139,7 +115,7 @@ async function wordsApplyRegistry(name) {
     await wordsCommand("words.compose", { animation_id: anim.animation_id });
     wordsPanel.show = name ? "edited" : "full";
     wordsPanel.stage = null;
-    toast(name ? `${name} on ${wordsLabel(anim)}` : `${wordsLabel(anim)} back to Words moves`);
+    toast(name ? `${name} on ${wordsLabel(anim)}` : `Effect removed from ${wordsLabel(anim)}`);
     await wordsOpen();
   } catch (error) { toast(String(error).replace(/^.*?: /, "")); }
 }
@@ -245,7 +221,7 @@ function wordsStage(anim) {
       view("full", "Full video"), view("lyrics", "Lyrics only"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
     el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
-      el("button", { class: "icon", id: "words-play", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
+      wordsPanel.playButton = el("button", { class: "icon", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
       wordsPanel.timeLabel = el("span", { class: "meta" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)),
     wordsLane("Lyric words · in the video", section));
@@ -339,7 +315,7 @@ addEventListener("message", (event) => {
     if (scrub) scrub.value = scrub.defaultValue = String(song);
     if (wordsPanel.timeLabel) wordsPanel.timeLabel.textContent = wordsClock(song);
     wordsPanel.laneHead?.(song);
-    $("words-play")?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
+    wordsPanel.playButton?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
   }
 });
 addEventListener("resize", () => wordsFit());
