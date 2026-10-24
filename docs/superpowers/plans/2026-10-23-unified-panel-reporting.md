@@ -60,6 +60,7 @@ The design is locked by a ratchet, not by a big-bang rewrite. Any commit that to
 | 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline in the hook | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
 
 | 8 | Beaker | `components.json` (one entry per element) + one `style.css`; no inline styling; looks/density as token sets | `ui/components.json`, `ui/style.css`, `ui/app.js` `el()`, inline-style sites, `tests/ui-lint.mjs`, `tests/panels.mjs` | 7 |
+| 9 | Gonzo | TUI theme: colours and styles only in `theme.rs`, palette read from `style.css` | `apps/mc/src/theme.rs` (new), `apps/mc/src/center*.rs`, `apps/mc/src/logo.rs` | 5, 8 |
 
 `ui/` and `tests/` are under `apps/magicstudio-shell/`. Shared files (`companion-boxes.js`, `.githooks/pre-commit`) change in the order above, one owner at a time.
 
@@ -232,16 +233,38 @@ The panel record carries `look` from the entry. The TUI signal colours come from
 
 ### Task 8 (Beaker): components.json + one stylesheet, no inline styling
 
-**Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/components.json` (new), `ui/style.css`, `ui/app.js` (`el()` reads the entry), `ui/companion-boxes.js` (items carry `look`; unconfigured `reason`), the ~34 inline-style sites listed above, `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: `apps/mc/src/center.rs` (Gonzo). No `tokens.css` / `components.css` / `views.css`.
+**Acceptance (measured, not claimed).** `node tests/ui-lint.mjs --report` prints, for `ui/style.css` and `ui/*.js`: CSS lines, rules, selectors, class names, px literals, hex literals, JS lines, inline style writes, `el()` style attributes. Task 8 is accepted only if, against the pre-refactor commit `08529bf` (CSS 869 lines / 671 rules / 673 selectors / 282 classes / 967 px / 72 hex; JS 3983 lines; 33 `.style.x =` + 14 `style:` attributes):
+
+- CSS lines and selectors are **lower** than at `08529bf` (round 1 left them at 899 / 664, i.e. +30 lines);
+- px and hex literals appear **only in `:root`**;
+- `style:` attributes are 0 and `.style.x =` writes are 0 (geometry uses `style.setProperty("--x", …)`);
+- UI JS lines are not higher than at `08529bf` (4005 today).
+
+Each Task 8 commit message ends with the `--report` line before → after.
+
+**Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/components.json` (new), `ui/style.css`, `ui/app.js` (`el()` reads the entry), `ui/companion-boxes.js` (items carry `look`; unconfigured `reason`), the ~34 inline-style sites listed above, `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: Task 9. No `tokens.css` / `components.css` / `views.css`.
 
 - [ ] Tests: `panels.mjs` — `every components.json look is in looks`; `every density is in densities`; `el() applies class and data-look from the entry`; `element without an entry is untracked`; `visual inline style is unstyled`; `geometry custom properties are not unstyled`. `ui-lint.mjs` new counts, per file: `inline_visual_styles` (≈14), `geometry_without_custom_property` (≈20), `raw_px_in_component_rules` (69), `outside_in_overrides` (18). Baseline today; target 0.
 - [ ] Write `components.json` for the elements `el()` already registers; make `el()` read it.
 - [ ] Rewrite panel looks/densities as token sets read by one rule per component; delete merged modifiers and outside-in overrides; add the scale tokens.
 - [ ] Remove inline visual styles (move to the component rule); move data geometry to `--x/--y/--w/--h` custom properties.
-- [ ] Per-file ratchet in `ui-lint.mjs` ("Refactor as you go"). Lower the baseline in each commit; final counts 0.
+- [ ] Per-file ratchet in `ui-lint.mjs` ("Refactor as you go"), plus `--report` for the acceptance numbers. Lower the baseline in each commit; final counts 0.
 - [ ] After each commit report the SHA; the coordinator screenshots the live Studio for Jesse.
 - [ ] Commits: `feat(ui): one config entry per element (#23)`, `refactor(ui): panel looks are token sets (#23)`, `refactor(ui): no inline styling; geometry through custom properties (#23)`.
 
+### Task 9 (Gonzo): TUI theme, no inline styling in Rust
+
+The TUI is the Rust side's UI and has the same problem: 31 `Color::Rgb(…)` literals (29 different colours) and 57 `Style::default()…` chains written at call sites, 44 of them in `apps/mc/src/center.rs`.
+
+**Consumes:** Task 5, Task 8 (`style.css` `:root`). **Files:** create `apps/mc/src/theme.rs`; modify `apps/mc/src/center.rs`, `apps/mc/src/center/*.rs`, `apps/mc/src/logo.rs`.
+
+**Produces:** `theme::signal(Signal) -> Style`, `theme::text() / muted() / accent() / title(active: bool) / panel_border(active: bool) / selected() -> Style` (exact set decided by what the call sites need; no per-screen functions). Colours are read once from the `:root` palette of `apps/magicstudio-shell/ui/style.css` via `include_str!` at build time, so the TUI and the Studio share one palette file.
+
+- [ ] Tests (the palette test moves here from Task 8): `tui_signal_colours_match_ui_tokens`; `every_theme_style_has_a_colour` (no `Color::Reset` fallbacks).
+- [ ] Replace call-site colours and `Style::default()` chains with theme functions.
+- [ ] Acceptance: `Color::Rgb` and `Style::default()` appear only in `theme.rs` (`grep -rc` over `apps/mc/src`), and `apps/mc/src` total lines are lower than before the task. Commit message ends with the counts before → after.
+- [ ] Commit `refactor(tui): one theme, read from the Studio palette (#23)`.
+
 ## Order
 
-Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first) → Task 8 after Task 7.
+Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first) → Task 8 after Task 7 → Task 9 after Tasks 5 and 8.
