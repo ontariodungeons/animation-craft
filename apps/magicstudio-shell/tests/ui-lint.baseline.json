@@ -1,15 +1,15 @@
 {
-  "method": 2,
+  "method": 3,
   "files": {
     "style.css": {
-      "px_outside_root": 909,
+      "px_outside_root": 906,
       "hex_outside_root": 0,
       "ms_outside_root": 4,
       "raw_px_in_component_rules": 128,
       "outside_in_overrides": 52,
-      "lines": 973,
-      "rules": 668,
-      "selectors": 698
+      "lines": 981,
+      "rules": 672,
+      "selectors": 702
     },
     "agent.js": {
       "hand_built_dots": 0,
@@ -45,7 +45,7 @@
       "hand_built_dots": 0,
       "retired": 0,
       "ids_without_config_entry": 15,
-      "class_from_code": 2,
+      "class_from_code": 0,
       "style_attributes": 1,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
@@ -195,7 +195,7 @@
       "hand_built_dots": 0,
       "retired": 0,
       "ids_without_config_entry": 1,
-      "class_from_code": 0,
+      "class_from_code": 1,
       "style_attributes": 3,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
@@ -204,12 +204,12 @@
     "words.js": {
       "hand_built_dots": 0,
       "retired": 0,
-      "ids_without_config_entry": 11,
+      "ids_without_config_entry": 7,
       "class_from_code": 0,
       "style_attributes": 0,
       "style_writes": 0,
       "geometry_without_custom_property": 0,
-      "lines": 241
+      "lines": 257
     }
   }
 }

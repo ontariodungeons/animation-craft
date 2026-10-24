@@ -94,7 +94,7 @@ const SIZE_KEYS = new Set(['lines', 'rules', 'selectors', 'classes']);
 
 // The counting method has a version. When it changes, the floors are recorded
 // anew: a different way of counting is not a regression.
-const METHOD = 2;
+const METHOD = 3;
 
 const PX = /\b\d+(?:\.\d+)?px\b/g;
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
@@ -135,10 +135,14 @@ function configCounts(source) {
   const ids = [...source.matchAll(/\bid\s*:\s*["'`]([^"'`$]*)["'`]/g)].map(match => match[1]);
   const withoutEntry = ids.filter(id => id && !configured.has(id)).length;
   const calls = source.match(/el\([^)]*?\}/gs) || [];
+  // A class written in code that the config does not name: the look is still
+  // at the call site instead of in components.json.
   const classFromCode = calls.filter(call => {
     const id = call.match(/\bid\s*:\s*["'`]([^"'`$]*)["'`]/);
     const klass = call.match(/\bclass\s*:\s*["'`]([^"'`]*)["'`]/);
-    return !!(id && klass && configured.has(id[1]));
+    if (!id || !klass || !configured.has(id[1])) return false;
+    const component = (config.elements?.[id[1]] ?? {}).component;
+    return klass[1].split(/\s+/).some(name => name && name !== component);
   }).length;
   return { ids_without_config_entry: withoutEntry, class_from_code: classFromCode };
 }
