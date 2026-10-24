@@ -18,8 +18,10 @@ Out of scope by instruction: editing Magic Studio code, installing OpenDesign or
 chosen runtime/model, generating media, and any broad architecture audit.
 
 Two names from the product vocabulary are used throughout: **Gaffer** is the in-app artist
-(Codex/`gpt-6-luna` by the default of `image.generate`), **Sproken** is the conversational coordinator.
-**Words** = approved lyrics/titles/timing. **Artwork** = drawings/motion design.
+(Codex/`gpt-6-luna` by the default of `image.generate`), **Sproket** is the conversational coordinator —
+that is the spelling in the code (`crates/engine/src/agent.rs`: "Sproket · Magic Studio", "You are
+Sproket"), while the task vocabulary spells it *Sproken*. **Words** = approved lyrics/titles/timing.
+**Artwork** = drawings/motion design.
 
 ---
 
@@ -111,16 +113,22 @@ fallback).
 
 ## 2. Reuse from the installed HyperFrames / motion-graphics — do not add a second engine
 
-**The OpenDesign "motion" skill is the file we already use.** The skill page
+**The OpenDesign "motion" skill is an upstream HyperFrames file.** The skill page
 `open-design.ai/skills/motion-graphics/` documents `heygen-com/hyperframes`
 `skills/motion-graphics/SKILL.md` (Apache-2.0, recorded commit `558c11b`, snapshot read 2026-09-14).
 Upstream's own install line is `npx skills add https://github.com/heygen-com/hyperframes --skill motion-graphics`.
-It is the same upstream skill our local `hyperframes` skill set derives from, and it routes to
-`/hyperframes` — the framework we already render with.
+It routes to `/hyperframes` — the same framework and CLI we already render with.
 
 **Already installed here (verified by listing, not by running):** `~/.agents/skills/hyperframes`,
 `hyperframes-cli`, `hyperframes-registry`, `media-use`; `~/.hyperframes/` (config, registry cache,
-lint streaks). `hyperframes` itself is not a global binary; the skill drives it through `npx`.
+lint streaks). `hyperframes` is not a global binary; the skill drives it through `npx hyperframes`.
+
+**One correction worth stating plainly:** our local `hyperframes` skill set is *our own* entry point
+over that upstream project and CLI — it is not a byte copy of upstream's `motion-graphics/SKILL.md`,
+and `motion-graphics` itself is not installed locally. So importing OpenDesign's motion skill would
+not add a capability; it would add a **second, overlapping entry point to one framework**, with two
+routers for the same CLI. That is duplication, which is why the recommendation below is to take
+OpenDesign's *reference text* rather than its skill bundle.
 
 **What OpenDesign would actually add (text, not an engine):**
 
@@ -145,8 +153,9 @@ skill/template files. That is a file copy, not an integration.
 
 ### 3.1 Reference artwork (input, locked by identity not by pixels)
 
-- Reference PNG: `assets/characters/<character>/reference.png` (project-relative), with the sha256
-  recorded in the manifest. A missing reference is a hard error — Gaffer never invents a character.
+- Reference PNG (proposed location): `assets/characters/<character>/reference.png` (project-relative),
+  with the sha256 recorded in the manifest. A missing reference is a hard error — Gaffer never invents
+  a character.
 - Optional second reference: the approved turnaround sheet
   `assets/sheets/<character>-turnaround-2048.png`, used only to match palette and line weight.
 - Up to 5 references total, matching the existing `image.generate` contract
@@ -156,11 +165,13 @@ skill/template files. That is a file copy, not an integration.
 
 | Output | Dimensions | Alpha | Notes |
 | --- | --- | --- | --- |
-| Cutout sheet | 2048 × 2048 px, PNG, sRGB | **required** (transparent background) | `image.generate transparent_background=true`, then normalised with `image.image_size` |
+| Cutout sheet | 2048 × 2048 px, PNG, sRGB | **required** (transparent background) | `image.generate` is asked for `transparent_background=true` (the engine passes the request to the native tool — it is not a guarantee), then the size is normalised with `image.image_size`; the alpha check in §3.6 is what enforces it |
 | Pose sheet (optional variant) | 2048 × 2048, 3 × 2 cells of 600 × 900, 48 px gutters | required | same canvas rules as the existing `asset-sheets` skill |
 | Parts | cut from the sheet by `asset.cut_sheet` | required | one PNG per part, white background removed |
 
-Part names (fixed vocabulary, mirroring the existing skeleton-sheet limb list):
+Part names (a fixed vocabulary; these snake_case tokens are this template's normalisation of the
+skeleton-sheet limb list in `.agents/skills/asset-sheets/SKILL.md` — "head, torso, upper arm L/R,
+forearm L/R, hand L/R, thigh L/R, shin L/R, foot L/R, tail"):
 `head`, `torso`, `upper_arm_l`, `upper_arm_r`, `forearm_l`, `forearm_r`, `hand_l`, `hand_r`,
 `thigh_l`, `thigh_r`, `shin_l`, `shin_r`, `foot_l`, `foot_r`, `tail` (optional),
 plus `prop_*` for held props. Left/right are the **character's** left/right, never the viewer's.
@@ -211,15 +222,22 @@ One manifest written beside the sheet, e.g. `assets/sheets/<character>-cutout.ma
     { "path": "assets/sheets/hopper-cutout.png", "width": 2048, "height": 2048,
       "alpha": true, "sha256": "<hex>", "background": "transparent" }
   ],
-  "parts": [
-    { "name": "head", "file": "assets/characters/hopper/parts/head.png",
-      "pivot": [512, 320], "sha256": "<hex>" }
-  ],
+  "rig": {
+    "canvas": [2048, 2048],
+    "layer_order": ["head", "torso", "upper_arm_l", "upper_arm_r", "forearm_l", "forearm_r",
+                    "hand_l", "hand_r", "thigh_l", "thigh_r", "shin_l", "shin_r",
+                    "foot_l", "foot_r"],
+    "layers": {
+      "head": { "box": [768, 96, 512, 480], "pivot": [1024, 336] },
+      "torso": { "box": [768, 560, 512, 720], "pivot": [1024, 560] }
+    },
+    "part_dir": "assets/characters/hopper/parts"
+  },
   "validation": {
     "programmatic": {
       "canvas_size": "pass", "alpha_present": "pass", "edge_margin_px": 64,
       "view_count": 4, "max_height_drift_pct": 3.1, "palette_conformance": "pass",
-      "part_count": 15, "part_names_match": "pass"
+      "part_count": 14, "part_names_match": "pass", "pivots_in_canvas": "pass"
     },
     "visual_review": { "required": true, "reviewer": null, "result": null }
   },
@@ -227,9 +245,17 @@ One manifest written beside the sheet, e.g. `assets/sheets/<character>-cutout.ma
 }
 ```
 
-This mirrors the receipt our engine already writes for registered frames (`registration.json` with
-`canvas`, `source_sha256`, pivots), so a Gaffer result is machine-checkable in the same way as the
-existing PhotoCraft path.
+The `rig` block is deliberately **not** a new format: it mirrors the layered-rig manifest the engine
+already loads (`crates/engine/src/session.rs`, `load_keyed_layers`) — `canvas`, `layer_order`, and
+`layers[id].box` + `layers[id].pivot`, with one `<id>.png` per layer next to the manifest, alpha
+required, dimensions matching the declared box, and the pivot inside the canvas. Layer ids must be
+alphanumeric plus `_` and `-`, which the part-name vocabulary already satisfies. A Gaffer result can
+therefore feed the existing rig loader instead of inventing a parallel one.
+
+The rest of the manifest mirrors the receipts the engine already writes for registered frames
+(`registration.json` with `canvas`, `source_sha256`, pivots) and for cut sheets (manifest with
+`part_names`, `frames[].label`, `warnings`, `review`), so a Gaffer result is machine-checkable on the
+same terms as the existing PhotoCraft path.
 
 ### 3.6 Programmatic validation vs. visual review
 
@@ -240,19 +266,21 @@ existing PhotoCraft path.
 | exact 2048 × 2048, PNG, sRGB | `image.image_size` normalises; assert decoded width/height/colour type |
 | alpha present and background really transparent | decode RGBA, assert corner pixels are transparent |
 | ≥ 64 px clear margin, nothing clipped | alpha bounding box per cell vs. canvas edges |
-| 4 views / 6 cells present, no overlap | connected components per cell + cell-box overlap test |
+| 4 views (cutout/turnaround) or 6 pose cells present, no overlap | connected components per cell + cell-box overlap test |
 | height drift ≤ 4 % between views | alpha height of each cell |
 | palette conformance | quantise non-transparent pixels, compare to the locked hex set (ΔE threshold) |
-| part count and part names | `asset.cut_sheet` output manifest vs. the fixed name vocabulary |
-| pivot sanity | each part's pivot inside its own alpha bounds |
-| no text baked in | cannot be asserted reliably → see below |
+| part count and part names | `asset.cut_sheet` manifest (`part_names`, `frames[].label`) vs. the fixed name vocabulary |
+| pivot sanity | pivot inside the canvas and inside its own crop box — the rig loader rejects it otherwise |
+| layer file shape | one `<id>.png` per layer, alpha present, pixel size equal to the declared `box` |
 
-**Needs human (or Sproken/Gaffer) visual review:**
+**Needs human (or Sproket/Gaffer) visual review:**
 
 - character identity and likeness against the reference (same character, not a redesign);
 - that the pose reads correctly and the gesture is the requested one;
 - profile orientation (nose right) — a silhouette heuristic can flag it, but only review is authoritative;
 - line weight consistency and "no AI-slop" quality (the `craft/anti-ai-slop.md` checklist is prose);
+- stray lettering or labels baked into the sheet — a text detector can flag a suspicion, but it cannot
+  prove the absence of text;
 - anything that looks like a hand/face artifact at pixel scale.
 
 **Honest limit:** a prompt can *ask* for a flat `#ffffff` background, a 64 px margin or a hex-locked
@@ -272,7 +300,7 @@ emphasis and motion**. The reference is never edited; mismatches are reported, n
 
 The template is therefore a **small, reviewable seed document** — not a re-authoring of the film and not
 a new format. It carries the approved words and their timestamps, and leaves styling fields empty so a
-person or Sproken can fill them without touching the text.
+person or Sproket can fill them without touching the text.
 
 ```json
 {
@@ -290,8 +318,8 @@ person or Sproken can fill them without touching the text.
       "lead_in": 0.4,
       "hold": 1.0,
       "song_anchor": 41.2,
-      "authored_duration": 7.6,
-      "style": { "size": 120, "face": "", "color": "" },
+      "authored_duration": 2.2,
+      "style": { "size": 120, "font": "", "color": "", "emphasis_color": "", "outline_color": "", "background": "" },
       "words": [
         { "word_id": "ch1-l1/w0", "text": "we",   "line_id": "ch1-l1", "sung_id": "ch1-l1",
           "ref_index": 118, "start": 41.6, "end": 41.9, "timing_source": "reference",
@@ -312,10 +340,26 @@ Rules the template encodes:
 - `style`, `emphasis`, `action`, `entrance`, `exit` are the **only** fields a template fills with
   content; they are styling/motion and are editable through `words.save` with
   `expected_source_revision` guarding concurrent edits.
+- The editable field set is closed and comes from the engine, so a template may not invent one:
+  style accepts `font`, `color`, `emphasis_color`, `outline_color`, `background` (strings) and `size`
+  (40–320); a word accepts `emphasis` (bool) and `action` (`none|wave|tiny|swim|no|cry|big|float`),
+  `entrance` (`pop|fade|rise|none`) and `exit` (`fade|drop|none`). Any other key is rejected by
+  `words.save`, including text and timing.
 - `mismatches` and `timing_disagreements` are reported by `words.align`; a template must not resolve
-  them by inventing text.
-- `song_anchor` / `authored_duration` keep the composition local time zero at
-  `first_start − lead_in`; the audio never moves.
+  them by inventing text. The engine's own default document carries a `mismatches` array from the
+  same alignment — a seed that omits it is still readable, because nothing in `words.read`,
+  `words.save` or `words.compose` requires that key.
+- `song_anchor` = `first_start − lead_in` and `authored_duration` = `(last_end + hold) − song_anchor`,
+  with `lead_in` 0.4 s and `hold` 1.0 s in the engine. In the example above: `41.6 − 0.4 = 41.2` and
+  `(42.4 + 1.0) − 41.2 = 2.2`. The audio never moves.
+- `reference.sha256` must be the sha256 of the transcript file the words were aligned to; `words.read`
+  reports `reference_changed` when the live transcript no longer matches it.
+- `canonical.sheet` / `canonical.original` are the artist's sheet and original lyric paths as returned
+  by `song.lyrics`; `origin` is a free string identifying where the seed came from (default
+  `"magicstudio"`).
+- `words.compose` additionally needs the project's HyperFrames composition (`hyperframes/index.html`,
+  from `video.init`) and writes only `hyperframes/compositions/words/<animation_id>.html`; the source
+  document and the reference stay untouched.
 - Template instantiation is *additive*: it seeds one animation per printed section occurrence and never
   rewrites an existing `design/words.json` beyond what `words.save` would accept.
 
@@ -329,9 +373,9 @@ Copy the parts we want into our own skill/template files and keep every current 
 
 - adopt OpenDesign's `house-style.md` rules and `palettes/*.md` as *source material* for the Gaffer
   template's locked palette sets and Artwork checklist;
-- express the Gaffer and Words templates in our existing `SKILL.md` convention (the same one our
-  `asset-sheets`, `storyboard` and `magicstudio` skills already use) so they are invoked by our agents
-  through `mc`, not through a second daemon;
+- express the Gaffer and Words templates in our existing `SKILL.md` convention (the same one the
+  repo's `.agents/skills/asset-sheets` and `.agents/skills/storyboard` already use) so they are invoked
+  by our agents through `mc`, not through a second daemon;
 - keep HyperFrames as the only renderer and `mc` as the only project authority;
 - change no runtime, no model, no account.
 
@@ -367,6 +411,12 @@ runtime or a model, and nothing requires a Linux daemon.
 5. The Gaffer manifest field `request.model` records what the tool reported; it makes **no** claim about
    relative model quality.
 6. The example palette hexes in §3.3 are illustrative until real palettes are adopted.
+7. Naming discrepancy to settle separately: the code spells the coordinator **Sproket**
+   (`crates/engine/src/agent.rs`, `apps/magicstudio-shell/ui/theatre.js`) while the task vocabulary says
+   *Sproken*. This document follows the code; it is not a proposal to rename anything.
+8. Our local `hyperframes` skills are our own variant of the upstream project (see §2), so "reuse the
+   upstream motion skill" would mean adding a second router for one CLI — the recommendation is
+   explicitly to take upstream's reference *text*, not its skill bundle.
 
 ---
 
@@ -379,9 +429,9 @@ runtime or a model, and nothing requires a Linux daemon.
 | Skill/template format, registries, staging, prompt order | `docs/skills-protocol.md` |
 | Runtime invocation, skill staging, security posture | `docs/agent-adapters.md` |
 | Linux build, daemon env vars, two execution modes | `QUICKSTART.md` |
-| Motion skill = upstream HyperFrames file | `https://open-design.ai/skills/motion-graphics/` (records `heygen-com/hyperframes` `skills/motion-graphics/SKILL.md`, commit `558c11b`, Apache-2.0) |
+| Motion skill is an upstream HyperFrames file (not the same text as our local skill) | `https://open-design.ai/skills/motion-graphics/` (records `heygen-com/hyperframes` `skills/motion-graphics/SKILL.md`, commit `558c11b`, Apache-2.0) |
 | Reusable palettes / house style | `design-templates/hyperframes/{SKILL.md,house-style.md,palettes/*.md}` |
-| Our own contracts (Gaffer, Words, sheets) | `crates/engine/src/{commands.rs,image_cmds.rs}` @ `origin/main`; `crates/engine/src/words.rs` @ `feature/song-lyrics-reader`; `.agents/skills/asset-sheets/SKILL.md` |
+| Our own contracts (Gaffer, Words, sheets, rig manifest) | `crates/engine/src/{commands.rs,image_cmds.rs,photocraft.rs,session.rs}` @ `origin/main`; `crates/engine/src/words.rs` @ `feature/song-lyrics-reader`; `.agents/skills/asset-sheets/SKILL.md` |
 | Local HyperFrames install | `~/.agents/skills/{hyperframes,hyperframes-cli,hyperframes-registry,media-use}`, `~/.hyperframes/` |
 
 ## Verification status of commands cited in this document
