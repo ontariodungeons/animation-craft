@@ -351,7 +351,7 @@ fn load(dir: &Path) -> Result<Option<Value>> {
 /// neighbours; heard words outside the printed lines are not shown.
 fn printed_caption_words(aligned: &Value) -> (Vec<Value>, Vec<[usize; 2]>) {
     let src: Vec<&Value> = aligned["words"].as_array().into_iter().flatten().collect();
-    let mut words: Vec<Value> = src.iter().map(|w| json!({"text": w["text"], "start": w["start"], "end": w["end"]})).collect();
+    let mut words: Vec<Value> = src.iter().map(|w| json!({"text": w["text"], "start": w["start"], "end": w["end"], "word_id": w["word_id"], "line": w["sung_id"]})).collect();
     let mut i = 0;
     while i < words.len() {
         if words[i]["start"].is_f64() { i += 1; continue; }
@@ -533,6 +533,9 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
             anim["effects"][track] = if choice.is_null() { Value::Null } else { text_effect(&dir.join("hyperframes"), choice)? };
         }
     }
+    if let Some(k) = p.get("kinetic") {
+        anim["kinetic"] = if k.is_null() { Value::Null } else { kinetic_design(&anim["words"], k)? };
+    }
     anim["source_revision"] = json!(current + 1);
     anim["origin"] = p.get("origin").filter(|v| v.is_string()).cloned().unwrap_or(json!("magicstudio"));
     let saved = anim.clone();
@@ -630,6 +633,41 @@ pub fn cmd_words_effect_install(s: &mut Session, p: &Value) -> Result<Value> {
     let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into()])?;
     if !hf.join(&src).is_file() { return Err(invalid(format!("hyperframes add {name} did not write {src}: {}", out.trim()))); }
     Ok(json!({"name":name,"src":src,"installed":true,"already":false,"receipt":serde_json::from_str::<Value>(&out).unwrap_or(json!(out.trim()))}))
+}
+
+const KINETIC_LIBRARY: &str = include_str!("../../../pipeline/templates/kinetic-library.json");
+
+/// A section's kinetic design, checked against the kinetic library: layout, entrance for the other words,
+/// an act per meaning word (by word id), the band, a seed and the lettering.
+fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
+    let lib: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
+    let named = |kind: &str, v: &Value| v.as_str().filter(|n| lib[kind][*n].is_object()).map(|n| json!(n))
+        .ok_or_else(|| invalid(format!("kinetic: {v} is not one of the library's {kind}")));
+    let ids: Vec<&Value> = words.as_array().into_iter().flatten().map(|w| &w["word_id"]).collect();
+    let mut acts = serde_json::Map::new();
+    for (word, act) in k["acts"].as_object().into_iter().flatten() {
+        if !ids.contains(&&json!(word)) { return Err(invalid(format!("kinetic.acts: {word} is not a word of this section"))); }
+        acts.insert(word.clone(), named("acts", act)?);
+    }
+    let hex = |v: &Value| v.as_str().filter(|c| c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())).map(|c| json!(c));
+    let st = &k["style"];
+    let style = json!({"font":st["font"].as_str().filter(|f| f.len() <= 40 && f.bytes().all(|b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-')).unwrap_or("sans"),
+        "hero_font":st["hero_font"].as_str().filter(|f| f.len() <= 40 && f.bytes().all(|b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-')),
+        "weight":st["weight"].as_u64().filter(|w| (100..=900).contains(w)).unwrap_or(700),"hero_weight":st["hero_weight"].as_u64().filter(|w| (100..=900).contains(w)).unwrap_or(700),
+        "hero_italic":st["hero_italic"].as_bool().unwrap_or(false),
+        "size":st["size"].as_f64().filter(|v| (20.0..=300.0).contains(v)).unwrap_or(64.0),"hero_size":st["hero_size"].as_f64().filter(|v| (20.0..=400.0).contains(v)).unwrap_or(110.0),
+        "color":hex(&st["color"]).unwrap_or(json!("#173F49")),"hero_color":hex(&st["hero_color"]).unwrap_or(json!("#B8442A")),"outline":hex(&st["outline"])});
+    Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,
+        "band":if k["band"] == "bottom" { "bottom" } else { "top" },"seed":k["seed"].as_u64().unwrap_or(1),"style":style}))
+}
+
+/// The section as kinetic text: every word at its local time, laid out and performed in the browser.
+fn kinetic_composition(anim: &Value, composition_id: &str, width: u64, height: u64, duration: f64, words: &[Value]) -> Result<String> {
+    let lib: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
+    let data = json!({"width":width,"height":height,"duration":duration,"words":words,"kinetic":anim["kinetic"],"style":anim["kinetic"]["style"],"library":lib});
+    Ok(include_str!("../../../pipeline/templates/words-kinetic.html").replace("__COMPOSITION_ID__", composition_id)
+        .replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string()).replace("__DURATION__", &format!("{duration:.6}"))
+        .replace("__DATA__", &serde_json::to_string(&data).map_err(|e| invalid(e.to_string()))?.replace("</", "<\\/")))
 }
 
 /// The section composed with its text effect: one mount per sung line, at the line's time, with
@@ -742,13 +780,31 @@ pub fn cmd_words_design(s: &mut Session, p: &Value) -> Result<Value> {
         "--recipe".into(), recipe.to_string_lossy().into_owned(), "--input".into(), input.to_string_lossy().into_owned()])?;
     let designs: Value = out.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["designs"].clone())
         .ok_or_else(|| EngineError::CommandFailed("words.design".into(), "lyrics_layout.py returned no designs".into()))?;
-    let style = serde_json::from_slice::<Value>(&fs::read(&recipe)?).ok().and_then(|r| r["font"].as_str().map(|f| json!({"font": f}))).unwrap_or(json!({}));
+    let recipe_doc: Value = serde_json::from_slice(&fs::read(&recipe)?).map_err(|e| invalid(format!("lyric recipe: {e}")))?;
+    let style = recipe_doc["font"].as_str().map(|f| json!({"font": f})).unwrap_or(json!({}));
+    // Kinetic text when the recipe has a `kinetic` block: meaning words act, the rest arrive by the section's
+    // entrance, each section in its own layout (chosen here or varied by seed through the recipe's lists).
+    let kin = &recipe_doc["kinetic"];
+    let pick = |list: &Value, key: &str, k: usize| p[key].as_str().map(|v| json!(v)).or_else(|| list.as_array().filter(|l| !l.is_empty())
+        .map(|l| l[(p["seed"].as_u64().unwrap_or(0) as usize + k * 7) % l.len()].clone()));
+    let only = p["section"].as_str();
     let mut sections = Vec::new();
-    for a in doc["animations"].as_array().into_iter().flatten() {
+    for (k, a) in doc["animations"].as_array().into_iter().flatten().enumerate() {
         let id = a["animation_id"].as_str().unwrap_or_default();
-        let saved = cmd_words_save(s, &json!({"animation_id":id,"expected_source_revision":a["source_revision"],"origin":"words.design","style":style,"design":designs[id]}))?;
+        if only.is_some_and(|o| o != id) { continue; }
+        let mut save = json!({"animation_id":id,"expected_source_revision":a["source_revision"],"origin":"words.design","style":style,"design":designs[id]});
+        if kin.is_object() && p["kinetic"] != false {
+            let acts: serde_json::Map<String, Value> = a["words"].as_array().into_iter().flatten().filter_map(|w| {
+                let key: String = w["text"].as_str()?.chars().filter(|c| c.is_alphabetic()).flat_map(char::to_lowercase).collect();
+                kin["acts"][&key].as_str().map(|act| (w["word_id"].as_str().unwrap_or_default().to_owned(), json!(act)))
+            }).collect();
+            save["kinetic"] = json!({"layout":pick(&kin["layouts"], "layout", k).unwrap_or(json!("karaoke")),"entrance":pick(&kin["entrances"], "entrance", k).unwrap_or(json!("fade-up")),
+                "acts":acts,"band":recipe_doc["band"],"seed":p["seed"].as_u64().unwrap_or(1) + k as u64,"style":kin["style"]});
+        }
+        let saved = cmd_words_save(s, &save)?;
         let applied = if p["apply"] == false { Value::Null } else { cmd_words_apply(s, &json!({"animation_id":id}))?["in_video"].clone() };
-        sections.push(json!({"animation_id":id,"lines":designs[id].as_object().map_or(0, |m| m.len()),"revision":saved["animation"]["source_revision"],"in_video":applied}));
+        sections.push(json!({"animation_id":id,"lines":designs[id].as_object().map_or(0, |m| m.len()),"revision":saved["animation"]["source_revision"],"in_video":applied,
+            "kinetic":saved["animation"]["kinetic"].as_object().map(|k| json!({"layout":k["layout"],"entrance":k["entrance"],"acts":k["acts"].as_object().map_or(0, |a| a.len())}))}));
     }
     // The video's caption track keeps only the sections without a design, so no line shows twice.
     let captions = if p["apply"] != false && dir.join("hyperframes/compositions/captions.html").is_file() {
@@ -756,6 +812,36 @@ pub fn cmd_words_design(s: &mut Session, p: &Value) -> Result<Value> {
     } else { Value::Null };
     Ok(json!({"ok":true,"recipe":recipe,"captions":captions,"sections":sections,"lines":sections.iter().filter_map(|x| x["lines"].as_u64()).sum::<u64>(),
         "next":"open Design to adjust any line, or hyperframes snapshot <project>/hyperframes --at <t> to check the video"}))
+}
+
+/// `words.track`: the song's lyric line in the video, one clip per printed word at its sung time (from the
+/// project's timed words), held to its line's end. The clips are invisible anchors: the Studio retimes them,
+/// and designed or kinetic lyrics and their drawings take their times from them. Re-running replaces the line.
+pub fn cmd_words_track(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let index = dir.join("hyperframes/index.html");
+    let html = fs::read_to_string(&index).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
+    let (words, _) = printed_caption_words(&aligned(s)?);
+    if words.is_empty() { return Err(invalid("No printed words with timing; check words.align")); }
+    let mut line_end: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for w in &words { let e = line_end.entry(w["line"].as_str().unwrap_or_default().to_owned()).or_insert(0.0); *e = e.max(w["end"].as_f64().unwrap_or(0.0)); }
+    let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
+    let mut clips = String::new();
+    for (i, w) in words.iter().enumerate() {
+        let (id, text) = (w["word_id"].as_str().unwrap_or_default(), w["text"].as_str().unwrap_or_default());
+        let start = w["start"].as_f64().unwrap_or(0.0);
+        let end = line_end[w["line"].as_str().unwrap_or_default()] + HOLD;
+        clips.push_str(&format!("<div id=\"kinetic-{}\" class=\"clip lyric-word-clip\" data-start=\"{start:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-word-id=\"{}\" aria-label=\"Sung word: {}\" style=\"opacity:0\">{}</div>\n",
+            esc(&id.replace("/w", "-")), (end - start).max(0.1), 200 + i, esc(id), esc(text), esc(text)));
+    }
+    let kept: Vec<&str> = html.lines().filter(|l| !l.contains("class=\"clip lyric-word-clip\"")).collect();
+    let mut out = kept.join("\n") + "\n";
+    let at = out.find("<audio").or_else(|| out.rfind("</div>")).ok_or_else(|| invalid("The video has no root composition to hold the lyric line"))?;
+    let at = out[..at].rfind('\n').map_or(at, |n| n + 1);
+    out.insert_str(at, &clips);
+    fs::write(&index, out)?;
+    Ok(json!({"ok":true,"clips":words.len(),"first":words.first(),"last":words.last(),"path":index,
+        "next":"words.design (or the Design page) builds the lyric visuals on these anchors; retime words in the Studio"}))
 }
 
 pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -849,7 +935,8 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let data = json!({"composition_id":composition_id,"animation_id":id,"source_revision":anim["source_revision"],"duration":duration,
         "hold":anim["hold"],"style":anim["style"],"words":words});
     let designed = anim["design"].as_object().is_some_and(|d| d.values().any(Value::is_object));
-    let html = if designed { design_composition(anim, &composition_id, width, height, duration, &local)? }
+    let html = if anim["kinetic"].is_object() { kinetic_composition(anim, &composition_id, width, height, duration, &words)? }
+        else if designed { design_composition(anim, &composition_id, width, height, duration, &local)? }
         else if anim["effects"]["text"].is_object() { effect_composition(anim, &composition_id, width, height, duration, &local) }
         else { include_str!("../../../pipeline/templates/words-composition.html")
         .replace("__COMPOSITION_ID__", &composition_id).replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string())
@@ -866,6 +953,18 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn kinetic_designs_use_the_library_and_the_section_words() {
+        let words = json!([{"word_id":"v1-l1/w0","text":"around"},{"word_id":"v1-l1/w1","text":"sea"}]);
+        let ok = kinetic_design(&words, &json!({"layout":"scatter","entrance":"pop","acts":{"v1-l1/w0":"spin"},"seed":3,"style":{"font":"C059","color":"#112233"}})).unwrap();
+        assert_eq!((ok["layout"].clone(), ok["acts"]["v1-l1/w0"].clone(), ok["style"]["color"].clone(), ok["band"].clone()), (json!("scatter"), json!("spin"), json!("#112233"), json!("top")));
+        assert!(kinetic_design(&words, &json!({"layout":"melt","entrance":"pop"})).is_err(), "unknown layout");
+        assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v9-l1/w0":"spin"}})).is_err(), "a word from another section");
+        assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
+        let lib: Value = serde_json::from_str(KINETIC_LIBRARY).unwrap();
+        assert!(lib["acts"].as_object().unwrap().len() >= 12 && lib["layouts"].as_object().unwrap().len() >= 4);
+    }
 
     #[test]
     fn a_saved_document_gains_a_sung_repeat_in_order_and_keeps_its_designs() {
