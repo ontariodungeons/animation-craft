@@ -1,36 +1,30 @@
-// The shell has one indicator, one panel component and colour tokens only.
-// This lint counts what the design contract forbids and fails when a count
-// grows past the baseline: hex literals outside :root, dots that are built by
-// hand instead of by the one builder, and retired class names that came back.
+// The shell has one indicator, one panel component, colour tokens only and no
+// inline styling. This lint counts what the design contract forbids, per file,
+// and fails when a count grows past its baseline.
 //
 //   node tests/ui-lint.mjs                 check against the baseline
+//   node tests/ui-lint.mjs --report        print the acceptance numbers
 //   node tests/ui-lint.mjs --write-baseline  record today's counts
+//   node tests/ui-lint.mjs --ratchet       no count may rise; a touched file
+//                                           with a non-zero count must lower one
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 
 const UI = new URL('../ui/', import.meta.url);
 const read = name => fs.readFileSync(new URL(name, UI), 'utf8');
 const BASELINE = new URL('./ui-lint.baseline.json', import.meta.url);
 
 const jsFiles = fs.readdirSync(UI).filter(name => name.endsWith('.js'));
-const sources = new Map([['style.css', read('style.css')], ...jsFiles.map(name => [name, read(name)])]);
+const cssFiles = fs.readdirSync(UI).filter(name => name.endsWith('.css'));
+const sources = new Map([...cssFiles, ...jsFiles].map(name => [name, read(name)]));
 
-// Hex literals belong to :root; a colour written in a rule is a second
-// convention waiting to drift.
-const rootBlock = read('style.css').match(/:root\s*\{[\s\S]*?\n\}/);
-const cssOutsideRoot = rootBlock
-  ? read('style.css').slice(0, rootBlock.index) + read('style.css').slice(rootBlock.index + rootBlock[0].length)
-  : read('style.css');
-const hexOutsideRoot = (cssOutsideRoot.match(/#[0-9a-fA-F]{3,8}\b/g) || []).length;
+const withoutComments = source => source.replace(/\/\*[\s\S]*?\*\//g, '');
+const occurrences = (source, re) => (source.match(re) || []).length;
 
-// A dot is built by companionBoxes.dot() only.
-let handBuiltDots = 0;
-for (const [name, source] of sources) {
-  if (name === 'companion-boxes.js' || name === 'style.css') continue;
-  handBuiltDots += (source.match(/class\s*:\s*[`'"]dot\b/g) || []).length;
-  handBuiltDots += (source.match(/className\s*=\s*[`'"]dot\b/g) || []).length;
-  handBuiltDots += (source.match(/classList\.(?:add|remove)\(\s*[`'"]dot\b/g) || []).length;
-}
+// The component families the shell owns. A rule that names one of them is a
+// component rule; a rule that names one from the outside is an override.
+const COMPONENT = /(?<![\w-])(?:\.dot|\.panel-head|\.panel-empty|\.panel-status|\.chip|\.tab|\.target|\.icon|\.save-icon|\.start|\.card|\.ghost|\.att|\.msg|\.toast)(?![\w-])/;
 
 // Retired class families: one indicator, one panel head, one empty state,
 // one status row. A name that comes back is a second convention again.
@@ -53,34 +47,152 @@ const classStrings = source => {
   return found.join(' ');
 };
 
-const retired = {};
-for (const { name, re } of RETIRED) {
-  let count = 0;
-  for (const [file, source] of sources) {
-    if (file === 'style.css') {
-      count += (source.replace(/#[\w-]+/g, '').match(re) || []).length;
-    } else {
-      count += (classStrings(source).match(re) || []).length;
+// Every rule of a stylesheet, with its selector and body.
+function rules(source) {
+  const text = withoutComments(source);
+  const found = [];
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf('{', i);
+    if (open < 0) break;
+    const selector = text.slice(i, open).trim();
+    let depth = 1;
+    let k = open + 1;
+    while (depth) {
+      if (text[k] === '{') depth++;
+      else if (text[k] === '}') depth--;
+      k++;
     }
+    found.push({ selector, body: text.slice(open + 1, k - 1) });
+    i = k;
   }
-  retired[name] = count;
+  return found;
 }
 
-const counts = { hex_outside_root: hexOutsideRoot, hand_built_dots: handBuiltDots, retired };
+const PX = /\b\d+(?:\.\d+)?px\b/g;
+const HEX = /#[0-9a-fA-F]{3,8}\b/g;
+const MS = /\b\d+(?:\.\d+)?ms\b/g;
+
+function cssCounts(file, source) {
+  const text = withoutComments(source);
+  const rootBlock = text.match(/:root\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
+  const outside = text.replace(rootBlock, '');
+  let rawPxInComponentRules = 0;
+  let outsideInOverrides = 0;
+  for (const rule of rules(source)) {
+    const selector = rule.selector.replace(/^@[\w-]+[^{]*\{/, '');
+    if (!COMPONENT.test(selector)) continue;
+    rawPxInComponentRules += occurrences(rule.body, PX);
+    // A rule that reaches into a component from the outside is an override.
+    const compounds = selector.split(/\s*[>+~]\s*|\s+/).filter(Boolean);
+    if (compounds.length > 1) outsideInOverrides++;
+  }
+  const all = rules(source);
+  const selectors = all.filter(rule => !rule.selector.startsWith('@')).flatMap(rule => rule.selector.split(',')).length;
+  return {
+    px_outside_root: occurrences(outside, PX),
+    hex_outside_root: occurrences(outside, HEX),
+    ms_outside_root: occurrences(outside, MS),
+    raw_px_in_component_rules: rawPxInComponentRules,
+    outside_in_overrides: outsideInOverrides,
+    lines: source.split('\n').length - 1,
+    rules: all.length,
+    selectors,
+  };
+}
+
+function jsCounts(file, source) {
+  let retired = 0;
+  for (const { re } of RETIRED) {
+    if (file.endsWith('.css')) retired += occurrences(source.replace(/#[\w-]+/g, ''), re);
+    else retired += occurrences(classStrings(source), re);
+  }
+  const styleAttributes = occurrences(source, /\bstyle\s*:\s*[`'"]/g);
+  const styleWrites = occurrences(source, /\.style\.[A-Za-z-]+\s*=\s*/g);
+  const geometryWrites = occurrences(source, /\.style\.(?:left|top|right|bottom|width|height|transform|opacity|display|visibility|pointerEvents|background|zIndex|overflow|flex|cursor|borderRadius|boxShadow)\s*=\s*/g);
+  let handBuiltDots = 0;
+  if (file !== 'companion-boxes.js') {
+    handBuiltDots += occurrences(source, /class\s*:\s*[`'"]dot\b/g);
+    handBuiltDots += occurrences(source, /className\s*=\s*[`'"]dot\b/g);
+    handBuiltDots += occurrences(source, /classList\.(?:add|remove)\(\s*[`'"]dot\b/g);
+  }
+  return {
+    hand_built_dots: handBuiltDots,
+    retired,
+    style_attributes: styleAttributes,
+    style_writes: styleWrites,
+    geometry_without_custom_property: geometryWrites,
+    lines: source.split('\n').length - 1,
+  };
+}
+
+const counts = {};
+for (const [file, source] of sources) {
+  counts[file] = file.endsWith('.css') ? cssCounts(file, source) : jsCounts(file, source);
+}
+
+// The acceptance numbers, measured.
+function report() {
+  const css = 'style.css';
+  const c = counts[css] ?? { lines: 0, rules: 0, selectors: 0, px_outside_root: 0, hex_outside_root: 0 };
+  const texts = {
+    css_lines: c.lines,
+    css_rules: c.rules,
+    css_selectors: c.selectors,
+    css_classes: new Set((withoutComments(read(css)).match(/\.[A-Za-z][\w-]*/g) || [])).size,
+    css_px_total: occurrences(withoutComments(read(css)), PX),
+    css_px_outside_root: c.px_outside_root,
+    css_hex_total: occurrences(withoutComments(read(css)), HEX),
+    css_hex_outside_root: c.hex_outside_root,
+    js_lines: jsFiles.reduce((sum, file) => sum + (counts[file]?.lines ?? 0), 0),
+    style_writes: jsFiles.reduce((sum, file) => sum + (counts[file]?.style_writes ?? 0), 0),
+    style_attributes: jsFiles.reduce((sum, file) => sum + (counts[file]?.style_attributes ?? 0), 0),
+  };
+  return `css ${texts.css_lines} lines / ${texts.css_rules} rules / ${texts.css_selectors} selectors / ${texts.css_classes} classes / ${texts.css_px_total} px (${texts.css_px_outside_root} outside :root) / ${texts.css_hex_total} hex (${texts.css_hex_outside_root} outside :root) · js ${texts.js_lines} lines / ${texts.style_writes} .style.x = / ${texts.style_attributes} style: attributes`;
+}
+
+if (process.argv.includes('--report')) console.log('report: ' + report());
 
 if (process.argv.includes('--write-baseline')) {
-  fs.writeFileSync(BASELINE, JSON.stringify(counts, null, 2) + '\n');
-  console.log('PASS ui-lint: baseline written', JSON.stringify(counts));
+  fs.writeFileSync(BASELINE, JSON.stringify({ files: counts }, null, 2) + '\n');
+  console.log('PASS ui-lint: baseline written');
 } else {
   const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  const baselineFiles = baseline.files ?? baseline;
   const problems = [];
-  for (const key of ['hex_outside_root', 'hand_built_dots']) {
-    if (counts[key] > (baseline[key] ?? 0)) problems.push(`${key}: ${counts[key]} > baseline ${baseline[key] ?? 0}`);
+  for (const [file, fileCounts] of Object.entries(counts)) {
+    const allowed = baselineFiles[file];
+    if (!allowed) continue; // a new file is recorded, not judged, on this commit
+    for (const [key, value] of Object.entries(fileCounts)) {
+      const limit = allowed[key];
+      if (limit === undefined) continue;
+      if (value > limit) problems.push(`${file} ${key}: ${value} > baseline ${limit}`);
+    }
   }
-  for (const [name, count] of Object.entries(counts.retired)) {
-    const allowed = baseline.retired?.[name] ?? 0;
-    if (count > allowed) problems.push(`retired ${name}: ${count} > baseline ${allowed}`);
+  if (process.argv.includes('--ratchet')) {
+    let staged = [];
+    try {
+      staged = execSync('git diff --cached --name-only', { encoding: 'utf8' }).split('\n').filter(Boolean);
+    } catch { staged = []; }
+    let previous = {};
+    try {
+      previous = JSON.parse(execSync('git show HEAD:apps/magicstudio-shell/tests/ui-lint.baseline.json', { encoding: 'utf8' })).files ?? {};
+    } catch { previous = {}; }
+    for (const path of staged) {
+      const file = path.split('/').slice(-1)[0];
+      if (!path.includes('/ui/') || !counts[file]) continue;
+      const before = previous[file];
+      if (!before) continue; // a new file has no floor yet
+      const now = counts[file];
+      const raised = Object.keys(now).filter(key => typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] > before[key]);
+      if (raised.length) problems.push(`${file} raised ${raised.join(', ')}`);
+      const had = Object.entries(before).some(([key, value]) => typeof value === 'number' && value > 0 && key !== 'lines');
+      if (had) {
+        const lowered = Object.keys(now).some(key => typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] < before[key]);
+        if (!lowered) problems.push(`${file} has non-zero counts but lowered none`);
+      }
+    }
   }
   assert.equal(problems.length, 0, `ui-lint regressions:\n  ${problems.join('\n  ')}`);
-  console.log('PASS ui-lint: no hex outside :root, no hand-built dot, no retired class above the baseline');
+  console.log('PASS ui-lint: no count above its baseline');
 }

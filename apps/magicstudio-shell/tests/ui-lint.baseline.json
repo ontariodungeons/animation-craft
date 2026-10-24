@@ -1,11 +1,166 @@
 {
-  "hex_outside_root": 0,
-  "hand_built_dots": 0,
-  "retired": {
-    "dot-colours": 0,
-    "magic-part-dot": 0,
-    "panel-heads": 0,
-    "panel-empties": 0,
-    "panel-statuses": 0
+  "files": {
+    "style.css": {
+      "px_outside_root": 960,
+      "hex_outside_root": 0,
+      "ms_outside_root": 4,
+      "raw_px_in_component_rules": 173,
+      "outside_in_overrides": 49,
+      "lines": 899,
+      "rules": 621,
+      "selectors": 643
+    },
+    "agent.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 13,
+      "geometry_without_custom_property": 12,
+      "lines": 455
+    },
+    "animation-native.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 148
+    },
+    "animation.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 398
+    },
+    "app.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 6,
+      "style_writes": 8,
+      "geometry_without_custom_property": 8,
+      "lines": 873
+    },
+    "blender-placement.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 5,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 106
+    },
+    "blender.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 1,
+      "geometry_without_custom_property": 0,
+      "lines": 145
+    },
+    "bridge.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 150
+    },
+    "companion-boxes.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 259
+    },
+    "companion-rails.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 194
+    },
+    "companion-sprites.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 77
+    },
+    "companions.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 3,
+      "geometry_without_custom_property": 3,
+      "lines": 253
+    },
+    "feedback.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 60
+    },
+    "home.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 1,
+      "geometry_without_custom_property": 0,
+      "lines": 124
+    },
+    "image-prompt.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 136
+    },
+    "motion-authoring.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 78
+    },
+    "sequence.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 7,
+      "geometry_without_custom_property": 6,
+      "lines": 284
+    },
+    "studio-caption-compat.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 22
+    },
+    "theatre.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 126
+    },
+    "timeline.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "style_attributes": 3,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 117
+    }
   }
 }
