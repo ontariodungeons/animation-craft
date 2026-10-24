@@ -276,6 +276,12 @@ pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
         args.extend(["--places".into(), places.to_string()]);
     }
+    if let Some(order) = p.get("order").filter(|v| !v.is_null()) {
+        if !order.as_array().is_some_and(|a| a.iter().all(Value::is_string)) {
+            return Err(invalid("order lists part ids back to front".into()));
+        }
+        args.extend(["--order".into(), order.to_string()]);
+    }
     let stdout = run_tool_in(&root, "python3", &args)?;
     let mut placement: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok())
         .ok_or_else(|| EngineError::CommandFailed("rig.from_sheet".into(), "rig_from_sheet.py returned no result".into()))?;

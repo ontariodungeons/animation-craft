@@ -91,7 +91,8 @@ def place(assembled: np.ndarray, part: np.ndarray, scales, fine=np.arange(0.95, 
     return match(assembled, part, s * np.asarray(fine), around=(x, y), radius=12)
 
 
-def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, places: dict | None = None) -> dict:
+def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, places: dict | None = None,
+        order: list | None = None) -> dict:
     layout = json.loads(receipt.read_text())['rig_sheet']
     if not layout:
         raise ValueError(f'{receipt} is not a rig sheet request')
@@ -110,6 +111,10 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, p
     cells = {f['label']: [f['sourceOffset'][0], f['sourceOffset'][1],
                           f['sourceOffset'][0] + f['sourceBox'][2] - f['sourceBox'][0],
                           f['sourceOffset'][1] + f['sourceBox'][3] - f['sourceBox'][1]] for f in manifest['frames']}
+    if order:  # back-to-front stacking given now; a part in front of its partner is backed by the partner's hidden art
+        if sorted(order) != sorted(p['id'] for p in parts):
+            raise ValueError(f'order must list every part once: {[p["id"] for p in parts]}')
+        parts = sorted(parts, key=lambda p: order.index(p['id']))
     missing = [pid for pid in ids if pid not in files]
     if missing:
         raise ValueError(f'cells with nothing cut: {missing}')
@@ -301,8 +306,9 @@ def main(argv=None) -> int:
     ap.add_argument('--out-dir', required=True, type=Path)
     ap.add_argument('--pivots', type=json.loads, default=None, help='JSON {part id: [u, v]} joint corrections')
     ap.add_argument('--places', type=json.loads, default=None, help='JSON {part id: [cx, cy]} placement corrections in canvas pixels')
+    ap.add_argument('--order', type=json.loads, default=None, help='JSON [part ids back to front]')
     a = ap.parse_args(argv)
-    print(json.dumps(run(a.sheet.resolve(), a.receipt.resolve(), a.out_dir.resolve(), a.pivots, a.places)))
+    print(json.dumps(run(a.sheet.resolve(), a.receipt.resolve(), a.out_dir.resolve(), a.pivots, a.places, a.order)))
     return 0
 
 

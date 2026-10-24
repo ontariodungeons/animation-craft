@@ -385,7 +385,7 @@ pub fn build() -> Vec<CommandSpec> {
             has_asset,
             cmd_asset_build_cutout_rig
         ),
-        cmd!("rig.from_sheet", "Rig From Sheet", ["Rig & Matting"], None, "{\"sheet\":\"rig sheet asset id or PNG (image.generate rig_parts=...)\",\"name\":\"rig id\",\"out_dir\":\"optional; default assets/characters/<name>/rig\",\"pivots\":{\"part id\":\"[u,v] in the part, 0-1; corrects a joint without a new sheet\"},\"places\":{\"part id\":\"[cx,cy] centre in canvas pixels; corrects a misplaced part\"}}", always, crate::image_cmds::cmd_rig_from_sheet),
+        cmd!("rig.from_sheet", "Rig From Sheet", ["Rig & Matting"], None, "{\"sheet\":\"rig sheet asset id or PNG (image.generate rig_parts=...)\",\"name\":\"rig id\",\"out_dir\":\"optional; default assets/characters/<name>/rig\",\"pivots\":{\"part id\":\"[u,v] in the part, 0-1; corrects a joint without a new sheet\"},\"places\":{\"part id\":\"[cx,cy] centre in canvas pixels; corrects a misplaced part\"},\"order\":[\"optional: part ids back to front\"]}", always, crate::image_cmds::cmd_rig_from_sheet),
         cmd!(
             "image.break_apart",
             "Break Image Into Parts",
@@ -466,7 +466,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("words.lyrics_view", "Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"scene\"}", always, crate::words::cmd_words_lyrics_view),
         query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
         cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
-        cmd!("words.captions", "Captions by the Artist's Lines", ["Design"], None, "{\"by\":\"section (default) or line\",\"out\":\"optional .srt path; default lyrics.captions.srt in the project\"}", always, crate::words::cmd_words_captions),
+        cmd!("words.captions", "Captions by the Artist's Lines", ["Design"], None, "{\"by\":\"section (default) or line\",\"out\":\"optional .srt path; default lyrics.captions.srt in the project\",\"to\":\"video: the video's caption track shows the printed lines (earlier source kept as captions.vN.html)\"}", always, crate::words::cmd_words_captions),
         cmd!("words.apply", "Use Designed Lyrics in the Video", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"use\":true}", always, crate::words::cmd_words_apply),
         cmd!("words.save", "Save Words Animation", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"expected_source_revision\":0,\"style\":{\"size\":120},\"words\":[{\"word_id\":\"ch1-l1/w5\",\"action\":\"cry\",\"emphasis\":true}]}", always, crate::words::cmd_words_save),
         cmd!("words.compose", "Compose Words Track (HyperFrames)", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"instance_id\":\"optional: isolated composition for a repeated placement\"}", always, crate::words::cmd_words_compose),
