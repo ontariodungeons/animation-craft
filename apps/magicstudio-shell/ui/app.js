@@ -99,7 +99,8 @@ function updateMagicSelection() {
 }
 
 function renderMagicAssetCatalog() {
-  if (state.view === 'animation') return;
+  // Animation and Design fill this pane themselves (parts; effects).
+  if (state.view === 'animation' || state.view === 'design') return;
   const slot = $('magic-parts-slot');
   if (!slot) return;
   const assets = state.data?.assets?.assets || [];
@@ -552,7 +553,7 @@ function renderBlocks() {
   box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
   if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
   renderMagicAssetCatalog();
-
+  if (state.view === 'design' && typeof wordsStatusRefresh === 'function') wordsStatusRefresh();
 }
 
 // ---- Storyboard: title cards ------------------------------------------------------------
@@ -842,8 +843,12 @@ function renderStoryboardText(){
   const node=el('textarea',{id:`sb-text-${field.page}-${field.id}`,class:'sb-text',
    title:`Edit ${field.field.replaceAll('_',' ')} · saved when you finish typing`,
    'aria-label':`Scene ${field.scene||'page '+field.page} ${field.field.replaceAll('_',' ')}`,
-   'data-commands':'storyboard.edit',spellcheck:'true',
-   style:`left:${x/size[0]*100}%;top:${y/size[1]*100}%;width:${w/size[0]*100}%;height:${(field.name?h:Math.max(h,50))/size[1]*100}%;font-size:${(field.name?(field.font_size||12):(field.field==='lyrics'?27:21))/size[0]*100}cqw;${field.name?`font-family:Helvetica,Arial,sans-serif;padding:${2/size[0]*100}cqw;box-sizing:border-box;--field-fill:${field.fill};--field-ink:${field.text_color}`:''}`});
+   'data-commands':'storyboard.edit',spellcheck:'true'});
+  // Page geometry and the field's own colours are data; .sb-text turns them into layout.
+  const put=(k,v)=>node.style.setProperty(k,v);
+  put('--x',`${x/size[0]*100}%`);put('--y',`${y/size[1]*100}%`);put('--w',`${w/size[0]*100}%`);put('--h',`${(field.name?h:Math.max(h,50))/size[1]*100}%`);
+  put('--font',`${(field.name?(field.font_size||12):(field.field==='lyrics'?27:21))/size[0]*100}cqw`);
+  if(field.name){node.dataset.named='';put('--pad',`${2/size[0]*100}cqw`);put('--field-fill',field.fill);put('--field-ink',field.text_color);}
   node.value=node.defaultValue=field.value;
   node.addEventListener('change',async()=>{
    if(node.value===node.defaultValue)return;

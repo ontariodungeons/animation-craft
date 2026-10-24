@@ -175,6 +175,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .lane-block { position: absolute; top: var(--space-1); bottom: var(--space-1); left: var(--start); width: var(--len); overflow: hidden; padding: 0 var(--space-1);
   border-radius: var(--radius-sm); background: var(--lane-fill, var(--tone-lyrics)); color: var(--accent-ink); font-size: var(--text-xs); white-space: nowrap; text-overflow: ellipsis; }
 .lane-head { position: absolute; top: 0; bottom: 0; left: var(--at, 0%); width: calc(var(--space-1) / 2); background: var(--playhead); pointer-events: none; }
+
+/* One effect: a card in a library of ready-made effects; its name, then what it does. */
+.effect { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); width: 100%; padding: var(--space-2) var(--space-3);
+  border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; }
+.effect:hover { border-color: var(--accent); }
+.effect > strong { color: var(--text); font-size: var(--text-md); }
 .magic-image-ok { display: inline-grid; width: 12px; height: 12px; place-items: center; color: var(--muted); font-size: 12px; line-height: 1; flex: none; }
 .magic-image-review { color: var(--amber); }
 @keyframes pulse { to { opacity: .35; } }
@@ -696,9 +702,10 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 
 /* Native storyboard text boxes: unchanged preview until the existing field receives focus. */
 .sb-sheet { container-type:inline-size; }
-.sb-text { position:absolute; z-index:2; margin:0; padding:0; border:0; border-radius:0;
+.sb-text { position:absolute; left:var(--x); top:var(--y); width:var(--w); height:var(--h); font-size:var(--font); z-index:2; margin:0; padding:0; border:0; border-radius:0;
  resize:none; background:transparent; color:transparent; font-family:"DejaVu Sans",sans-serif;
  line-height:1.2; box-shadow:none; outline:none; }
+.sb-text[data-named] { font-family:Helvetica,Arial,sans-serif; padding:var(--pad); box-sizing:border-box; }
 .sb-text:hover { outline:1px dashed var(--focus-outline); }
 .sb-text:focus { outline:1px solid var(--focus-outline); background:var(--field-fill,var(--field-fill)); color:var(--field-ink,var(--field-ink)); }
 
@@ -861,7 +868,7 @@ body.at-home .app-footer { display:none; }
 .block-headrow { display: flex; align-items: center; padding-right: 10px; }
 .block-headrow .panel-head { flex: 1; min-width: 0; }
 .song-play { flex: none; }
-.song-section { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.song-section { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: thin solid var(--line); }
 .song-section[data-section=lyrics] .title { color: var(--tone-lyrics); }
 .song-section[data-section=transcript] .title { color: var(--tone-transcript); }
 .song-details summary { color: var(--faint); font-size: 12px; cursor: pointer; }

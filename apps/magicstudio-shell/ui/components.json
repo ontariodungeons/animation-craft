@@ -20,7 +20,8 @@
     "chip": [
       "word"
     ],
-    "lane": []
+    "lane": [],
+    "effect": []
   },
   "densities": [
     "normal",
@@ -180,6 +181,14 @@
     "motion-scrub": {
       "component": "transport",
       "label": "Animation scrubber"
+    },
+    "words-scrub": {
+      "component": "transport",
+      "label": "Video time"
+    },
+    "words-video-frame": {
+      "component": "stage",
+      "label": "The finished video"
     }
   }
 }

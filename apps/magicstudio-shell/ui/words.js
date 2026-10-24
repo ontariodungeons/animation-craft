@@ -3,11 +3,22 @@
 // changes only style, emphasis and motion (words.save). The stage plays the finished HyperFrames
 // video itself, one section at a time, through the preview player's control messages; its
 // lyric clips come from words.studio_track. One project, one clock, the song's own.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, word: null, pending: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, laneHead: null };
+const wordsPanel = { read: null, align: null, studio: null, selected: null, word: null, pending: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, laneHead: null, paneTitle: null, server: null, player: null, lyricsOnly: false };
 const WORD_ACTIONS = [["none", "Still"], ["wave", "Wave"], ["tiny", "Small"], ["swim", "Swim"], ["no", "Shake"], ["cry", "Droop"], ["big", "Grow"], ["float", "Float"]];
 const WORD_ENTRANCES = ["pop", "fade", "rise", "none"];
 const WORD_EXITS = ["fade", "drop", "none"];
 const wordsCommand = (command, params = {}) => invoke("engine_command", { id: command, params });
+// Effects: recipes that set several words at once from the moves Words already has. Applying one
+// fills the section's unsaved edits; Save sends them. `fields(word, last)` says what a word gets;
+// `last` is true for the last word of its line. Nothing here is special to one song.
+const WORD_EFFECTS = [
+  { key: "rise-float", name: "Rise and float", about: "Each word rises in, drifts while it is sung, then fades.", fields: () => ({ entrance: "rise", action: "float", exit: "fade" }) },
+  { key: "pop-fade", name: "Pop in, fade out", about: "Words pop on at their onset and fade at the end.", fields: () => ({ entrance: "pop", action: "none", exit: "fade" }) },
+  { key: "wave", name: "Wave the line", about: "Every word waves while it is sung.", fields: () => ({ action: "wave" }) },
+  { key: "swim", name: "Swim through", about: "Words fade in and swim.", fields: () => ({ entrance: "fade", action: "swim" }) },
+  { key: "last-grows", name: "Last word grows", about: "The last word of each line grows and is emphasised.", fields: (w, last) => (last ? { action: "big", emphasis: true } : {}) },
+  { key: "still", name: "Still", about: "Plain words that fade in and out.", fields: () => ({ entrance: "fade", action: "none", exit: "fade", emphasis: false }) },
+];
 
 const wordsSongPath = () => state.data?.status?.stages?.find((s) => s.id === "song")?.inputs?.[0]?.path;
 const wordsCurrent = () => wordsPanel.read?.document?.animations?.find((a) => a.animation_id === wordsPanel.selected);
@@ -65,11 +76,45 @@ function wordsValue(word, key) {
   return edit && key in edit ? edit[key] : word[key];
 }
 
-function wordsEdit(word, key, value) {
+function wordsSetField(word, key, value) {
   const edit = { ...(wordsPanel.pending.get(word.word_id) || {}) };
   if (value === word[key]) delete edit[key]; else edit[key] = value;
   if (Object.keys(edit).length) wordsPanel.pending.set(word.word_id, edit); else wordsPanel.pending.delete(word.word_id);
+}
+
+function wordsEdit(word, key, value) {
+  wordsSetField(word, key, value);
   wordsRender();
+}
+
+// Apply one effect to every word of the selected section, as unsaved edits.
+function wordsApplyEffect(effect) {
+  const anim = wordsCurrent();
+  if (!anim) return;
+  anim.words.forEach((w, i) => {
+    const last = anim.words[i + 1]?.line_id !== w.line_id;
+    for (const [key, value] of Object.entries(effect.fields(w, last))) wordsSetField(w, key, value);
+  });
+  toast(`${effect.name} on ${wordsLabel(anim)} · save to keep it`);
+  wordsRender();
+}
+
+// While Design is open, the workstation's lower pane holds the effects; leaving gives it back.
+function wordsEffectsPane(anim) {
+  const slot = $("magic-parts-slot"), title = $("magic-parts-head")?.firstElementChild;
+  if (!slot || !title) return;
+  wordsPanel.paneTitle ??= title.textContent;
+  title.textContent = "Effects";
+  slot.replaceChildren(el("div", { class: "group-label" }, `Apply to ${wordsLabel(anim)}`),
+    ...WORD_EFFECTS.map((effect) => el("button", { class: "effect", "data-effect": effect.key, onclick: () => wordsApplyEffect(effect) },
+      el("strong", {}, effect.name), el("span", { class: "muted" }, effect.about))));
+}
+
+function wordsEffectsPaneClose() {
+  const title = $("magic-parts-head")?.firstElementChild;
+  if (title && wordsPanel.paneTitle != null) title.textContent = wordsPanel.paneTitle;
+  wordsPanel.paneTitle = null;
+  if (typeof renderMagicAssetCatalog === "function") renderMagicAssetCatalog();
 }
 
 function wordsRender() {
@@ -145,6 +190,7 @@ function wordsRender() {
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
     stage, sheet, inspector);
   view.replaceChildren(side, main);
+  wordsEffectsPane(anim);
   wordsFit();
 }
 
@@ -153,6 +199,7 @@ function wordsStage(anim) {
   const section = wordsStudioSection(anim);
   if (wordsPanel.stage && wordsPanel.stage.dataset.animation === anim.animation_id) return wordsPanel.stage;
   const url = serverUrl();
+  wordsPanel.server = url || null;
   if (!section || !url) {
     wordsPanel.stage = null;
     return el("p", { class: "panel-empty inline" }, !url ? "Start the Studio server to play the video here."
@@ -164,16 +211,33 @@ function wordsStage(anim) {
   // The preview player of the HyperFrames server, same project id as the Studio link.
   const server = new URL(url);
   const project = server.hash.split("/")[1] || "hyperframes";
-  const frame = el("iframe", { id: "words-video-frame", title: "The finished video", allow: "autoplay", src: `${server.origin}/api/projects/${project}/preview` });
+  wordsPanel.player = `${server.origin}/api/projects/${project}/preview`;
+  const frame = el("iframe", { id: "words-video-frame", title: "The finished video", allow: "autoplay" });
   frame.addEventListener("load", wordsVideoRange);
+  const view = (lyricsOnly, label) => el("button", { role: "tab", "aria-selected": String(wordsPanel.lyricsOnly === lyricsOnly), onclick: () => wordsShow(lyricsOnly) }, label);
   wordsPanel.stage = el("div", { class: "words-preview", "data-animation": anim.animation_id },
+    el("div", { class: "segmented", role: "tablist", "aria-label": "What the stage shows" }, view(false, "Full video"), view(true, "Lyrics only")),
     el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
       el("button", { class: "icon", id: "words-play", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
       el("span", { class: "meta", id: "words-time" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)),
     wordsLane("Lyric words · in the video", section));
+  wordsShow(wordsPanel.lyricsOnly, frame);
   return wordsPanel.stage;
+}
+
+// The stage shows the whole video, or a derived copy with only its lyric clips (words.lyrics_view).
+async function wordsShow(lyricsOnly, frame = $("words-video-frame")) {
+  wordsPanel.lyricsOnly = lyricsOnly;
+  wordsPanel.stage?.querySelectorAll('[role="tab"]').forEach((tab, i) => tab.setAttribute("aria-selected", String((i === 1) === lyricsOnly)));
+  if (!frame || !wordsPanel.player) return;
+  let src = wordsPanel.player;
+  if (lyricsOnly) {
+    try { src = `${wordsPanel.player}/comp/${(await wordsCommand("words.lyrics_view")).src}`; }
+    catch (error) { toast(String(error).replace(/^.*?: /, "")); return wordsShow(false, frame); }
+  }
+  if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
 }
 
 // One lane of the section: the video's lyric clips where they sit in time, a playhead on top.
@@ -190,6 +254,15 @@ function wordsLane(name, section) {
   }), head);
   wordsPanel.laneHead = (t) => head.style.setProperty("--at", at(Math.min(section.end, Math.max(section.start, t))));
   return el("div", { class: "lane" }, el("span", { class: "lane-name" }, name), track);
+}
+
+// On each status refresh: the stage appears once the video server is up, and goes when it stops.
+function wordsStatusRefresh() {
+  const url = serverUrl() || null;
+  if (url === wordsPanel.server || !wordsCurrent()) return;
+  wordsPanel.stage = null;
+  wordsRender();
+  wordsVideoRange();
 }
 
 // One control message to the video's preview player.
@@ -232,7 +305,11 @@ addEventListener("message", (event) => {
 });
 addEventListener("resize", () => wordsFit());
 // Leaving the Design view stops the video, so nothing plays behind another view.
-new MutationObserver(() => { if (!$("view-design")?.classList.contains("active") && wordsPanel.playing) wordsVideo("pause"); })
+new MutationObserver(() => {
+  if ($("view-design")?.classList.contains("active")) return;
+  if (wordsPanel.playing) wordsVideo("pause");
+  if (wordsPanel.paneTitle != null) wordsEffectsPaneClose();
+})
   .observe(document.getElementById("view-design") || document.body, { attributes: true, attributeFilter: ["class"] });
 
 function wordsSelectField(options, value, onchange) {
