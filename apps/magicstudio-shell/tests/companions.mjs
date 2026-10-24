@@ -41,11 +41,36 @@ function fixture() {
     element.replaceChildren(...children); return element;
   };
   vm.runInContext(read('companions.js'), ctx);
-  return { ctx, boxes: ctx.window.companionBoxes, timers };
+  return { ctx, boxes: ctx.window.companionBoxes, timers, media, mediaListeners };
 }
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
+  ['reduced motion and disabling cancel outstanding pose animations', async () => {
+    const { ctx, boxes, timers, media, mediaListeners } = fixture();
+    const pets = ctx.createCompanions({frames:{}}, {boxes,sprites:{has:()=>true,image:()=>null}});
+    boxes.fact({id:'problem',state:'failed'}); await flush();
+    assert.ok(timers.size>0);
+    media.matches=true; mediaListeners.forEach(fn=>fn());
+    assert.equal(timers.size,0);
+    media.matches=false; mediaListeners.forEach(fn=>fn());
+    boxes.fact({id:'other',state:'failed'}); await flush();
+    pets.setEnabled(false);
+    assert.equal(timers.size,0);
+    assert.ok(Object.values(pets.nodes).every(node=>node.hidden));
+  }],
+  ['explicit TUI attention wins over routine next-step readiness', async () => {
+    const { ctx, boxes } = fixture();
+    boxes.fact({id:'song',state:'needs-attention',priority:100,source:'readiness'});
+    boxes.register('chat');
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    boxes.attention('chat', 'Inspect this result');
+    await flush();
+    assert.equal(pets.snapshot().sproket.box, 'chat');
+    assert.equal(boxes.panels().items.find(row=>row.id==='chat').attention,'Inspect this result');
+    boxes.attention('chat', null); await flush();
+    assert.equal(pets.snapshot().sproket.box, 'song');
+  }],
   ['pets see errors after the first sixty-four registered states', async () => {
     const { ctx, boxes } = fixture();
     for (let i = 0; i < 70; i++) boxes.register(`panel-${i}`);

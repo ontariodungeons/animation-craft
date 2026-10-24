@@ -10,7 +10,7 @@ function createCompanions(frames, options = {}) {
   const rails = options.rails || null;
   const boxes = options.boxes || window.companionBoxes || null;
   const media = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)") || { matches: false, addEventListener() {} };
-  let enabled = localStorage.getItem("magic.companions") === "true";
+  let enabled = localStorage.getItem("magic.companions") !== "false";
   let project = null;
   let stage = null;
   let settleTimer = null;
@@ -122,7 +122,7 @@ function createCompanions(frames, options = {}) {
     rails?.discover();
     const rows = boxes.panels().items.filter(row => row.signal > 0);
     const newestFirst = (a, b) => (b.seq ?? 0) - (a.seq ?? 0) || (b.observed_at ?? 0) - (a.observed_at ?? 0);
-    const worst = rows.filter(row => row.signal >= 2).sort((a, b) => b.signal - a.signal || (b.priority || 0) - (a.priority || 0) || newestFirst(a, b))[0] || null;
+    const worst = rows.filter(row => row.signal >= 2).sort((a, b) => b.signal - a.signal || Number(!!b.attention) - Number(!!a.attention) || (b.priority || 0) - (a.priority || 0) || newestFirst(a, b))[0] || null;
     const recent = rows.filter(row => row.state === "working" || (row.source !== "readiness" && row.source !== "light" && Date.now() - row.observed_at < 8000));
     const newest = [...recent].sort(newestFirst)[0] || worst;
     clearTimeout(settleTimer);
@@ -157,6 +157,11 @@ function createCompanions(frames, options = {}) {
 
   function sync() {
     if (project !== state.project) { project = state.project; reset(); }
+    if (!enabled || media.matches || document.hidden) {
+      clearTimeout(settleTimer);
+      for (const pet of Object.values(pets)) { clearTimeout(pet.timer); pet.timer = null; }
+      for (const name of Object.keys(travelling)) { clearTimeout(travelling[name]); delete travelling[name]; nodes[name].classList.remove("companion-traveling"); }
+    }
     if (!enabled) { for (const name of Object.keys(nodes)) nodes[name].hidden = true; return; }
     react();
   }

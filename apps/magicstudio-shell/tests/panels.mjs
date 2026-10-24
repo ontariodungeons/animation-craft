@@ -232,7 +232,7 @@ const tests = [
     assert.equal(typeof report.revision, 'number');
     assert.ok(Array.isArray(report.items));
     assert.ok(Array.isArray(report.unconfigured));
-    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, busy: false, reason: null, source: null, request: null, project: null, context: null, state: 'idle', seq: 0, priority: 0, job: null, resolution: null, observed_at: null, receipt: null });
+    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, attention: null, busy: false, reason: null, source: null, request: null, project: null, context: null, state: 'idle', seq: 0, priority: 0, job: null, resolution: null, observed_at: null, receipt: null });
   }],
   ['revision unchanged when nothing changed', () => {
     const { boxes } = fixture();

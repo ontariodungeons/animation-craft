@@ -2,7 +2,7 @@
 
 Implementation branch: `fix/panel-unification`, base `5ab274ba`.
 Worktree: `.worktrees/panel-unification` inside the Magic Studio repository.
-Foundation commit: `775c6a02`. No PR yet. This document describes the source contract; completion evidence belongs in implementation-plan.md.
+Foundation commit: `775c6a02`; latest backend checkpoint `621b9600`. This document describes the source contract; completion evidence belongs in implementation-plan.md.
 
 ## Configuration and state
 
@@ -83,3 +83,9 @@ The assigned TUI agent owns terminal presentation and consumption of these recor
 ## Shared panel construction
 
 A `panel` config entry names its `rail`. The common constructor mounts exactly one slot in its shared header. Rail policy and slot identity come from the same config; coordinates are measured from that slot. Missing or invisible destinations are unavailable, never redirected to a different panel. The registry publishes state changes through the existing feedback transport even when companions are disabled.
+
+## Activated companions
+
+The original SVG dog and cat are selected by `companions.manifest.json`; all ten pose files decode in the live shell. Companions default on, with explicit user opt-out retained. `panels.items[].attention` exposes an explicit attention request separately from the underlying engine state. Errors outrank attention; explicit TUI attention outranks routine readiness at the same signal level. Clearing attention cannot clear an engine error. Completed activity expires, and idle pets return to their configured homes. Reduced motion and disabling cancel pending pose timers.
+
+Live acceptance: `docs/architecture/evidence/live-pets-results.json` exercises actual CLI attention, an actual rejected engine command, successful command recovery, a deliberately unregistered fixture control, disable/re-enable and controlled idle homes. `pet-layout-results.json` proves both decoded images fit their configured slots at 700, 941 and 1261 pixels. The controlled idle fixture does not claim that project intake prerequisites are complete.

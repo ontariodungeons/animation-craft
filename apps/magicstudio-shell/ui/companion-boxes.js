@@ -259,6 +259,7 @@ function createCompanionBoxes() {
         context: box.context,
         state: box.state,
         signal: boxSignal(box),
+        attention: box.attention ?? null,
         seq: box.seq ?? 0,
         reason: contractIssues.has(box.id) ? `UI contract: ${contractIssues.get(box.id).map(issue => issue.id).join(", ")}` : box.attention || box.reason,
         priority: box.priority,
