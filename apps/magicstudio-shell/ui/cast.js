@@ -28,7 +28,7 @@ function castStatus(message) {
 function castLeave() {
   cast.active=false;
   for(const id of ['learning-new','learning-import'])if($(id))$(id).hidden=false;
-  if($('learning-save')){$('learning-save').textContent='Save';$('learning-save').onclick=learningSave;}
+  if($('learning-save'))$('learning-save').textContent='Save';
   const crumb=$('view-skills')?.querySelector('.learning-breadcrumb');if(crumb)crumb.textContent='Learning / production path';
 }
 async function castOpen() {
@@ -42,7 +42,7 @@ async function castOpen() {
     }
     cast.workspace=result.workspace;cast.items=result.departments;cast.active=true;
     for(const id of ['learning-new','learning-import'])$(id).hidden=true;
-    $('learning-save').textContent='Save AGENTS.md';$('learning-save').onclick=castSave;
+    $('learning-save').textContent='Save AGENTS.md';
     $('view-skills').querySelector('.learning-breadcrumb').textContent='Learning / Magic Studio cast';
     castRender();
   }catch(e){learningError(e);}

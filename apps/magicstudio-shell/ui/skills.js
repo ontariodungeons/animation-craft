@@ -27,7 +27,7 @@ function learningMount(){
     lnode('div','learning-task-list'),lnode('p','learning-location',learning.directory));
   rail.addEventListener('dragover',e=>e.preventDefault());rail.addEventListener('drop',e=>{e.preventDefault();const source=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');if(source)learningImportSource(source.trim());});
   const main=lnode('main','learning-main',lnode('header','learning-bar',lnode('span','learning-breadcrumb','Learning / production path'),
-    lnode('div','learning-actions',lbutton('learning-new','New task',learningNew),lbutton('learning-import','Import reference',learningImportClipboard,'Import a URL or existing package path from clipboard; also drop it on the list'),lbutton('learning-save','Save',learningSave),lnode('span','learning-save-state'))),
+    lnode('div','learning-actions',lbutton('learning-new','New task',learningNew),lbutton('learning-import','Import reference',learningImportClipboard,'Import a URL or existing package path from clipboard; also drop it on the list'),lbutton('learning-save','Save',()=>cast.active?castSave():learningSave()),lnode('span','learning-save-state'))),
     lnode('p','learning-message'),lnode('div','learning-surface'));
   main.querySelector('.learning-message').id='learning-message';main.querySelector('.learning-save-state').id='learning-save-state';
   root.replaceChildren(lnode('div','learning-layout',rail,main));root.firstChild.id='learning-layout';
