@@ -20,6 +20,7 @@ cargo test --offline -p magicstudio-engine --test agent_security --quiet -- --te
 node apps/magicstudio-shell/tests/agent-selection.mjs
 node apps/magicstudio-shell/tests/panels.mjs
 node apps/magicstudio-shell/tests/words-lettering.mjs
+python3 -m unittest -q tests.test_rig_from_sheet tests.test_lyrics_layout
 node apps/magicstudio-shell/tests/companions.mjs
 node apps/magicstudio-shell/tests/ui-lint.mjs --ratchet --report --append-report
 

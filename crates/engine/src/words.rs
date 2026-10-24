@@ -363,13 +363,26 @@ fn printed_caption_words(aligned: &Value) -> (Vec<Value>, Vec<[usize; 2]>) {
     (words, groups)
 }
 
-/// `words.captions to=video`: the video's caption track shows the artist's printed lines. The
-/// earlier caption source is kept beside it as `captions.vN.html`.
+/// `words.captions to=video`: the video's caption track shows the artist's printed lines for every section
+/// not designed in the video. The earlier caption source is kept beside it as `captions.vN.html`.
 fn captions_to_video(s: &Session, dir: &Path, aligned: &Value) -> Result<Value> {
-    let (words, groups) = printed_caption_words(aligned);
-    if words.is_empty() { return Err(invalid("No printed words to caption")); }
+    // A section already designed in the video shows its own lyrics; the captions cover only the rest.
+    let index = dir.join("hyperframes/index.html");
+    let host = fs::read_to_string(&index).unwrap_or_default();
+    let designed: std::collections::BTreeSet<&str> = host.split("data-magicstudio-words=\"").skip(1).filter_map(|r| r.split('"').next()).collect();
+    let open: Vec<Value> = aligned["words"].as_array().into_iter().flatten().filter(|w| {
+        let id = format!("words-{}-{}", w["section"].as_str().unwrap_or("lyrics").replace('_', "-"), w["occurrence"].as_u64().unwrap_or(1));
+        !designed.contains(id.as_str())
+    }).cloned().collect();
+    let (words, groups) = printed_caption_words(&json!({"words": open}));
     let comp = dir.join("hyperframes/compositions");
     let dest = comp.join("captions.html");
+    if words.is_empty() {  // every section is designed: the caption track leaves the video, its source stays
+        let marker = "data-composition-src=\"compositions/captions.html\"";
+        let kept: Vec<&str> = host.lines().filter(|l| !l.contains(marker)).collect();
+        if kept.len() != host.lines().count() { fs::write(&index, kept.join("\n") + "\n")?; }
+        return Ok(json!({"ok":true,"caption_track":"removed: every section is designed","source":dest,"designed":designed}));
+    }
     let kept = if dest.is_file() {
         let version = (1..).map(|n| comp.join(format!("captions.v{n}.html"))).find(|p| !p.exists()).unwrap();
         fs::copy(&dest, &version)?;
@@ -691,6 +704,44 @@ fn without_placement(html: &str, id: &str) -> String {
 /// `words.apply`: put one section's designed lyrics into the video (`use`, the default) or take
 /// them back out (`use: false`). Using composes the section, mounts it at its song time and hides
 /// the section's original lyric clips; restoring leaves the video exactly as it was before.
+/// `words.design`: every sung line designed from the project's lyric recipe (`lyrics-design.json`: palette,
+/// band, hero words and how they act), laid out by `pipeline/lyrics_layout.py`, saved per section and,
+/// unless `apply=false`, used in the video. The recipe holds the art direction; nothing here is per song.
+pub fn cmd_words_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let recipe = p["recipe"].as_str().map(PathBuf::from).unwrap_or_else(|| dir.join("lyrics-design.json"));
+    if !recipe.is_file() { return Err(invalid(format!("No lyric recipe at {}; write one (see pipeline/lyrics_layout.py)", recipe.display()))); }
+    let doc = cmd_words_read(s, &json!({}))?["document"].clone();
+    let times: std::collections::HashMap<String, Value> = cmd_words_studio_track(s, &json!({}))?["sections"].as_array().into_iter().flatten()
+        .flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default())
+        .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), c["start"].clone()))).collect();
+    let animations: Vec<Value> = doc["animations"].as_array().into_iter().flatten().map(|a| json!({"animation_id":a["animation_id"],"section":a["scope"]["section"],
+        "words":a["words"].as_array().into_iter().flatten().map(|w| { let mut w = w.clone();
+            if let Some(t) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = t.clone(); } w }).collect::<Vec<_>>()})).collect();
+    let input = dir.join(".agent/words-design-input.json");
+    if let Some(parent) = input.parent() { fs::create_dir_all(parent)?; }
+    fs::write(&input, serde_json::to_vec(&json!({"animations":animations})).map_err(|e| invalid(e.to_string()))?)?;
+    let root = crate::workspace::workspace_root(s);
+    let out = crate::workspace::run_tool_in(&root, "python3", &[root.join("pipeline/lyrics_layout.py").to_string_lossy().into_owned(),
+        "--recipe".into(), recipe.to_string_lossy().into_owned(), "--input".into(), input.to_string_lossy().into_owned()])?;
+    let designs: Value = out.lines().rev().find_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["designs"].clone())
+        .ok_or_else(|| EngineError::CommandFailed("words.design".into(), "lyrics_layout.py returned no designs".into()))?;
+    let style = serde_json::from_slice::<Value>(&fs::read(&recipe)?).ok().and_then(|r| r["font"].as_str().map(|f| json!({"font": f}))).unwrap_or(json!({}));
+    let mut sections = Vec::new();
+    for a in doc["animations"].as_array().into_iter().flatten() {
+        let id = a["animation_id"].as_str().unwrap_or_default();
+        let saved = cmd_words_save(s, &json!({"animation_id":id,"expected_source_revision":a["source_revision"],"origin":"words.design","style":style,"design":designs[id]}))?;
+        let applied = if p["apply"] == false { Value::Null } else { cmd_words_apply(s, &json!({"animation_id":id}))?["in_video"].clone() };
+        sections.push(json!({"animation_id":id,"lines":designs[id].as_object().map_or(0, |m| m.len()),"revision":saved["animation"]["source_revision"],"in_video":applied}));
+    }
+    // The video's caption track keeps only the sections without a design, so no line shows twice.
+    let captions = if p["apply"] != false && dir.join("hyperframes/compositions/captions.html").is_file() {
+        let aligned = aligned(s)?; captions_to_video(s, &dir, &aligned)?
+    } else { Value::Null };
+    Ok(json!({"ok":true,"recipe":recipe,"captions":captions,"sections":sections,"lines":sections.iter().filter_map(|x| x["lines"].as_u64()).sum::<u64>(),
+        "next":"open Design to adjust any line, or hyperframes snapshot <project>/hyperframes --at <t> to check the video"}))
+}
+
 pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let index = dir.join("hyperframes/index.html");
