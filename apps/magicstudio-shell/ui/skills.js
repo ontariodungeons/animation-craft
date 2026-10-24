@@ -21,6 +21,7 @@ function learningMount(){
   const search=el('input',{id:'learning-search',type:'search',placeholder:'Find a task / command',title:'Search task content'});
   search.addEventListener('input',()=>{learning.search=search.value;learningRail();if(!learning.selected)learningHome();});
   const rail=lnode('aside','learning-rail',lnode('h2','', 'Production manual'),search,
+    lbutton('learning-cast','MOPPETS cast',castOpen,'Choose the Magic Studio cast and edit shared department AGENTS.md files'),
     lbutton('learning-overview','Production path',()=>{learning.category=null;learningHome();}),
     lnode('nav','learning-categories',...LEARNING_CATEGORIES.map(([id,title])=>lbutton(`learning-category-${id}`,title,()=>{learning.category=id;learningHome();}))),
     lnode('div','learning-task-list'),lnode('p','learning-location',learning.directory));
@@ -37,6 +38,7 @@ function learningRail(){
   list.replaceChildren(...learning.items.filter(learningMatches).map(item=>el('button',{class:`learning-task ${learning.selected?.id===item.id?'active':''}`,'data-task':item.id,title:item.name,onclick:()=>learningOpen(item.id)},lnode('strong','',item.name||item.id),lnode('small','',`${item.category||'legacy reference'} · ${item.block?.word_count||0} words${item.blocked?' · blocked':''}`))));
 }
 async function learningHome(){
+  castLeave();
   await learning.editor?.destroy();learning.editor=null;learning.selected=null;learning.dirty=false;learning.conflict=null;learning.epoch++;
   const surface=$('view-skills').querySelector('.learning-surface');surface.replaceChildren();surface.id='learning-home';
   $('learning-save').disabled=true;$('learning-save-state').textContent='';learningRail();
@@ -56,6 +58,7 @@ function learningMessage(){
   $('learning-message').textContent=learning.message||policy;
 }
 async function learningOpen(id,options={}){
+  castLeave();
   const epoch=++learning.epoch;
   try{
     const item=options.item||(await learningApi('skills.info',{id})).skill;if(epoch!==learning.epoch)return;
@@ -141,6 +144,7 @@ function learningDemo(){
   host.append(lnode('h3','','Mechanism reference'),svg,lnode('small','','Original illustration · AE recipe · Craft equivalents unverified. Edit descriptions and Demo word on the writing surface.'));
 }
 async function learningDiagram(kind){
+  castLeave();
   try{
     learning.message='Generating Archify from these task records…';learningMessage();const result=await learningApi('skills.diagram',{kind,render:true});
     const surface=$('view-skills').querySelector('.learning-surface');await learning.editor?.destroy();learning.editor=null;learning.selected=null;

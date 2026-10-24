@@ -44,6 +44,7 @@ pub mod panels;
 pub mod project;
 pub mod project_settings;
 pub mod skills_registry;
+pub mod crew;
 pub mod rig;
 pub mod sequence;
 pub mod sheets;
@@ -118,7 +119,9 @@ impl Session {
     /// Execute one command by id with JSON parameters, returning JSON.
     pub fn execute(&mut self,id:&str,params:Value)->Result<Value>{
         let _context=activity::enter(id,&params);
-        let _writer=if commands::find(id).is_some_and(|c|c.journal) && !matches!(id,"project.open"|"project.close"|"project.new"|"project.intake") {
+        // Cast writes are journaled workshop files, independent of the open song's writer lease.
+        let project_edit=commands::find(id).is_some_and(|c|c.journal) && id!="crew.save";
+        let _writer=if project_edit && !matches!(id,"project.open"|"project.close"|"project.new"|"project.intake") {
             self.project_path.as_deref().map(|path|project::claim(self,path)).transpose()?
         }else{None};
         let prior_owner=self.project_owner.clone();
@@ -129,7 +132,7 @@ impl Session {
         let (saves_before,project_before)=(self.project_saves.load(std::sync::atomic::Ordering::Relaxed),self.project_path.clone());
         let result=self.execute_inner(id,params.clone());
         // An edit is a successful journaled command that left the project file unwritten.
-        if result.as_ref().is_ok_and(|v|v["ok"]!=false) && commands::find(id).is_some_and(|c|c.journal) {
+        if result.as_ref().is_ok_and(|v|v["ok"]!=false) && project_edit {
             if self.project_saves.load(std::sync::atomic::Ordering::Relaxed)!=saves_before || self.project_path!=project_before {self.edits_since_save=0;}
             else {self.edits_since_save+=1;}
         }

@@ -1,0 +1,30 @@
+/* Callboard: the shell's surfaces and type, with profiles that open in place. */
+.cast-hero h1{margin:var(--space-2) 0;font-size:var(--learning-title-small)}
+.cast-hero p,.cast-intro p{color:var(--muted);max-width:65ch}
+.cast-departments{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:var(--space-5) 0}
+.cast-departments [aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.cast-intro{padding:var(--space-4);border:thin solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.cast-intro h2{margin:0;font-size:var(--text-xl)}
+.cast-human{color:var(--accent)!important}
+.cast-tools{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:var(--space-4) 0}
+.cast-tools input{flex:1;min-width:0}
+.cast-tools select{max-width:100%}
+.cast-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:var(--space-3);align-items:start}
+.cast-candidate{border:thin solid var(--line);border-radius:var(--radius);background:var(--surface);transition:border-color var(--fast) var(--ease)}
+.cast-candidate:hover,.cast-candidate:focus-within{border-color:var(--accent)}
+.cast-candidate summary{padding:var(--space-4);cursor:pointer;list-style:none}
+.cast-candidate summary::-webkit-details-marker{display:none}
+.cast-name{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);margin-bottom:var(--space-2)}
+.cast-name strong{font-size:var(--text-xl);overflow-wrap:anywhere}
+.cast-state{color:var(--muted);white-space:nowrap}
+.cast-candidate p{color:var(--text);line-height:1.65;margin:var(--space-3) 0}
+.cast-candidate summary>small{color:var(--muted)}
+.cast-candidate summary>.cast-suggestion{color:var(--depth-gold)}
+.cast-fields{display:grid;gap:var(--space-3);padding:0 var(--space-4) var(--space-4)}
+.cast-field{display:grid;gap:var(--space-1);min-width:0;color:var(--muted)}
+.cast-field input,.cast-field select,.cast-field textarea{width:100%;min-width:0}
+.cast-note{color:var(--muted);font-size:var(--text-sm);overflow-wrap:anywhere}
+.cast-rules,.cast-saved{margin:var(--space-4) 0;padding:var(--space-4);border:thin solid var(--line);border-radius:var(--radius)}
+.cast-rules summary,.cast-saved summary{cursor:pointer;font-weight:600}
+.cast-rules>textarea{width:100%;min-height:20rem;resize:vertical;line-height:1.6}
+.cast-saved pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:25rem;overflow:auto;font-size:var(--text-sm)}

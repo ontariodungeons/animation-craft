@@ -236,6 +236,8 @@ pub fn build() -> Vec<CommandSpec> {
         query!("project.catalog", "Home Project Navigation History", "{}", crate::project_catalog::catalog),
         cmd!("project.root", "Inspect / Set Production Project Root", ["File"], None, "{\"root\":\"optional absolute production root; omitted to inspect\"}", always, crate::project_settings::command),
         query!("skills.list", "Registered knowledge skills (info blocks)", "{}", crate::skills_registry::cmd_skills_list),
+        query!("crew.list", "Magic Studio MOPPETS and shared department AGENTS.md files", "{\"workspace\":\"optional workshop root\"}", crate::crew::cmd_list),
+        cmd!("crew.save", "Save one department cast and shared instructions (revision guarded)", [], None, "{\"workspace\":\"workshop root from crew.list\",\"department\":\"creative|animation|production|backstage|review\",\"expected_revision\":\"from crew.list\",\"document\":\"department and instructions from crew.list\"}", always, crate::crew::cmd_save),
         query!("skills.info", "One registered skill's info block", "{\"id\":\"skill id\"}", crate::skills_registry::cmd_skills_info),
         cmd!("skills.limits", "Read / explicitly configure Learning block caps", [], None, "{\"max_words\":\"optional explicit cap\",\"max_steps\":\"optional explicit cap\"}", always, crate::skills_registry::cmd_skills_limits),
         cmd!("skills.diagram", "Archify view derived from Learning task records", [], None, "{\"kind\":\"production|correction\",\"render\":false}", always, crate::skills_registry::cmd_skills_diagram),
