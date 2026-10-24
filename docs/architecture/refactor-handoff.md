@@ -4,7 +4,7 @@ Branch: `fix/panel-unification`
 Worktree: `.worktrees/panel-unification`  
 Base: `5ab274ba7053f6f580988ae9ba21ea8137f1ccea`  
 Implementation through: `24e62387`  
-PR: none; remote main lacks 146 commits already present in the task baseline. Publishing that unrelated baseline needs authorization under AGENTS.md. No push or merge performed.
+PRs: [#28 — shared refactor](https://github.com/ontariodungeons/animation-craft/pull/28), then [#29 — integrate into main](https://github.com/ontariodungeons/animation-craft/pull/29). Both are published, open, non-draft and mergeable. No merge has been performed.
 
 ## Implemented and verified
 
@@ -35,4 +35,11 @@ Idle acceptance deliberately injects idle facts in a disposable fixture; it does
 
 Final review repairs are committed in `21607e0e` and `24e62387`; the fresh reviewer confirmed no remaining findings. The final rebuilt shell passed the complete live pet acceptance and 295-component paging again. An actual failed command in fixture A followed by opening disposable fixture B and requesting attention produced B's idle underlying state plus yellow attention, with null request/receipt and no frontend errors. The task-owned preview was closed cleanly; its window and port 19963 are confirmed closed in [preview-close.json](evidence/preview-close.json). Other agents' windows and source edits were preserved.
 
-The work is committed locally and ready for integration review. No PR can be scoped against the remote main until its pre-existing 146-commit baseline gap is handled; no unrelated baseline was published or merged as part of this task.
+The work is committed and published. The 146 existing baseline commits are exposed separately in #29; #28 contains only this refactor against that baseline. Merge #28 into the baseline branch first, then #29 into main. Concurrent uncommitted files are excluded and preserved.
+
+## GitHub merge order
+
+1. Merge [#28](https://github.com/ontariodungeons/animation-craft/pull/28) into `integration/committed-baseline-2026-10-24`.
+2. Merge [#29](https://github.com/ontariodungeons/animation-craft/pull/29) into `main`.
+
+GitHub reports both PRs CLEAN and MERGEABLE. There are no configured GitHub status checks; local verification is recorded above. No new worktree was created to publish them.
