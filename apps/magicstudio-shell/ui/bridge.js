@@ -90,11 +90,11 @@ window.magicBridge = {
     const nodes = [...document.querySelectorAll(`${CLICKABLE}, [id]`)];
     nodes.forEach((node, i) => {
       const ownState = node.getAttribute('data-box-id') || (entries[node.id] ? node.id : null);
-      const reason = (ownState && !registry?.get(ownState)) || !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
+      const reason = node.dataset.contractError ? "missing-panel-header" : (ownState && !registry?.get(ownState)) || !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
       if (!reason) return;
       const tag = node.tagName.toLowerCase();
       const label = (node.title || node.getAttribute("aria-label") || node.textContent || "").trim().slice(0, 80);
-      const rect = node.getBoundingClientRect(), container = node.closest('[data-companion-rail]')?.getAttribute('data-companion-rail') || null;
+      const rect = node.getBoundingClientRect(), container = entries[node.id]?.rail || node.closest('[data-companion-rail]')?.getAttribute('data-companion-rail') || null;
       rows.push({ id: node.id || `${tag}-${i + 1}`, index: registry?.registerElement(node)?.index ?? null, tag, label: label || null, reason, container, rect: [rect.x,rect.y,rect.width,rect.height] });
     });
     return rows;

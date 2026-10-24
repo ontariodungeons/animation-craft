@@ -253,9 +253,9 @@ function wordsRender() {
   const save = el("button", { class: "start", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
   save.disabled = !changes;
 
-  const main = el("section", { class: "words-main", "aria-label": `${wordsLabel(anim)} words` },
+  const main = el("section", { id: "words-main", "aria-label": `${wordsLabel(anim)} words` },
+    el("div", { id: "words-main-head" }, el("strong", { class: "panel-title" }, wordsLabel(anim))),
     el("div", { class: "words-head" },
-      el("strong", {}, wordsLabel(anim)),
       el("span", { class: "meta" }, `${anim.words.length} words · ${(anim.authored_duration || 0).toFixed(1)} s · rev ${anim.source_revision}${wordsPanel.read.saved ? "" : " · not saved yet"}`),
       el("label", { class: "field-row" }, "Size", sizeInput),
       ...wordsStyleFields(anim),
@@ -265,10 +265,11 @@ function wordsRender() {
     wordsPanel.lane === "text" ? el("div", { class: "group-label" }, `Text effects for ${wordsLabel(anim)} · HyperFrames`) : null,
     wordsPanel.lane === "text" ? wordsEffects(anim) : inspector);
   view.replaceChildren(
-    el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Lyrics · on the song timeline"), wordsTimeline(animations, end)),
+    el("aside", { id: "words-lyrics" }, el("div", { id: "words-lyrics-head" }, el("strong", { class: "panel-title" }, "Lyrics · song timeline")), wordsTimeline(animations, end)),
     main,
-    el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Film roll · the whole song"), wordsRoll(animations, end)));
+    el("aside", { id: "words-film" }, el("div", { id: "words-film-head" }, el("strong", { class: "panel-title" }, "Film roll")), wordsRoll(animations, end)));
   wordsNow(wordsPanel.time);
+  wordsFitTimeline();
   wordsFit();
 }
 
@@ -300,7 +301,7 @@ function wordsStage(anim) {
   }
   const scrub = el("input", { type: "range", id: "words-scrub", min: String(section.start), max: String(section.end), step: "0.01", "aria-label": "Video time",
     oninput: (e) => wordsSeekSong(Number(e.target.value)) });
-  scrub.value = scrub.defaultValue = String(section.start); // a view control, never an unsaved edit
+  scrub.value = String(section.start); scrub.defaultValue = scrub.value; // a view control, never an unsaved edit
   // The preview player of the HyperFrames server, same project id as the Studio link.
   const server = new URL(url);
   const project = server.hash.split("/")[1] || "hyperframes";
@@ -368,6 +369,21 @@ function wordsVideoRange() {
   wordsSeekSong(section.start);
 }
 
+// One measured scale for both timelines keeps every word reachable without changing song timing.
+function wordsFitTimeline() {
+  const view = $("view-design");
+  if (!view?.classList.contains("active")) return;
+  view.style.removeProperty("--song-s");
+  let scale = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--space-1")) * 3.5;
+  for (const row of view.querySelectorAll(".words-line")) {
+    const seconds = Number(row.style.getPropertyValue("--len-s"));
+    if (!(seconds > 0)) continue;
+    const css = getComputedStyle(row), gap = parseFloat(css.rowGap) || 0;
+    scale = Math.max(scale, (row.scrollHeight + (parseFloat(css.marginTop) || 0) + gap + 1) / seconds);
+  }
+  view.style.setProperty("--song-s", `${Math.ceil(scale)}px`);
+}
+
 // The video's own size, as data; the stage rule scales the frame to fit.
 function wordsFit(size = wordsPanel.size) {
   const frame = $("words-video-frame"), box = $("words-preview");
@@ -387,13 +403,18 @@ addEventListener("message", (event) => {
     const song = data.currentTime + wordsPanel.offset; // the player's time, on the song clock
     wordsPanel.time = song; wordsPanel.playing = !!data.isPlaying;
     const scrub = $("words-scrub");
-    if (scrub) scrub.value = scrub.defaultValue = String(song);
+    if (scrub) { scrub.value = String(song); scrub.defaultValue = scrub.value; }
     if (wordsPanel.timeLabel) wordsPanel.timeLabel.textContent = wordsClock(song);
     wordsNow(song);
     wordsPanel.playButton?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
   }
 });
-addEventListener("resize", () => wordsFit());
+addEventListener("resize", () => { wordsFitTimeline(); wordsFit(); });
+let wordsLayoutWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (entry.contentRect.width === wordsLayoutWidth) return;
+  wordsLayoutWidth = entry.contentRect.width; wordsFitTimeline(); wordsFit();
+}).observe($("view-design"));
 // Leaving the Design view stops the video, so nothing plays behind another view.
 new MutationObserver(() => {
   if ($("view-design")?.classList.contains("active")) return;

@@ -114,6 +114,15 @@ function elFixture(entries) {
 }
 
 const tests = [
+  ['missing shared panel header is a reported contract failure', () => {
+    const { ctx, bridge, boxes, elements } = fixture();
+    ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };
+    boxes.register('lyrics', { project: '/p/Study.magic' });
+    const node = element('section', { id: 'lyrics', attrs: { 'data-box-id': 'lyrics', 'data-companion-rail': 'lyrics' } });
+    node.dataset.contractError = 'Panel has no shared header'; elements.push(node);
+    assert.equal(bridge.unconfigured()[0].reason, 'missing-panel-header');
+    assert.equal(boxes.panels().items.find(row => row.id === 'lyrics').signal, 3);
+  }],
   ['missing state inside a configured panel is a red contract error', () => {
     const { ctx, bridge, boxes, elements } = fixture();
     ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };
@@ -188,13 +197,16 @@ const tests = [
     assert.deepEqual(plain(first.items[0].actions), ['ui.set', 'ui.key']);
     assert.ok(!JSON.stringify(first).includes('private draft'));
   }],
-  ['attention is project-bound and truncation cannot look complete', () => {
+  ['attention is project-bound and state reports include every panel', () => {
     const { bridge, boxes } = fixture();
     for (let i = 0; i < 70; i++) boxes.register(`panel-${i}`);
     assert.throws(() => bridge.attention({ project: '/wrong.magic', id: 'panel-0', reason: 'Next' }), /does not match/);
     const reply = bridge.attention({ project: '/p/Study.magic', id: 'panel-0', reason: 'Next' });
     assert.equal(reply.panels.total_items, 70);
-    assert.equal(reply.panels.truncated, true);
+    assert.equal(reply.panels.truncated, false);
+    assert.equal(reply.panels.items.length, 70);
+    boxes.fact({id: "panel-69", state: "failed", reason: "Last panel failed"});
+    assert.equal(boxes.panels().items.find(p => p.id === "panel-69").signal, 3);
     assert.equal(reply.panels.items[0].signal, 2);
     bridge.attention({ project: '/p/Study.magic', id: 'panel-0', clear: true });
     assert.equal(boxes.get('panel-0').attention, null);

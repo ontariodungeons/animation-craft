@@ -42,6 +42,16 @@ function fixture() {
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
+  ['pets see errors after the first sixty-four registered states', async () => {
+    const { ctx, boxes } = fixture();
+    for (let i = 0; i < 70; i++) boxes.register(`panel-${i}`);
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
+    boxes.fact({ id: 'panel-69', state: 'failed', reason: 'Render failed' });
+    await flush();
+    assert.equal(pets.snapshot().sproket.box, 'panel-69');
+    assert.equal(pets.snapshot().sproket.signal, 3);
+  }],
   ['rails require a configured destination and never fall back elsewhere', () => {
     const { ctx } = fixture();
     const rail = { getAttribute: key => key === 'data-companion-rail' ? 'panel' : null, getBoundingClientRect: () => ({ width: 100, height: 40 }) };

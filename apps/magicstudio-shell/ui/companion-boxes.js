@@ -292,13 +292,12 @@ function createCompanionBoxes() {
       notify();
     }
     const items = snapshot({ project: currentProject(), limit: Infinity });
-    const bounded = items.slice(0, 64);
     const signature = JSON.stringify([items.map(({ seq, observed_at, ...item }) => item), unconfigured]);
     if (signature !== panelSignature) {
       panelSignature = signature;
       panelRevision++;
     }
-    return { revision: panelRevision, available: true, items: bounded, unconfigured: unconfigured.slice(0, 64), total_items: items.length, total_unconfigured: unconfigured.length, truncated: items.length > 64 || unconfigured.length > 64 };
+    return { revision: panelRevision, available: true, items, unconfigured, total_items: items.length, total_unconfigured: unconfigured.length, truncated: false };
   }
 
   function clear() {

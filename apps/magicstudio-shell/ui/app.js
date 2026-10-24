@@ -241,6 +241,7 @@ function applyEntry(node, entry, id = node.id) {
   if (entry.component === 'panel' && entry.rail && !node.querySelector('[data-companion-slot]')) {
     const head = node.querySelector('.panel-head');
     if (!head) { node.dataset.contractError = 'Panel has no shared header'; return node; }
+    delete node.dataset.contractError;
     node.setAttribute('data-companion-rail', entry.rail);
     const slot = document.createElement('span');
     slot.className = 'panel-rail'; slot.setAttribute('data-companion-slot', entry.rail);
@@ -399,10 +400,10 @@ function lyricsBody(lyrics, doc, liner, songPath) {
     model.canonical && lyrics.artist_note ? el("blockquote", { class: "artist-note" }, el("p", {}, lyrics.artist_note), el("cite", {}, lyrics.artist || "The artist")) : null,
     el("div", { class: "lyric-actions" },
       original?.exists
-        ? el("button", { id: "song-open-original", class: "ghost", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
+        ? el("button", { id: "song-open-original", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
         : [el("span", { class: "not-linked" }, original ? `Original not found: ${name(original.path)}` : "Original not linked"),
            el("button", { id: "song-attach-original", class: "ghost", onclick: attachOriginal }, "Attach original…")],
-      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", class: "ghost", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
+      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
     lyricSheet(model),
     el("div", { class: "group-label" }, "Liner notes"),
     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None attached yet."),
@@ -428,7 +429,7 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
   const pane = el("section", { id: "magic-reader", "aria-label": `${title}, read only` },
     el("div", { id: "magic-reader-head" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
-      el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
+      el("button", { id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
   $("magic-reader")?.remove();
   $("magic-workstation")?.append(pane);
@@ -540,7 +541,7 @@ function renderBlocks() {
      songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
        ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
      songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
-       [doc?.words?.length ? el("button", { id: "song-open-transcript", class: "ghost", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
+       [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
         el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
     songState, audio ? songPlayButton(audio.path) : null));
 

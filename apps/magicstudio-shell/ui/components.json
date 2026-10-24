@@ -743,6 +743,65 @@
       "component": "icon",
       "label": "Actual size",
       "indicator": "hidden"
+    },
+    "words-main": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Lyrics and motion",
+      "rail": "words-main",
+      "indicator": "hidden"
+    },
+    "words-main-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-main",
+      "indicator": "hidden"
+    },
+    "words-lyrics": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Lyrics timeline",
+      "rail": "words-lyrics",
+      "indicator": "hidden"
+    },
+    "words-lyrics-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-lyrics",
+      "indicator": "hidden"
+    },
+    "words-film": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Film roll",
+      "rail": "words-film",
+      "indicator": "hidden"
+    },
+    "words-film-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-film",
+      "indicator": "hidden"
+    },
+    "song-open-original": {
+      "component": "ghost",
+      "label": "Open original lyrics",
+      "indicator": "hidden"
+    },
+    "song-read-along": {
+      "component": "ghost",
+      "label": "Read along",
+      "indicator": "hidden"
+    },
+    "magic-reader-close": {
+      "component": "ghost",
+      "label": "Close lyrics reader",
+      "indicator": "hidden"
+    },
+    "song-open-transcript": {
+      "component": "ghost",
+      "label": "Open transcript",
+      "indicator": "hidden"
     }
   },
   "rails": {
@@ -816,6 +875,15 @@
       "accept": "yes"
     },
     "motion-selected-layer": {
+      "accept": "yes"
+    },
+    "words-main": {
+      "accept": "yes"
+    },
+    "words-lyrics": {
+      "accept": "yes"
+    },
+    "words-film": {
       "accept": "yes"
     }
   },
@@ -891,6 +959,15 @@
     },
     "motion-selected-layer": {
       "target": "motion-selected-layer"
+    },
+    "words-main": {
+      "target": "words-main"
+    },
+    "words-lyrics": {
+      "target": "words-lyrics"
+    },
+    "words-film": {
+      "target": "words-film"
     }
   },
   "signals": {

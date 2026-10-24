@@ -937,8 +937,8 @@ body.at-home .app-footer { display:none; }
    the stage, the section's lanes and what goes on them stay pinned in the centre.
    Items carry their song time and length as --at-s / --len-s, the playhead --now-s. */
 #view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 9), 24vw) minmax(0, 1fr) calc(var(--space-5) * 7); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto; --song-s: calc(var(--space-1) * 3.5); }
-.words-side, .words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); background: var(--bg); }
+#view-design > aside, #words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+#words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); }
 .words-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .words-head strong { font-size: var(--text-lg); }
 .words-head > :last-child { margin-left: auto; }
@@ -951,7 +951,7 @@ body.at-home .app-footer { display:none; }
 .words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
 .words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
 .words-band > .meta { color: var(--faint); }
-.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); align-content: flex-start; gap: var(--space-1); overflow: hidden; }
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); align-content: flex-start; gap: var(--space-1); overflow: auto; }
 .words-tl > .first { margin-top: var(--text-xl); height: calc(var(--len-s) * var(--song-s) - var(--text-xl) - var(--space-1)); }
 .words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }
 /* The film roll: sprocket holes down both edges, a time mark every ten seconds. */
@@ -987,6 +987,8 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 
 @media (max-width: 62.5em) {
   :root { --workspace-narrow: 1; }
+  #view-design.active { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #words-main { position: static; grid-column: 1 / -1; grid-row: 1; }
   .brand-word, .project-chip { display: none; }
   .tabs { min-width: 0; overflow-x: auto; }
   .tab { white-space: nowrap; }
