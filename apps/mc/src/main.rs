@@ -26,6 +26,7 @@ mod snapshot;
 mod studios;
 mod telemetry;
 mod touch;
+mod settings;
 mod theme;
 mod tui;
 mod scope;

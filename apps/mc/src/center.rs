@@ -63,6 +63,7 @@ struct Center {
     mcp_sessions: Vec<Value>,
     touches: Vec<Value>,
     skills: Vec<Value>,
+    settings: crate::settings::TuiSettings,
     procs: Vec<crate::dials::ProcRow>,
     history: Vec<f64>,
     logs: Value,
@@ -112,7 +113,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
+        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::load(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
         match panels::load_config(){Ok(config)=>center.panel_config=config,Err(error)=>center.panel_config_error=Some(error),}
         center.scope=crate::scope::current()?.cloned();
         if let Some(scope)=&center.scope{
@@ -198,7 +199,7 @@ impl Center {
 
             },Err(error)=>{let catalog=self.catalog();workshop::reconcile(self,&catalog);self.state["catalog"]=catalog;self.message=error.clone();self.state["ui"]=json!({"connection":"stale_or_unavailable","ui_ready":false,"error":error,"recovery":"F8 explicitly reattaches the same project; Studio is never switched."});},
         }
-                if self.agent_gang_at.map(|t|t.elapsed().as_secs()>=3).unwrap_or(true) {
+                if self.agent_gang_at.map(|t|t.elapsed().as_secs()>=self.settings.agent_refresh_secs).unwrap_or(true) {
                     if let Ok(out)=std::process::Command::new("herdr").args(["agent","list"]).output() {
                         if let Ok(v)=serde_json::from_slice::<Value>(&out.stdout) {
                             let mut agents=v["result"]["agents"].as_array().cloned().unwrap_or_default();
@@ -263,7 +264,7 @@ impl Center {
                 Err(std::sync::mpsc::TryRecvError::Empty)=>{if self.studios_at.is_some_and(|at|at.elapsed().as_secs()>=6){self.studios["observation_error"]=json!("Studio discovery pending");}},
             }
         }
-        if self.studios_receiver.is_none()&&self.studios_at.is_none_or(|at|at.elapsed().as_secs()>=3){
+        if self.studios_receiver.is_none()&&self.studios_at.is_none_or(|at|at.elapsed().as_secs()>=self.settings.studio_discovery_secs){
             let (sender,receiver)=std::sync::mpsc::channel();self.studios_receiver=Some(receiver);self.studios_at=Some(std::time::Instant::now());
             // Retain one slow discovery instead of discarding its result or accumulating threads.
             std::thread::spawn(move||{let mut value=magicstudio_engine::studio_sessions::discover();value["observed_at_ms"]=json!(crate::worker::now_ms());let _=sender.send(value);});
@@ -1739,10 +1740,12 @@ fn render_config(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  lines.push(Line::raw(""));
  lines.push(styled("Press Enter on a field to edit, Esc to cancel",MUTED));
  lines.push(Line::raw(""));
- lines.push(styled(format!("Process count in MAYHEM: {}", 18),DESK_FG));
- lines.push(styled(format!("Agent refresh interval: {}s", 3),DESK_FG));
- lines.push(styled(format!("Studio discovery interval: {}s", 3),DESK_FG));
- lines.push(styled(format!("MCP scan interval: {}s", 3),DESK_FG));
+ lines.push(styled(format!("Process count in MAYHEM: {}", c.settings.process_count),DESK_FG));
+ lines.push(styled(format!("Agent refresh interval: {}s", c.settings.agent_refresh_secs),DESK_FG));
+ lines.push(styled(format!("Studio discovery interval: {}s", c.settings.studio_discovery_secs),DESK_FG));
+ lines.push(styled(format!("MCP scan interval: {}s", c.settings.mcp_scan_secs),DESK_FG));
+ lines.push(styled(format!("Log tail lines: {}", c.settings.log_tail_lines),DESK_FG));
+ lines.push(styled(format!("RSS threshold (KB): {}", c.settings.proc_rss_threshold_kb),DESK_FG));
  lines.push(Line::raw(""));
  lines.push(styled("Skills registered:",TEAL));
  for s in &c.skills{
@@ -2058,7 +2061,7 @@ mod feedback_tests {
         assert!(!c.message.contains("sent to beaker"),"a working agent is never sent the check-in");
     }
     pub(super) fn fixture()->Center{
-        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new(),skills:Vec::new()}
+        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::default(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}
     }
     fn panel_text(lines:&[Line])->String{lines.iter().map(|line|line.to_string()).collect::<Vec<_>>().join("\n")}
     fn panel_screen(c:&Center)->String{
@@ -2566,9 +2569,9 @@ fn render_known_apps(f: &mut Frame, c: &Center, area: ratatui::layout::Rect) {
         lines.push(styled("No known apps running", MUTED));
     } else {
         lines.push(styled(format!("{:<8}{:<28}{:>8}", "PID", "APP", "RSS"), MUTED));
-        for (pid, name, _argv, rss_kb) in apps.iter().take(12) {
+        for (pid, name, _argv, rss_kb) in apps.iter().take(c.settings.process_count) {
             let rss = if *rss_kb >= 1024 { format!("{:.0}M", *rss_kb as f64 / 1024.0) } else { format!("{}K", rss_kb) };
-            let colour = if *rss_kb > 500_000 { AMBER } else { DESK_FG };
+            let colour = if *rss_kb > c.settings.proc_rss_threshold_kb { AMBER } else { DESK_FG };
             lines.push(Line::from(vec![
                 Span::styled(format!("{:<8}", pid), Style::default().fg(MUTED)),
                 Span::styled(format!("{:<28}", fit_text(name, 26)), Style::default().fg(colour)),
