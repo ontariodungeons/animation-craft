@@ -208,14 +208,29 @@ function headSources() {
   return map;
 }
 
+// The Task 8 acceptance bar. It is printed, not enforced: the tree is over it
+// today, and a failing gate would block every agent's commit.
+const BAR = { css_lines: 911, css_selectors: 673, js_lines: 4227 };
+
+function acceptance() {
+  const css = 'style.css';
+  const c = counts[css] ?? {};
+  const js = jsFiles.reduce((sum, file) => sum + (counts[file]?.lines ?? 0), 0);
+  const writes = jsFiles.reduce((sum, file) => sum + (counts[file]?.style_writes ?? 0), 0);
+  const attributes = jsFiles.reduce((sum, file) => sum + (counts[file]?.style_attributes ?? 0), 0);
+  const gap = (value, limit) => `${value}/${limit}${value > limit ? ` (+${value - limit})` : ''}`;
+  return `acceptance: css ${gap(c.lines ?? 0, BAR.css_lines)} lines · selectors ${gap(c.selectors ?? 0, BAR.css_selectors)} · js ${gap(js, BAR.js_lines)} lines · px outside :root ${c.px_outside_root ?? 0} · hex outside :root ${c.hex_outside_root ?? 0} · ${writes} .style.x = · ${attributes} style: attributes`;
+}
+
 if (process.argv.includes('--report')) console.log('report: ' + report());
+if (process.argv.includes('--report') || process.argv.includes('--ratchet')) console.log(acceptance());
 
 if (process.argv.includes('--append-report')) {
   const gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf8' }).trim();
   const messagePath = `${gitDir}/COMMIT_EDITMSG`;
   let before = '';
   try { before = reportFor(headSources()); } catch { before = report(); }
-  const line = `report: ${before} -> report: ${report()}`;
+  const line = `report: ${before} -> report: ${report()}\n${acceptance()}`;
   const message = fs.readFileSync(messagePath, 'utf8');
   if (!message.includes(line)) fs.writeFileSync(messagePath, `${message.replace(/\s*$/, '')}\n\n${line}\n`);
 }
