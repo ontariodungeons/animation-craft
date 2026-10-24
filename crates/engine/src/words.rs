@@ -595,8 +595,10 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| invalid("The video has no root composition"))?;
         let track_index = html.split("data-track-index=\"").skip(1).filter_map(|r| r.split('"').next()?.parse::<u64>().ok()).max().unwrap_or(0) + 1;
         let (w, h) = (composed["width"].as_u64().unwrap_or(1920), composed["height"].as_u64().unwrap_or(1080));
-        html.insert_str(root, &format!("<div class=\"clip lyric-design-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{track_index}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:76\"></div>\n",
-            composed["composition_id"].as_str().unwrap_or(id), composed["src"].as_str().unwrap_or_default(),
+        // HyperFrames needs the host's id, the scene root and the timeline key to be the same id.
+        let composition_id = composed["composition_id"].as_str().unwrap_or(id);
+        html.insert_str(root, &format!("<div id=\"{composition_id}\" class=\"clip lyric-design-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{composition_id}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{track_index}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:76\"></div>\n",
+            composed["src"].as_str().unwrap_or_default(),
             composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0)));
         receipt["src"] = composed["src"].clone();
         receipt["start"] = composed["song_anchor"].clone();
@@ -896,7 +898,9 @@ mod tests {
         assert!(html.contains(r#"data-composition-src="compositions/words/words-chorus-1.html""#) && html.contains(r#"data-track-index="204""#), "{html}");
         assert!(html.contains("#kinetic-ch-l1-0, #kinetic-ch-l1-1, #kinetic-ch-l1-2, #kinetic-ch-l1-3 { visibility: hidden !important; }"), "{html}");
         let composed = fs::read_to_string(dir.join("hyperframes/compositions/words/words-chorus-1.html")).unwrap();
-        assert!(composed.contains(r#"class="words-design""#) && composed.contains(r#""text":"Hey ho""#) && composed.contains(r#""accent":0.7"#), "accent on the local clock: {composed}");
+        assert!(composed.starts_with("<template>") && composed.trim_end().ends_with("</template>"), "a HyperFrames scene file");
+        assert!(html.contains(r#"<div id="words-chorus-1" class="clip lyric-design-clip""#), "the host carries the scene's id");
+        assert!(composed.contains("data-words-design") && composed.contains(r#""text":"Hey ho""#) && composed.contains(r#""accent":0.7"#), "accent on the local clock: {composed}");
         assert_eq!(cmd_words_read(&mut s, &json!({})).unwrap()["in_video"], json!(["words-chorus-1"]));
         let again = cmd_words_apply(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap();
         assert_eq!(again["changed"], false, "applying twice changes nothing");

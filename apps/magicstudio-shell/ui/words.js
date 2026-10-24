@@ -175,7 +175,7 @@ function wordsDesignEdit(anim, lineId, change) {
 // layout fits any video; every word stays its own item unless the layout groups context words.
 function wordsLayout(anim, lineId, kind) {
   const words = wordsLineWords(anim, lineId), [W, H] = wordsWorld();
-  const item = (ws, x, y, size, look = "regular", motion = "quiet") => {
+  const item = (ws, x, y, size, look = "song", motion = "quiet") => {
     const [, , , font, weight, italic] = WORDS_LETTERING.find((l) => l[0] === look);
     return { word_ids: ws.map((w) => w.word_id), x: Math.round(x), y: Math.round(y), size: Math.round(size), font, weight, italic, color: anim.style?.color || "#1b2a33",
       outline: null, rotate: 0, motion, accent: motion === "quiet" ? null : ws.at(-1).word_id };
