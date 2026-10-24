@@ -33,11 +33,11 @@ const MOTION_ICONS = {
  layers:'<path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/>', export:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>', step:'<path d="m5 5 10 7-10 7zM19 5v14"/>'
 };
 function motionButton(id,label,icon,fn){return el('button',{id,class:'icon',title:label,'aria-label':label,html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`,onclick:fn});}
-function motionSection(title,body,open=false,toneOverride=null){
- const groups={Action:['motion','play'],'Path & depth':['depth','pen'],'Motion & timing':['motion','step'],Layers:['layers','layers'],'Expression & pose':['pose','eye'],'Quality checks':['check','fit'],'Export & integrations':['export','export']};
- const [tone,icon]=groups[title]||[toneOverride||'layers','layers'];
- const heading=el('summary',{},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`}),el('span',{},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
- const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));
+function motionSection(title,body,open=false,componentId=null){
+ const id=componentId||uiConfig.sections?.[title];
+ if(!id||!uiConfig.elements[id])throw Error(`Unconfigured animation panel: ${title}`);
+ const heading=el('summary',{id:`${id}-head`},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[uiConfig.elements[id].icon]}</svg>`}),el('span',{class:'panel-title'},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
+ const node=el('details',{id,class:'motion-section'},heading,el('div',{class:'motion-section-body'},body));
  node.open=Object.hasOwn(motion.openSections,title)?motion.openSections[title]===true:open;
  node.addEventListener('toggle',()=>{
   motion.openSections[title]=node.open;
@@ -48,9 +48,9 @@ function motionSection(title,body,open=false,toneOverride=null){
 function motionRange(id,label,min,max,step,value,unit,change){
  const out=el('output',{},`${Number(Number(value).toFixed(2))}${unit}`);
  const input=el('input',{id,type:'range',min,max,step,value,'aria-label':label,title:`${label}: ${min}–${max}${unit}`});
- const fill=()=>input.style.setProperty('--range-fill',`${100*(Number(input.value)-min)/(max-min)}%`);fill();
+ const fill=()=>input.style.setProperty('--range-fill',`${max>min?100*(Number(input.value)-min)/(max-min):0}%`);fill();
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
- return el('label',{class:'motion-range'},el('span',{},label,out),input);
+ const node=el('label',{class:'motion-range'},el('span',{},label,out),input);node.input=input;return node;
 }
 async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;motion.explicitCharacter=true;await setView('animation');}
 async function animationOpen(){
@@ -87,7 +87,7 @@ function animationShell(){
  const grid=motionButton('motion-grid','Show or hide grid','grid',()=>{motion.grid=!motion.grid;localStorage.setItem('animation.grid',String(motion.grid));grid.setAttribute('aria-pressed',String(motion.grid));animationDraw();});grid.setAttribute('aria-pressed',String(motion.grid));
  const toolbar=el('div',{class:'motion-stagebar'},motionModeSwitch(),el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
   motionButton('motion-pen','Pen · draw a motion path','pen',()=>{animationPause();motion.pen=!motion.pen;$('motion-pen').setAttribute('aria-pressed',String(motion.pen));$('motion-canvas').classList.toggle('drawing',motion.pen);$('motion-path-section')?.setAttribute('open','');}), motionButton('motion-path-visible','Show or hide the motion path','eye',()=>{motion.pathVisible=!motion.pathVisible;$('motion-path-visible').setAttribute('aria-pressed',String(motion.pathVisible));animationDraw();}), grid, motionButton('motion-fit','Fit artwork','fit',()=>{motion.fit=true;motion.zoom=1;animationDraw();}),
-  el('button',{class:'icon',id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
+  el('button',{id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
  const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step-back','Previous frame','step',()=>animationStep(-1)),motionButton('motion-step','Next frame','step',()=>animationStep(1)),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>animationSeek(Number(e.target.value))}));
  const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar',hidden:''});
@@ -129,6 +129,7 @@ function animationControls(){
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  const artworkDot=window.companionBoxes.dot('ready');artworkDot.title='Artwork loaded';
  box.append(el('div',{class:'panel-head inline'},artworkDot,picker),authoring.status);
+ box.append(motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),false));
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
@@ -176,14 +177,13 @@ function animationControls(){
   }},'Undo');
   undoButton.disabled=!savedUndo;
   compare.append(actionStatus,el('div',{class:'magic-part-actionbar'},
-   el('button',{class:'ghost',id:'part-open-photocraft',title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${name} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(selected)},'PhotoCraft'),
+   photoCraftPartButton(selected,'part-open-photocraft'),
    replaceButton,undoButton,
    el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${name}`,onclick:()=>selected.file&&openPath(selected.file)},'Original'),
    el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${name}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy path')));
  }
- const assetsGrid=(motion.assets||[]).length?el('div',{class:'magic-assets-grid'},motion.assets.map(asset=>magicAssetTile(asset,{active:asset.id===motion.character,onclick:()=>{if(asset.id!==motion.character)openAnimation(asset.id);}}))):el('p',{class:'why'},'No project assets are available yet.');
  const partsSlot=$('magic-parts-slot');
- if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare,assetsGrid));else authoring.layers.append(layers);box.append(section);
+ if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare));else authoring.layers.append(layers);box.append(section);
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));
@@ -230,7 +230,7 @@ function renderPartControlsBar(selected,controls){
  el('button',{id:'motion-show-all',class:'ghost','data-commands':'part.show_all',onclick:async()=>{try{await motionCommand('part.show_all',{expected_project:project,character});await animationRefresh();}catch(error){toast(String(error));}}},'Show all parts'));
 }
 // Compare | All parts: one tab at a time, remembered while the view is open.
-function partsDrawer(compare,assetsGrid){
+function partsDrawer(compare){
  const meta=motion.meta;
  const cards=(meta.layers||[]).map(part=>{
   const shown=part.state?.visible!==false,name=part.label||part.id,picked=motion.selected===part.id;
@@ -244,16 +244,22 @@ function partsDrawer(compare,assetsGrid){
    el('button',{class:'magic-part-card-pick','aria-pressed':String(picked),'aria-label':`Select ${name} (${part.id})`,onclick:select},
     el('span',{class:'magic-part-card-name'},name),part.label&&part.label!==part.id?el('span',{class:'magic-part-card-id'},part.id):null,badge),
    el('div',{class:'magic-part-card-actions'},visible,
-    el('button',{class:'ghost magic-part-card-open',id:`part-open-photocraft-${part.id}`,title:'Edit a draft copy in PhotoCraft; save it to use as the candidate','aria-label':`Open ${name} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'PhotoCraft')));
+    photoCraftPartButton(part,`part-open-photocraft-${part.id}`)));
  });
- const panels={parts:cards.length?el('div',{class:'magic-part-cards'},cards):el('p',{class:'why'},'This object has no rig parts.'),compare,assets:assetsGrid};
+ const panels={parts:cards.length?el('div',{class:'magic-part-cards'},cards):el('p',{class:'why'},'This object has no rig parts.'),compare};
+ if(!Object.hasOwn(panels,motion.partsTab))motion.partsTab='parts';
  const body=el('div',{class:'magic-parts-panel',role:'tabpanel'},panels[motion.partsTab]||compare);
- const tab=(key,label)=>el('button',{class:`magic-parts-tab${motion.partsTab===key?' active':''}`,role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
- return el('div',{class:'magic-parts-drawer'},el('div',{class:'magic-parts-tabs',role:'tablist','aria-label':'Parts and assets'},
-  tab('parts',`Parts (${(meta.layers||[]).length})`),tab('compare','Compare'),tab('assets',`Assets (${(motion.assets||[]).length})`)),body);
+ const tab=(key,label)=>el('button',{class:motion.partsTab===key?'active':'',role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
+ return el('div',{class:'magic-parts-drawer'},el('div',{class:'segmented',role:'tablist','aria-label':'Parts and assets'},
+  tab('parts',`Parts (${(meta.layers||[]).length})`),tab('compare','Compare')),body);
 }
 // PhotoCraft edits a draft copy; the live layer only changes through part.replace_image.
+function photoCraftPartButton(part,id){
+ const capability=part.image_edit;
+ const button=el('button',{id,class:'ghost magic-part-card-open','data-commands':'part.open_photocraft','data-value-source':'motion.tracks.layers.image_edit',title:capability?.supported?'Edit a draft copy in PhotoCraft; save it to use as the candidate':capability?.reason||'Image editing capability is unknown','aria-label':`Open ${part.label||part.id} in PhotoCraft`,onclick:()=>openPartInPhotoCraft(part)},'PhotoCraft');button.disabled=capability?.supported!==true;return button;
+}
 async function openPartInPhotoCraft(part){
+ if(part.image_edit?.supported!==true){toast(part.image_edit?.reason||'Image editing capability is unknown');return;}
  try{
   const result=await motionCommand('part.open_photocraft',{asset:motion.character,part:part.id,spawn:true});
   toast(`PhotoCraft: ${(result.draft?.file||result.file).split('/').pop()} · keep it ${result.width}×${result.height} · save to make it the candidate`);

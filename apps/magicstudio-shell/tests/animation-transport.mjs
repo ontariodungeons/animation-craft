@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const nodes=new Map(),calls=[];
 const el=(tag,attrs={},...children)=>{const n={tag,...attrs,children:children.flat(),style:{setProperty(){}},events:{},append(...c){this.children.push(...c)},addEventListener(k,f){this.events[k]=f},setAttribute(k,v){this[k]=v},get options(){return this.children.filter(c=>c?.tag==='option')},get value(){return this._value??attrs.value??this.options[0]?.value??''},set value(v){this._value=String(v)}};if(attrs.id)nodes.set(attrs.id,n);return n;};
-const c=vm.createContext({console,el,$:id=>nodes.get(id),ICONS:{chev:''},window:{addEventListener(){}},localStorage:{getItem:()=>null,setItem(){}},state:{project:'/generic/Study.magic'},toast:m=>calls.push(m)});
+const c=vm.createContext({uiConfig:JSON.parse(readFileSync(new URL('../ui/components.json',import.meta.url),'utf8')),console,el,$:id=>nodes.get(id),ICONS:{chev:''},window:{addEventListener(){}},localStorage:{getItem:()=>null,setItem(){}},state:{project:'/generic/Study.magic'},toast:m=>calls.push(m)});
 vm.runInContext(readFileSync(new URL('../ui/animation.js',import.meta.url),'utf8'),c);
 vm.runInContext(`animationPause=()=>{motion.playing=false};animationDraw=()=>{};motion.sample={duration:3,fps:24};motion.time=1;animationStep(-1);`,c);assert.equal(vm.runInContext('motion.time',c),1-1/24);
 vm.runInContext('animationSeek(999)',c);assert.equal(vm.runInContext('motion.time',c),3);vm.runInContext('animationSeek(-1)',c);assert.equal(vm.runInContext('motion.time',c),0);

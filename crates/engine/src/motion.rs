@@ -742,7 +742,10 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
         let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
+        let image_edit = metadata.as_ref().map(|(raw,_,_)|crate::part_replacement::image_edit_capability(s,&rig.plan_path,raw,&p.id))
+            .unwrap_or(json!({"supported":false,"reason":"Saved source image metadata is unavailable"}));
         json!({"id":p.id,"label":p.label,"file":p.cropped_path,"source_file":source_file,"source_size":source_size,"crop":p.crop_box,"pivot":p.pivot,"parent":p.parent,"order":depth,"depth":depth,"image_sha256":image_sha256,
+        "image_edit":image_edit,
         "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
@@ -1148,6 +1151,35 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     result["rest"] = sample["rest"].clone();
     result["amount"] = json!(p["amount"].as_f64().unwrap_or(100.0));
     Ok(result)
+}
+
+/// One song section in one call: the drawn path becomes a clip the motion gate passed, placed at the
+/// section's time in the HyperFrames video. A clip that fails the gate is reported, never placed.
+pub fn cmd_motion_place_section(s: &mut Session, p: &Value) -> Result<Value> {
+    let clip = p["id"].as_str().filter(|id| !id.is_empty()).ok_or_else(|| invalid("Name the video clip id"))?;
+    let duration = p["duration"].as_f64().ok_or_else(|| invalid("Give the section duration"))?;
+    let mut path = p.clone();
+    if let Some(obj) = path.as_object_mut() {
+        obj.remove("id");
+    }
+    let drawn = cmd_motion_path(s, &path)?;
+    let character = drawn["character"].clone();
+    let track = drawn["track"].clone();
+    let exported = cmd_motion_export_track(
+        s,
+        &json!({"character":character,"track":track,"duration":duration,"amount":p["amount"].as_f64().unwrap_or(100.0)}),
+    )?;
+    let output = &exported["outputs"][0];
+    let file = output["file"].as_str().ok_or_else(|| invalid("The export wrote no clip"))?;
+    if output["validation"]["ok"] != json!(true) {
+        return Ok(json!({"ok":false,"placed":false,"character":character,"track":track,"file":file,"validation":output["validation"]}));
+    }
+    let mut place = json!({"id":clip,"path":file,"start":p["start"].as_f64().unwrap_or(0.0),"duration":duration,"character":character,"track":track});
+    if let Some(rect) = p.get("rect") {
+        place["rect"] = rect.clone();
+    }
+    let placed = crate::video_target::cmd_video_place_track(s, &place)?;
+    Ok(json!({"ok":true,"placed":true,"character":character,"track":track,"file":file,"validation":output["validation"],"placement":placed}))
 }
 
 #[cfg(test)]

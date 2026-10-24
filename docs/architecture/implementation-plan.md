@@ -124,3 +124,39 @@ Run these gates in order. Update this checklist with commit SHAs and evidence as
 The current checkout has existing staged/unstaged changes in UI lint, image prompt, index and stylesheet, plus untracked design material. Preserve them. Implementation starts from a committed baseline in a named project-local worktree per AGENTS.md, declares file ownership and coordinates overlapping files before edits. Implementation changes are isolated in the named worktree; the canonical planning document remains at this visible project path.
 
 Progress reports name the completed behavior, commit, checks and remaining blockers. Neither an old checkbox, an output filename, a green panel nor a saved plan counts as implementation completion.
+
+## Combined preview — 2026-10-24
+
+Applied Claude's committed lyrics change `cfabfb7b02856ce08716746cb0aee7f8881a72ac` from `feature/lyrics-design-timeline` to this implementation worktree: exact `words.js` and marked Words CSS block, preserving shared styles. Integration is currently uncommitted; no PR exists.
+
+The rebuilt task-owned preview runs in workspace 17 on bridge 19963 with Hey Ho Little Fish opened from project history. Six lyric sections load; frontend errors and unconfigured diagnostics are empty. Parts is hidden in this view while its component remains in telemetry. `combined-lyrics.png` records the actual app and existing video preview. Visible lyric lines are clipped at the current time-to-height scale: this is an outstanding layout issue, not a passed visual gate.
+
+Missing-state repair now preserves independent engine errors. New Chat now acknowledges its applied engine revision; the live UI and engine both reported revision 2 after the operation. Shared controls passed at widths 700, 941 and 1261 before lyrics integration. The combined build passes workspace compilation, UI handler tests and lint ratchet; strict style-size acceptance remains unmet. ASCII pets now use the same configured rails as sprites and reject zero-width slots. New SVG art remains inactive until gates pass.
+
+### Follow-up evidence
+
+Checkpoint `118f5a7` includes the combined lyrics change and previous contract repairs; normal commit hooks passed. Subsequent work gives lyrics, stage and film-roll panels configured shared headers/rails, reports missing headers as red, removes the 64-state reporting cap (the real song has 279 states), and normalizes the scrubber default to its actual bounded value. `check-lyrics-layout.py` exercised 700/941/1261px with the drawer open and closed: all 12 lyric rows fit, all three rails exist, Parts remains hidden and registered, and all 279 state records are reported without truncation. Screenshots `lyrics-*-open.png` and `lyrics-*-closed.png` show the wide pinned layout and narrow stacked layout. This supersedes the earlier clipped-row finding. New SVG artwork remains inactive; style-size acceptance and remaining architecture verification are still open.
+
+### Companion registration and field consolidation
+
+Checkpoint `4b53c42` passed normal hooks. Follow-up work routes pet containers, sprite holders/images and the companion-state list through the shared element constructor; configured sprite dimensions fit the existing 28px rail slot. Scrolling invalidates rail geometry; zero-size and partially offscreen slots are rejected in regression tests. Duplicate motion slider rules were consolidated without changing the effective properties. Lyrics font/colour/background fields and Save now have stable configured IDs and shared styling; live records expose their indices, config IDs and theme values. Pets remain disabled while the broader style gate is incomplete.
+
+## Scope correction — UI reserved for Claude
+
+Jesse explicitly instructed Codex to continue the refactor and leave the UI alone. From this point Codex changes only Rust registry/CLI/TUI plumbing, its tests and handoff documentation. Do not edit `apps/magicstudio-shell/ui`, rebuild/restart the preview or apply the pending lyric-tag polish. Prior uncommitted stylesheet cleanup and inactive SVG assets remain preserved in this isolated worktree, outside main; they are not part of the backend checkpoint.
+
+Backend follow-up: configuration validation now runs during loading for both CLI and TUI; both consumers resolve aliases through one `PanelReport::component` method. Reports retain Studio/project identity, diagnose malformed observations, reject explicitly stale/not-ready observations and detect count mismatches as incomplete. TUI cache equality includes these records instead of only revision/availability. No screen layout, style or UI behavior was edited for this change.
+
+## Final functional acceptance — shared refactor and two pets
+
+Jesse's latest instruction is to complete the partially implemented refactor and pets while preserving Claude's page design. The pending mechanical stylesheet cleanup was retained: no pixel or hex literals remain outside root tokens; obsolete panel selectors were removed. Live computed-style comparisons covered 1,985 lyrics DOM nodes and 2,156 animation DOM nodes across 22 properties. No displayed component changed; only the deliberately hidden retired part bar lost unused properties. Selector count is 666 versus the original 673 target. CSS/JS source-line targets remain exceeded (1,042/4,524 versus 911/4,227); these measurements must remain visible in delivery and must not be described as met.
+
+The manifest now activates the original honey dog and orange cat, with ten decoded SVG poses. Default-on respects explicit opt-out. Live acceptance proves TUI attention and clearing, actual engine failure and recovery, missing-state red detection, most-recent command tracking, disable/re-enable, separate idle homes, and positions within measured configured slots. Both pets fit a shared slot at 700/941/1261 pixels. Regression coverage additionally proves reduced-motion cancellation, stale project events and errors beyond the first 64 states. `mc panels --check` exits 0 and full indexed inspection reports 295 unique components with finite positions in the live fixture.
+
+Evidence: `live-pets-results.json`, `pet-layout-results.json`, `complete-components.json`, `final-panel-report.json`, `pets-idle-homes.png`, `pets-missing-state-red.png`, `pets-tui-attention.png`, and `pets-700.png`, all in this project's `docs/architecture/evidence/`. Tests use a clearly identified disposable project fixture; no song content or authored animation is fabricated or modified. Existing fish-and-bee motion engines are unchanged by this final activation.
+
+Remaining delivery work at this checkpoint: normal commit hooks, independent final review, and scoped PR. No merge is authorized. The TUI recipient has not been supplied; the durable contract and committed code are the handoff artifact.
+
+### Independent final review
+
+The executing-plans final reviewer found two material registry defects: `submitted` jobs were incorrectly reported ready and their later status polls lacked an initiating component; attention could also reassign an old failed record to a new project. Both are repaired in the common registry. Job IDs now correlate status observations to their initiating component/request, including independent CLI polling; replacement-job stale completions are rejected. New-project attention goes through the existing registration reset and clears old context/receipt. Regression tests failed before these repairs and pass after them. No panel design or engine implementation changed.

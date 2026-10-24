@@ -3,17 +3,18 @@
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
  const action=acFeedback.action;
- const companion=command==='engine_command'?window.magicCompanions?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ const companion=command==='engine_command'?window.uiRegistry?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ if(companion)window.uiRegistry?.event({...companion,phase:"start"});
  acFeedback.pending++;await acFeedback.report();
  if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id||params.params?._request_id||companion?.request}};}
  if(command==='project_create'||command==='project_open'){params={...params,request:params?.request??action?.request_id??null,control:params?.control??action?.control??null};}
  acFeedback.report(null,null,{stage:'handler_dispatch',control:action?.control||null,request_id:action?.request_id||null,command:params?.id||command});
  try{
   const result=await nativeInvoke(command,params);acFeedback.last={transport:command,id:params?.id||null,status:'success'};
-  if(companion)window.magicCompanions?.event({...companion,phase:'success',result});
+  if(companion)window.uiRegistry?.event({...companion,phase:'success',result});
   if(result?._ui_engine_revision) acFeedback.pendingRevision=result._ui_engine_revision;
   return result;
- }catch(error){if(companion)window.magicCompanions?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
+ }catch(error){if(companion)window.uiRegistry?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
  finally{acFeedback.pending--;await acFeedback.report();}
 }
 const $ = (id) => document.getElementById(id);
@@ -99,28 +100,24 @@ function updateMagicSelection() {
 }
 
 function renderMagicAssetCatalog() {
-  // Animation and Design fill this pane themselves (parts; effects).
-  if (state.view === 'animation' || state.view === 'design') return;
-  const slot = $('magic-parts-slot');
-  if (!slot) return;
-  const assets = state.data?.assets?.assets || [];
-  const draft = imageDrafts?.get(state.project);
-  slot.replaceChildren(el('div', { class: 'group-label' }, `Project assets (${assets.length})`));
-  if (!assets.length) { slot.append(el('p', { class: 'why' }, 'Project parts and generated candidates will appear here.')); return; }
-  slot.append(el('div', { class: 'magic-assets-grid' }, assets.map((asset) =>
-    magicAssetTile(asset, { candidate: draft?.result?.asset_id === asset.id, onclick: () => openAnimation(asset.id) }))));
+  const pane=$('magic-parts-pane');if(pane)pane.hidden=state.view!=='animation';
+  if(state.view!=='animation')$('magic-parts-slot')?.replaceChildren();
 }
 
-// One compact tile per project asset: the Project/Studio catalog and the Animation Assets tab.
-function magicAssetTile(asset, { active = false, candidate = false, onclick }) {
+function projectAssetGrid(assets,{active=null,prefix='magic-asset'}={}) {
+  return el('div',{class:'magic-assets-grid'},assets.map(asset=>magicAssetTile(asset,{active:asset.id===active,prefix,onclick:()=>openAnimation(asset.id)})));
+}
+
+function magicAssetTile(asset, { active = false, candidate = false, prefix='magic-asset', onclick }) {
   const name = asset.name || asset.id;
   const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
     ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
     : el('span', { class: 'magic-asset-placeholder' }, 'PART');
-  return el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `magic-asset-${asset.id}`,
-    title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · show its parts`, onclick },
+  const tile=el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `${prefix}-${asset.id}`,draggable:'true',
+    title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · drag onto a storyboard page or click to animate`, onclick },
     image, el('span', { class: 'magic-asset-name' }, name),
     candidate ? el('span', { class: 'magic-asset-badge' }, 'Candidate') : el('span', { class: 'magic-asset-id' }, asset.id));
+  tile.addEventListener('dragstart',event=>{event.dataTransfer.setData('application/x-magicstudio-asset',asset.id);event.dataTransfer.setData('text/plain',asset.id);event.dataTransfer.effectAllowed='copy';});return tile;
 }
 
 // ---- Unified footer: workflow stages · what the active tab shows · save and studio state ----
@@ -225,16 +222,28 @@ async function loadComponents() {
   Object.assign(uiConfig, await response.json());
   for (const [id, entry] of Object.entries(uiConfig.elements)) {
     const node = document.getElementById(id);
-    if (node) applyEntry(node, entry);
+    if (node) { applyEntry(node, entry, id); node.setAttribute("data-box-id", id); window.companionBoxes?.register(id, { project: state.project, ...entry }); }
   }
+  for (const node of document.body.querySelectorAll("*")) window.uiRegistry?.registerElement(node);
   return uiConfig;
 }
 
-function applyEntry(node, entry) {
+function applyEntry(node, entry, id = node.id) {
   if (!entry) return node;
+  node.dataset.uiConfig = id;
   if (entry.component) node.className = [...new Set(`${node.className || ''} ${entry.component}`.trim().split(/\s+/))].join(' ');
   if (entry.look) node.dataset.look = entry.look;
   if (entry.density) node.dataset.density = entry.density;
+  if (entry.component === 'panel' && entry.rail && !node.querySelector('[data-companion-slot]')) {
+    const head = node.querySelector('.panel-head');
+    if (!head) { node.dataset.contractError = 'Panel has no shared header'; return node; }
+    delete node.dataset.contractError;
+    node.setAttribute('data-companion-rail', entry.rail);
+    const slot = document.createElement('span');
+    slot.className = 'panel-rail'; slot.setAttribute('data-companion-slot', entry.rail);
+    slot.setAttribute('aria-hidden', 'true'); head.append(slot);
+    window.uiRegistry?.registerElement(slot);
+  }
   return node;
 }
 
@@ -242,6 +251,7 @@ function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   let box = null;
   for (const [k, v] of Object.entries(attrs)) {
+    if(v===null||v===undefined)continue;
     if (k === "class") node.className = v;
     else if (k === "html") node.innerHTML = v;
     else if (k === "box") box = v;
@@ -252,11 +262,12 @@ function el(tag, attrs = {}, ...children) {
   const project = typeof state === "undefined" ? null : state.project;
   const boxId = box || attrs.id || null;
   const entry = boxId ? uiConfig.elements[boxId] : null;
-  if (entry) applyEntry(node, entry);
+  if (entry) applyEntry(node, entry, boxId);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
     if (window.companionBoxes) window.companionBoxes.register(boxId, { project, label: entry?.label || null, look: entry?.look || null, density: entry?.density || null });
   }
+  window.uiRegistry?.registerElement(node);
   return node;
 }
 
@@ -386,10 +397,10 @@ function lyricsBody(lyrics, doc, liner, songPath) {
     model.canonical && lyrics.artist_note ? el("blockquote", { class: "artist-note" }, el("p", {}, lyrics.artist_note), el("cite", {}, lyrics.artist || "The artist")) : null,
     el("div", { class: "lyric-actions" },
       original?.exists
-        ? el("button", { id: "song-open-original", class: "ghost", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
+        ? el("button", { id: "song-open-original", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
         : [el("span", { class: "not-linked" }, original ? `Original not found: ${name(original.path)}` : "Original not linked"),
            el("button", { id: "song-attach-original", class: "ghost", onclick: attachOriginal }, "Attach original…")],
-      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", class: "ghost", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
+      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
     lyricSheet(model),
     el("div", { class: "group-label" }, "Liner notes"),
     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None attached yet."),
@@ -412,10 +423,10 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
         ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
         : [el("span", {}, line.text)]))))));
   const title = model.canonical ? "Lyrics" : "Transcript";
-  const pane = el("section", { class: "magic-pane magic-reader", id: "magic-reader", "aria-label": `${title}, read only` },
-    el("div", { class: "panel-head pane" }, el("span", {}, title),
+  const pane = el("section", { id: "magic-reader", "aria-label": `${title}, read only` },
+    el("div", { id: "magic-reader-head" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
-      el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
+      el("button", { id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
   $("magic-reader")?.remove();
   $("magic-workstation")?.append(pane);
@@ -446,7 +457,11 @@ function block(id, icon, title, meta, done, body, blockState, action) {
   const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", id);
   dot.title = done ? "Ready" : "Needs work";
   const head = el("button", { class: "panel-head", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
-      onclick: () => { state.open = open ? null : id; renderBlocks(); } },
+      onclick: () => {
+        const narrow = getComputedStyle(document.documentElement).getPropertyValue("--workspace-narrow").trim() === "1";
+        if (narrow && agent.open) { agentToggle(false); state.open = id; } else state.open = open ? null : id;
+        renderBlocks();
+      } },
     dot,
     el("span", { class: "ico", html: icon }),
     el("span", { class: "title" }, title),
@@ -454,12 +469,10 @@ function block(id, icon, title, meta, done, body, blockState, action) {
     el("span", { class: "chev", html: ICONS.chev }));
   // The header row carries the slot. It sits on the block's own edge, outside
   // the clickable head button, so a companion never covers a control.
-  const slot = el("span", { class: "companion-slot", "data-companion-slot": `block-${id}`, "data-companion-target": id, "data-box-id": id });
   // Readiness informs a prerequisite status. An empty block is not an error.
   if (window.companionBoxes) window.companionBoxes.readiness(id, { state: blockState, reason: done ? "Ready" : "Needs work" });
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
+  return el("section", { box: id, class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
     action ? el("div", { class: "block-headrow" }, head, action) : head,
-    slot,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 
@@ -525,33 +538,19 @@ function renderBlocks() {
      songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
        ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
      songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
-       [doc?.words?.length ? el("button", { id: "song-open-transcript", class: "ghost", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
+       [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
         el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
     songState, audio ? songPlayButton(audio.path) : null));
 
   const assets=state.data?.assets?.assets||[];
-  const cards=assets.map(a=>{
-    const picture=/\.(png|jpe?g|webp|gif)$/i.test(a.path||'')?el('img',{src:convertFileSrc(a.path),alt:a.name,draggable:'false'}):el('span',{html:ICONS.animate});
-    const card=el('button',{id:`asset-${a.id}`,class:'object',draggable:'true',title:`${a.name} · drag onto a storyboard page or click to animate`,'aria-label':a.name,
-      onclick:()=>openAnimation(a.id)},el('div',{class:'stack'},picture),el('span',{class:'label'},a.name));
-    card.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/x-magicstudio-asset',a.id);e.dataTransfer.setData('text/plain',a.id);e.dataTransfer.effectAllowed='copy';});return card;
-  });
-  const animateState = observed("animate")?.state || "unknown";
-  const animateBody = assets.length > 0
-    ? [el('div',{class:'group-label'},'Objects'),el('div',{class:'objects'},cards)]
-    : [el('div',{class:'group-label'},'Objects'),
-       el('button',{id:'asset-import-animate',class:'start',onclick:importProjectAsset},'Import artwork'),
-       el('p',{class:'why'},'Drag an object onto a storyboard page once imported.')];
-  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),animateBody, animateState));
   const assetsState = observed("assets")?.state || "unknown";
   const assetFiles = (s.asset_files||[]);
-  const assetsBody = assetFiles.length > 0
-    ? [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
-       el('p',{class:'why'},'Drag a character above onto a storyboard page.'),
-       el('details',{},el('summary',{},'Project files'),...assetFiles.map(fileButton))]
-    : [el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),
-       el('p',{class:'why'},'Imported artwork and characters appear here. Drag one onto a storyboard page to place it.')];
-  box.append(block('assets',ICONS.animate,'Assets',`${assetFiles.length} files`,ready("assets"),assetsBody, assetsState));
+  const assetsBody=[el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),projectAssetGrid(assets,{prefix:'asset'}),
+    el('p',{class:'why'},'Click an asset to animate it, or drag it onto a storyboard page.'),
+    assetFiles.length?el('details',{},el('summary',{},`Project files (${assetFiles.length})`),...assetFiles.map(fileButton)):null];
+  box.append(block('assets',ICONS.animate,'Assets',`${assets.length} assets`,ready("assets"),assetsBody, assetsState));
+  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),
+    el('p',{class:'why'},'Choose an asset above to animate it.'),observed('animate')?.state||'unknown'));
   if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
   renderMagicAssetCatalog();
   if (state.view === 'design' && typeof wordsStatusRefresh === 'function') wordsStatusRefresh();
@@ -679,7 +678,7 @@ async function setView(view, action) {
   if (typeof animationPause === "function") animationPause();
   if (view !== 'animation' && typeof blenderDispose === 'function') blenderDispose();
   state.view = view;
-  if (view !== 'animation') renderMagicAssetCatalog();
+  renderMagicAssetCatalog();
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
     t.classList.toggle("active", on);

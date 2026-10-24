@@ -1,0 +1,84 @@
+<template>
+<!-- Derived by `mc exec words.compose` from the line designs in design/words.json; regenerate rather than hand-edit.
+     Words are the artist's canonical text; times come from the video's lyric track. A HyperFrames scene file:
+     everything lives inside <template>, and the host, this root and the timeline share the composition id. -->
+<style>
+  #root { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .line { position: absolute; inset: 0; opacity: 0; }
+  .it { position: absolute; white-space: nowrap; line-height: 1.05; }
+  .it > span { display: inline-block; white-space: pre; transform-origin: 50% 100%; }
+  .plain { position: absolute; left: 6%; right: 6%; bottom: 10%; display: flex; flex-wrap: wrap; justify-content: center; gap: 0 .3em; line-height: 1.1; }
+  svg { position: absolute; overflow: visible; }
+</style>
+<div id="root" data-composition-id="__COMPOSITION_ID__" data-width="__WIDTH__" data-height="__HEIGHT__" data-duration="__DURATION__" data-words-design data-layout-allow-overlap></div>
+<script>
+  (() => {
+    // The scene's own root inside its host (both carry the composition id); never the whole document.
+    const root = document.querySelector('[data-composition-id="__COMPOSITION_ID__"][data-words-design], [data-composition-id="__COMPOSITION_ID__"] [data-words-design]');
+    const DATA = __DATA__;
+    const family = (font) => font === "serif" ? "serif" : font === "sans" ? "sans-serif" : (DATA.font ? `${JSON.stringify(DATA.font)}, sans-serif` : "sans-serif");
+    const tl = gsap.timeline({ paused: true });
+    // fromTo everywhere: the host re-seeks the scene each time it shows.
+    const at = (target, from, to, time) => tl.fromTo(target, from, { ...to, immediateRender: false }, Math.max(0, time));
+    for (const line of DATA.lines) {
+      const box = document.createElement("div");
+      box.className = "line";
+      root.appendChild(box);
+      // A line fades in just before its first word and out when the next line arrives.
+      at(box, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, line.start - 0.4);
+      at(box, { opacity: 1 }, { opacity: 0, duration: 0.3, ease: "power1.in" }, Math.max(line.start, line.end - 0.3));
+      if (line.plain) {
+        const row = document.createElement("div");
+        row.className = "plain";
+        Object.assign(row.style, { fontFamily: family("song"), fontSize: `${DATA.size}px`, color: DATA.color, fontWeight: "700" });
+        row.textContent = line.text;
+        box.appendChild(row);
+        continue;
+      }
+      for (const d of line.draws) {
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", d.view_box);
+        Object.assign(svg.style, { left: `${d.x}px`, top: `${d.y}px`, width: `${d.w}px`, height: `${d.h}px` });
+        for (const p of d.paths) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          for (const [k, v] of Object.entries({ d: p.d, pathLength: "1", fill: "none", stroke: p.stroke, "stroke-width": p.width, "stroke-linecap": "round", "stroke-linejoin": "round", "stroke-dasharray": "1", "stroke-dashoffset": "1" })) path.setAttribute(k, v);
+          svg.appendChild(path);
+          at(path, { attr: { "stroke-dashoffset": 1 } }, { attr: { "stroke-dashoffset": 0 }, duration: Math.max(0.01, p.to - p.from), ease: "sine.inOut" }, line.start + p.from);
+        }
+        box.appendChild(svg);
+      }
+      for (const it of line.items) {
+        const el = document.createElement("div");
+        el.className = "it";
+        Object.assign(el.style, { left: `${it.x}px`, top: `${it.y}px`, fontSize: `${it.size}px`, color: it.color, fontFamily: family(it.font),
+          fontWeight: String(it.weight), fontStyle: it.italic ? "italic" : "normal", rotate: `${it.rotate}deg` });
+        if (it.outline) Object.assign(el.style, { webkitTextStroke: `${it.size * 0.07}px ${it.outline}`, paintOrder: "stroke fill" });
+        const a = it.accent;
+        if (it.motion === "sleep") {
+          [...it.text].forEach((ch, k) => {
+            const s = document.createElement("span"); s.textContent = ch; el.appendChild(s);
+            at(s, { y: 0, rotation: 0 }, { y: 7, rotation: -0.6, duration: 0.8, ease: "sine.inOut" }, a + k * 0.035);
+          });
+        } else {
+          const s = document.createElement("span"); s.textContent = it.text; el.appendChild(s);
+          const rest = { x: 0, y: 0, scale: 1, scaleY: 1 };
+          const steps = {
+            settle: [[{ y: 6, scaleY: 0.965, duration: 0.65, ease: "power3.out" }, 0]],
+            fall: [[{ y: 20, duration: 0.65, ease: "power3.out" }, 0]],
+            pop: [[{ scale: 1.12, duration: 0.13, ease: "power1.out" }, 0], [{ scale: 1, duration: 0.3, ease: "power1.in" }, 0.13]],
+            rise: [[{ x: 12, y: -26, duration: 0.375, ease: "power1.out" }, 0], [{ x: 24, y: -18, duration: 0.375, ease: "power1.in" }, 0.375]],
+            east: [[{ x: 18, duration: 0.65, ease: "power3.out" }, 0]],
+            west: [[{ x: -18, duration: 0.65, ease: "power3.out" }, 0]],
+            loop: [[{ x: 12, y: -7, duration: 0.19 }, 0], [{ x: 0, y: -14, duration: 0.19 }, 0.19], [{ x: -12, y: -7, duration: 0.19 }, 0.38], [{ x: 0, y: 0, duration: 0.19 }, 0.57]],
+          }[it.motion] || [];
+          let state = rest;
+          for (const [to, offset] of steps) { at(s, { ...state }, to, a + offset); state = { ...state, ...Object.fromEntries(Object.entries(to).filter(([k]) => k in rest)) }; }
+        }
+        box.appendChild(el);
+      }
+    }
+    window.__timelines = window.__timelines || {};
+    window.__timelines["__COMPOSITION_ID__"] = tl;
+  })();
+</script>
+</template>

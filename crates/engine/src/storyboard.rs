@@ -635,7 +635,8 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
     // The Old MacDonald template's palette: cream page, rust kickers, slate bars.
     let swatch = |name: &str, rgb: [u8; 3]| -> Result<PathBuf> {
         let p = theme.join(format!("{name}.png"));
-        image::RgbaImage::from_pixel(4, 4, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).save(&p)?;
+        // pdfcraft-cli 0.9 refuses tiny images ("the image is too small"); a solid swatch scales freely.
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).save(&p)?;
         Ok(p)
     };
     let card_fill = swatch("card", [0xFF, 0xF8, 0xEC])?;
@@ -1029,7 +1030,10 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
     if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
         if let Ok(board)=serde_json::from_str::<Value>(&text) {
             let page=board["first_scene_page"].as_u64().unwrap_or(1)+n as u64-1;
-            if let Some(group)=board["page_plan"].as_array().and_then(|pages|pages.iter().filter_map(|p|p.get("group")).find(|g|g["id"]==format!("scene-{n}"))) {
+            // The board's spans describe the scenes it was built from. After the song's scenes change
+            // (new captions), a stale board must not hand its old spans back to the rebuild.
+            let same_scenes=board["scene_count"].as_u64()==Some(list.len() as u64);
+            if let Some(group)=board["page_plan"].as_array().filter(|_|same_scenes).and_then(|pages|pages.iter().filter_map(|p|p.get("group")).find(|g|g["id"]==format!("scene-{n}"))) {
                 result["start"]=group["span_start"].clone();result["end"]=group["span_end"].clone();result["kind"]=group["kind"].clone();
                 result["panels"]=group["panels"].clone();result["section_label"]=group["section_label"].clone();
                 if let Some(label)=group["section_label"].as_str(){result["title"]=json!(format!("{label} / Scene {n:02}"));}

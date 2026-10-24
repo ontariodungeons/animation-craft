@@ -42,7 +42,11 @@ def place(project,request):
     tag=f'<video id="{key}" class="clip" src="{html.escape(str(target.relative_to(root)))}" data-start="{start}" data-duration="{duration}" data-playback-rate="{playback_rate}" data-track-index="{track}" data-magicstudio-scene="{request.get("scene", "")}" data-magicstudio-character="{character}" data-magicstudio-track="{motion_track}" muted playsinline style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;object-fit:contain;z-index:10"></video>'
     root_tag=re.search(r'<[^>]+\bdata-composition-id\s*=\s*["\'][^"\']+["\'][^>]*>',text)
     backup=root/'.magicstudio-history';backup.mkdir(exist_ok=True);stamp=time.time_ns();shutil.copy2(entry,backup/f'index-{stamp}.html')
-    text=text[:root_tag.end()]+'\n'+tag+text[root_tag.end():]
+    # Stack in placement order: a new placement goes after the last placed track, so it draws on top
+    # of everything placed before it (equal z-index; later in the page wins).
+    placed=list(re.finditer(r'<video\b[^>]*\bdata-magicstudio-scene=[^>]*>\s*</video>',text))
+    at=placed[-1].end() if placed else root_tag.end()
+    text=text[:at]+'\n'+tag+text[at:]
     entry.write_text(text)
     record=dict(request,ok=True,media=str(target),track_index=track,backup=str(backup/f'index-{stamp}.html'))
     if generation is not None: record['source_generation']=generation

@@ -77,16 +77,19 @@ function rules(source) {
     const selector = text.slice(i, open).trim();
     let depth = 1;
     let k = open + 1;
-    while (depth) {
+    while (depth && k < text.length) {
       if (text[k] === '{') depth++;
       else if (text[k] === '}') depth--;
       k++;
     }
+    assert.equal(depth, 0, `Unclosed CSS block: ${selector.slice(0,80)}`);
     found.push({ selector, body: text.slice(open + 1, k - 1) });
     i = k;
   }
   return found;
 }
+
+assert.throws(() => rules('broken { color: red;'), /Unclosed CSS block/);
 
 // Size metrics are reported, not judged: a file may grow while its violations
 // shrink. Only the violation counts gate the ratchet.

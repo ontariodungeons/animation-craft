@@ -42,21 +42,28 @@ fn label(section: &str) -> String {
     if number.is_empty() { name } else { format!("{name} {number}") }
 }
 
-/// The sheet as printed: each printed section occurrence with its lines, and the next matching
-/// sung line's timing (its own id kept) attached when the alignment covers it.
+/// The sheet in sung order: each section occurrence with its printed lines, and the next matching
+/// sung line's timing (its own id kept) attached when the alignment covers it. `structure_as_sung`
+/// (sections, or `{section, lines: [ids]}` for a partial repeat) gives the order the artist sings
+/// when it differs from `structure_as_printed`; the printed text is never changed.
 fn sections(sheet: &Value, timed: Option<&Value>) -> Vec<Value> {
     let lines = sheet["lines"].as_array().cloned().unwrap_or_default();
-    let mut order: Vec<String> = sheet["structure_as_printed"].as_array().into_iter().flatten()
-        .filter_map(|s| s.as_str().map(str::to_owned)).collect();
+    let structure = if sheet["structure_as_sung"].is_array() { &sheet["structure_as_sung"] } else { &sheet["structure_as_printed"] };
+    let mut order: Vec<(String, Option<Vec<Value>>)> = structure.as_array().into_iter().flatten()
+        .filter_map(|s| match s.as_str() {
+            Some(name) => Some((name.to_owned(), None)),
+            None => Some((s["section"].as_str()?.to_owned(), s["lines"].as_array().cloned())),
+        }).collect();
     if order.is_empty() {
-        for l in &lines { let s = l["section"].as_str().unwrap_or("lyrics").to_owned(); if order.last() != Some(&s) { order.push(s); } }
+        for l in &lines { let s = l["section"].as_str().unwrap_or("lyrics").to_owned(); if order.last().map(|o| &o.0) != Some(&s) { order.push((s, None)); } }
     }
     let mut sung: Vec<Value> = timed.and_then(|t| t["lines"].as_array()).cloned().unwrap_or_default();
     let mut seen = std::collections::HashMap::<String, usize>::new();
-    order.iter().map(|section| {
+    order.iter().map(|(section, only)| {
         let count = seen.entry(section.clone()).or_default();
         *count += 1;
-        let out: Vec<Value> = lines.iter().filter(|l| l["section"].as_str().unwrap_or("lyrics") == section).map(|line| {
+        let out: Vec<Value> = lines.iter().filter(|l| l["section"].as_str().unwrap_or("lyrics") == section)
+            .filter(|l| only.as_ref().is_none_or(|ids| ids.contains(&l["id"]))).map(|line| {
             let text = line["text"].as_str().unwrap_or_default();
             let found = sung.iter().position(|s| s["section"] == line["section"] && s["text"].as_str().is_some_and(|t| key(t) == key(text)));
             let cue = found.map(|i| sung.remove(i));
@@ -130,6 +137,18 @@ mod tests {
         assert_eq!(out[3]["lines"][0]["id"], "ch-l1");
         assert_eq!(out[0]["lines"][0]["text"], "Fish in the sea,");
         assert_eq!((out[0]["lines"][0]["start"].clone(), out[0]["lines"][0]["end"].clone()), (json!(1.0), json!(2.5)));
+    }
+
+    #[test]
+    fn sung_structure_adds_a_partial_repeat_without_changing_printed_text() {
+        let sheet: Value = serde_json::from_str(&SHEET.replace(r#""structure_as_printed""#,
+            r#""structure_as_sung":["verse_1","chorus","verse_2","chorus",{"section":"verse_1","lines":["v1-l1"]}],"structure_as_printed""#)).unwrap();
+        let out = sections(&sheet, None);
+        assert_eq!(out.len(), 5);
+        assert_eq!((out[4]["section"].as_str(), out[4]["occurrence"].as_u64()), (Some("verse_1"), Some(2)));
+        assert_eq!(out[4]["lines"].as_array().unwrap().len(), 1);
+        assert_eq!(out[4]["lines"][0]["text"], "Fish in the sea,");
+        assert_eq!(sheet["structure_as_printed"].as_array().unwrap().len(), 4);
     }
 
     #[test]

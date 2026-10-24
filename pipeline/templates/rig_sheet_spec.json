@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "name": "Magic Studio rig sheet",
+  "purpose": "One generated sheet holds the whole asset assembled plus each moving part on its own, so rig.from_sheet can cut the parts, place each one back where it sits on the assembled asset, and write a layered rig.",
+  "grid": "columns = ceil(sqrt(parts + 1)); rows = ceil((parts + 1) / columns); cell 1 (top-left) is the assembled asset, then the parts in the caller's order (back to front), left to right, top to bottom.",
+  "parts": "Each part is {id, description, parent (optional part id), pivot (optional [u, v] inside the part's bounds, 0..1)}. Without a pivot, the joint is where the part overlaps its parent on the assembled asset.",
+  "acceptance": [
+    "Assembled cell matches the reference",
+    "Every part at the same scale and orientation as on the assembled asset",
+    "Hidden areas where parts join are painted as rounded caps in the part's own material, never a cuff or edge",
+    "No text, labels, grid lines or shadows"
+  ],
+  "promptTemplate": "Draw ONE rig sheet for cut-out animation of the attached asset. Use an invisible grid of {columns} columns by {rows} rows of equal square cells, and leave at least 64 px of clear space inside every cell. Cell 1 (top-left) shows the complete assembled asset exactly as in the reference: same pose, proportions, colours, materials and texture. The other cells, left to right then top to bottom, each show ONE separate part of that same asset, in this order: {cells}. Draw every part at exactly the same scale and the same orientation as it appears on the assembled asset in cell 1: do not rotate, mirror, enlarge or shrink a part to fill its cell. Paint each part complete, including the areas normally hidden where it overlaps or joins another part: continue it at least 64 px past the visible join as a rounded cap in the part's own material and colour (a sleeve continues into a rounded shoulder, a neck continues down under the collar, a tail or fin continues into its base), so the part can turn without leaving a hole. Never end a part at a join with a cuff, hem, lining, flat cut, outline or gap. A part must not contain pixels of any other part. Leave unused cells empty. Transparent background; if transparency is unavailable use one uniform flat background colour that does not appear in the asset. No text, labels, numbers, grid lines, borders, ground plane or cast shadows."
+}
