@@ -140,3 +140,9 @@ Checkpoint `118f5a7` includes the combined lyrics change and previous contract r
 ### Companion registration and field consolidation
 
 Checkpoint `4b53c42` passed normal hooks. Follow-up work routes pet containers, sprite holders/images and the companion-state list through the shared element constructor; configured sprite dimensions fit the existing 28px rail slot. Scrolling invalidates rail geometry; zero-size and partially offscreen slots are rejected in regression tests. Duplicate motion slider rules were consolidated without changing the effective properties. Lyrics font/colour/background fields and Save now have stable configured IDs and shared styling; live records expose their indices, config IDs and theme values. Pets remain disabled while the broader style gate is incomplete.
+
+## Scope correction — UI reserved for Claude
+
+Jesse explicitly instructed Codex to continue the refactor and leave the UI alone. From this point Codex changes only Rust registry/CLI/TUI plumbing, its tests and handoff documentation. Do not edit `apps/magicstudio-shell/ui`, rebuild/restart the preview or apply the pending lyric-tag polish. Prior uncommitted stylesheet cleanup and inactive SVG assets remain preserved in this isolated worktree, outside main; they are not part of the backend checkpoint.
+
+Backend follow-up: configuration validation now runs during loading for both CLI and TUI; both consumers resolve aliases through one `PanelReport::component` method. Reports retain Studio/project identity, diagnose malformed observations, reject explicitly stale/not-ready observations and detect count mismatches as incomplete. TUI cache equality includes these records instead of only revision/availability. No screen layout, style or UI behavior was edited for this change.

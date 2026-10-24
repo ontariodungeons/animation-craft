@@ -138,7 +138,9 @@ impl Config {
 
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        serde_json::from_str(&text).map_err(|e| e.to_string())
+        let config: Self = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        config.validate()?;
+        Ok(config)
     }
 }
 
@@ -170,6 +172,12 @@ pub struct PanelReport {
     #[serde(default)]
     pub revision: u64,
     #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub studio: Value,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
     pub available: bool,
     #[serde(default)]
     pub items: Vec<Panel>,
@@ -186,11 +194,28 @@ pub struct PanelReport {
 impl PanelReport {
     pub fn from_feedback(feedback: &Value) -> Self {
         let panels = feedback.get("panels").cloned().unwrap_or(Value::Null);
-        if panels.is_null() {
-            return PanelReport { available: false, ..Default::default() };
+        let mut report: Self = match serde_json::from_value(panels.clone()) {
+            Ok(report) => report,
+            Err(error) => Self { error: Some(if panels.is_null() { "No panel observation".into() } else { format!("Invalid panel observation: {error}") }), ..Default::default() },
+        };
+        report.project = feedback["project"].as_str().map(str::to_owned);
+        report.studio = feedback["identity"].clone();
+        if feedback["ui_ready"] == false || feedback["frontend_report_age_ms"].as_u64().is_some_and(|age| age > 5000) {
+            report.available = false;
+            report.error = Some("Studio observation is stale or not ready".into());
         }
-        serde_json::from_value(panels).unwrap_or_default()
+        for (key, actual) in [("total_items", report.items.len()), ("total_unconfigured", report.unconfigured.len())] {
+            if panels[key].as_u64().is_some_and(|total| total != actual as u64) { report.truncated = true; }
+        }
+        report
     }
+    /// Aliases in CLI and TUI resolve through the same canonical state record.
+    pub fn component<'a>(&'a self, config: &Config, id: &str) -> Option<&'a Panel> {
+        if !self.available { return None; }
+        let target = config.elements.get(id).and_then(|entry| entry.target.as_deref()).unwrap_or(id);
+        self.items.iter().find(|panel| panel.id == target)
+    }
+
     pub fn worst(&self) -> Signal {
         self.items.iter().map(|p| p.signal).fold(Signal::Idle, |acc, s| {
             if (s as u8) > (acc as u8) { s } else { acc }

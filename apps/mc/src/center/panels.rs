@@ -1,6 +1,6 @@
 //! Panel rows from the on-disk UI config. A Studio fills signal and busy only.
 use super::*;
-use magicstudio_engine::panels::{Config, Panel, PanelReport, Reason};
+use magicstudio_engine::panels::{Config, PanelReport, Reason};
 
 pub(super) fn load_config() -> Result<Config, String> {
     let path = crate::panels::config_path();
@@ -10,7 +10,7 @@ pub(super) fn load_config() -> Result<Config, String> {
 /// Rebuild the cached lines only when the live revision or availability changes.
 pub(super) fn sync(c: &mut Center) {
     let report = PanelReport::from_feedback(&c.state["ui"]);
-    if c.last_panels_revision == Some(report.revision) && c.panel_report.available == report.available {
+    if c.last_panels_revision == Some(report.revision) && c.panel_report == report {
         return;
     }
     let (rows, detail) = built(c, &report);
@@ -24,16 +24,10 @@ fn built(c: &Center, report: &PanelReport) -> (Vec<Line<'static>>, Vec<Line<'sta
     if let Some(error) = &c.panel_config_error {
         return (vec![styled(format!("UI config unreadable: {error}"), RED)], Vec::new());
     }
-    let mut live: std::collections::BTreeMap<&str, &Panel> = std::collections::BTreeMap::new();
-    if report.available {
-        for item in &report.items {
-            live.insert(item.id.as_str(), item);
-        }
-    }
     let mut rows = vec![health_line(report)];
     for (id, entry) in &c.panel_config.elements {
         let label = entry.label.as_deref().filter(|text| !text.is_empty()).unwrap_or(id.as_str());
-        let (dot, color, busy) = match live.get(id.as_str()) {
+        let (dot, color, busy) = match report.component(&c.panel_config, id) {
             Some(item) => ("●", signal_color(item.signal), item.busy),
             None => ("·", MUTED, false),
         };
