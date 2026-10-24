@@ -61,6 +61,10 @@ blender-skills/
 !.agents/skills/layered-motion/
 !.agents/skills/magicstudio-shell-ui/
 !.agents/skills/storyboard/
+!.agents/skills/character-rigging/
+!.agents/skills/pose-library-design/
+!.agents/skills/image-to-animation/
+!.agents/skills/rust-egui-craft-ui/
 .github/skills/
 .claude/
 .opencode/
