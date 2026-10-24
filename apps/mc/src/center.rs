@@ -48,6 +48,8 @@ struct Center {
     selected: usize,
     editing: bool,
     state: Value,
+    github_health: Value,
+    github_health_receiver: Option<std::sync::mpsc::Receiver<Value>>,
     message: String,
     agent_gang: Value,
     agent_gang_at: Option<std::time::Instant>,
@@ -114,7 +116,7 @@ impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::load(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
+        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),github_health:crate::github_health::empty(),github_health_receiver:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::load(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
         match panels::load_config(){Ok(config)=>center.panel_config=config,Err(error)=>center.panel_config_error=Some(error),}
         center.scope=crate::scope::current()?.cloned();
         if let Some(scope)=&center.scope{
@@ -125,6 +127,7 @@ impl Center {
     }
     fn catalog(&mut self)->Value{if let Some(scope)=&self.scope{scope.catalog()}else{self.session.execute("project.catalog",json!({})).unwrap_or_else(|e|json!({"error":e.to_string()}))}}
     fn refresh(&mut self) {
+        self.poll_github_health();
         // No project is attached: the booth waits in the workshop for you to choose one.
         if self.session.project_path.is_none() { self.control_view=true; }
         let project=self.session.project_path.as_ref().map(|p|p.to_string_lossy().into_owned());
@@ -262,6 +265,25 @@ impl Center {
         panels::sync(self);
         if let Some(scope)=&self.scope{self.state=scope.redact(self.state.clone());}
 
+    }
+    fn refresh_github_health(&mut self) {
+        if self.scope.is_some() || self.github_health_receiver.is_some() { return; }
+        self.github_health["refreshing"] = json!(true);
+        let repo = crate::github_health::repo_root(&std::env::current_dir().unwrap_or_default());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.github_health_receiver = Some(receiver);
+        std::thread::spawn(move || { let _ = sender.send(crate::github_health::inspect(&repo)); });
+    }
+    fn poll_github_health(&mut self) {
+        let Some(receiver) = &self.github_health_receiver else { return; };
+        match receiver.try_recv() {
+            Ok(value) => { self.github_health = value; self.github_health_receiver = None; }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.github_health = json!({"schema":"mc.github-health/1","ok":false,"observed_at_ms":null,"errors":["GitHub observation worker disconnected"],"pull_requests":null});
+                self.github_health_receiver = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
     }
     fn poll_studios(&mut self){
         if self.scope.is_some(){return;}
@@ -1770,15 +1792,53 @@ fn render_config(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_telemetry(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if area.width<118{
-  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
-  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_trend(f,c,p[5]);render_logs(f,c,p[6]);
+  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Length(14),Constraint::Length(16),Constraint::Min(9),Constraint::Length(10)]).split(area);
+  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_trend(f,c,p[5]);render_github_health(f,c,p[6]);render_logs(f,c,p[7]);
   return;
  }
  let p=Layout::vertical([Constraint::Min(12),Constraint::Length(16)]).split(area);
  let columns=Layout::horizontal([Constraint::Length(42),Constraint::Length(48),Constraint::Min(30)]).split(p[0]);
  render_host(f,c,columns[0]);render_known_apps(f,c,columns[1]);render_logs(f,c,columns[2]);
- let bottom=Layout::horizontal([Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20)]).split(p[1]);
- render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_trend(f,c,bottom[3]);render_agent_usage(f,c,bottom[4]);
+ let bottom=Layout::horizontal([Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(16),Constraint::Percentage(16)]).split(p[1]);
+ render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_trend(f,c,bottom[3]);render_github_health(f,c,bottom[4]);render_agent_usage(f,c,bottom[5]);
+}
+/// GITHUB HEALTH: what an agent did to the repository's GitHub state. Every line is a
+/// measured fact from `git` and `gh`; the worst problems come first.
+fn render_github_health(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ let health=&c.github_health;
+ if c.scope.is_some(){
+  lines.push(styled("GitHub status is unavailable in assigned project view.",MUTED));
+ } else if health["refreshing"]==true {
+  lines.push(styled("Refreshing GitHub status…",MUTED));
+ } else if health["observed_at_ms"].is_null(){
+  lines.push(styled("Press F8 to refresh GitHub status.",MUTED));
+ } else {
+  let row=|label:&str,value:String,tone:Color|Line::from(vec![Span::styled(format!("{label:<12}"),Style::default().fg(MUTED)),Span::styled(value,Style::default().fg(tone))]);
+  let value=|field:&str|health[field].as_str().map(str::to_owned).unwrap_or_else(||"unknown".into());
+  let count=|field:&str|health[field].as_u64().map(|n|n.to_string()).unwrap_or_else(||"unknown".into());
+  lines.push(row("Repository",value("repository"),DESK_FG));
+  lines.push(row("Branch",format!("{} · {}",value("branch"),value("local_sha")),DESK_FG));
+  lines.push(row("Main",value("main_sha"),DESK_FG));
+  lines.push(row("origin/main",value("remote_sha"),DESK_FG));
+  let diverged=health["ahead"].as_u64().is_some_and(|n|n>0)||health["behind"].as_u64().is_some_and(|n|n>0);
+  lines.push(row("Upstream",format!("{} · +{} / −{}",value("upstream"),count("ahead"),count("behind")),if diverged{AMBER}else{DESK_FG}));
+  let dirty=health["dirty_files"].as_u64();
+  lines.push(row("Working tree",format!("{} changed file(s)",dirty.map(|n|n.to_string()).unwrap_or_else(||"unknown".into())),if dirty.is_some_and(|n|n>0){AMBER}else{DESK_FG}));
+  match health["pull_requests"].as_array(){
+   Some(rows)=>{
+    lines.push(row("Pull requests",format!("{} open",rows.len()),DESK_FG));
+    for pr in rows.iter().take(2){
+     lines.push(row(&format!("#{}",pr["number"].as_u64().unwrap_or(0)),format!("{} · checks {}",pr["title"].as_str().unwrap_or("title unknown"),pr["checks"]["state"].as_str().unwrap_or("unknown")),if pr["checks"]["state"]=="failed"{RED}else{DESK_FG}));
+    }
+   }
+   _=>lines.push(row("Pull requests","unavailable".into(),AMBER)),
+  }
+  let age=health["observed_at_ms"].as_u64().map(|stamp|crate::worker::now_ms().saturating_sub(stamp));
+  lines.push(row("Observed",age.map(|ms|format!("{:.1}s ago",ms as f64/1000.0)).unwrap_or_else(||"unknown".into()),MUTED));
+  for error in health["errors"].as_array().into_iter().flatten().take(2){lines.push(styled(format!("Error: {}",error.as_str().unwrap_or("unknown")),RED));}
+ }
+ f.render_widget(Paragraph::new(lines).block(round_panel("GITHUB · F8 refresh",TEAL,false)),area);
 }
 /// The measured trend since the first recorded sample: are we closing processes and
 /// using less memory, or not? Every number comes from a recorded sample.
@@ -2111,7 +2171,7 @@ mod feedback_tests {
         assert!(!c.message.contains("sent to beaker"),"a working agent is never sent the check-in");
     }
     pub(super) fn fixture()->Center{
-        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::default(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}
+        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,config_view:false,dials:None,dials_at:None,metrics_at:None,proc_snapshot:Vec::new(),mcp_servers:Vec::new(),mcp_sessions:Vec::new(),touches:Vec::new(),skills:Vec::new(),settings:crate::settings::TuiSettings::default(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new(),github_health:crate::github_health::empty(),github_health_receiver:None}
     }
     fn panel_text(lines:&[Line])->String{lines.iter().map(|line|line.to_string()).collect::<Vec<_>>().join("\n")}
     fn panel_screen(c:&Center)->String{

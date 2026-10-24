@@ -50,6 +50,19 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
   anatomy, sheets, controls, joint continuity or unreviewed transitions marked incomplete.
   Review source images and results before assigning the next bounded agent task.
 
+## Visible workshop agents
+
+- Every agent works for Magic Studio under an explicit MOP role and model choice.
+  Do not launch unwrapped/default agents. Reuse the existing Muppet role-planning
+  project before defining new roles.
+- All delegated agents run in Herdr and appear in the Workshop/TUI. Use one-word
+  MOP names. Do not use hidden background subagents or create a checkout per agent.
+- Reuse the canonical source/workshop and shared build cache. Record each active
+  agent’s actual task and open app identity through the existing native TUI controls.
+- Keep GitHub issues short. Humans supply the problem; agents supply files, exact
+  commands and acceptance evidence. Do not require tags, boards, milestones or
+  GitHub assignees from Jesse. Do not add GitHub push/review/check gates on your own.
+
 ## Isolate source only when needed
 
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
@@ -88,10 +101,9 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - Run checks appropriate to your changes. Identify inherited failures against the
   base revision and report their owner; do not hide them or duplicate another
   agent's active fix. Do not bypass required PR checks.
-- During editing, use `cargo check --workspace` to verify compilation. Do not run
-  `cargo test` manually in a loop; `.githooks/pre-commit` (`git config core.hooksPath .githooks`)
-  runs the Rust check and test suite automatically when you `git commit`. Never
-  bypass hooks with `--no-verify`.
+- Do not pretest code changes. Add meaningful tests, then make a normal `git commit`;
+  `.githooks/pre-commit` runs compilation and tests. Never bypass hooks. Build the
+  app as needed to keep the visible preview open; report actual hook outcomes.
 
 ## Commit before handing work to another agent
 

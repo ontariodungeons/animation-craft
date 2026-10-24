@@ -27,6 +27,7 @@ mod snapshot;
 mod studios;
 mod telemetry;
 mod touch;
+mod github_health;
 mod mayhem;
 mod settings;
 mod theme;
@@ -1207,6 +1208,13 @@ fn main() {
                     "mcp_bridges": mcp_procs,
                     "guidance": "Use --stop to kill all MCP bridges. Use --clean to remove stale endpoints."
                 });
+                outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+                return;
+            }
+            if a.flag_github {
+                // GITHUB HEALTH: what an agent did to the repository's GitHub state.
+                let repo = github_health::repo_root(&std::env::current_dir().unwrap_or_default());
+                let health = github_health::inspect(&repo);
                 outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
                 return;
             }

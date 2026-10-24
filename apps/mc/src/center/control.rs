@@ -63,7 +63,7 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
             if key.code==KeyCode::F(10){c.check_storyboard();return Flow::Continue;}
             // F4 is the telemetry tab: dials, processes and live log tails, sampled only
             // while it is open. F6 opens the intake form; F4 still closes it.
-            if key.code==KeyCode::F(4) && !c.show_form{c.telemetry_view=!c.telemetry_view;c.control_view=false;c.muppets_view=false;c.config_view=false;c.details_open=false;return Flow::Continue;}
+            if key.code==KeyCode::F(4) && !c.show_form{c.telemetry_view=!c.telemetry_view;c.control_view=false;c.muppets_view=false;c.config_view=false;c.details_open=false;if c.telemetry_view{c.refresh_github_health();}return Flow::Continue;}
             if key.code==KeyCode::F(4) && c.show_form{c.show_form=false;return Flow::Continue;}
             if key.code==KeyCode::F(5) && !c.show_form{c.config_view=!c.config_view;c.control_view=false;c.muppets_view=false;c.telemetry_view=false;c.details_open=false;return Flow::Continue;}
             if key.code==KeyCode::F(6) && !c.show_form{c.show_form=true;return Flow::Continue;}
@@ -99,7 +99,7 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
                     KeyCode::Enter if c.control_view=>c.observe_selected(),
                     KeyCode::PageDown=>c.scroll=c.scroll.saturating_add(4),
                     KeyCode::PageUp=>c.scroll=c.scroll.saturating_sub(4),
-                    KeyCode::F(8)=>{c.pinned_instance=None;c.refresh();},
+                    KeyCode::F(8)=>{c.pinned_instance=None;c.refresh();c.refresh_github_health();},
                     _=>{}
                 }
                 return Flow::Continue;
@@ -321,7 +321,7 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
   "agents":agents,"agent_detail":{"pane":c.selected_agent().map(|a|a["pane_id"].clone()),"output":c.spy,"age_ms":c.spy_at.map(|t|t.elapsed().as_millis())},
   "projects":c.state["catalog"]["projects"],"catalog_scope":if c.scope.is_some(){"assigned project only"}else{"existing recent-project catalog"},"stages":c.state["prerequisites"],"worker":c.state["animation_worker"],"events":c.state["tail"],"event_detail":c.event_detail,
   "animal":{"scope":if c.scope.is_some(){"project"}else{"system"},"worker":c.state["animation_worker"],"beat":activity_wave(c),"host":host.clone(),"processes":processes.clone()},
-  "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"logs":if c.scope.is_some(){json!({"studio":c.state["tail"]})}else{c.logs.clone()},"usage":if c.scope.is_some(){json!([])}else{json!(c.usage)},
+  "telemetry":{"sampling":c.telemetry_view,"host":host,"processes":processes,"logs_age_ms":c.logs_at.map(|t|t.elapsed().as_millis())},"github":if c.scope.is_some(){Value::Null}else{c.github_health.clone()},"logs":if c.scope.is_some(){json!({"studio":c.state["tail"]})}else{c.logs.clone()},"usage":if c.scope.is_some(){json!([])}else{json!(c.usage)},
   "workshop":{"discovery":{"observed_at_ms":c.studios["observed_at_ms"],"pending":c.studios_receiver.is_some(),"error":c.studios["observation_error"],"errors":c.studios["errors"]},"cards":workshop::observations(c),"selected_project":workshop::selected(c),"inactive_expanded":workshop::expanded(c),"visible_order":workshop::order(c),"columns":c.catalog_columns.get()},
   "selected":{"agent":c.gang_selected,"project":c.catalog_selected,"stage":c.stage_selected,"event":c.event_index,"command":c.command_selected,"scroll":c.scroll},
   "composers":{"note":c.poke.as_ref().map(|p|json!({"pane":p.target,"name":p.name,"text":p.text,"delivery":"unsent draft"})),"chat":{"open":c.chat_editing,"text":c.chat_draft,"project":c.chat_draft_project}},
