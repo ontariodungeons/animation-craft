@@ -42,3 +42,7 @@ Committed, not yet seen in the combined Studio:
 - e5bc1512: `words.captions to=video` puts the printed lines in the video's caption track.
 
 When the combined Studio is up: open Design, check the column on Three Times Around (seven sections now), style a few words, Save, then `mc --bridge 19971 exec words.captions to=video` and snapshot 20, 52, 120 s.
+
+## Lyrics designed (Jesse's task)
+
+`mc exec words.design` designed and used all 26 sung lines (24 printed + the 2-line ending repeat) from `project/lyrics-design.json`; recipe `animation/recipe/06-design-lyrics.jsonl`. The caption track was removed (every section designed), so each line shows once. Checked in snapshots at 3.5, 14.6, 32, 52, 65, 80, 100.5, 118 and 130 s (`animation/preview/lyrics-check-2/sheet.jpg`). The video index before this is kept in `animation/recipe/history/index.before-words-design.html`. Change the art direction in the recipe and run the command again; adjust single lines in Design.
