@@ -235,12 +235,15 @@ main { flex: 1; min-height: 0; position: relative; }
 .chip.chapter { font-size: 11px; padding: 4px 10px; border-left: 3px solid transparent; }
 .chip.chapter.active { border-left-color: var(--accent-ink); }
 .chip.scene { min-width: 130px; }
-.chip.word { display: inline-flex; align-items: center; gap: var(--space-2); max-width: none; color: var(--text); font-size: var(--text-lg); }
-.chip.word.active { background: var(--surface); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 calc(var(--space-1) / 2) color-mix(in srgb, var(--accent) 30%, transparent); }
-.chip.word[data-emphasis] { font-weight: 700; }
-.chip.word[data-heard=differs] { text-decoration: underline wavy var(--amber); text-underline-offset: var(--space-1); }
-.chip.word[data-timing=differs] { border-style: dotted; border-color: var(--amber); }
-.chip-action { color: var(--accent); font-size: var(--text-sm); }
+/* A lyric tag: no fill, soft square corners, the word then its data. */
+.chip.word { display: flex; flex-direction: column; align-items: flex-start; gap: 0; max-width: none; min-width: 0; padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm); background: none; color: var(--text); font-size: var(--text-md); line-height: 1.25; }
+.chip.word:hover { border-color: var(--muted); }
+.chip.word.active { background: none; color: var(--accent); border-color: var(--accent); }
+.chip.word.hero { border-color: color-mix(in srgb, var(--tone-lyrics) 45%, var(--line)); }
+.chip.word.long { grid-column: span 2; }
+.chip.word[data-changed] { border-style: dashed; }
+.chip-action { min-height: var(--text-sm); color: var(--tone-animate); font-size: var(--text-xs); }
 .sb-nav { display: flex; align-items: center; gap: 4px; color: var(--muted); flex: none; }
 .icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--muted); transition: all var(--fast) var(--ease); }
 .icon:hover { background: var(--surface-2); color: var(--text); }
@@ -982,8 +985,8 @@ body.at-home .app-footer { display:none; }
 .words-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .words-head strong { font-size: var(--text-lg); }
 .words-head > :last-child { margin-left: auto; }
-.words-line, .words-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.words-actions { width: 100%; }
+.words-crumb { font-size: var(--text-md); }
+.words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
 .words-band { --band: var(--tone-transcript); display: flex; align-items: flex-start; gap: var(--space-2); height: calc(var(--len-s) * var(--song-s)); padding: var(--space-1) var(--space-2);
@@ -991,7 +994,9 @@ body.at-home .app-footer { display:none; }
 .words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
 .words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
 .words-band > .meta { color: var(--faint); }
-.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); align-content: flex-start; gap: var(--space-1); overflow: hidden; }
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 2.6), 1fr));
+  align-content: start; gap: var(--space-1); padding-left: var(--space-1); border-left: medium solid transparent; overflow: hidden; cursor: pointer; }
+.words-tl > .words-line.active { border-left-color: var(--accent); }
 .words-tl > .first { margin-top: var(--text-xl); height: calc(var(--len-s) * var(--song-s) - var(--text-xl) - var(--space-1)); }
 .words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }
 /* The film roll: sprocket holes down both edges, a time mark every ten seconds. */
@@ -1000,24 +1005,30 @@ body.at-home .app-footer { display:none; }
     radial-gradient(circle, var(--line) 35%, transparent 40%) right top / var(--space-4) var(--text-xl) repeat-y, var(--bg); }
 .words-roll > .words-band { left: var(--space-4); right: var(--space-4); }
 .words-roll > .words-tick { left: var(--space-4); right: var(--space-4); border-top: thin dashed var(--surface-2); color: var(--faint); font-size: var(--text-xs); text-align: right; }
-.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: flex; flex-wrap: wrap; align-content: flex-start; gap: var(--space-1);
-  padding: var(--space-1); overflow: hidden; border: thin solid var(--line); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.words-frame { height: calc(var(--len-s) * var(--song-s) - var(--space-1)); padding: 0; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--tone-lyrics) 14%, white); cursor: pointer; }
 .words-roll > .words-frame { left: calc(var(--space-4) + var(--space-1)); right: calc(var(--space-4) + var(--space-1)); }
 .words-frame:hover, .words-frame.active { border-color: var(--accent); }
-.words-tag { padding: 0 var(--space-1); border-radius: var(--radius-sm); background: var(--tag, var(--tone-lyrics)); color: var(--accent-ink); font-size: var(--text-xs); }
-.words-tag[data-track="motion"] { --tag: var(--tone-animate); }
-/* The section's minimal lanes; the selected one decides what shows below them. */
+/* The line's minimal lanes: when its words are sung, when items move, when strokes draw. */
 .words-lanes { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); cursor: pointer; }
+.words-lanes > .lane { padding-left: var(--space-2); border-left: medium solid var(--lane-fill, var(--tone-lyrics)); border-radius: var(--radius-sm); }
 .words-lanes > .lane[data-track="motion"] { --lane-fill: var(--tone-animate); }
-.words-lanes > .lane[aria-selected="true"] { background: var(--surface-2); }
+.words-lanes > .lane[data-track="draw"] { --lane-fill: var(--tone-assets); }
 .words-lanes .lane-track { background: var(--bg); }
-.lane-name { display: flex; flex-direction: column; min-width: 0; color: var(--text); }
-.lane-name > .meta { color: var(--faint); font-size: var(--text-xs); }
+.lane-name { min-width: 0; color: var(--text); }
 .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 7), 1fr)); gap: var(--space-2); max-height: calc(var(--space-5) * 10); overflow: auto; }
-/* Design has no parts or assets; its effects sit under the lanes. */
+/* Design has no parts or assets; its options sit under the lanes. */
 body:has(#view-design.active) #magic-parts-pane { display: none; }
-.words-inspector { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.words-inspector .group-label { width: 100%; }
-.words-library { display: flex; flex-direction: column; gap: var(--space-1); width: 100%; }
 .effect[aria-checked="true"] { border-color: var(--accent); background: var(--surface-2); }
+/* The line designer: a composition-sized world, scaled into the stage; items and strokes carry
+   their place, size, ink and motion as custom properties. */
+.lyric-canvas { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tone-lyrics) 14%, white); }
+.lyric-world { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform: scale(var(--scale, 0)); transform-origin: 0 0; font-family: var(--family); }
+.lyric-item { position: absolute; left: var(--x); top: var(--y); font-size: var(--size); color: var(--ink); rotate: var(--rot); opacity: var(--o, 1);
+  white-space: nowrap; line-height: 1.05; font-weight: 400; cursor: grab; user-select: none; touch-action: none; }
+.lyric-item[data-weight="700"] { font-weight: 700; }
+.lyric-item[data-italic="true"] { font-style: italic; }
+.lyric-item > span { display: inline-block; white-space: pre; transform-origin: 50% 100%; translate: var(--tx, 0) var(--ty, 0); scale: var(--sx, 1) var(--sy, 1); rotate: var(--lr, 0deg); }
+.lyric-item.active { outline: medium dashed var(--accent); outline-offset: var(--space-3); }
+.lyric-draw { position: absolute; left: var(--x); top: var(--y); width: var(--dw); height: var(--dh); overflow: visible; pointer-events: none; }

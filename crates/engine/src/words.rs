@@ -1,7 +1,8 @@
 //! Words: editable visible lyric animations built from the artist's canonical lines, timed by
 //! the hidden transcript reference. The reference (heard words, their order and times) is never
 //! edited or exported; mismatches against the artist's words are reported, never substituted.
-//! Text and timing are not editable here: `words.save` changes only style, emphasis and motion.
+//! Text and timing are not editable here: `words.save` changes only style, emphasis, motion and
+//! each line's design (where its words sit, their lettering and moves, and drawn strokes).
 use std::{fs, path::{Path, PathBuf}};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -10,6 +11,8 @@ use crate::{EngineError, Result, Session};
 pub const ACTIONS: &[&str] = &["none", "wave", "tiny", "swim", "no", "cry", "big", "float"];
 const ENTRANCES: &[&str] = &["pop", "fade", "rise", "none"];
 const EXITS: &[&str] = &["fade", "drop", "none"];
+/// How a designed lyric item moves on its accent word.
+const MOVES: &[&str] = &["quiet", "sleep", "settle", "fall", "pop", "rise", "east", "west", "loop"];
 const LEAD_IN: f64 = 0.4;
 const HOLD: f64 = 1.0;
 
@@ -341,6 +344,13 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
             word[key] = checked;
         }
     }
+    if let Some(designs) = p.get("design").filter(|v| !v.is_null()) {
+        for (line_id, design) in designs.as_object().ok_or_else(|| invalid("design must be an object of line_id: design"))? {
+            let words: Vec<Value> = anim["words"].as_array().into_iter().flatten().filter(|w| w["line_id"] == json!(line_id)).cloned().collect();
+            if words.is_empty() { return Err(invalid(format!("{line_id} is not a line of {id}"))); }
+            anim["design"][line_id] = if design.is_null() { Value::Null } else { line_design(&words, design)? };
+        }
+    }
     if let Some(effects) = p.get("effects").filter(|v| !v.is_null()) {
         for (track, choice) in effects.as_object().ok_or_else(|| invalid("effects must be an object of track: effect"))? {
             if track != "text" { return Err(invalid(format!("effects.{track}: only the text track takes registry effects so far"))); }
@@ -356,6 +366,48 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
     fs::write(&temporary, serde_json::to_vec_pretty(&doc).map_err(|e| invalid(e.to_string()))?)?;
     fs::rename(&temporary, &path)?;
     Ok(json!({"ok":true,"conflict":false,"path":path,"animation":saved}))
+}
+
+/// Check one line's design. Items group the line's own words, all of them, in sung order; each
+/// item's text is joined from those words, so lyrics never change here. Strokes are SVG path data.
+fn line_design(words: &[Value], design: &Value) -> Result<Value> {
+    let num = |v: &Value, what: &str, lo: f64, hi: f64| v.as_f64().filter(|n| (lo..=hi).contains(n)).map(|n| json!(n))
+        .ok_or_else(|| invalid(format!("{what} must be a number from {lo} to {hi}")));
+    let colour = |v: &Value| v.as_str().filter(|c| c.len() <= 32 && !c.contains(['<', '>', '"', ';'])).map(|c| json!(c))
+        .ok_or_else(|| invalid("colour must be a short CSS colour"));
+    let mut placed: Vec<&str> = Vec::new();
+    let mut items = Vec::new();
+    for item in design["items"].as_array().ok_or_else(|| invalid("a design needs items"))? {
+        let ids: Vec<&str> = item["word_ids"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if ids.is_empty() { return Err(invalid("each item needs word_ids")); }
+        let text: Vec<&str> = ids.iter().map(|id| words.iter().find(|w| w["word_id"] == json!(id)).and_then(|w| w["text"].as_str())
+            .ok_or_else(|| invalid(format!("{id} is not a word of this line")))).collect::<Result<_>>()?;
+        let accent = match &item["accent"] { Value::Null => Value::Null,
+            a => a.as_str().filter(|a| ids.contains(a)).map(|a| json!(a)).ok_or_else(|| invalid("accent must be one of the item's words"))? };
+        placed.extend(&ids);
+        items.push(json!({"word_ids":ids,"text":text.join(" "),"x":num(&item["x"],"x",-2000.0,6000.0)?,"y":num(&item["y"],"y",-2000.0,6000.0)?,
+            "size":num(&item["size"],"size",8.0,600.0)?,"weight":item["weight"].as_u64().filter(|w| [400, 700].contains(w)).ok_or_else(|| invalid("weight must be 400 or 700"))?,
+            "italic":item["italic"].as_bool().ok_or_else(|| invalid("italic must be true or false"))?,"color":colour(&item["color"])?,
+            "rotate":num(&item["rotate"],"rotate",-45.0,45.0)?,"motion":one_of(&item["motion"],MOVES,"motion")?,"accent":accent}));
+    }
+    let line: Vec<&str> = words.iter().filter_map(|w| w["word_id"].as_str()).collect();
+    if placed != line { return Err(invalid("the items must hold every word of the line once, in sung order")); }
+    let mut draws = Vec::new();
+    for draw in design["draws"].as_array().into_iter().flatten() {
+        let mut paths = Vec::new();
+        for path in draw["paths"].as_array().ok_or_else(|| invalid("a drawing needs paths"))? {
+            let d = path["d"].as_str().filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit() || " ,.-eMmLlHhVvCcSsQqTtAaZz".contains(c)))
+                .ok_or_else(|| invalid("a stroke's d must be SVG path data"))?;
+            let (from, to) = (num(&path["from"],"from",0.0,600.0)?, num(&path["to"],"to",0.0,600.0)?);
+            if from.as_f64() > to.as_f64() { return Err(invalid("a stroke finishes drawing after it starts")); }
+            paths.push(json!({"d":d,"stroke":colour(&path["stroke"])?,"width":num(&path["width"],"width",0.5,60.0)?,"from":from,"to":to}));
+        }
+        let view_box = draw["view_box"].as_str().filter(|v| v.split_whitespace().count() == 4 && v.split_whitespace().all(|n| n.parse::<f64>().is_ok()))
+            .ok_or_else(|| invalid("view_box must be four numbers"))?;
+        draws.push(json!({"name":draw["name"].as_str().unwrap_or("Drawing"),"view_box":view_box,"x":num(&draw["x"],"x",-2000.0,6000.0)?,
+            "y":num(&draw["y"],"y",-2000.0,6000.0)?,"w":num(&draw["w"],"w",1.0,6000.0)?,"h":num(&draw["h"],"h",1.0,6000.0)?,"paths":paths}));
+    }
+    Ok(json!({"items":items,"draws":draws}))
 }
 
 /// A registry component's declared variables, read from its `data-composition-variables`.
@@ -655,6 +707,32 @@ mod tests {
         assert_eq!((reread["saved"].clone(), reread["reference_changed"].clone()), (json!(true), json!(false)));
         fs::write(dir.join("song.transcript.json"), json!({"words":[{"text":"Hey","start":4.0,"end":4.2}]}).to_string()).unwrap();
         assert_eq!(cmd_words_read(&mut s, &json!({})).unwrap()["reference_changed"], true);
+    }
+
+    #[test]
+    fn a_line_design_groups_the_lines_own_words_and_checks_every_field() {
+        let (_dir, mut s) = project("design");
+        let item = |ids: &[&str], motion: &str, accent: Option<&str>| json!({"word_ids":ids,"x":120,"y":80,"size":96,"weight":700,"italic":false,
+            "color":"#173F49","rotate":-3,"motion":motion,"accent":accent});
+        let stroke = json!({"name":"Arrow","view_box":"0 0 100 100","x":10,"y":20,"w":100,"h":100,
+            "paths":[{"d":"M 10 10 Q 50 90 90 10","stroke":"#8B3D26","width":6,"from":0.2,"to":1.1}]});
+        let design = json!({"ch-l1":{"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w1")),item(&["ch-l1/w2","ch-l1/w3"],"quiet",None)],"draws":[stroke]}});
+        let saved = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":0,"design":design})).unwrap();
+        let line = &saved["animation"]["design"]["ch-l1"];
+        assert_eq!((line["items"][0]["text"].clone(), line["items"][1]["text"].clone()), (json!("Hey ho"), json!("don't cry.")), "text comes from the sheet");
+        assert_eq!(line["draws"][0]["paths"][0]["to"], 1.1);
+        let mut bad = |design: Value| cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"design":{"ch-l1":design}})).is_err();
+        let whole = |a: Value, b: Value| json!({"items":[a,b],"draws":[]});
+        assert!(bad(whole(item(&["ch-l1/w1","ch-l1/w0"],"pop",None), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "words keep the sung order");
+        assert!(bad(json!({"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",None)],"draws":[]})), "every word of the line is placed");
+        assert!(bad(whole(item(&["ch-l1/w0","ch-l1/w1"],"explode",None), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "only known moves");
+        assert!(bad(whole(item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w3")), item(&["ch-l1/w2","ch-l1/w3"],"quiet",None))), "the accent is one of the item's words");
+        let mut scribble = design["ch-l1"].clone();
+        scribble["draws"][0]["paths"][0]["d"] = json!("M 0 0 <script>");
+        assert!(bad(scribble), "a stroke is path data only");
+        let cleared = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"design":{"ch-l1":null}})).unwrap();
+        assert!(cleared["animation"]["design"]["ch-l1"].is_null());
+        assert!(cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":2,"design":{"v1-l1":null}})).is_err(), "only this section's lines");
     }
 
     #[test]
