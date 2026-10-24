@@ -33,7 +33,7 @@ async function renderRecent() {
   }
   $("recent").replaceChildren(...list.map((p) => {
     const thumb = el("div", { class: "thumb", html: p.thumb ? "" : FILM });
-    if (p.thumb) thumb.style.backgroundImage = `url("${convertFileSrc(p.thumb)}")`;
+    if (p.thumb) thumb.style.setProperty("--thumbnail-image", `url("${convertFileSrc(p.thumb)}")`);
     const forget = el("span", { class: "forget", role: "button", tabindex: "0", "aria-label": `Remove ${p.name} from Recent`,
       title: "Remove from Recent (the files stay)", html: CROSS });
     forget.addEventListener("click", async (e) => {

@@ -40,7 +40,6 @@ async function blenderAnimationOpen(selection={}){
  dialog.addEventListener('close',()=>{if(blenderDialog===dialog)blenderDispose();});
  document.body.append(dialog);dialog.showModal();
  const video=el('video',{id:'blender-preview',controls:true,loop:true,'aria-label':'Rendered Blender animation'});
- video.style.cssText='width:100%;height:100%;object-fit:contain';
  stage.append(video);
  let latest=null,job=null,jobState=null,selectionRevision=0;
  const report=(message,detail=message)=>{if(current()){status.textContent=message;status.title=detail;}};

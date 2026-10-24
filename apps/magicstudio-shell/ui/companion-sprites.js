@@ -45,10 +45,9 @@ function createCompanionSprites(manifestUrl = "companions.manifest.json") {
     if (images.has(key)) return images.get(key);
     const entry = poseFor(name, pose);
     if (!entry) return null;
-    const img = new Image();
+    const img = el("img", { alt: "" });
     img.decoding = "async";
     img.src = entry.src;
-    img.alt = "";
     images.set(key, img);
     return img;
   }

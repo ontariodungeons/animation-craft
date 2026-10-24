@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Gaffer asleep">
+<title>Gaffer — asleep</title>
+<g stroke="#503329" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+<g id="tail" data-pivot="106 119" transform="rotate(0 106 119)"><path d="M105 119 Q147 126 132 91" fill="none" stroke="#ee8241" stroke-width="15"/></g>
+<g id="body"><path d="M46 95 Q73 80 102 98 L110 137 Q78 151 40 137Z" fill="#ee8241"/><ellipse cx="74" cy="122" rx="20" ry="23" fill="#fff0ce" stroke="none"/></g>
+<g id="feet" fill="#ee8241"><path d="M45 126 Q27 132 33 143 L59 143 L59 133 M91 133 L91 143 L118 143 Q124 130 105 127"/></g>
+<g id="head" data-pivot="76 94" transform="rotate(15 76 94)"><path d="M38 59 L35 19 Q58 25 62 41 M83 41 Q99 22 113 20 L110 64" fill="#ee8241"/><path d="M43 45 L42 30 L56 43 M91 43 L106 30 L105 48" fill="#f9b7a0"/><path d="M36 62 Q35 34 74 34 Q113 33 114 62 L111 83 Q105 103 76 103 Q42 103 37 83Z" fill="#ee8241"/><path d="M62 38 L65 47 M75 35 L75 46 M88 38 L85 47" stroke="#a7472c" stroke-width="5"/><ellipse cx="75" cy="81" rx="25" ry="17" fill="#fff0ce" stroke="none"/><path d="M50 67 Q57 73 64 67 M83 67 Q90 73 97 67" fill="none"/><path d="M68 76 Q75 70 82 76 L75 83Z" fill="#503329"/><path d="M62 83 Q74 92 86 83" fill="none"/><path d="M43 80 L31 77 M104 80 L117 77" stroke="#a7472c"/></g>
+<g id="scarf"><path d="M45 98 Q74 111 104 98 L102 109 Q73 121 47 108Z" fill="#9c83d9"/><path d="M91 109 L109 125 L108 106Z" fill="#9c83d9"/></g>
+</g></svg>

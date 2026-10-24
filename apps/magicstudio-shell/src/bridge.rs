@@ -89,12 +89,14 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
         "ui.eval" => eval(app, params["js"].as_str().ok_or("ui.eval needs js")?),
         "ui.feedback" => crate::feedback::snapshot(app),
         "ui.focus"=>{let window=app.get_window("main").ok_or("Studio window unavailable")?;window.set_focus().map_err(|e|e.to_string())?;Ok(json!({"ok":true,"focused":true,"reused_session":true}))},
+        "ui.controls" => page(app,"controls", &[params]),
+        "ui.attention" => page(app,"attention", &[params]),
         "ui.components" => page(app,"components", &[params]),
         "ui.state" => page(app, "state", &[]),
         "ui.elements" => page(app, "elements", &[params.get("region").unwrap_or(&none)]),
-        "ui.click" => page(app, "click", &[params.get("id").or(params.get("target")).unwrap_or(&none)]),
-        "ui.set" => page(app, "set", &[params.get("id").or(params.get("target")).unwrap_or(&none), params.get("value").unwrap_or(&none)]),
-        "ui.key" => page(app, "key", &[params.get("key").unwrap_or(&none), params.get("id").unwrap_or(&none)]),
+        "ui.click" => page(app, "click", &[params.get("id").or(params.get("target")).unwrap_or(&none), params.get("instance").unwrap_or(&none)]),
+        "ui.set" => page(app, "set", &[params.get("id").or(params.get("target")).unwrap_or(&none), params.get("value").unwrap_or(&none), params.get("instance").unwrap_or(&none)]),
+        "ui.key" => page(app, "key", &[params.get("key").unwrap_or(&none), params.get("id").unwrap_or(&none), params.get("instance").unwrap_or(&none)]),
         "ui.screenshot" => {
             let out = output(app, params, "screenshot")?;
             crate::snapshot_to(app, None, &out)?;
