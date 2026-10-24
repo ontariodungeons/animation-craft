@@ -989,6 +989,10 @@ body.at-home .app-footer { display:none; }
 .words-crumb { font-size: var(--text-md); }
 .words-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .words-spacer { flex: 1; }
+/* Narrow windows: the side columns tighten so the stage keeps its room. */
+@media (max-width: 70em) {
+  #view-design.active { grid-template-columns: calc(var(--space-5) * 7) minmax(0, 1fr) calc(var(--space-5) * 4.5); gap: var(--space-2); padding: var(--space-2); }
+}
 .words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
