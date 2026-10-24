@@ -45,7 +45,7 @@ const tests = [
       assert.equal(boxes.signal(state), value, `${state} signal`);
       const dot = boxes.dot(state);
       assert.equal(dot.dataset.signal, String(value), `${state} dot attr`);
-      assert.ok(dot.className.includes(['', 'ok', 'warn', 'off'][value]), `${state} dot class`);
+      assert.equal(dot.className, 'dot', `${state} dot class`);
     }
   }],
   ['readers are notified once per change batch, never per fact', async () => {

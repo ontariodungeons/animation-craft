@@ -168,15 +168,16 @@ function renderAppFooter() {
   $('footer-stages').replaceChildren(...FOOTER_STAGES.map(([id, label]) => {
     const tone = footerStageState(id);
     return el('button', { class: 'footer-stage', id: `footer-stage-${id}`, title: `${label} · ${tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs work' : 'not started'}`,
-      onclick: () => footerGo(id).catch((e) => toast(String(e))) }, el('span', { class: `dot ${tone}` }), label);
+      onclick: () => footerGo(id).catch((e) => toast(String(e))) }, window.companionBoxes.dot(tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs-attention' : 'idle'), label);
   }));
   const context = footerContext();
   $('footer-context').textContent = context; $('footer-context').title = context;
   const unsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
-  $('footer-save-state').replaceChildren(el('span', { class: `dot ${unsaved ? 'warn' : 'ok'}` }), unsaved ? 'Unsaved edits' : 'Saved');
+  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready'), unsaved ? 'Unsaved edits' : 'Saved');
   $('footer-save-state').title = unsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : 'No unsaved motion';
   const url = serverUrl();
-  $('footer-server').replaceChildren(el('span', { class: `dot ${url ? 'ok' : 'off'}` }), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
+  // A Studio that is off is simply idle: grey, never a red problem.
+  $('footer-server').replaceChildren(window.companionBoxes.dot(url ? 'ready' : 'idle'), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
 }
 // Theatre's own listener (theatre.js) updates its revisions first; render after it.
 window.addEventListener('message', (event) => { if (event.data?.magicTheatre && event.data.type !== 'values') setTimeout(updateAppFooter); });
@@ -251,9 +252,11 @@ async function openPath(path) {
 const SONG_SECTIONS = ['lyrics', 'transcript'];
 
 function songSection(id, title, meta, done, sectionState, body) {
+  const head = window.companionBoxes.dot(done ? "ready" : "needs-attention");
+  head.title = done ? "Ready" : "Needs work";
   return el("div", { class: "song-section", id: `song-${id}`, "data-section": id, "data-state": sectionState },
     el("div", { class: "song-section-head" },
-      el("span", { class: `dot ${done ? "ok" : "warn"}`, title: done ? "Ready" : "Needs work" }),
+      head,
       el("span", { class: "title" }, title), el("span", { class: "meta" }, meta || "")),
     ...body);
 }
@@ -415,9 +418,11 @@ function readerFollow() {
 // that does not care about companions inherits the contract for free.
 function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
+  const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention");
+  dot.title = done ? "Ready" : "Needs work";
   const head = el("button", { class: "block-head", "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
-    el("span", { class: `dot ${done ? "ok" : "warn"}`, title: done ? "Ready" : "Needs work" }),
+    dot,
     el("span", { class: "ico", html: icon }),
     el("span", { class: "title" }, title),
     el("span", { class: "meta" }, meta || ""),
@@ -687,7 +692,9 @@ function renderTarget() {
   const url = serverUrl();
   const project = videoProject();
   $("target-name").textContent = `${s.video_target}${url ? " · " + url.replace(/^https?:\/\//, "").replace(/\/$/, "") : " · off"}`;
-  $("server-dot").className = `dot ${url ? "ok" : "off"}`;
+  const serverDot = window.companionBoxes.dot(url ? "ready" : "idle");
+  serverDot.id = "server-dot";
+  $("server-dot").replaceWith(serverDot);
   updateAppFooter();
   $("target").title = `${url ? `Studio running at ${url} · click to stop` : "Studio off · click to start"}\n${project ? `Video project: ${project}` : "No video project yet · starting the studio creates it"}`;
 }
@@ -695,7 +702,9 @@ function renderTarget() {
 async function toggleServer() {
   if (!state.project) return;
   const on = !serverUrl();
-  $("server-dot").className = "dot busy";
+  const startingDot = window.companionBoxes.dot("working", "pulse");
+  startingDot.id = "server-dot";
+  $("server-dot").replaceWith(startingDot);
   try {
     // A target without its project gets one from the engine first (video.init reuses an existing one).
     if (on && state.data?.status?.video_target && !state.data.status.video_project_path) {

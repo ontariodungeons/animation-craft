@@ -102,7 +102,7 @@ console.log("PASS: shared Sproket drawer is outside tab-specific containers");
 const artworkNodes = new Map(), artworkCalls = [];
 function artworkElement(tag, attrs = {}, ...children) {
   const n = { tag, ...attrs, _value:attrs.value, children: [], parentElement:null, style: {}, dataset: {}, events:{}, textContent: children.filter(c => typeof c === 'string').join(''),
-    classList: { add() {} }, addEventListener(type,fn) {this.events[type]=fn;}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, replaceWith() {}, showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},remove(){},
+    classList: { add() {} }, addEventListener(type,fn) {this.events[type]=fn;}, dispatchEvent() {}, focus() {}, pause() {}, load() {}, removeAttribute() {}, setAttribute(name,value) {this[name]=value;}, replaceWith() {}, showModal(){this.open=true;},close(){this.open=false;this.events.close?.();},remove(){},
     append(...items) { for(const item of items.flat()){if(item&&typeof item==='object'){if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}item.parentElement=this;}this.children.push(item);} },
     replaceChildren(...items) { for(const child of this.children)if(child&&typeof child==='object')child.parentElement=null;this.children=[];this.append(...items); },
     insertBefore(item,reference) { if(reference!==null&&!this.children.includes(reference))throw new DOMException('Reference is not a child','NotFoundError');if(item===reference)return item;if(item.parentElement){const previous=item.parentElement;previous.children.splice(previous.children.indexOf(item),1);}this.children.splice(reference===null?this.children.length:this.children.indexOf(reference),0,item);item.parentElement=this;return item; },
@@ -133,7 +133,7 @@ const artworkContext = vm.createContext({
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
-  document: { querySelector: () => null,body:{append(){}} }, window: { addEventListener() {} },
+  document: { querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
   magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
   updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
   invoke: async (id, args) => {
@@ -147,7 +147,7 @@ const artworkContext = vm.createContext({
     throw Error(`Unexpected fixture command ${args.id}`);
   },
 });
-for (const file of ['animation.js', 'blender-placement.js', 'blender.js', 'image-prompt.js']) {
+for (const file of ['companion-boxes.js', 'animation.js', 'blender-placement.js', 'blender.js', 'image-prompt.js']) {
   vm.runInContext(readFileSync(new URL(`../ui/${file}`, import.meta.url), 'utf8'), artworkContext);
 }
 const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');

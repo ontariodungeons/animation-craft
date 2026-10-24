@@ -1,9 +1,9 @@
 {
-  "hex_outside_root": 52,
-  "hand_built_dots": 9,
+  "hex_outside_root": 49,
+  "hand_built_dots": 0,
   "retired": {
-    "dot-colours": 8,
-    "magic-part-dot": 5,
+    "dot-colours": 0,
+    "magic-part-dot": 0,
     "panel-heads": 60,
     "panel-empties": 31,
     "panel-statuses": 6

@@ -22,6 +22,14 @@
   --tone-animate: #baa5eb;
   --tone-assets: #f4a07b;
   --radius: 8px;
+  /* Indicator colours: one number per signal, one danger, one info, one surface. */
+  --signal-0: var(--faint);
+  --signal-1: var(--accent);
+  --signal-2: var(--amber);
+  --danger: #e0524a;
+  --signal-3: var(--danger);
+  --info: #6ea8ff;
+  --surface-3: #212631;
   --ease: cubic-bezier(.2, .8, .2, 1);
   --fast: 160ms;
   --slow: 320ms;
@@ -54,12 +62,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .tab.active { color: var(--text); }
 .tab-ink { position: absolute; bottom: -9px; height: 2px; border-radius: 2px; background: var(--accent); transition: transform var(--slow) var(--ease), width var(--slow) var(--ease); }
 .target { margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; transition: background var(--fast); }
-.dot.ok { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
-.dot.warn { background: var(--amber); }
-.dot.off { background: #e0524a; box-shadow: 0 0 0 3px #e0524a1f; }
-.dot.busy { background: var(--amber); animation: pulse 900ms ease-in-out infinite alternate; }
-.magic-workstation .dot.pending { background: #6ea8ff; }
+.dot { --dot-size: 8px; width: var(--dot-size); height: var(--dot-size); border-radius: 50%; background: var(--signal-0); flex: none; transition: background var(--fast); }
+.dot[data-signal="1"] { background: var(--signal-1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-1) 12%, transparent); }
+.dot[data-signal="2"] { background: var(--signal-2); }
+.dot[data-signal="3"] { background: var(--signal-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-3) 12%, transparent); }
+.dot[data-variant="pulse"] { animation: pulse 900ms ease-in-out infinite alternate; }
+.dot[data-variant="ring"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-1) 22%, transparent); }
+.dot[data-variant="hollow"] { background: transparent; border: 2px solid var(--info); }
+.dot.sm { --dot-size: 6px; }
 .magic-image-ok { display: inline-grid; width: 12px; height: 12px; place-items: center; color: var(--muted); font-size: 12px; line-height: 1; flex: none; }
 .magic-image-review { color: var(--amber); }
 @keyframes pulse { to { opacity: .35; } }
@@ -549,13 +559,13 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 /* Compact Studio keeps controls readable without clipping the creative workspace. */
 .blocks.collapsed {padding:8px 4px;}
 .blocks.collapsed .block-head {position:relative;min-height:40px;gap:0;padding:9px 4px;}
-.blocks.collapsed .block-head .dot {position:absolute;right:3px;top:3px;width:5px;height:5px;}
+.blocks.collapsed .block-head .dot {position:absolute;right:3px;top:3px;--dot-size:5px;}
 .block-head .ico svg {width:20px;height:20px;}
 .sb-empty {max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;}
 @media(max-width:640px){
  .blocks{padding:8px 4px;}
  .blocks .block-head{position:relative;min-height:40px;gap:0;padding:9px 4px;}
- .blocks .block-head .dot{position:absolute;right:3px;top:3px;width:5px;height:5px;}
+ .blocks .block-head .dot{position:absolute;right:3px;top:3px;--dot-size:5px;}
  .blocks .block:has(.block-head[aria-expanded=true]) .block-body{display:block;position:fixed;left:56px;top:58px;bottom:12px;width:min(280px,calc(100vw - 68px));overflow:auto;background:var(--surface);z-index:20;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 32px #0008;}
  .sb-head{flex-wrap:wrap;min-width:0;gap:4px;padding:6px;}
  .sb-empty{padding:18px 12px;}
@@ -638,9 +648,7 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
 .magic-part-card-pick { display:flex; align-items:baseline; gap:4px; min-width:0; padding:0; text-align:left; color:var(--text); }
 .magic-part-card-name { font-size:11.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .magic-part-card-id { flex:1; min-width:0; font:10px ui-monospace,monospace; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.magic-part-dot { flex:none; align-self:center; width:6px; height:6px; margin-left:auto; border-radius:50%; }
-.magic-part-dot.warn { background:var(--amber); }
-.magic-part-dot.accent { background:var(--accent); }
+.magic-part-card .dot { flex:none; align-self:center; margin-left:auto; }
 .magic-part-card-actions { display:flex; align-items:center; gap:4px; min-width:0; }
 .magic-part-card-actions .icon { width:20px; height:18px; padding:0; display:grid; place-items:center; color:var(--muted); }
 .magic-part-card-actions .icon svg { width:13px; height:13px; }
@@ -672,7 +680,7 @@ body.at-home .app-footer { display:none; }
 .footer-stages { display:flex; gap:2px; flex:none; }
 .footer-stage, .footer-item { display:inline-flex; align-items:center; gap:5px; padding:2px 7px; border-radius:6px; white-space:nowrap; color:var(--muted); }
 .footer-stage:hover, button.footer-item:hover { background:var(--surface-2); color:var(--text); }
-.app-footer .dot { width:6px; height:6px; box-shadow:none; }
+.app-footer .dot { --dot-size:6px; box-shadow:none; }
 .footer-context { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; }
 .footer-status { display:flex; gap:4px; flex:none; }
 @media (max-width: 1000px) { .footer-stage { font-size:0; gap:0; padding:4px; } }

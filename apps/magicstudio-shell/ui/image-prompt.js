@@ -127,8 +127,9 @@ function imagePromptBlock() {
       const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');
       indicator.replaceWith(success);
     } else {
-      indicator.className = `dot ${draft.error ? 'off' : draft.busy ? 'ok' : 'pending'}`;
-      indicator.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
+      const next = window.companionBoxes.dot(draft.error ? 'failed' : draft.busy ? 'working' : 'idle');
+      next.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
+      indicator.replaceWith(next);
     }
   }
   return section;

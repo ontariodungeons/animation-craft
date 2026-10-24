@@ -115,11 +115,20 @@ async function animationLoad(){
   if(opening&&motion.meta===meta&&!motion.playing)await animationPlay();
  }catch(e){animationEmpty('Artwork needs preparation',String(e));}finally{motion.loading=false;}
 }
+// The part card badge: the one indicator, at the small size.
+function partBadge(state, title) {
+  const node = window.companionBoxes.dot(state);
+  node.classList.add('sm');
+  node.title = title;
+  return node;
+}
+
 function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
  const authoring=motionAuthoringPanels(meta);
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
- box.append(el('div',{class:'motion-object-head'},el('span',{class:'dot ok',title:'Artwork loaded'}),picker),authoring.status);
+ const artworkDot=window.companionBoxes.dot('ready');artworkDot.title='Artwork loaded';
+ box.append(el('div',{class:'motion-object-head'},artworkDot,picker),authoring.status);
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
  const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
@@ -227,7 +236,7 @@ function partsDrawer(compare,assetsGrid){
   const shown=part.state?.visible!==false,name=part.label||part.id,picked=motion.selected===part.id;
   const candidate=partCandidate(part.id);
   const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
-  const badge=candidate?el('span',{class:'magic-part-dot warn',title:candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'}):picked?el('span',{class:'magic-part-dot accent',title:'Selected'}):null;
+  const badge=candidate?partBadge('needs-attention',candidate.source==='photocraft'?'A saved PhotoCraft draft awaits review':'A generated candidate awaits review'):picked?partBadge('ready','Selected'):null;
   const visible=motionButton(`magic-part-visible-${part.id}`,`${shown?'Hide':'Show'} ${name}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:part.id,visible:!shown});await animationRefresh();});
   visible.setAttribute('aria-pressed',String(shown));
   return el('article',{class:`magic-part-card${picked?' active':''}${shown?'':' hidden-layer'}`,id:`magic-part-card-${part.id}`,title:`${name} (${part.id})`},

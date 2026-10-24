@@ -23,7 +23,7 @@ const BOX_STATES = ["idle", "working", "ready", "needs-attention", "failed"];
 //   0 none · 1 green in use · 2 yellow attention · 3 red problem
 // Working is work in flight, so it is green and busy; yellow is only "needs you".
 const SIGNAL = { idle: 0, ready: 1, working: 1, "needs-attention": 2, failed: 3 };
-const SIGNAL_CLASS = { 0: "", 1: "ok", 2: "warn", 3: "off" };
+const SIGNAL_LABEL = { 0: "idle", 1: "in use", 2: "attention", 3: "problem" };
 
 // The three flags every panel reports: is it open, is work in flight, does it
 // hold unsaved edits. They are facts about one panel, never about the app.
@@ -234,13 +234,16 @@ function createCompanionBoxes() {
   function signal(state) {
     return SIGNAL[state] ?? 0;
   }
-  function dot(state) {
+  // The one indicator. The state picks the number; the variant changes the
+  // shape only. The colour lives in CSS, as a token.
+  function dot(state, variant = "") {
     const value = signal(state);
     const node = document.createElement("span");
-    node.className = `dot ${SIGNAL_CLASS[value]}`.trim();
+    node.className = "dot";
     node.dataset.signal = String(value);
+    if (variant) node.dataset.variant = variant;
     node.setAttribute("role", "img");
-    node.setAttribute("aria-label", value === 3 ? "problem" : value === 2 ? "attention" : value === 1 ? "in use" : "idle");
+    node.setAttribute("aria-label", SIGNAL_LABEL[value]);
     return node;
   }
   function subscribe(fn) {
