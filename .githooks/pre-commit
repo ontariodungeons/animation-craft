@@ -22,6 +22,13 @@ node apps/magicstudio-shell/tests/panels.mjs
 node apps/magicstudio-shell/tests/companions.mjs
 node apps/magicstudio-shell/tests/ui-lint.mjs --ratchet --report
 
+if git diff --cached --name-only | grep -qE '^scripts/(test_)?render_motion_recipe\.py$'; then
+    python scripts/test_render_motion_recipe.py
+fi
+if git diff --cached --name-only | grep -qE '^pipeline/(layered_motion|test_layer_alternates)\.py$'; then
+    python pipeline/test_layer_alternates.py
+fi
+
 # 2. If Rust files are staged, run workspace compile check + test suite on commit
 RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
 if [ -n "$RUST_STAGED" ]; then
