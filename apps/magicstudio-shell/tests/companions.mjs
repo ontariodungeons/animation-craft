@@ -46,6 +46,35 @@ function fixture() {
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
+  ['submitted jobs stay busy and status follows their initiating panel', async () => {
+    const { ctx, boxes } = fixture();
+    boxes.register('render', {project:ctx.state.project});
+    const start={box:'render',command:'blender.start',project:ctx.state.project,request:'render-1',params:{}};
+    boxes.event({...start,phase:'start'});
+    boxes.event({...start,phase:'success',result:{job:'job-1',state:'submitted'}});
+    assert.equal(boxes.get('render').state,'working');
+    assert.equal(boxes.get('render').job,'job-1');
+    boxes.event({command:'blender.status',request:'independent-cli-poll',project:ctx.state.project,params:{job:'job-1'},phase:'success',result:{state:'failed',error:'Worker failed'}});
+    assert.equal(boxes.get('render').state,'failed');
+    assert.match(boxes.get('render').reason,/Worker failed/);
+    boxes.event({...start,request:'render-2',phase:'start'});
+    boxes.event({...start,request:'render-2',phase:'success',result:{job:'job-2',state:'submitted'}});
+    boxes.event({command:'blender.status',project:ctx.state.project,params:{job:'job-1'},phase:'success',result:{state:'completed'}});
+    assert.equal(boxes.get('render').state,'working','old job cannot complete the replacement');
+    boxes.event({command:'blender.status',project:ctx.state.project,params:{job:'job-2'},phase:'success',result:{state:'completed'}});
+    assert.equal(boxes.get('render').state,'ready');
+  }],
+  ['attention cannot inherit another project failure or receipt', () => {
+    const {ctx,boxes}=fixture();
+    boxes.fact({id:'chat',project:ctx.state.project,state:'failed',reason:'Old failure',request:'old-request',job:'old-job',context:{scene:'A'},resolution:'old resolution'});
+    boxes.recordReceipt('chat',{revision:4,command:'old-command'});
+    ctx.state.project='/p/Other.magic';
+    boxes.attention('chat','Inspect this project');
+    const box=boxes.get('chat');
+    assert.equal(box.project,ctx.state.project);assert.equal(box.state,'idle');
+    assert.equal(box.request,null);assert.equal(box.job,null);assert.equal(box.receipt,null);assert.equal(box.context,null);assert.equal(box.resolution,null);
+    assert.equal(boxes.panels().items.find(row=>row.id==='chat').signal,2);
+  }],
   ['reduced motion and disabling cancel outstanding pose animations', async () => {
     const { ctx, boxes, timers, media, mediaListeners } = fixture();
     const pets = ctx.createCompanions({frames:{}}, {boxes,sprites:{has:()=>true,image:()=>null}});

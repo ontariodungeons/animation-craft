@@ -28,6 +28,8 @@ const SIGNAL_LABEL = { 0: "idle", 1: "in use", 2: "attention", 3: "problem" };
 function createCompanionBoxes() {
   const boxes = new Map();
   const listeners = new Set();
+  const jobs = new Map();
+  const jobId = value => typeof value === "string" ? value : value?.id || null;
   let quiet = false;
   let changeSeq = 0;
   let draftFields = [];
@@ -140,7 +142,7 @@ function createCompanionBoxes() {
       boxes.set(id, box);
     } else {
       if (project != null && box.project !== project) {
-        Object.assign(box, { project, state: "idle", busy: false, reason: null, request: null, job: null, source: null, attention: null, receipt: null, observed_at: null });
+        Object.assign(box, { project, context: null, resolution: null, state: "idle", busy: false, reason: null, request: null, job: null, source: null, attention: null, receipt: null, observed_at: null });
       }
       if (context != null) box.context = context;
       if (priority) box.priority = priority;
@@ -213,25 +215,28 @@ function createCompanionBoxes() {
       if (event.project !== state.project) return;
       const context = event.box ? event : capture(event.command, event.params);
       if (!context.box) return;
-      const box = get(context.box), request = event.request || context.request;
-      if (event.phase !== "start" && box?.state === "working" && box?.request && request && box.request !== request) return;
+      const box = get(context.box), request = context.job ? context.request : event.request || context.request;
+      if (event.phase !== "start" && (box?.state === "working" || context.job) && box?.request && request && box.request !== request) return;
       const result = event.result || {}, failed = event.phase === "error" || result.ok === false || result.state === "failed";
-      const working = event.phase === "start" || ["queued", "running", "cancelling"].includes(result.state);
-      fact({ id: context.box, project: event.project, state: failed ? "failed" : working ? "working" : result.state === "cancelled" ? "idle" : "ready", request,
+      const working = event.phase === "start" || ["submitted", "queued", "running", "cancelling"].includes(result.state);
+      const job = jobId(result.job) || jobId(result.job_id) || context.job;
+      if (job) bounded(jobs, `${event.project}:${job}`, { box: context.box, request });
+      fact({ id: context.box, project: event.project, job, state: failed ? "failed" : working ? "working" : result.state === "cancelled" ? "idle" : "ready", request,
         reason: failed ? String(event.error || result.error || "Operation failed") : working ? "Working" : "Command completed", source: "command result" });
       if (event.phase === "success") recordReceipt(context.box, { ...result, command: event.command });
   }
   function capture(command, params = {}) {
       const action = typeof acFeedback === "undefined" ? null : acFeedback.action;
+      const job = jobId(params.job) || jobId(params.job_id), owner = job ? jobs.get(`${state.project}:${job}`) : null;
       const node = document.getElementById(params?._control || action?.control) || [...document.querySelectorAll("[data-commands]")].find(n => (n.getAttribute("data-commands") || "").split(/\s+/).includes(command));
-      const box = action?.box || node?.closest("[data-companion-rail]")?.getAttribute("data-companion-rail") || node?.closest("[data-box-id]")?.getAttribute("data-box-id") || null;
-      return { command, params, box, request: params?._request_id || action?.request_id || null, project: state.project, view: state.view };
+      const box = owner?.box || action?.box || node?.closest("[data-companion-rail]")?.getAttribute("data-companion-rail") || node?.closest("[data-box-id]")?.getAttribute("data-box-id") || null;
+      return { command, params, box, job, request: owner?.request || params?._request_id || action?.request_id || null, project: state.project, view: state.view };
   }
 
   function attention(id, reason) {
-    const box = boxes.get(canonical(id));
-    if (!box) throw new Error("Unknown panel: " + id);
+    if (!boxes.has(canonical(id))) throw new Error("Unknown panel: " + id);
     if (reason !== null && (typeof reason !== "string" || !reason.trim())) throw new Error("Attention needs a reason");
+    const box = register(id, { project: currentProject() });
     box.project = currentProject();
     box.attention = reason === null ? null : reason.trim().slice(0, 180);
     box.seq = ++changeSeq;
@@ -302,7 +307,7 @@ function createCompanionBoxes() {
   }
 
   function clear() {
-    boxes.clear();
+    boxes.clear(); jobs.clear();
     notify();
   }
 

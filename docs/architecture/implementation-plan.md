@@ -156,3 +156,7 @@ The manifest now activates the original honey dog and orange cat, with ten decod
 Evidence: `live-pets-results.json`, `pet-layout-results.json`, `complete-components.json`, `final-panel-report.json`, `pets-idle-homes.png`, `pets-missing-state-red.png`, `pets-tui-attention.png`, and `pets-700.png`, all in this project's `docs/architecture/evidence/`. Tests use a clearly identified disposable project fixture; no song content or authored animation is fabricated or modified. Existing fish-and-bee motion engines are unchanged by this final activation.
 
 Remaining delivery work at this checkpoint: normal commit hooks, independent final review, and scoped PR. No merge is authorized. The TUI recipient has not been supplied; the durable contract and committed code are the handoff artifact.
+
+### Independent final review
+
+The executing-plans final reviewer found two material registry defects: `submitted` jobs were incorrectly reported ready and their later status polls lacked an initiating component; attention could also reassign an old failed record to a new project. Both are repaired in the common registry. Job IDs now correlate status observations to their initiating component/request, including independent CLI polling; replacement-job stale completions are rejected. New-project attention goes through the existing registration reset and clears old context/receipt. Regression tests failed before these repairs and pass after them. No panel design or engine implementation changed.
