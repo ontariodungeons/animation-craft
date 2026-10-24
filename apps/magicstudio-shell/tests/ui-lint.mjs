@@ -136,26 +136,46 @@ for (const [file, source] of sources) {
 }
 
 // The acceptance numbers, measured.
-function report() {
+function reportFor(sources) {
   const css = 'style.css';
-  const c = counts[css] ?? { lines: 0, rules: 0, selectors: 0, px_outside_root: 0, hex_outside_root: 0 };
-  const texts = {
-    css_lines: c.lines,
-    css_rules: c.rules,
-    css_selectors: c.selectors,
-    css_classes: new Set((withoutComments(read(css)).match(/\.[A-Za-z][\w-]*/g) || [])).size,
-    css_px_total: occurrences(withoutComments(read(css)), PX),
-    css_px_outside_root: c.px_outside_root,
-    css_hex_total: occurrences(withoutComments(read(css)), HEX),
-    css_hex_outside_root: c.hex_outside_root,
-    js_lines: jsFiles.reduce((sum, file) => sum + (counts[file]?.lines ?? 0), 0),
-    style_writes: jsFiles.reduce((sum, file) => sum + (counts[file]?.style_writes ?? 0), 0),
-    style_attributes: jsFiles.reduce((sum, file) => sum + (counts[file]?.style_attributes ?? 0), 0),
-  };
-  return `css ${texts.css_lines} lines / ${texts.css_rules} rules / ${texts.css_selectors} selectors / ${texts.css_classes} classes / ${texts.css_px_total} px (${texts.css_px_outside_root} outside :root) / ${texts.css_hex_total} hex (${texts.css_hex_outside_root} outside :root) · js ${texts.js_lines} lines / ${texts.style_writes} .style.x = / ${texts.style_attributes} style: attributes`;
+  const fileCounts = new Map();
+  for (const [file, source] of sources) {
+    fileCounts.set(file, file.endsWith('.css') ? cssCounts(file, source) : jsCounts(file, source));
+  }
+  const c = fileCounts.get(css) ?? { lines: 0, rules: 0, selectors: 0, px_outside_root: 0, hex_outside_root: 0 };
+  const js = [...fileCounts].filter(([file]) => file.endsWith('.js'));
+  const sum = key => js.reduce((total, [, counts]) => total + (counts[key] ?? 0), 0);
+  const cssText = withoutComments(sources.get(css) ?? '');
+  const classes = new Set(cssText.match(/\.[A-Za-z][\w-]*/g) || []).size;
+  return `css ${c.lines} lines / ${c.rules} rules / ${c.selectors} selectors / ${classes} classes / ${occurrences(cssText, PX)} px (${c.px_outside_root} outside :root) / ${occurrences(cssText, HEX)} hex (${c.hex_outside_root} outside :root) · js ${sum('lines')} lines / ${sum('style_writes')} .style.x = / ${sum('style_attributes')} style: attributes`;
+}
+
+const report = () => reportFor(sources);
+
+// HEAD's numbers, so a commit can say what it changed.
+function headSources() {
+  const files = execSync('git ls-tree --name-only HEAD apps/magicstudio-shell/ui/', { encoding: 'utf8' })
+    .split('\n').map(name => name.split('/').pop()).filter(name => name.endsWith('.css') || name.endsWith('.js'));
+  const map = new Map();
+  for (const file of files) {
+    try {
+      map.set(file, execSync(`git show HEAD:apps/magicstudio-shell/ui/${file}`, { encoding: 'utf8' }));
+    } catch { /* a file that is not in HEAD yet */ }
+  }
+  return map;
 }
 
 if (process.argv.includes('--report')) console.log('report: ' + report());
+
+if (process.argv.includes('--append-report')) {
+  const gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf8' }).trim();
+  const messagePath = `${gitDir}/COMMIT_EDITMSG`;
+  let before = '';
+  try { before = reportFor(headSources()); } catch { before = report(); }
+  const line = `report: ${before} -> report: ${report()}`;
+  const message = fs.readFileSync(messagePath, 'utf8');
+  if (!message.includes(line)) fs.writeFileSync(messagePath, `${message.replace(/\s*$/, '')}\n\n${line}\n`);
+}
 
 if (process.argv.includes('--write-baseline')) {
   fs.writeFileSync(BASELINE, JSON.stringify({ files: counts }, null, 2) + '\n');
