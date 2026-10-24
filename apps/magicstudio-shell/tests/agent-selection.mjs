@@ -24,7 +24,7 @@ const context = vm.createContext({
     calls.push({ id, params });
     if (id === "agent.log") return [];
     if (id === "agent.models") return { available: true, models: [{ providerID: "opencode", id: "synthetic-free", enabled: true }] };
-    if (id === "agent.new_chat") return { ok: true, session: "ses_fresh", turns: [] };
+    if (id === "agent.new_chat") return { ok: true, session: "ses_fresh", turns: [], _ui_engine_revision: 2 };
     if (id === "agent.send") {
       if (rejectSend) throw Error("Synthetic authentication rejected");
       return { ok: true, session: "ses_fresh", provider: "opencode", model: "synthetic-free", text: "Synthetic answer", turns: [] };
@@ -46,6 +46,7 @@ assert.equal(saved.patch.provider, "opencode");
 assert.equal(saved.patch.model, "synthetic-free");
 assert.ok(!("image_model" in saved.patch), "chat save must not overwrite image preferences");
 await vm.runInContext("agentNewChat()", context);
+assert.ok(calls.some(c => c.id === "render_revision" && c.revision === 2 && c.project === "/synthetic/Test.magic"), "New Chat acknowledges its applied UI revision");
 node("agent-input").value = "Synthetic first message";
 await vm.runInContext("agentSend()", context);
 let sends = calls.filter((c) => c.id === "agent.send");
@@ -70,7 +71,7 @@ assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"other project ca
 await vm.runInContext(`agent.turns=[{role:"assistant",text:"Not rendered",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"unrendered text cannot acknowledge");
 await vm.runInContext(`agent.turns=[{role:"assistant",text:"Visible reply",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
-assert.equal(calls.filter(c=>c.id==="render_revision").length,1);
+assert.equal(calls.filter(c=>c.id==="render_revision" && c.revision===10).length,1);
 assert.equal(calls.find(c=>c.id==="render_receipt").event.request_id,"r1");
 await vm.runInContext("acknowledgeAgentReply()",context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,1,"polling must not duplicate receipt");
@@ -133,7 +134,7 @@ const artworkContext = vm.createContext({
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
-  document: { querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
+  document: { querySelectorAll: () => [], querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
   magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
   updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
   invoke: async (id, args) => {

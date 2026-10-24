@@ -237,6 +237,8 @@ pub fn build() -> Vec<CommandSpec> {
         query!("center.events", "Recent Activity Receipts (alias of backstage.events)", "{\"after\":0,\"limit\":20,\"project\":\"optional absolute project filter\"}", crate::activity::events),
         query!("ui.feedback", "Live Studio Feedback", "{\"project\":\"optional canonical project path\"}", crate::command_center::requires_ui),
         query!("ui.components", "Rendered Studio Components", "{\"region\":\"#view-project\",\"filter\":\"optional ID filter\",\"limit\":30}", crate::command_center::requires_ui),
+        query!("ui.controls", "Studio control telemetry", "{\"region\":\"optional region\",\"offset\":0,\"limit\":64}", crate::command_center::requires_ui),
+        cmd!("ui.attention", "Request attention at a Studio panel", ["Window"], None, "{\"project\":\"exact open .magic path\",\"id\":\"registered panel id\",\"reason\":\"what needs attention\",\"clear\":false}", always, crate::command_center::requires_ui),
         query!("center.status", "Backstage (alias of backstage.status)", "{\"trace\":false}", crate::command_center::status),
         query!("studio.cues", "Cues at a Song Time / Uses of a Clip (read-only)", "{\"project\":\"existing .magic path\",\"at\":43.2,\"clip\":\"clip id; give at or clip\"}", crate::studio_cues::cues),
         cmd!("project.migrate", "Migrate a Legacy .acproj to .magic", ["File"], None, "{\"path\":\"legacy .acproj file\"}", always, crate::project::cmd_project_migrate),

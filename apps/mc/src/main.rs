@@ -21,6 +21,7 @@ mod find;
 mod logo;
 mod mcp_presence;
 mod mcp_watch;
+mod panels;
 mod local_ui;
 mod snapshot;
 mod studios;
@@ -91,6 +92,7 @@ OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `magicstudio-shell --control <port>` GUI window
 
 SUBCOMMANDS
+  panels [--json|--check]              shared UI configuration and live panel telemetry
   tui look [instance=<pid>]            actual live TUI frame, state and all controls as JSON
   tui read [instance=<pid>]            the actual rendered terminal text
   tui instances                       list controllable TUIs; multiple instances require selection
@@ -495,7 +497,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         stop_after_reply = true;
                     }
                     out
-                } else if cmd_id=="ui.feedback"||cmd_id=="ui.components" {bridge_call(bridge.as_deref().unwrap_or("auto"),cmd_id,args)
+                } else if matches!(cmd_id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention") {bridge_call(bridge.as_deref().unwrap_or("auto"),cmd_id,args)
                 } else if let Some(addr) = &bridge {
                     bridge_call(addr, cmd_id, args)
                 } else {
@@ -746,7 +748,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "panels", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
@@ -936,6 +938,10 @@ fn main() {
                 outln!("  {} — {}", spec.id, spec.label);
             }
         }
+        "panels" => {
+            let raw = cli_args();
+            std::process::exit(panels::run(a.bridge_addr().as_deref(), raw.iter().any(|v| v == "--json"), raw.iter().any(|v| v == "--check")));
+        }
         "studios" | "windows" => {
             // skip the program and this subcommand, so the first free argument is the studio to pin
             let raw = cli_args().iter().cloned().skip(2).collect::<Vec<_>>();
@@ -1066,7 +1072,7 @@ fn main() {
                 if v["ok"]==false{std::process::exit(1);}
                 return;
             }
-            let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
+            let res = if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
             }else if let Some(addr) = a.bridge_addr() {
                 bridge_call(&addr, id, params)
             } else {
@@ -1111,7 +1117,7 @@ fn main() {
                     .unwrap_or_else(|| usage(format!("line {}: missing \"id\"", n + 1)));
                 let mut params = v.get("params").cloned().unwrap_or(json!({}));
                 params["_origin"]=json!("CLI JSONL");
-                let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(bridge.as_deref().unwrap_or("auto"),id,params)
+                let res = if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(bridge.as_deref().unwrap_or("auto"),id,params)
                 }else if let Some(addr) = &bridge {
                     bridge_call(addr, id, params)
                 } else {

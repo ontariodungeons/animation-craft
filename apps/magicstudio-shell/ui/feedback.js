@@ -10,11 +10,10 @@ function feedbackSnapshot(){
  // light, the companion and the TUI all read ONE observation. Each row says
  // where it came from and when it was seen; a stale or closed-app observation
  // is marked, never invented as a failure. No new poller and no new command.
- const boxes=window.companionBoxes?window.companionBoxes.snapshot({project:typeof state==='undefined'?null:state.project}):[];
  // The one standard record per panel: flags, a revision that changes only when
  // a flag changes, and the clickable controls that belong to no known panel.
  const panels=window.companionBoxes?window.companionBoxes.panels():null;
- return {companions:window.magicCompanions?.snapshot()||null,boxes,panels,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
+ return {companions:window.magicCompanions?.snapshot()||null,panels,theatre:typeof theatreFeedback==='function'?theatreFeedback():null,chat_selector:chat,rendered,phase:acFeedback.phase,errors:acFeedback.errors.slice(-8),pending_invokes:acFeedback.pending,ack_engine_revision:acFeedback.ack,project:typeof state==='undefined'?null:state.project,view:typeof state==='undefined'?null:document.body.classList.contains('at-home')?'home':state.view,draft_fields:changed,last_frontend_command:acFeedback.last};
 }
 acFeedback.report=async function(phase,ack,event){
  if(phase)acFeedback.phase=phase;if(ack)acFeedback.ack=Math.max(acFeedback.ack,ack);
@@ -34,7 +33,7 @@ document.addEventListener('click',e=>{
  const request_id=`ui-${Date.now()}-${Math.random().toString(16).slice(2,8)}`;
  const navigation=n.matches('#project-details,#sb-prev,#sb-next,.sb-link,#sb-chips [role=tab],.tab[data-view]');
  const previous=acFeedback.action,errors=acFeedback.errors.length;
- e.acAction={control,request_id};acFeedback.actions.set(n,e.acAction);acFeedback.action=e.acAction;
+ e.acAction={control,request_id,box:n.closest("[data-companion-rail]")?.getAttribute("data-companion-rail")||n.closest("[data-box-id]")?.getAttribute("data-box-id")||null};acFeedback.actions.set(n,e.acAction);acFeedback.action=e.acAction;
  // Static handlers run during this dispatch too; invoke captures this context before awaiting.
  queueMicrotask(()=>{if(acFeedback.action===e.acAction)acFeedback.action=previous;});
  acFeedback.report(null,null,{stage:'ui_click',control,request_id,interaction:navigation?'navigation':'control',verified_commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:navigation?'existing navigation handler':n.dataset.commands?'verified handler annotation':'unknown'});

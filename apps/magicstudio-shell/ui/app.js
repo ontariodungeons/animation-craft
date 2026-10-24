@@ -3,17 +3,18 @@
 const { invoke: nativeInvoke, convertFileSrc } = window.__TAURI__.core;
 async function invoke(command,params){
  const action=acFeedback.action;
- const companion=command==='engine_command'?window.magicCompanions?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ const companion=command==='engine_command'?window.uiRegistry?.capture(params.id,{...params.params,_request_id:action?.request_id||params.params?._request_id}):null;
+ if(companion)window.uiRegistry?.event({...companion,phase:"start"});
  acFeedback.pending++;await acFeedback.report();
  if(command==='engine_command'&&params){params={...params,params:{...params.params,_origin:action?'UI click':'UI callback',_client:'Studio user (unverified label)',_control:action?.control,_request_id:action?.request_id||params.params?._request_id||companion?.request}};}
  if(command==='project_create'||command==='project_open'){params={...params,request:params?.request??action?.request_id??null,control:params?.control??action?.control??null};}
  acFeedback.report(null,null,{stage:'handler_dispatch',control:action?.control||null,request_id:action?.request_id||null,command:params?.id||command});
  try{
   const result=await nativeInvoke(command,params);acFeedback.last={transport:command,id:params?.id||null,status:'success'};
-  if(companion)window.magicCompanions?.event({...companion,phase:'success',result});
+  if(companion)window.uiRegistry?.event({...companion,phase:'success',result});
   if(result?._ui_engine_revision) acFeedback.pendingRevision=result._ui_engine_revision;
   return result;
- }catch(error){if(companion)window.magicCompanions?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
+ }catch(error){if(companion)window.uiRegistry?.event({...companion,phase:'error',error:String(error)});acFeedback.last={transport:command,id:params?.id||null,status:'error',error:String(error).slice(0,300)};acFeedback.report(null,null,{stage:'handler_error',command:params?.id||command,control:action?.control||null,request_id:action?.request_id||null,error:String(error).slice(0,300)});throw error;}
  finally{acFeedback.pending--;await acFeedback.report();}
 }
 const $ = (id) => document.getElementById(id);
@@ -225,16 +226,28 @@ async function loadComponents() {
   Object.assign(uiConfig, await response.json());
   for (const [id, entry] of Object.entries(uiConfig.elements)) {
     const node = document.getElementById(id);
-    if (node) applyEntry(node, entry);
+    if (node) { applyEntry(node, entry, id); node.setAttribute("data-box-id", id); window.companionBoxes?.register(id, { project: state.project, ...entry }); }
   }
+  for (const node of document.body.querySelectorAll("*")) window.uiRegistry?.registerElement(node);
   return uiConfig;
 }
 
-function applyEntry(node, entry) {
+function applyEntry(node, entry, id = node.id) {
   if (!entry) return node;
+  node.dataset.uiConfig = id;
   if (entry.component) node.className = [...new Set(`${node.className || ''} ${entry.component}`.trim().split(/\s+/))].join(' ');
   if (entry.look) node.dataset.look = entry.look;
   if (entry.density) node.dataset.density = entry.density;
+  if (entry.component === 'panel' && entry.rail && !node.querySelector('[data-companion-slot]')) {
+    const head = node.querySelector('.panel-head');
+    if (!head) { node.dataset.contractError = 'Panel has no shared header'; return node; }
+    delete node.dataset.contractError;
+    node.setAttribute('data-companion-rail', entry.rail);
+    const slot = document.createElement('span');
+    slot.className = 'panel-rail'; slot.setAttribute('data-companion-slot', entry.rail);
+    slot.setAttribute('aria-hidden', 'true'); head.append(slot);
+    window.uiRegistry?.registerElement(slot);
+  }
   return node;
 }
 
@@ -252,11 +265,12 @@ function el(tag, attrs = {}, ...children) {
   const project = typeof state === "undefined" ? null : state.project;
   const boxId = box || attrs.id || null;
   const entry = boxId ? uiConfig.elements[boxId] : null;
-  if (entry) applyEntry(node, entry);
+  if (entry) applyEntry(node, entry, boxId);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
     if (window.companionBoxes) window.companionBoxes.register(boxId, { project, label: entry?.label || null, look: entry?.look || null, density: entry?.density || null });
   }
+  window.uiRegistry?.registerElement(node);
   return node;
 }
 
@@ -386,10 +400,10 @@ function lyricsBody(lyrics, doc, liner, songPath) {
     model.canonical && lyrics.artist_note ? el("blockquote", { class: "artist-note" }, el("p", {}, lyrics.artist_note), el("cite", {}, lyrics.artist || "The artist")) : null,
     el("div", { class: "lyric-actions" },
       original?.exists
-        ? el("button", { id: "song-open-original", class: "ghost", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
+        ? el("button", { id: "song-open-original", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
         : [el("span", { class: "not-linked" }, original ? `Original not found: ${name(original.path)}` : "Original not linked"),
            el("button", { id: "song-attach-original", class: "ghost", onclick: attachOriginal }, "Attach original…")],
-      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", class: "ghost", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
+      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
     lyricSheet(model),
     el("div", { class: "group-label" }, "Liner notes"),
     liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None attached yet."),
@@ -412,10 +426,10 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
         ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
         : [el("span", {}, line.text)]))))));
   const title = model.canonical ? "Lyrics" : "Transcript";
-  const pane = el("section", { class: "magic-pane magic-reader", id: "magic-reader", "aria-label": `${title}, read only` },
-    el("div", { class: "panel-head pane" }, el("span", {}, title),
+  const pane = el("section", { id: "magic-reader", "aria-label": `${title}, read only` },
+    el("div", { id: "magic-reader-head" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
-      el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
+      el("button", { id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
   $("magic-reader")?.remove();
   $("magic-workstation")?.append(pane);
@@ -446,7 +460,11 @@ function block(id, icon, title, meta, done, body, blockState, action) {
   const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", id);
   dot.title = done ? "Ready" : "Needs work";
   const head = el("button", { class: "panel-head", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
-      onclick: () => { state.open = open ? null : id; renderBlocks(); } },
+      onclick: () => {
+        const narrow = getComputedStyle(document.documentElement).getPropertyValue("--workspace-narrow").trim() === "1";
+        if (narrow && agent.open) { agentToggle(false); state.open = id; } else state.open = open ? null : id;
+        renderBlocks();
+      } },
     dot,
     el("span", { class: "ico", html: icon }),
     el("span", { class: "title" }, title),
@@ -454,12 +472,10 @@ function block(id, icon, title, meta, done, body, blockState, action) {
     el("span", { class: "chev", html: ICONS.chev }));
   // The header row carries the slot. It sits on the block's own edge, outside
   // the clickable head button, so a companion never covers a control.
-  const slot = el("span", { class: "companion-slot", "data-companion-slot": `block-${id}`, "data-companion-target": id, "data-box-id": id });
   // Readiness informs a prerequisite status. An empty block is not an error.
   if (window.companionBoxes) window.companionBoxes.readiness(id, { state: blockState, reason: done ? "Ready" : "Needs work" });
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
+  return el("section", { box: id, class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
     action ? el("div", { class: "block-headrow" }, head, action) : head,
-    slot,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 
@@ -525,7 +541,7 @@ function renderBlocks() {
      songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
        ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
      songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
-       [doc?.words?.length ? el("button", { id: "song-open-transcript", class: "ghost", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
+       [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
         el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
     songState, audio ? songPlayButton(audio.path) : null));
 

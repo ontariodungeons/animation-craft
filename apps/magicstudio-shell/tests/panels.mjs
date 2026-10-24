@@ -28,6 +28,7 @@ function element(tag, { id = '', title = '', text = '', attrs = {}, parent = nul
     matches(selector) {
       for (const part of String(selector).split(',').map(s => s.trim())) {
         if (!part) continue;
+        if (part === "*") return true;
         if (part.startsWith('[')) {
           const m = part.match(/^\[([^\]=]+)(?:="([^"]*)")?\]$/);
           if (!m) continue;
@@ -38,7 +39,7 @@ function element(tag, { id = '', title = '', text = '', attrs = {}, parent = nul
         }
         if (part.startsWith('.')) { if (el.className.split(/\s+/).includes(part.slice(1))) return true; continue; }
         const tag = part.split('[')[0];
-        if (tag && el.tagName.toLowerCase() === tag.toLowerCase()) return true;
+        if (tag && el.tagName.toLowerCase() === tag.toLowerCase() && (!part.includes('[') || el.matches(part.slice(part.indexOf('['))))) return true;
       }
       return false;
     },
@@ -67,8 +68,9 @@ function fixture() {
     getElementById: (id) => elements.find(el => el.id === id) || null,
     addEventListener() {},
   };
+  doc.body.querySelectorAll = doc.querySelectorAll;
   const ctx = vm.createContext({
-    console, JSON, Map, Set, Promise, Date, queueMicrotask,
+    console, JSON, Map, Set, Promise, Date, queueMicrotask, Event: class { constructor(type) { this.type = type; } },
     document: doc,
     state: { project: '/p/Study.magic', view: 'project' },
     localStorage: { getItem: () => null, setItem() {} },
@@ -93,11 +95,15 @@ function elFixture(entries) {
     const element = { tagName: tag.toUpperCase(), className: '', dataset: {}, attributes: {}, children: [],
       setAttribute(name, value) { this.attributes[name] = String(value); },
       getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; },
-      append(...items) { this.children.push(...items); }, addEventListener() {} };
+      append(...items) { this.children.push(...items); for (const item of items) if (typeof item === 'object') item.parentElement = this; },
+      querySelector(selector) {
+        const all = this.children.flatMap(child => typeof child === 'object' ? [child, ...(child.children || [])] : []);
+        return all.find(child => selector === '.panel-head' ? child.className?.split(' ').includes('panel-head') : child.getAttribute?.('data-companion-slot') !== null) || null;
+      }, addEventListener() {} };
     created.push(element);
     return element;
   };
-  const doc = { createElement: node, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, body: { classList: { contains: () => false, add() {}, remove() {} } } };
+  const doc = { createElement: node, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {}, body: { querySelectorAll: () => [], classList: { contains: () => false, add() {}, remove() {} } } };
   const ctx = vm.createContext({ console, JSON, Promise, document: doc, state: { project: '/p/Study.magic' },
     fetch: async () => ({ ok: true, json: async () => ({ version: 1, looks: {}, densities: [], elements: entries }) }),
     queueMicrotask, window: {} });
@@ -108,6 +114,116 @@ function elFixture(entries) {
 }
 
 const tests = [
+  ['missing shared panel header is a reported contract failure', () => {
+    const { ctx, bridge, boxes, elements } = fixture();
+    ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };
+    boxes.register('lyrics', { project: '/p/Study.magic' });
+    const node = element('section', { id: 'lyrics', attrs: { 'data-box-id': 'lyrics', 'data-companion-rail': 'lyrics' } });
+    node.dataset.contractError = 'Panel has no shared header'; elements.push(node);
+    assert.equal(bridge.unconfigured()[0].reason, 'missing-panel-header');
+    assert.equal(boxes.panels().items.find(row => row.id === 'lyrics').signal, 3);
+  }],
+  ['missing state inside a configured panel is a red contract error', () => {
+    const { ctx, bridge, boxes, elements } = fixture();
+    ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };
+    boxes.register('lyrics', { project: '/p/Study.magic' });
+    const parent = element('section', { id: 'lyrics', attrs: { 'data-box-id': 'lyrics', 'data-companion-rail': 'lyrics' } });
+    const broken = element('button', { id: 'new-control', parent, attrs: { 'data-box-id': 'missing-state' } });
+    elements.push(parent, broken);
+    assert.ok(bridge.unconfigured().some(row => row.id === 'new-control'));
+    const fault = boxes.panels().items.find(row => row.id === 'lyrics');
+    assert.equal(fault.signal, 3, 'optional visibility must not conceal missing state');
+    assert.match(fault.reason, /UI contract/);
+    boxes.fact({ id: 'lyrics', state: 'failed', reason: 'Actual lyric load failed' });
+    boxes.register('missing-state', { project: '/p/Study.magic' });
+    const repaired = boxes.panels().items.find(row => row.id === 'lyrics');
+    assert.equal(repaired.signal, 3, 'repair must preserve an independent engine error');
+    assert.match(repaired.reason, /Actual lyric load failed/);
+    boxes.fact({ id: 'lyrics', state: 'idle' });
+    assert.equal(boxes.panels().items.find(row => row.id === 'lyrics').signal, 0, 'healthy state clears after the real error is resolved');
+  }],
+  ['one shared panel constructor mounts the configured rail exactly once', async () => {
+    const { ctx } = elFixture({ panel: { component: 'panel', look: 'chat', rail: 'panel' } });
+    await ctx.loadComponents();
+    const head = ctx.el('div', { class: 'panel-head' });
+    const panel = ctx.el('section', { id: 'panel' }, head);
+    ctx.applyEntry(panel, ctx.uiConfig.elements.panel, 'panel');
+    assert.equal(panel.getAttribute('data-companion-rail'), 'panel');
+    assert.equal(head.children.length, 1);
+    assert.equal(head.children[0].getAttribute('data-companion-slot'), 'panel');
+    assert.equal(panel.dataset.uiConfig, 'panel');
+  }],
+  ['CLI toggles update checked state and indexed actions require instance', () => {
+    const { bridge, elements } = fixture();
+    const control = element('input', { id: 'toggle' });
+    control.type = 'checkbox'; control.checked = false; control.dispatchEvent = () => {};
+    elements.push(control);
+    bridge.set('toggle', true);
+    assert.equal(control.checked, true);
+    assert.throws(() => bridge.set('toggle', 'true'), /boolean/);
+    assert.throws(() => bridge.click('@1'), /instance/);
+    control.disabled = true;
+    assert.throws(() => bridge.set('toggle', false), /not editable/);
+  }],
+  ['indices and positions survive reads; changed snapshots reject old pagination', () => {
+    const { bridge, elements } = fixture();
+    const parent = element('div', { id: 'panel' }), child = element('button', { parent });
+    elements.push(parent, child);
+    const first = bridge.controls({});
+    const row = first.items[1];
+    assert.ok(Number.isInteger(row.index));
+    assert.equal(row.parent_index, first.items[0].index);
+    assert.deepEqual(plain(row.rect), [0, 0, 120, 24]);
+    assert.equal(row.target, `@${row.index}`);
+    assert.equal(bridge.controls({}).items[1].index, row.index);
+    assert.throws(() => bridge.controls({ expected_instance: 'another-page' }), /instance changed/);
+    child.disabled = true;
+    assert.throws(() => bridge.controls({ expected_revision: first.revision }), /snapshot changed/);
+  }],
+  ['control telemetry pages all controls without returning input contents', () => {
+    const { bridge, elements } = fixture();
+    for (let i = 0; i < 70; i++) {
+      const control = element('input', { id: `field-${i}` });
+      control.value = 'private draft';
+      elements.push(control);
+    }
+    const first = bridge.controls({});
+    assert.equal(first.total, 70);
+    assert.equal(first.items.length, 64);
+    assert.equal(first.next_offset, 64);
+    const last = bridge.controls({ offset: first.next_offset });
+    assert.equal(last.items.length, 6);
+    assert.equal(last.next_offset, null);
+    assert.deepEqual(plain(first.items[0].actions), ['ui.set', 'ui.key']);
+    assert.ok(!JSON.stringify(first).includes('private draft'));
+  }],
+  ['attention is project-bound and state reports include every panel', () => {
+    const { bridge, boxes } = fixture();
+    for (let i = 0; i < 70; i++) boxes.register(`panel-${i}`);
+    assert.throws(() => bridge.attention({ project: '/wrong.magic', id: 'panel-0', reason: 'Next' }), /does not match/);
+    const reply = bridge.attention({ project: '/p/Study.magic', id: 'panel-0', reason: 'Next' });
+    assert.equal(reply.panels.total_items, 70);
+    assert.equal(reply.panels.truncated, false);
+    assert.equal(reply.panels.items.length, 70);
+    boxes.fact({id: "panel-69", state: "failed", reason: "Last panel failed"});
+    assert.equal(boxes.panels().items.find(p => p.id === "panel-69").signal, 3);
+    assert.equal(reply.panels.items[0].signal, 2);
+    bridge.attention({ project: '/p/Study.magic', id: 'panel-0', clear: true });
+    assert.equal(boxes.get('panel-0').attention, null);
+  }],
+  ['hidden indicator still reports attention and preserves errors', () => {
+    const { ctx, boxes } = fixture();
+    ctx.window.uiConfig = { elements: { quiet: { indicator: 'hidden' } } };
+    const dot = boxes.dot('idle', '', 'quiet');
+    assert.equal(dot.hidden, true);
+    assert.equal(dot.textContent, '💤');
+    boxes.attention('quiet', 'Check this next');
+    assert.equal(boxes.panels().items[0].signal, 2);
+    boxes.fact({ id: 'quiet', state: 'failed', reason: 'Render failed' });
+    boxes.attention('quiet', null);
+    assert.equal(boxes.panels().items[0].signal, 3);
+    assert.throws(() => boxes.attention('missing', 'Look here'), /Unknown panel/);
+  }],
   ['panels() shape matches contract', () => {
     const { boxes } = fixture();
     boxes.register('block-song', { label: 'Song' });
@@ -116,8 +232,7 @@ const tests = [
     assert.equal(typeof report.revision, 'number');
     assert.ok(Array.isArray(report.items));
     assert.ok(Array.isArray(report.unconfigured));
-    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, busy: false });
-    assert.deepEqual(Object.keys(report.items[0]), ['id', 'label', 'look', 'signal', 'busy']);
+    assert.deepEqual(plain(report.items[0]), { id: 'block-song', label: 'Song', look: null, signal: 0, attention: null, busy: false, reason: null, source: null, request: null, project: null, context: null, state: 'idle', seq: 0, priority: 0, job: null, resolution: null, observed_at: null, receipt: null });
   }],
   ['revision unchanged when nothing changed', () => {
     const { boxes } = fixture();

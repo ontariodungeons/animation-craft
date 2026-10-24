@@ -7,9 +7,7 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="bar" data-companion-rail="top" data-companion-accept="yes" data-companion-priority="20">
-    <span class="companion-slot" data-companion-slot="bar-chat" data-companion-target="chat" data-companion-priority="10"></span>
-    <span class="companion-slot" data-companion-slot="bar-artwork" data-companion-target="artwork" data-companion-priority="10"></span>
+  <header id="app-bar" class="bar">
     <div class="brand" id="brand" role="button" tabindex="0" title="Home · all projects" aria-label="Magic Studio · Home">
       <span class="brand-word" aria-hidden="true"><span class="brand-magic">Magic</span> <span class="brand-studio">Studio</span></span><span class="brand-spark" aria-hidden="true">✧</span>
     </div>
@@ -73,7 +71,7 @@
     <section class="view active" id="view-project" aria-label="Project workspace">
       <div class="project-body">
         <!-- Left rail: collapsible blocks (song workflow) -->
-        <aside class="blocks" id="blocks" aria-label="Song workflow" data-companion-rail="blocks" data-companion-accept="yes" data-companion-priority="5"></aside>
+        <aside class="blocks" id="blocks" aria-label="Song workflow"></aside>
 
         <!-- Main: storyboard title cards -->
         <section class="storyboard" aria-label="Storyboard">
@@ -98,7 +96,7 @@
     </section>
 
     <section class="view" id="view-animation" aria-label="Animation workspace"></section>
-    <section class="view" id="view-design" aria-label="Design: Words and Artwork"></section>
+    <section class="view" id="view-design" aria-label="Lyrics and motion graphics"></section>
     <section class="view" id="view-studio">
       <div class="studio-slot" id="studio-slot"></div>
       <div class="panel-empty" id="studio-empty">
@@ -144,10 +142,7 @@
     </section>
   </main>
   <!-- One footer for every tab: workflow stages · what the active tab shows · save and studio state. -->
-  <footer class="app-footer" id="app-footer" role="contentinfo" aria-label="Application status footer"
-          data-companion-rail="footer" data-companion-accept="yes" data-companion-priority="10">
-    <span class="companion-slot" data-companion-slot="footer-chat" data-companion-target="chat" data-companion-priority="10"></span>
-    <span class="companion-slot" data-companion-slot="footer-artwork" data-companion-target="artwork" data-companion-priority="10"></span>
+  <footer class="app-footer" id="app-footer" role="contentinfo" aria-label="Application status footer">
     <nav class="footer-stages" id="footer-stages" aria-label="Workflow stages"></nav>
     <div class="footer-context" id="footer-context" aria-live="polite"></div>
     <div class="panel-status row" id="footer-status">
@@ -156,19 +151,16 @@
     </div>
   </footer>
       <!-- The existing agent, image composer, and project parts share one right workstation. -->
-      <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation"
-             data-companion-rail="dock" data-companion-accept="yes" data-companion-priority="30">
-        <span class="companion-slot" data-companion-slot="dock-chat" data-companion-target="chat" data-companion-priority="20"></span>
-        <span class="companion-slot" data-companion-slot="dock-artwork" data-companion-target="artwork" data-companion-priority="20"></span>
+      <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation">
         <section class="magic-pane magic-chat-pane" id="magic-chat-pane" aria-label="Sproket chat">
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
-        <div class="panel-head spread" id="agent-head">
-          <span class="agent-title">Sproket <span class="agent-connection" id="agent-connection">· not configured</span></span>
+        <div class="panel-head" id="agent-head">
+          <span class="agent-title panel-title">Sproket <span class="agent-connection" id="agent-connection">· not configured</span></span>
           <div class="agent-head-actions">
             <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
             <button class="icon" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-            <button class="ghost" id="agent-config-toggle" aria-controls="anim-agent-settings" aria-expanded="false" title="Agent settings: agent, model, thinking">Settings</button>
-            <button class="ghost" id="agent-close" aria-label="Hide the agent panel" title="Hide">Hide</button>
+            <button class="icon" id="agent-config-toggle" aria-label="Agent settings" aria-controls="anim-agent-settings" aria-expanded="false" title="Agent settings: agent, model, thinking"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button>
+            <button class="icon" id="agent-close" aria-label="Hide the agent panel" title="Hide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           </div>
         </div>
         <div class="agent-config" id="anim-agent-settings" hidden>
@@ -190,7 +182,7 @@
         </div>
         <div class="agent-log" id="agent-log" aria-live="polite"></div>
         <div class="agent-attachments" id="agent-attachments"></div>
-        <div class="agent-compose">
+        <div class="agent-compose" id="agent-compose">
           <textarea id="agent-input" rows="3" placeholder="Describe a change…" aria-label="Message" title="Enter to send · Shift+Enter for a new line · Ctrl+Enter also sends"></textarea>
           <div class="agent-actions">
             <button class="ghost" id="agent-point" title="Point: click anything in the app to attach a picture of it">
@@ -203,12 +195,12 @@
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Sproket and Gaffer artwork sections" data-splitter="chat"></div>
         <section class="magic-pane magic-image-pane" id="magic-image-pane" aria-label="Gaffer artwork generation">
-          <div class="companion-artwork-home"><button class="panel-head pane magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Gaffer artwork"><span>🐈 Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span></button></div>
+          <div class="companion-artwork-home"><button class="panel-head magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Gaffer artwork"><span class="panel-title">Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span></button></div>
           <div id="magic-image-tools" class="magic-image-tools"></div>
         </section>
         <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Gaffer artwork and parts sections" data-splitter="image"></div>
         <section class="magic-pane magic-parts-pane" id="magic-parts-pane" aria-label="Parts and assets">
-          <div class="panel-head pane" id="magic-parts-head"><span>Parts &amp; assets</span><span id="magic-target-parts" class="magic-target">No part selected</span></div>
+          <div class="panel-head" id="magic-parts-head"><span class="panel-title">Parts &amp; assets</span><span id="magic-target-parts" class="magic-target">No part selected</span></div>
           <div id="magic-parts-slot" class="magic-parts-slot"></div>
         </section>
       </aside>
