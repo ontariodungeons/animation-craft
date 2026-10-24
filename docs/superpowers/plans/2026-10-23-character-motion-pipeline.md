@@ -11,6 +11,17 @@
 - The fabric scales, flat body base and pearl fibres were made by hand (`parts/fabric-scales-v2/*.pcraft` + `placement-recipe.json`); no command produced them.
 - Four tools were installed today (Blender 5.2, Kdenlive/MLT, Synfig 1.4.5, OpenToonz 1.8). Only Blender touched the fish, and its worker (`blender-jobs/*/worker.py`) loads parts as flat planes and bakes the same rigid rotations: no armature, no deformation, and it used the older 6-part rig. `pipeline/blender53_bridge.py:532` builds a fixed humanoid armature for every character. Synfig/OpenToonz only render scenes authored by hand (`docs/workflows/animation-source-links.md`: rig → native project "not provided").
 
+## Which tool for bones (compared 2026-10-23, by asking each installed tool)
+
+Rule from Jesse: use whatever can be scripted end to end without anyone opening it and looking; not all four tools are needed.
+
+| Tool | Bones by script | Bends the art | Headless render | Wired here | Use for |
+|---|---|---|---|---|---|
+| Blender 5.2 (`blender` → 5.3 beta) | yes: Python API builds armature, weights, keys | yes: armature + automatic weights on subdivided planes | yes | yes: worker, limits, receipts, accept | **character bones (Task B)** |
+| Synfig 1.4.5 | partly: no API, scene XML written by hand | yes: `skeleton`, `skeleton_deformation` layers | yes | render only | fallback; deformation grid needs tuning by eye |
+| OpenToonz 1.8 | no: skeletons are built in the GUI; headless is `tcomposer` render only | GUI only | yes | render only | hand-authored scenes only |
+| Kdenlive / MLT | no (0 warp/skeleton filters in `melt`) | no | yes | yes (film cuts) | film assembly, not character motion |
+
 ## The map
 
 | # | Step | Tool | Command today | Status |
@@ -44,7 +55,7 @@
 - the engine clip baked as bone rotations (starts identical to today's swim);
 - registered as the character's native source (`animation.source.set`), rendered by the existing worker, gated by `validate.motion`, accepted by `animation.source.accept`.
 
-Blender is the backend because it is already wired (worker, limits, receipts, accept). Synfig/OpenToonz stay for hand-authored scenes; a Synfig writer can follow the same contract later.
+Blender is the backend: it is the only installed tool that builds bones and weights by script with no inspection, and it is already wired (worker, limits, receipts, accept). Synfig is the fallback; OpenToonz stays for hand-authored scenes; Kdenlive/MLT stays for the film.
 
 Replaces the fixed humanoid in `pipeline/blender53_bridge.py:532` for cutout rigs.
 
