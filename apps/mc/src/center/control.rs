@@ -206,6 +206,22 @@ pub(super) fn action(c:&mut Center,name:&str,p:&Value)->Result<Flow,String>{
    if c.telemetry_view{c.refresh();}
   },
   "agent"=>{select_agent(c,p)?;c.details_open=false;flow=press(c,KeyCode::F(3));c.refresh();},
+  "recover"=>{
+   // Hand an unpushed branch back to the agent that still holds it.
+   let pane=required(p,"pane")?;
+   let branch=required(p,"branch")?;
+   let ahead=p["ahead"].as_u64().unwrap_or(0);
+   let worktree=p["worktree"].as_str().unwrap_or("");
+   let message=format!("Your branch {branch} is {ahead} commit(s) ahead of its upstream and has not been pushed. Please push it (git push) or tell Jesse what it holds before it is lost.");
+   // The agent's own pane receives the note; nothing is pushed from here.
+   let note=json!({"action":"note.send","pane":pane,"text":message});
+   let sent=crate::center::send_agent_note(pane,&message);
+   let _=note;
+   match sent{
+    Ok(())=>{c.message=format!("Sent {branch} to {pane} ({worktree}): {message}");}
+    Err(error)=>return Err(format!("Could not reach {pane}: {error}")),
+   }
+  },
   "agent.next"=>{c.cycle_agent(1);c.refresh();},
   "agent.previous"=>{c.cycle_agent(-1);c.refresh();},
   "events"=>{if !c.event_focus{flow=press(c,KeyCode::Char('e'));}},
