@@ -1030,7 +1030,10 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
     if let Ok(text)=std::fs::read_to_string(dir.join("storyboard/movie-board.json")) {
         if let Ok(board)=serde_json::from_str::<Value>(&text) {
             let page=board["first_scene_page"].as_u64().unwrap_or(1)+n as u64-1;
-            if let Some(group)=board["page_plan"].as_array().and_then(|pages|pages.iter().filter_map(|p|p.get("group")).find(|g|g["id"]==format!("scene-{n}"))) {
+            // The board's spans describe the scenes it was built from. After the song's scenes change
+            // (new captions), a stale board must not hand its old spans back to the rebuild.
+            let same_scenes=board["scene_count"].as_u64()==Some(list.len() as u64);
+            if let Some(group)=board["page_plan"].as_array().filter(|_|same_scenes).and_then(|pages|pages.iter().filter_map(|p|p.get("group")).find(|g|g["id"]==format!("scene-{n}"))) {
                 result["start"]=group["span_start"].clone();result["end"]=group["span_end"].clone();result["kind"]=group["kind"].clone();
                 result["panels"]=group["panels"].clone();result["section_label"]=group["section_label"].clone();
                 if let Some(label)=group["section_label"].as_str(){result["title"]=json!(format!("{label} / Scene {n:02}"));}
