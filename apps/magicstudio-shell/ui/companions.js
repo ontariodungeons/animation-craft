@@ -13,8 +13,7 @@ function createCompanions(frames, options = {}) {
   let enabled = localStorage.getItem("magic.companions") === "true";
   let project = null;
   let stage = null;
-  let timer = null;
-  let step = 0;
+  // per-pet timers live on pets[name]
   const nodes = {};
   const pets = {};
   const anchors = {};
@@ -25,11 +24,10 @@ function createCompanions(frames, options = {}) {
     const node = document.createElement("pre");
     node.id = `companion-${name}`;
     node.className = "ambient-companion";
-    node.style.pointerEvents = "none";
     node.setAttribute("aria-hidden", "true");
     node.setAttribute("inert", "");
     nodes[name] = node;
-    pets[name] = { pose: "rest", box: null, slot: null, signal: 0 };
+    pets[name] = { pose: "rest", box: null, slot: null, signal: 0, timer: null, step: 0, lastBurstAt: 0 };
   }
 
   // ---- artwork ----------------------------------------------------------
@@ -59,7 +57,7 @@ function createCompanions(frames, options = {}) {
       if (useSprite(name)) { spriteElement(name); continue; }
       const bank = frames?.frames?.[name];
       if (!bank?.length) continue;
-      const text = bank[step % bank.length];
+      const text = bank[pets[name].step % bank.length];
       if (nodes[name].textContent !== text) nodes[name].textContent = text;
     }
   }
@@ -130,16 +128,20 @@ function createCompanions(frames, options = {}) {
   // A finite news burst: three poses, then still. Not a loop.
   function burst(name) {
     if (!enabled || document.hidden || media.matches || !useSprite(name)) return;
+    const pet = pets[name];
+    const now = Date.now();
+    if (now - (pet.lastBurstAt || 0) < 1500) return;
+    pet.lastBurstAt = now;
     const poses = ["work", "alert", "rest"];
-    clearTimeout(timer);
-    step = 0;
+    clearTimeout(pet.timer);
+    pet.step = 0;
     const tick = () => {
-      pets[name].pose = poses[step];
+      pets[name].pose = poses[pet.step];
       frame();
-      if (++step >= poses.length) { timer = null; return; }
-      timer = setTimeout(tick, 260);
+      if (++pet.step >= poses.length) { pet.timer = null; return; }
+      pet.timer = setTimeout(tick, 260);
     };
-    timer = setTimeout(tick, 260);
+    pet.timer = setTimeout(tick, 260);
   }
 
   function react() {
@@ -166,7 +168,8 @@ function createCompanions(frames, options = {}) {
   }
 
   function reset() {
-    for (const name of Object.keys(pets)) pets[name] = { pose: "rest", box: null, slot: null, signal: 0 };
+    for (const name of Object.keys(pets)) clearTimeout(pets[name].timer);
+    for (const name of Object.keys(pets)) pets[name] = { pose: "rest", box: null, slot: null, signal: 0, timer: null, step: 0, lastBurstAt: 0 };
     for (const name of Object.keys(nodes)) {
       nodes[name].hidden = true;
       nodes[name].style.transform = "";

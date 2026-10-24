@@ -72,6 +72,40 @@ const tests = [
     assert.equal(snap.sproket.pose, 'alert');
     assert.equal(snap.gaffer.box, 'red', 'newest change wins for the cat');
   }],
+  ['each pet finishes its own burst', async () => {
+    const { ctx, boxes, timers } = fixture();
+    const sprites = { has: () => true, image: () => null };
+    boxes.fact({ id: 'red', project: '/p/Study.magic', state: 'failed' });
+    const pets = ctx.createCompanions({ frames: {} }, { boxes, sprites });
+    pets.setEnabled(true);
+    await flush();
+    assert.equal(timers.size, 2, 'the dog and the cat each start a burst');
+    for (let round = 0; round < 10 && timers.size; round++) for (const [key, timer] of [...timers]) { timers.delete(key); timer.fn(); }
+    const snap = pets.snapshot();
+    assert.equal(snap.sproket.pose, 'rest', 'the dog is not frozen mid-burst');
+    assert.equal(snap.gaffer.pose, 'rest');
+  }],
+  ['news within the cooldown makes one burst, not two', async () => {
+    const { ctx, boxes, timers } = fixture();
+    const sprites = { has: () => true, image: () => null };
+    const pets = ctx.createCompanions({ frames: {} }, { boxes, sprites });
+    pets.setEnabled(true);
+    boxes.fact({ id: 'first', project: '/p/Study.magic', state: 'failed' });
+    await flush();
+    const started = timers.size;
+    boxes.fact({ id: 'second', project: '/p/Study.magic', state: 'failed' });
+    await flush();
+    assert.equal(timers.size, started, 'no second burst inside the cooldown');
+  }],
+  ['ASCII pets still draw without a sprite', async () => {
+    const { ctx, boxes } = fixture();
+    boxes.fact({ id: 'green', project: '/p/Study.magic', state: 'ready' });
+    const pets = ctx.createCompanions({ frames: { sproket: ['dog'], gaffer: ['cat'] } }, { boxes });
+    pets.setEnabled(true);
+    await flush();
+    assert.equal(pets.nodes.sproket.textContent, 'dog');
+    assert.equal(pets.nodes.gaffer.textContent, 'cat');
+  }],
   ['yellow is attention, green is only in use', async () => {
     const { ctx, boxes } = fixture();
     boxes.fact({ id: 'yellow', project: '/p/Study.magic', state: 'needs-attention' });

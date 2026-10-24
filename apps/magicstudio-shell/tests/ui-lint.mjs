@@ -12,19 +12,30 @@ import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 
 const UI = new URL('../ui/', import.meta.url);
-const read = name => fs.readFileSync(new URL(name, UI), 'utf8');
+const UI_PATH = 'apps/magicstudio-shell/ui/';
+// In the commit hook the lint judges what is being committed (the index), never
+// files another agent is still editing in the shared checkout.
+const RATCHET = process.argv.includes('--ratchet');
+const read = name => RATCHET
+  ? execSync(`git show ":${UI_PATH}${name}"`, { encoding: 'utf8', maxBuffer: 1 << 26 })
+  : fs.readFileSync(new URL(name, UI), 'utf8');
+const listed = RATCHET
+  ? execSync(`git ls-files --full-name -- ":/${UI_PATH}"`, { encoding: 'utf8' }).split('\n')
+    .filter(path => path.startsWith(UI_PATH) && !path.slice(UI_PATH.length).includes('/'))
+    .map(path => path.slice(UI_PATH.length))
+  : fs.readdirSync(UI);
 const BASELINE = new URL('./ui-lint.baseline.json', import.meta.url);
 
-const jsFiles = fs.readdirSync(UI).filter(name => name.endsWith('.js'));
+const jsFiles = listed.filter(name => name.endsWith('.js'));
 const config = (() => {
   try {
-    return JSON.parse(fs.readFileSync(new URL('components.json', UI), 'utf8'));
+    return JSON.parse(read('components.json'));
   } catch {
     return { elements: {} };
   }
 })();
 const configured = new Set(Object.keys(config.elements ?? {}));
-const cssFiles = fs.readdirSync(UI).filter(name => name.endsWith('.css'));
+const cssFiles = listed.filter(name => name.endsWith('.css'));
 const sources = new Map([...cssFiles, ...jsFiles].map(name => [name, read(name)]));
 
 const withoutComments = source => source.replace(/\/\*[\s\S]*?\*\//g, '');
