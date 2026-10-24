@@ -375,7 +375,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Break Image Into Parts",
             ["Edit", "Break Apart"],
             None,
-            "{\"asset\":\"optional_id\",\"regions\":{\"part_id\":[[x,y]]},\"out_dir\":\"optional_dir\"}",
+            "{\"asset\":\"optional_id\",\"regions\":{\"part_id\":[[x,y],[x,y],[x,y]]},\"out_dir\":\"optional_dir\",\"rig_order\":[\"optional: part ids back to front; also writes rig.json for project.add_asset kind=cutout_rig\"]}",
             always,
             cmd_image_break_apart
         ),

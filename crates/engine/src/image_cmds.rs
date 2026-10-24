@@ -182,6 +182,15 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
         }
     }
 
+    // `rig_order` (part ids, back to front) also writes the parts' layered rig, `rig.json`, for
+    // project.add_asset kind=cutout_rig: the largest part is the root, the others ride on it, and each
+    // pivot starts at its part's centre (refined later in the Animation view).
+    let rig = match params.get("rig_order").and_then(Value::as_array) {
+        Some(order) if errors.is_empty() => Some(write_parts_rig(&out_dir, &asset_id, order)?),
+        Some(_) => { errors.push("rig.json not written: some parts failed".into()); None }
+        None => None,
+    };
+
     Ok(json!({
         "ok": !produced_parts.is_empty(),
         "command": "image.break_apart",
@@ -190,8 +199,33 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
         "out_dir": out_dir.to_string_lossy(),
         "parts_produced": produced_parts.len(),
         "parts": produced_parts,
+        "rig": rig,
         "errors": errors,
     }))
+}
+
+fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value]) -> Result<std::path::PathBuf> {
+    let mut layers = Vec::new();
+    let mut canvas = (0, 0);
+    for id in order {
+        let id = id.as_str().ok_or_else(|| EngineError::InvalidParams("rig_order holds part ids".into()))?;
+        let file = out_dir.join(format!("{id}.png"));
+        let image = image::open(&file).map_err(|e| EngineError::InvalidParams(format!("rig_order: {id}: {e}")))?.into_rgba8();
+        canvas = image.dimensions();
+        let (mut min, mut max, mut area) = ((u32::MAX, u32::MAX), (0, 0), 0u64);
+        for (x, y, _) in image.enumerate_pixels().filter(|(_, _, p)| p[3] > 16) {
+            min = (min.0.min(x), min.1.min(y)); max = (max.0.max(x), max.1.max(y)); area += 1;
+        }
+        if area == 0 { return Err(EngineError::InvalidParams(format!("rig_order: part {id} is empty"))); }
+        layers.push((id.to_string(), file, [(min.0 + max.0) as f64 / 2.0, (min.1 + max.1) as f64 / 2.0], area));
+    }
+    let root = layers.iter().max_by_key(|l| l.3).map(|l| l.0.clone()).unwrap_or_default();
+    let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": [],
+        "layers": layers.iter().map(|(id, file, pivot, _)| json!({"id": id, "file": file, "pivot": pivot,
+            "parent": if *id == root { Value::Null } else { json!(root) }})).collect::<Vec<_>>()});
+    let path = out_dir.join("rig.json");
+    std::fs::write(&path, serde_json::to_vec_pretty(&rig).map_err(|e| EngineError::InvalidParams(e.to_string()))?)?;
+    Ok(path)
 }
 
 /// Warp the active asset's source with explicit src/dst pins via PhotoCraft puppet warp.
