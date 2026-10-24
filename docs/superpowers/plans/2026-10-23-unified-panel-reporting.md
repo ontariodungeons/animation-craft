@@ -10,6 +10,42 @@
 
 **Spec:** this document (the design was agreed in chat with Jesse on 2026-10-23).
 
+## Agent brief (read this first, every session)
+
+You are one of several agents in ONE shared checkout. This file is the contract.
+
+- Do only your task number. Claim its paths in `design/coordination/handoff-ledger.md` (C35) before editing.
+- Commit with `git commit --only <your paths>`. Never stage, revert, stash or merge files you did not write.
+- Tests run only through `.githooks/pre-commit`. Write the failing test first; let the hook run it.
+- Use the names in "The contract" and "The style contract" exactly. Do not invent fields, classes, tokens or commands.
+- No per-panel or per-character logic: code loops over panels and looks.
+- No silent fallbacks: a missing registry, look or Studio is reported, never drawn as a default.
+- If the plan is wrong or a step fails, stop and report `file:line` to the coordinator (Claude, pane wG:pS). Do not improvise.
+- Report each commit SHA to the coordinator in one line.
+
+```mermaid
+flowchart LR
+  P["panel registers once<br/>id · label · look · density"] --> R["registry<br/>companion-boxes.js"]
+  E["events set state"] --> R
+  R -->|"state → signal"| D["dot(state)"]
+  R -->|"look + density → token set"| C["one .panel-head / .panel-empty rule"]
+  R -->|"ui.feedback panels"| T["Rust PanelReport"]
+  T --> TUI["TUI rows<br/>same palette"]
+  T --> CLI["mc panels --check<br/>flags missing look / record"]
+  TOK[":root tokens<br/>palette · space · text"] --> D
+  TOK --> C
+  TOK -->|"palette test"| TUI
+```
+
+## Refactor as you go (every agent, every UI commit)
+
+The design is locked by a ratchet, not by a big-bang rewrite. Any commit that touches a file under `apps/magicstudio-shell/ui/` also leaves that file closer to the contract:
+
+- Every count in `tests/ui-lint.mjs` is tracked **per file** in `ui-lint.baseline.json`. A commit may never raise a file's count, and a commit that edits a file with a non-zero count must lower at least one of that file's counts (`--write-baseline` records the new floor in the same commit).
+- Converting means using the contract, not inventing: a panel gets a `look` from the fixed list, sizes come from the scale tokens, colours from palette tokens, lights from `dot(state)`.
+- Code that builds UI goes through `el()` with a `box`/`id` so it registers; `mc panels --check` must stay at 0 unconfigured for any view you touched.
+- If a needed look, token or state is missing from the contract, stop and ask the coordinator; do not add a one-off.
+
 ## Who does what
 
 | # | Owner | Delivers | Paths (claim in ledger) | Waits on |
@@ -21,6 +57,8 @@
 | 5 | Gonzo | TUI panel rows + "Unconfigured UI" row, redraw on revision | `apps/mc/src/center/panels.rs` (new), `apps/mc/src/center.rs` | 3 |
 | 6 | Rizzo | Per-pet timer + cooldown | `ui/companions.js`, `tests/companions.mjs` | 1 |
 | 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline in the hook | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
+
+| 8 | Beaker | Looks + density as token sets; one spacing/type scale; `look` in the panel record; TUI palette = UI palette | `ui/style.css`, `ui/companion-boxes.js`, `ui/app.js` panel builders, `tests/ui-lint.mjs`, `tests/panels.mjs`; palette test in `apps/mc/src/center.rs` tests (Gonzo reviews) | 7 |
 
 `ui/` and `tests/` are under `apps/magicstudio-shell/`. Shared files (`companion-boxes.js`, `.githooks/pre-commit`) change in the order above, one owner at a time.
 
@@ -63,6 +101,26 @@ impl PanelReport { pub fn from_feedback(feedback: &serde_json::Value) -> PanelRe
 ```
 
 Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>` → shell `bridge.rs` routes to page `acBridge.panel(id, flag, value)` → calls the handler the panel registered for that flag; a flag without a handler is refused with `"panel <id> does not accept <flag>"`.
+
+## The style contract (Task 8)
+
+A panel's look is configuration, chosen once at registration from a fixed list. Values live only in `:root` tokens.
+
+```js
+companionBoxes.register("block-song", { label: "Song", look: "control", density: "normal" });
+// el() writes data-look / data-density on the element; CSS reads tokens only.
+```
+
+| Kind | Looks (fixed list) | Replaces today's modifiers |
+|---|---|---|
+| head | `control` (clickable row) · `bar` (pane title with rule) · `ruler` (sticky timeline head) · `inline` (row inside a body) | `control`; `divided`+`spread`+`pane`; `tiny`; `inline` |
+| empty | `card` · `overlay` · `inline` | `boxed`+`compare`; `overlay`+`motion`; `inline` |
+| density | `normal` · `compact` | the 18 context overrides (`.blocks.collapsed …`, `.magic-chat-pane …`, `.magic-image-tools …`, the narrow media query) |
+
+- Scale tokens in `:root`: `--space-1..5` = 4, 8, 12, 16, 28px; `--text-xs, -sm, -md, -lg, -xl` = 10, 11, 13, 15, 18px; existing `--radius`.
+- Each look and density sets only panel tokens (`--panel-pad-y`, `--panel-pad-x`, `--panel-gap`, `--panel-text`, `--panel-rule`, `--panel-bg`). ONE `.panel-head` rule and ONE `.panel-empty` rule consume them.
+- The panel record gains `look` (string). `unconfigured` also lists a registered panel whose `look` is missing or not in the list.
+- One palette: the TUI signal colours come from the same values as `--signal-0..3`. Today they differ (UI green `#35e1c0`, TUI `#4fe88f`; amber `#f0a83c`/`#f6c168`; red `#e0524a`/`#ff7682`). Jesse picks which side wins; until then the UI tokens win.
 
 ## Global Constraints
 
@@ -153,6 +211,17 @@ Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|b
 - [ ] Final baseline: retired names 0, hand-built dots 0, hex outside `:root` 0.
 - [ ] Commits `refactor(ui): one indicator …`, `refactor(ui): one panel head …`, etc. (#23).
 
+### Task 8 (Beaker): Looks, density and one scale
+
+**Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/style.css`, `ui/companion-boxes.js` (`register` accepts `look`, `density`; `panels()` items carry `look`), `ui/app.js` (panel builders pass `look`), `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: `apps/mc/src/center.rs` `feedback_tests` (coordinate with Gonzo, who owns that file).
+
+- [ ] Tests: `panels.mjs` — `look is reported in panels()`; `unknown look is listed as unconfigured`; `missing look is listed as unconfigured`. `ui-lint.mjs` — new counts `raw_px_in_panel_rules` (today 69) and `context_overrides` (today 18), baseline today, target 0. Rust — `tui_signal_colours_match_ui_tokens` parses `apps/magicstudio-shell/ui/style.css` `:root` and compares with `signal_color(Signal::*)`.
+- [ ] Add the scale tokens; rewrite heads and empties as one rule each plus token sets per look/density; delete the merged modifiers and the context overrides; set `data-look`/`data-density` from `register()`.
+- [ ] Set the TUI signal colours to the UI token values (one `fn signal_color`).
+- [ ] Make the baseline per file and enforce the "Refactor as you go" ratchet in `ui-lint.mjs` (staged UI files with non-zero counts must lower one). Lower the baseline in the same commit; final: `raw_px_in_panel_rules` 0, `context_overrides` 0.
+- [ ] Visual check of each view with the live-window screenshot recipe before each commit; Jesse judges the look.
+- [ ] Commits `refactor(ui): panel looks are token sets (#23)`, `refactor(ui): one spacing and type scale (#23)`, `fix(tui): signal colours match the Studio (#23)`.
+
 ## Order
 
-Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first).
+Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first) → Task 8 after Task 7.
