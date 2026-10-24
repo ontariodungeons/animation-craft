@@ -53,6 +53,9 @@ const tests = [
     assert.equal(rails.resolve({ name: 'sproket', target: 'missing' }), null);
     assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }).slotId, 'panel');
     assert.equal(rails.measure('panel').x, 12);
+    slot.getBoundingClientRect = () => ({left: 12, top: 8, width: 0, height: 28});
+    rails.invalidate();
+    assert.equal(rails.measure('panel'), null, 'zero-width slots cannot host a pet');
     delete ctx.window.uiConfig.slots.panel; rails.discover();
     assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }), null);
   }],
@@ -177,6 +180,8 @@ const tests = [
     await flush();
     assert.equal(pets.nodes.sproket.textContent, 'dog');
     assert.equal(pets.nodes.gaffer.textContent, 'cat');
+    assert.equal(pets.nodes.sproket.hidden, true, 'ASCII cannot bypass missing configured rails');
+    assert.match(pets.snapshot().sproket.placement_error, /configured visible rail/);
   }],
   ['yellow is attention, green is only in use', async () => {
     const { ctx, boxes } = fixture();

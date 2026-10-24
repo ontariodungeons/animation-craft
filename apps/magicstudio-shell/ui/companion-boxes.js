@@ -33,6 +33,7 @@ function createCompanionBoxes() {
   let draftFields = [];
   let panelRevision = 0;
   let panelSignature = "";
+  let contractIssues = new Map(), contractSignature = "";
   const canonical = id => window.uiConfig?.elements?.[id]?.target || id;
   const currentProject = () => typeof state === "undefined" ? null : state.project ?? null;
 
@@ -237,7 +238,7 @@ function createCompanionBoxes() {
     box.observed_at = Date.now();
     notify();
   }
-  const boxSignal = box => Math.max(SIGNAL[box.state] ?? 0, box.attention ? 2 : 0);
+  const boxSignal = box => Math.max(SIGNAL[box.state] ?? 0, box.attention ? 2 : 0, contractIssues.has(box.id) ? 3 : 0);
   function get(id) {
     return boxes.get(canonical(id)) || null;
   }
@@ -259,7 +260,7 @@ function createCompanionBoxes() {
         state: box.state,
         signal: boxSignal(box),
         seq: box.seq ?? 0,
-        reason: box.attention || box.reason,
+        reason: contractIssues.has(box.id) ? `UI contract: ${contractIssues.get(box.id).map(issue => issue.id).join(", ")}` : box.attention || box.reason,
         priority: box.priority,
         request: box.request,
         job: box.job,
@@ -279,6 +280,17 @@ function createCompanionBoxes() {
   function panels() {
     const bridge = typeof window !== "undefined" ? window.magicBridge : null;
     const unconfigured = bridge && typeof bridge.unconfigured === "function" ? bridge.unconfigured() : [];
+    const nextContractSignature = JSON.stringify(unconfigured);
+    if (nextContractSignature !== contractSignature) {
+      contractSignature = nextContractSignature; contractIssues = new Map();
+      for (const issue of unconfigured) {
+        const target = canonical(issue.container || window.uiConfig?.contract_target);
+        if (!boxes.has(target)) continue;
+        if (!contractIssues.has(target)) contractIssues.set(target, []);
+        contractIssues.get(target).push(issue);
+      }
+      notify();
+    }
     const items = snapshot({ project: currentProject(), limit: Infinity });
     const bounded = items.slice(0, 64);
     const signature = JSON.stringify([items.map(({ seq, observed_at, ...item }) => item), unconfigured]);

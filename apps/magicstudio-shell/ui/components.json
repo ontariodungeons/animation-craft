@@ -680,7 +680,7 @@
       "indicator": "hidden"
     },
     "image-command": {
-      "component": "workspace",
+      "component": "animation-readback",
       "indicator": "hidden"
     },
     "magic-reader": {
@@ -694,6 +694,54 @@
       "component": "panel-head",
       "look": "heading",
       "target": "magic-reader",
+      "indicator": "hidden"
+    },
+    "motion-canvas-settings": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Canvas",
+      "icon": "fit",
+      "rail": "motion-canvas-settings",
+      "indicator": "hidden"
+    },
+    "motion-canvas-settings-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "motion-canvas-settings",
+      "indicator": "hidden"
+    },
+    "motion-selected-layer": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Selected layer",
+      "icon": "layers",
+      "rail": "motion-selected-layer",
+      "indicator": "hidden"
+    },
+    "motion-selected-layer-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "motion-selected-layer",
+      "indicator": "hidden"
+    },
+    "blender-preview": {
+      "component": "media-preview",
+      "label": "Rendered Blender animation",
+      "indicator": "hidden"
+    },
+    "words-preview": {
+      "component": "stage",
+      "label": "Lyrics video preview",
+      "indicator": "hidden"
+    },
+    "image-generate": {
+      "component": "start",
+      "label": "Generate artwork candidate",
+      "indicator": "hidden"
+    },
+    "motion-actual": {
+      "component": "icon",
+      "label": "Actual size",
       "indicator": "hidden"
     }
   },
@@ -763,6 +811,12 @@
     },
     "magic-reader": {
       "accept": "yes"
+    },
+    "motion-canvas-settings": {
+      "accept": "yes"
+    },
+    "motion-selected-layer": {
+      "accept": "yes"
     }
   },
   "slots": {
@@ -831,6 +885,12 @@
     },
     "magic-reader": {
       "target": "magic-reader"
+    },
+    "motion-canvas-settings": {
+      "target": "motion-canvas-settings"
+    },
+    "motion-selected-layer": {
+      "target": "motion-selected-layer"
     }
   },
   "signals": {
@@ -868,6 +928,14 @@
     "Layers": "motion-layers",
     "Expression & pose": "motion-pose",
     "Quality checks": "motion-quality",
-    "Export & integrations": "motion-export-section"
+    "Export & integrations": "motion-export-section",
+    "Canvas": "motion-canvas-settings"
+  },
+  "contract_target": "magic-chat-pane",
+  "timeline_tones": {
+    "opacity": "--pose-purple",
+    "position": "--depth-gold",
+    "scale": "--motion-blue",
+    "rotation": "--accent"
   }
 }

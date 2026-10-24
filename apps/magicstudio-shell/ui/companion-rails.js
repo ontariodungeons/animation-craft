@@ -93,7 +93,7 @@ function createCompanionRails({ root = document } = {}) {
     const cached = measured.get(slotId);
     if (cached && cached.generation === generation) return cached.rect;
     const rect = slot.element.getBoundingClientRect();
-    if (!rect.width && !rect.height) return null;
+    if (![rect.left, rect.top, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return null;
     const value = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
     measured.set(slotId, { generation, rect: value });
     return value;

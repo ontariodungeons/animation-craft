@@ -114,6 +114,25 @@ function elFixture(entries) {
 }
 
 const tests = [
+  ['missing state inside a configured panel is a red contract error', () => {
+    const { ctx, bridge, boxes, elements } = fixture();
+    ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };
+    boxes.register('lyrics', { project: '/p/Study.magic' });
+    const parent = element('section', { id: 'lyrics', attrs: { 'data-box-id': 'lyrics', 'data-companion-rail': 'lyrics' } });
+    const broken = element('button', { id: 'new-control', parent, attrs: { 'data-box-id': 'missing-state' } });
+    elements.push(parent, broken);
+    assert.ok(bridge.unconfigured().some(row => row.id === 'new-control'));
+    const fault = boxes.panels().items.find(row => row.id === 'lyrics');
+    assert.equal(fault.signal, 3, 'optional visibility must not conceal missing state');
+    assert.match(fault.reason, /UI contract/);
+    boxes.fact({ id: 'lyrics', state: 'failed', reason: 'Actual lyric load failed' });
+    boxes.register('missing-state', { project: '/p/Study.magic' });
+    const repaired = boxes.panels().items.find(row => row.id === 'lyrics');
+    assert.equal(repaired.signal, 3, 'repair must preserve an independent engine error');
+    assert.match(repaired.reason, /Actual lyric load failed/);
+    boxes.fact({ id: 'lyrics', state: 'idle' });
+    assert.equal(boxes.panels().items.find(row => row.id === 'lyrics').signal, 0, 'healthy state clears after the real error is resolved');
+  }],
   ['one shared panel constructor mounts the configured rail exactly once', async () => {
     const { ctx } = elFixture({ panel: { component: 'panel', look: 'chat', rail: 'panel' } });
     await ctx.loadComponents();

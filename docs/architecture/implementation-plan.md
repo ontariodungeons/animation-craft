@@ -23,8 +23,9 @@ These requirements supersede conflicting details in the recovered diagram and th
 7. **Pets enforce the architecture.** Their only inputs are shared registered state and configured rails. No manually positioned overlays, fixed right-panel coordinates, separate command watcher or per-panel pet code. An unregistered/unconfigured destination must report a contract violation rather than accepting a special-case placement.
 8. **Dog:** follows bugs/errors or the next action needing attention. **Cat:** follows the last relevant chat action, or joins the dog for what's next. With no activity/attention, each returns to its configured AI box. The TUI can request attention through the shared component record. Clearing a request never clears a real engine error.
 9. **Artwork follows the architecture.** The honey-coloured dog and orange cat are starter assets. Do not activate them until the registered right-hand panels, shared styling and generic rails pass their gates. No grey dog replacement work is needed from Jesse.
-10. **Ownership:** Codex implements UI/engine/CLI and prepares the documented telemetry interface. Jesse will supply the TUI agent; send that agent a committed handoff when identified. Do not create a competing TUI implementation.
+10. **Ownership:** Codex implements UI/engine/CLI and prepares the documented telemetry interface. Jesse will supply the TUI agent; send that agent a committed handoff when identified. Do not create a competing TUI implementation. Claude owns lyrics behavior (`ui/words.js` and lyrics engine work); coordinate shared `app.js`/`style.css`/`components.json` integration and preserve his changes.
 11. **Location:** this plan, the diagram and handoff stay in `docs/architecture/`. Evidence stays in `docs/architecture/evidence/`; song media stays in the song project. No `.codex/sparks`, temporary-document destinations or directory hunting.
+12. **Reuse the working animation system.** Preserve the existing fish-and-bee animation workflow. Do not replace its engine, evaluator or timeline. Extend the existing CLI/engine adapters only where commands are missing. Blender owns 3D; verify the existing 2D breakout/rig tools and OpenToonz capability before choosing an adapter. Shared Rust packages are candidates for reuse, not permission to rewrite the UI or vendor an entire app.
 
 ## Current execution status
 
@@ -123,3 +124,11 @@ Run these gates in order. Update this checklist with commit SHAs and evidence as
 The current checkout has existing staged/unstaged changes in UI lint, image prompt, index and stylesheet, plus untracked design material. Preserve them. Implementation starts from a committed baseline in a named project-local worktree per AGENTS.md, declares file ownership and coordinates overlapping files before edits. Implementation changes are isolated in the named worktree; the canonical planning document remains at this visible project path.
 
 Progress reports name the completed behavior, commit, checks and remaining blockers. Neither an old checkbox, an output filename, a green panel nor a saved plan counts as implementation completion.
+
+## Combined preview — 2026-10-24
+
+Applied Claude's committed lyrics change `cfabfb7b02856ce08716746cb0aee7f8881a72ac` from `feature/lyrics-design-timeline` to this implementation worktree: exact `words.js` and marked Words CSS block, preserving shared styles. Integration is currently uncommitted; no PR exists.
+
+The rebuilt task-owned preview runs in workspace 17 on bridge 19963 with Hey Ho Little Fish opened from project history. Six lyric sections load; frontend errors and unconfigured diagnostics are empty. Parts is hidden in this view while its component remains in telemetry. `combined-lyrics.png` records the actual app and existing video preview. Visible lyric lines are clipped at the current time-to-height scale: this is an outstanding layout issue, not a passed visual gate.
+
+Missing-state repair now preserves independent engine errors. New Chat now acknowledges its applied engine revision; the live UI and engine both reported revision 2 after the operation. Shared controls passed at widths 700, 941 and 1261 before lyrics integration. The combined build passes workspace compilation, UI handler tests and lint ratchet; strict style-size acceptance remains unmet. ASCII pets now use the same configured rails as sprites and reject zero-width slots. New SVG art remains inactive until gates pass.

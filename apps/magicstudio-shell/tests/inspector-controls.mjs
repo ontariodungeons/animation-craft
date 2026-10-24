@@ -17,3 +17,7 @@ c=fixture();
 assert.equal(vm.runInContext(`motionSection('Action',[],true).open`,c),false,'closing survives app reload');
 assert.equal(vm.runInContext(`motionSection('Path & depth',[]).open`,c),true,'opening survives app reload');
 console.log('PASS inspector: independently expandable sections persist across rerender and reload');
+
+assert.equal(vm.runInContext(`motionSection('A dynamically named layer',[],true,'motion-selected-layer').id`,c),'motion-selected-layer','dynamic layer labels use an explicit configured component');
+assert.throws(()=>vm.runInContext(`motionSection('Unconfigured panel',[])`,c),/Unconfigured/);
+console.log('PASS inspector: composite canvas and dynamic layer names retain configured shared panels');

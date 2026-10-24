@@ -209,15 +209,17 @@ function clearSent(input, raw, attachments) {
 
 async function agentNewChat() {
   if (agent.sending) throw new Error("Wait for the current message to finish");
-  const button = $("agent-new");
+  const button = $("agent-new"), project = state.project;
   button.disabled = true;
   try {
     const reply = await motionCommand("agent.new_chat");
+    if (state.project !== project) return;
     agent.turns = Array.isArray(reply.turns) ? reply.turns : [];
     agent.newChat = !reply.session;
     renderLog();
     status(`New chat ready${reply.session ? ` · ${reply.session}` : ""} · previous conversation saved`);
     $("agent-input").focus();
+    if (reply._ui_engine_revision) await acFeedback.acknowledge(reply._ui_engine_revision, project);
   } finally { button.disabled = false; }
 }
 $("agent-new").addEventListener("click", () => agentNewChat().catch((e) => status(String(e))));
@@ -269,9 +271,9 @@ function describe(node) {
 
 function pick(x, y) {
   const overlay = $("point-overlay");
-  overlay.style.pointerEvents = "none";
+  overlay.classList.add("picking");
   const node = document.elementFromPoint(x, y);
-  overlay.style.pointerEvents = "";
+  overlay.classList.remove("picking");
   return node && !node.closest("#agent") ? node : null;
 }
 
@@ -282,16 +284,16 @@ function pointStart() {
   let target = null;
   const move = (e) => {
     target = pick(e.clientX, e.clientY);
-    if (!target) { box.style.width = "0"; return; }
+    if (!target) { box.style.setProperty("--point-width", "0px"); return; }
     const r = target.getBoundingClientRect();
-    Object.assign(box.style, { left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px` });
+    for (const [key,value] of Object.entries({left:r.left-3,top:r.top-3,width:r.width+6,height:r.height+6})) box.style.setProperty(`--point-${key}`,`${value}px`);
   };
   const stop = () => {
     overlay.classList.remove("on");
     overlay.removeEventListener("mousemove", move);
     overlay.removeEventListener("click", click);
     document.removeEventListener("keydown", esc, true);
-    box.style.width = "0";
+    box.style.setProperty("--point-width", "0px");
     $("agent").classList.add("open");
   };
   const click = async (e) => {
@@ -363,29 +365,25 @@ function toggleAgentFloat() {
 
 let agentDrag = null;
 function setupAgentDrag() {
-  const head = $("agent").querySelector(".panel-head.spread");
-  head.style.cursor = "move";
+  const head = $("agent-head");
+  head.dataset.draggable = "true";
   head.addEventListener("pointerdown", onAgentDragStart);
 }
 function teardownAgentDrag() {
-  const head = $("agent").querySelector(".panel-head.spread");
-  head.style.cursor = "";
+  const head = $("agent-head");
+  delete head.dataset.draggable;
   head.removeEventListener("pointerdown", onAgentDragStart);
   if (agentDrag) { window.removeEventListener("pointermove", agentDrag.move); window.removeEventListener("pointerup", agentDrag.up); agentDrag = null; }
 }
 function onAgentDragStart(e) {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || e.target.closest("button,input,select,textarea,a")) return;
   const agentEl = $("agent");
   const r = agentEl.getBoundingClientRect();
   agentDrag = {
     move: (ev) => {
-      agentEl.style.position = "fixed";
-      agentEl.style.transform = "none";
-      agentEl.style.top = `${Math.max(48, ev.clientY - r.height / 2)}px`;
-      agentEl.style.left = `${Math.max(0, ev.clientX - r.width / 2)}px`;
-      agentEl.style.bottom = "auto";
-      agentEl.style.right = "auto";
-      agentEl.style.width = `${r.width}px`;
+      agentEl.style.setProperty("--float-y", `${Math.max(48, ev.clientY - r.height / 2)}px`);
+      agentEl.style.setProperty("--float-x", `${Math.max(0, ev.clientX - r.width / 2)}px`);
+      agentEl.style.setProperty("--float-width", `${r.width}px`);
     },
     up: () => {
       teardownAgentDrag();

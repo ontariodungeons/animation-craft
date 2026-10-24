@@ -110,6 +110,10 @@ pub struct Config {
     pub companions: Value,
     #[serde(default)]
     pub sections: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub timeline_tones: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub contract_target: Option<String>,
 }
 
 impl Config {
@@ -157,6 +161,8 @@ pub struct Unconfigured {
     pub label: Option<String>,
     #[serde(default)]
     pub reason: Reason,
+    #[serde(flatten)]
+    pub telemetry: std::collections::BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Default)]

@@ -17,7 +17,6 @@ function createCompanions(frames, options = {}) {
   // per-pet timers live on pets[name]
   const nodes = {};
   const pets = {};
-  const anchors = {};
   const travelling = {};
 
   for (const name of ["sproket", "gaffer"]) {
@@ -62,8 +61,7 @@ function createCompanions(frames, options = {}) {
   }
 
   // ---- placement --------------------------------------------------------
-  // A box declares where a pet may stand. No slot declared means the pet keeps
-  // its place and only changes pose.
+  // A box declares where a pet may stand. Missing slots remain explicit failures.
   function slotFor(name, boxId) {
     const config = window.uiConfig?.companions?.[name];
     if (!rails || !config) return null;
@@ -97,28 +95,12 @@ function createCompanions(frames, options = {}) {
   function place(name) {
     const pet = pets[name];
     if (!enabled || !project || document.hidden) { nodes[name].hidden = true; return; }
-    if (useSprite(name)) {
-      const slot = slotFor(name, pet.box);
-      nodes[name].hidden = !slot;
-      pet.placement_error = slot ? null : "No configured visible rail for this component";
-      if (!slot) { pet.slot = null; return; }
-      travel(name, slot);
-      return;
-    }
-    // ASCII fallback keeps its original inline behaviour: one anchor, no travel.
-    const anchor = name === "gaffer"
-      ? document.querySelector("#magic-image-toggle")
-      : document.querySelector(".agent-title");
-    if (!anchor || anchor.closest("[hidden],[aria-hidden=true]") || !anchor.getBoundingClientRect().width) {
-      nodes[name].hidden = true;
-      return;
-    }
-    if (anchors[name] !== anchor) {
-      anchor.after(nodes[name]);
-      anchors[name] = anchor;
-      if (typeof placeInk === "function") placeInk();
-    }
-    nodes[name].hidden = false;
+    const slot = slotFor(name, pet.box);
+    const rect = slot && rails.measure(slot.slotId);
+    nodes[name].hidden = !rect;
+    pet.placement_error = rect ? null : "No configured visible rail for this component";
+    if (!rect) { pet.slot = null; return; }
+    travel(name, slot);
   }
 
   // ---- the brain --------------------------------------------------------
