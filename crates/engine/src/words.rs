@@ -326,15 +326,19 @@ fn load(dir: &Path) -> Result<Option<Value>> {
     }
 }
 
-/// `words.captions`: subtitles for the recording, one cue per sung line of the artist's sheet. Every
-/// heard word appears once, in order, in its own wording and time (the transcript the workshop imports
-/// it with); a heard word aligned to no printed word stays with the line it is sung in.
+/// `words.captions`: subtitles for the recording grouped by the artist's sheet: one cue per section
+/// (each verse or chorus as sung; the default, so storyboard scenes follow the song's sections) or per
+/// line (`by: "line"`). Every heard word appears once, in order, in its own wording and time (the
+/// transcript the workshop imports it with); a heard word aligned to no printed word stays with the
+/// group it is sung in.
 pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let aligned = aligned(s)?;
     let (_, _, heard) = reference(&dir)?;
+    let by_line = match p["by"].as_str().unwrap_or("section") { "section" => false, "line" => true, other => return Err(invalid(format!("by must be section or line, not {other}"))) };
     let line_of: std::collections::HashMap<u64, String> = aligned["words"].as_array().into_iter().flatten()
-        .filter_map(|w| Some((w["ref_index"].as_u64()?, w["sung_id"].as_str()?.to_owned()))).collect();
+        .filter_map(|w| Some((w["ref_index"].as_u64()?, if by_line { w["sung_id"].as_str()?.to_owned() }
+            else { format!("{}#{}", w["section"].as_str()?, w["occurrence"].as_u64()?) }))).collect();
     let mut cues: Vec<(String, Vec<&Value>)> = Vec::new();
     for (i, w) in heard.iter().enumerate() {
         let line = line_of.get(&(i as u64)).cloned().or_else(|| cues.last().map(|(id, _)| id.clone())).unwrap_or_default();
@@ -977,7 +981,10 @@ mod tests {
     #[test]
     fn captions_are_one_cue_per_sung_line_of_the_sheet() {
         let (dir, mut s) = project("captions");
+        let lines = cmd_words_captions(&mut s, &json!({"by":"line"})).unwrap()["cues"].as_u64().unwrap();
         let made = cmd_words_captions(&mut s, &json!({})).unwrap();
+        assert!(made["cues"].as_u64().unwrap() <= lines, "a section holds one or more lines");
+        assert!(cmd_words_captions(&mut s, &json!({"by":"word"})).is_err());
         let srt = fs::read_to_string(dir.join("lyrics.captions.srt")).unwrap();
         assert_eq!(made["cues"].as_u64().unwrap() as usize, srt.matches(" --> ").count());
         assert!(srt.starts_with("1\n00:00:"), "{srt}");
