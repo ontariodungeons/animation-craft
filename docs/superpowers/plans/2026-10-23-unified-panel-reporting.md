@@ -10,6 +10,18 @@
 
 **Spec:** this document (the design was agreed in chat with Jesse on 2026-10-23).
 
+## Definition of done (Jesse returns to real work when all are true)
+
+1. `components.json` is the one config file; `mc panels` and the TUI read it **directly from disk** (no Studio needed) and list every element with its component and look.
+2. A running Studio adds only live state per element: `signal` (0-3) and `busy`. `open` and `dirty` are **dropped** from the record until something needs them; if an element should start collapsed or hidden, that becomes a field in its config entry, not JS logic.
+3. TUI "UI health" row shows `untracked` / `unstyled` counts, both 0 for every view.
+4. `ui-lint --report` totals below the pre-refactor commit `08529bf` (CSS lines, selectors), px/hex only in `:root`, 0 inline style writes.
+5. TUI colours come from one theme read from `style.css` `:root`.
+6. Statler's Words panel is on main, on the contract.
+7. The app builds and the coordinator has screenshotted Project, Animation and Design views from a fresh build.
+
+Out of scope until then: new features, the probe rig, OpenDesign.
+
 ## Agent brief (read this first, every session)
 
 You are one of several agents in ONE shared checkout. This file is the contract.
@@ -56,7 +68,7 @@ The design is locked by a ratchet, not by a big-bang rewrite. Any commit that to
 | 1 | Rizzo | Boxes survive a project switch | `ui/companion-boxes.js`, `ui/companions.js`, `ui/app.js:224-230`, `tests/companions.mjs` | — |
 | 2 | Beaker | Panel record + change-only revision + unconfigured list in `ui.feedback` | `ui/companion-boxes.js`, `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs`, `.githooks/pre-commit` | 1 |
 | 3 | Rizzo | Rust `panels` types; `studios.rs` on a `Studio` struct | `crates/engine/src/panels.rs`, `crates/engine/src/lib.rs`, `crates/engine/tests/panels.rs`, `apps/mc/src/studios.rs` | — |
-| 4 | Rizzo | `mc panels [--json\|--check]`; generic `ui.panel` setter | `apps/mc/src/main.rs`, `apps/mc/src/panels.rs`, `apps/magicstudio-shell/src/bridge.rs` | 2, 3 |
+| 4 | Rizzo | `mc panels [--json\|--check]` reading `components.json` from disk | `apps/mc/src/main.rs`, `apps/mc/src/panels.rs`, `apps/magicstudio-shell/src/bridge.rs` | 2, 3 |
 | 5 | Gonzo | TUI panel rows + "Unconfigured UI" row, redraw on revision | `apps/mc/src/center/panels.rs` (new), `apps/mc/src/center.rs` | 3 |
 | 6 | Rizzo | Per-pet timer + cooldown | `ui/companions.js`, `tests/companions.mjs` | 1 |
 | 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline in the hook | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
@@ -78,7 +90,7 @@ Companion plan: `docs/superpowers/plans/2026-10-23-magic-studio-wiring-refactor.
   "revision": 12,
   "available": true,
   "items": [
-    { "id": "block-song", "label": "Song", "signal": 1, "open": true, "busy": false, "dirty": false }
+    { "id": "block-song", "label": "Song", "look": "control", "signal": 1, "busy": false }
   ],
   "unconfigured": [ { "id": "button-17", "tag": "button", "label": "Export", "reason": "untracked" },
                     { "id": "blender-placement", "tag": "div", "label": "Place in scene", "reason": "unstyled" } ]
@@ -87,9 +99,9 @@ Companion plan: `docs/superpowers/plans/2026-10-23-magic-studio-wiring-refactor.
 
 - `signal`: 0 idle · 1 green in use · 2 yellow attention · 3 red problem. The ONLY state→signal table is `SIGNAL` in `companion-boxes.js`. **`working` maps to 1 (in use) with `busy: true`**, not 2: yellow means "needs you", work in flight is the `busy` flag (drawn as the `pulse` variant).
 - `dot(state, variant?)` takes the box **state string** (idle / working / ready / needs-attention / failed) and derives the signal from `SIGNAL`; callers never pass numbers or class names.
-- `register(id, opts)` **extends** the existing signature (`project`, `context`, `priority`, `title` stay); `label` and `on: {open, busy, dirty}` are added.
+- `register(id, opts)` **extends** the existing signature (`project`, `context`, `priority`, `title` stay); `label`, `look`, `density` are added (no `on` handlers).
 - "Configured" = the element or an ancestor carries `data-box-id` (set by `el()` in `app.js`) for an id the registry knows.
-- Flags: `open` (visible/expanded), `busy` (work in flight), `dirty` (unsaved edits). Default set chosen in chat; Jesse may change it. Adding a flag later = one field in JS + one field in `Panel`.
+- Live state is only `signal` and `busy` (work in flight). `open`/`dirty` are dropped (see Definition of done). Default set chosen in chat; Jesse may change it. Adding a flag later = one field in JS + one field in `Panel`.
 - `revision` increments only when an item's flags or the unconfigured list actually change. The 1 s feedback heartbeat must NOT bump it.
 - `items` and `unconfigured` are each capped at 64.
 - `reason` is one of: `untracked` (no entry in `components.json` for it or an ancestor), `unstyled` (a visual inline style on it). Look validity is checked at commit time against `components.json`, not at runtime. The TUI and `mc panels` show a count per reason; this is the map of random, untracked and unstyled UI.
@@ -101,14 +113,15 @@ Rust (`crates/engine/src/panels.rs`, `pub mod panels;` in lib.rs):
 #[repr(u8)] pub enum Signal { Idle = 0, InUse = 1, Attention = 2, Problem = 3 }
 impl Signal { pub fn from_u64(v: u64) -> Signal; pub fn label(self) -> &'static str; } // "idle" "in use" "attention" "problem"
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
-pub struct Panel { pub id: String, pub label: Option<String>, pub look: Option<String>, pub signal: Signal, pub open: bool, pub busy: bool, pub dirty: bool }
+pub struct Panel { pub id: String, pub label: Option<String>, pub look: Option<String>, pub signal: Signal, pub busy: bool }
+// Static side: magicstudio_engine::panels::Config::load(path) reads ui/components.json (elements, looks, densities); mc panels and the TUI use it with or without a Studio.
 pub enum Reason { Untracked, Unstyled } // serde kebab-case
 pub struct Unconfigured { pub id: String, pub tag: String, pub label: Option<String>, pub reason: Reason }
 pub struct PanelReport { pub revision: u64, pub available: bool, pub items: Vec<Panel>, pub unconfigured: Vec<Unconfigured> }
 impl PanelReport { pub fn from_feedback(feedback: &serde_json::Value) -> PanelReport; pub fn worst(&self) -> Signal; pub fn count(&self, reason: Reason) -> usize; }
 ```
 
-Generic setter (replaces per-switch commands): `ui.panel id=<panel> flag=<open|busy|dirty> value=<bool>` → shell `bridge.rs` routes to page `magicBridge.panel(id, flag, value)` → calls the handler the panel registered for that flag; a flag without a handler is refused with `"panel <id> does not accept <flag>"`.
+No setter command: nothing switches a panel from outside. Removed with `open`/`dirty` (Definition of done). Beaker deletes `flag()`, `on` handlers and `magicBridge.panel()` in Task 8 with their tests.
 
 ## The style contract (Task 8): two files
 
@@ -197,15 +210,16 @@ The panel record carries `look` from the entry. The TUI signal colours come from
 - [ ] Refactor `studios.rs` onto `Studio`; `mc studios`, `--json`, `--check`, pin output byte-identical (existing tests stay green).
 - [ ] Commit `feat(engine): typed panel report; mc studios reads typed Studios (#23)`.
 
-### Task 4 (Rizzo): `mc panels` + generic `ui.panel` setter
+### Task 4 (Rizzo): `mc panels` reads the config file
 
-**Consumes:** Task 2 `magicBridge.panel`, Task 3 `PanelReport`.
-**Files:** Modify `apps/mc/src/main.rs` (subcommand + SUBCOMMANDS + help), create `apps/mc/src/panels.rs`; modify `apps/magicstudio-shell/src/bridge.rs:93-96` (route `ui.panel` → `page(app, "panel", [id, flag, value])`), register `ui.panel` wherever `ui.set` is registered for MCP/command_list.
+**Consumes:** Task 3 `PanelReport` and `Config::load`.
+**Files:** Modify `apps/mc/src/main.rs` (subcommand + SUBCOMMANDS + help), create `apps/mc/src/panels.rs`. No shell/bridge change.
 
-- [ ] `mc panels` prints `SIGNAL  ID  LABEL  LOOK  open busy dirty` rows + one line per non-zero reason (`untracked 3: ids…`); `--json` prints the `PanelReport`; `--check` exits 1 when `unconfigured` is non-empty or `available` is false, 0 otherwise. Help line in `mc help` + one README example.
+- [ ] `mc panels` reads `ui/components.json` from disk (works with no Studio) and prints `SIGNAL  ID  COMPONENT  LOOK  LABEL  BUSY` rows (signal/busy `-` when no Studio answers) + one line per non-zero reason (`untracked 3: ids…`); `--json` prints the `PanelReport`; `--check` exits 1 when `unconfigured` is non-empty or `available` is false, 0 otherwise. Help line in `mc help` + one README example.
 - [ ] Rust unit tests on the formatter with a fixture `PanelReport` (no live Studio).
 - [ ] Delete `boxes` from `feedbackSnapshot()` once nothing reads it (grep `"boxes"`).
-- [ ] Commit `feat(cli): mc panels lists and checks every panel; ui.panel sets a flag (#23)`.
+- [ ] `--check` exits 1 when any `untracked`/`unstyled` is reported or an entry's look is not in `looks`; 0 otherwise.
+- [ ] Commit `feat(cli): mc panels reads the UI config and checks it (#23)`.
 
 ### Task 5 (Gonzo): TUI panels section
 
