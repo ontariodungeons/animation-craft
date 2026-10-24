@@ -46,7 +46,7 @@
     },
     "view-skills": {
       "component": "workspace",
-      "label": "Skills"
+      "label": "Learning production manual"
     },
     "blocks": {
       "component": "workspace",
@@ -196,7 +196,7 @@
     },
     "tab-skills": {
       "component": "workspace",
-      "label": "Skills tab"
+      "label": "Learning tab"
     }
   }
 }

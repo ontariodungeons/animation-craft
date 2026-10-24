@@ -1,10 +1,16 @@
 {
   "private": true,
   "scripts": {
-    "build": "bun build theatre-frame.js --target browser --format iife --banner 'var __require;' --outfile ../ui/vendor/theatre.bundle.js"
+    "build": "bun run build:theatre && bun run build:learning",
+    "build:theatre": "bun build theatre-frame.js --target browser --format iife --banner 'var __require;' --outfile ../ui/vendor/theatre.bundle.js",
+    "build:learning": "bun build learning-editor.js --target browser --format iife --outdir ../ui/vendor/learning"
   },
   "dependencies": {
     "@theatre/core": "0.7.0",
-    "@theatre/studio": "0.7.0"
+    "@theatre/studio": "0.7.0",
+    "@milkdown/crepe": "7.22.3"
+  },
+  "devDependencies": {
+    "playwright-core": "1.58.2"
   }
 }
