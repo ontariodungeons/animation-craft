@@ -326,32 +326,33 @@ fn load(dir: &Path) -> Result<Option<Value>> {
     }
 }
 
-/// `words.captions`: one caption per sung line of the artist's sheet, timed from the aligned words
-/// (an SRT the workshop imports with the transcript, so scenes follow the song's own lines).
-/// Lines with no heard word are listed, not guessed.
+/// `words.captions`: subtitles for the recording, one cue per sung line of the artist's sheet. Every
+/// heard word appears once, in order, in its own wording and time (the transcript the workshop imports
+/// it with); a heard word aligned to no printed word stays with the line it is sung in.
 pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let aligned = aligned(s)?;
-    let mut lines: Vec<(String, Vec<&Value>)> = Vec::new();
-    for w in aligned["words"].as_array().into_iter().flatten() {
-        let sung = w["sung_id"].as_str().unwrap_or_default().to_owned();
-        if lines.last().is_none_or(|(id, _)| *id != sung) { lines.push((sung, Vec::new())); }
-        lines.last_mut().unwrap().1.push(w);
+    let (_, _, heard) = reference(&dir)?;
+    let line_of: std::collections::HashMap<u64, String> = aligned["words"].as_array().into_iter().flatten()
+        .filter_map(|w| Some((w["ref_index"].as_u64()?, w["sung_id"].as_str()?.to_owned()))).collect();
+    let mut cues: Vec<(String, Vec<&Value>)> = Vec::new();
+    for (i, w) in heard.iter().enumerate() {
+        let line = line_of.get(&(i as u64)).cloned().or_else(|| cues.last().map(|(id, _)| id.clone())).unwrap_or_default();
+        if cues.last().is_none_or(|(id, _)| *id != line) { cues.push((line, Vec::new())); }
+        cues.last_mut().unwrap().1.push(w);
     }
     let clock = |t: f64| { let ms = (t * 1000.0).round() as u64; format!("{:02}:{:02}:{:02},{:03}", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000) };
-    let (mut srt, mut cues, mut untimed) = (String::new(), 0, Vec::new());
-    for (sung, words) in &lines {
-        let start = words.iter().filter_map(|w| w["start"].as_f64()).reduce(f64::min);
-        let end = words.iter().filter_map(|w| w["end"].as_f64()).reduce(f64::max);
-        let (Some(start), Some(end)) = (start, end) else { untimed.push(json!(sung)); continue };
-        cues += 1;
-        let text = words.iter().filter_map(|w| w["text"].as_str()).collect::<Vec<_>>().join(" ");
-        srt.push_str(&format!("{cues}\n{} --> {}\n{text}\n\n", clock(start), clock(end.max(start + 0.1))));
+    let mut srt = String::new();
+    for (n, (_, words)) in cues.iter().enumerate() {
+        let start = words.iter().filter_map(|w| w["start"].as_f64()).reduce(f64::min).unwrap_or(0.0);
+        let end = words.iter().filter_map(|w| w["end"].as_f64()).reduce(f64::max).unwrap_or(start);
+        let text = words.iter().filter_map(|w| w["text"].as_str().or_else(|| w["word"].as_str())).collect::<Vec<_>>().join(" ");
+        srt.push_str(&format!("{}\n{} --> {}\n{text}\n\n", n + 1, clock(start), clock(end.max(start + 0.1))));
     }
     let out = p["out"].as_str().map(PathBuf::from).unwrap_or_else(|| dir.join("lyrics.captions.srt"));
     if let Some(parent) = out.parent() { fs::create_dir_all(parent)?; }
     fs::write(&out, &srt)?;
-    Ok(json!({"ok":true,"path":out,"cues":cues,"untimed_lines":untimed}))
+    Ok(json!({"ok":true,"path":out,"cues":cues.len(),"words":heard.len()}))
 }
 
 /// `words.read`: the saved Words document, or the unsaved default built from the artist's sheet.
@@ -980,7 +981,8 @@ mod tests {
         let srt = fs::read_to_string(dir.join("lyrics.captions.srt")).unwrap();
         assert_eq!(made["cues"].as_u64().unwrap() as usize, srt.matches(" --> ").count());
         assert!(srt.starts_with("1\n00:00:"), "{srt}");
-        assert!(srt.contains("Hey ho don't cry."), "the artist's line, whole: {srt}");
+        let words: usize = srt.split("\n\n").filter(|c| !c.trim().is_empty()).map(|c| c.lines().nth(2).unwrap_or("").split_whitespace().count()).sum();
+        assert_eq!(words as u64, made["words"].as_u64().unwrap(), "every heard word once: {srt}");
     }
 
     #[test]

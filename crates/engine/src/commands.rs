@@ -450,7 +450,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("words.lyrics_view", "Lyrics-Only or Scene-Only View of the Video", ["Design"], None, "{\"show\":\"scene\"}", always, crate::words::cmd_words_lyrics_view),
         query!("words.effects", "Effects from the HyperFrames Registry", "{\"kind\":\"optional: text, drawing or background\"}", crate::words::cmd_words_effects),
         cmd!("words.effect_install", "Install a Registry Effect", ["Design"], None, "{\"name\":\"per-word-rise\"}", always, crate::words::cmd_words_effect_install),
-        cmd!("words.captions", "Captions from the Artist's Lines", ["Design"], None, "{\"out\":\"optional .srt path; default lyrics.captions.srt in the project\"}", always, crate::words::cmd_words_captions),
+        cmd!("words.captions", "Captions by the Artist's Lines", ["Design"], None, "{\"out\":\"optional .srt path; default lyrics.captions.srt in the project\"}", always, crate::words::cmd_words_captions),
         cmd!("words.apply", "Use Designed Lyrics in the Video", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"use\":true}", always, crate::words::cmd_words_apply),
         cmd!("words.save", "Save Words Animation", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"expected_source_revision\":0,\"style\":{\"size\":120},\"words\":[{\"word_id\":\"ch1-l1/w5\",\"action\":\"cry\",\"emphasis\":true}]}", always, crate::words::cmd_words_save),
         cmd!("words.compose", "Compose Words Track (HyperFrames)", ["Design"], None, "{\"animation_id\":\"words-chorus-1\",\"instance_id\":\"optional: isolated composition for a repeated placement\"}", always, crate::words::cmd_words_compose),
