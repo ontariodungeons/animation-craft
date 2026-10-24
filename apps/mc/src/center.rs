@@ -3,6 +3,7 @@ mod control;
 mod workshop;
 mod booth;
 mod roles;
+mod panels;
 use magicstudio_engine::Session;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
@@ -93,12 +94,19 @@ struct Center {
     doctor_receiver:Option<std::sync::mpsc::Receiver<Result<Value,String>>>,
     doctor_error:Option<String>,
     chat_receiver:Option<std::sync::mpsc::Receiver<Result<Value,String>>>,
+    panel_config: magicstudio_engine::panels::Config,
+    panel_config_error: Option<String>,
+    panel_report: magicstudio_engine::panels::PanelReport,
+    last_panels_revision: Option<u64>,
+    panel_rows: Vec<Line<'static>>,
+    panel_detail: Vec<Line<'static>>,
 }
 impl Center {
     fn new(p: &Value) -> Result<Self, String> {
         let value = |k: &str| p[k].as_str().unwrap_or_default().to_string();
         let root = magicstudio_engine::project_settings::root().map_err(|e|e.to_string())?;
-        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0};
+        let mut center=Self{session:Session::user_session(),scope:None,onboarding:None,fields:[value("project"),p["root"].as_str().map(str::to_owned).unwrap_or_else(||root.to_string_lossy().into_owned()),value("name"),value("audio"),value("transcript"),value("captions"),value("audiomap"),value("materials")],selected:0,editing:false,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,state:json!({}),agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,message:format!("Blue not started / red failed / yellow stalled / green working / [OK] completed. Production root: {}.",root.display()),scroll:0,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()};
+        match panels::load_config(){Ok(config)=>center.panel_config=config,Err(error)=>center.panel_config_error=Some(error),}
         center.scope=crate::scope::current()?.cloned();
         if let Some(scope)=&center.scope{
             if !center.fields[0].is_empty()&&std::fs::canonicalize(&center.fields[0]).map_err(|e|e.to_string())?!=scope.project{return Err("Restricted: Booth project differs from assignment".into());}
@@ -228,6 +236,7 @@ impl Center {
                     self.spy_at=Some(std::time::Instant::now());
                 }
                 self.sample_studio();
+        panels::sync(self);
         if let Some(scope)=&self.scope{self.state=scope.redact(self.state.clone());}
 
     }
@@ -751,6 +760,14 @@ const GREEN: Color=Color::Rgb(79,232,143);
 const AMBER: Color=Color::Rgb(246,193,104);
 const RED: Color=Color::Rgb(255,118,130);
 const MUTED: Color=Color::Rgb(181,197,219);
+fn signal_color(signal:magicstudio_engine::panels::Signal)->Color{
+ match signal{
+  magicstudio_engine::panels::Signal::Idle=>MUTED,
+  magicstudio_engine::panels::Signal::InUse=>GREEN,
+  magicstudio_engine::panels::Signal::Attention=>AMBER,
+  magicstudio_engine::panels::Signal::Problem=>RED,
+ }
+}
 const DIM: Color=Color::Rgb(120,132,155);
 const FILM: Color=Color::Rgb(92,74,42);
 fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
@@ -1461,6 +1478,12 @@ fn render_muppets(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  }
  f.render_widget(Paragraph::new(lines).wrap(Wrap{trim:false}).scroll((c.scroll,0)),parts[1]);
 }
+fn render_overview(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ if area.height>=12{
+  let parts=Layout::vertical([Constraint::Length(9),Constraint::Min(3)]).split(area);
+  booth::render_project(f,c,parts[0]);panels::render(f,c,parts[1]);
+ }else{booth::render_project(f,c,area);}
+}
 fn render_desk(f:&mut Frame,c:&Center,control:bool){
  let area=f.area();let narrow=area.width<110;f.render_widget(Block::default().style(Style::default().bg(DESK_BG).fg(DESK_FG)),area);
  let gang_rows=if narrow{0}else{3};
@@ -1480,8 +1503,8 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
   else if c.muppets_view{render_muppets(f,c,chunks[2]);}
   else{
  let compact_actions=(root_actions(c).len() as u16*2+2).clamp(4,8);let bottom_height=if narrow{compact_actions+12}else{15};let body=Layout::vertical([Constraint::Min(8),Constraint::Length(bottom_height)]).split(chunks[2]);
- if narrow{let stacked=area.width>=68;let p=Layout::vertical([Constraint::Length(if stacked{6}else{9}),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,stacked)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);if c.details_open{render_pulse(f,c,p[2]);}else{booth::render_project(f,c,p[2]);}}
- else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);let overview=right[1];booth::render_project(f,c,overview);}
+ if narrow{let stacked=area.width>=68;let p=Layout::vertical([Constraint::Length(if stacked{6}else{9}),Constraint::Length(if c.details_open{9}else if body[0].height>=14{4}else{3}),Constraint::Min(3)]).split(body[0]);f.render_widget(Paragraph::new(stage_lines(c,stacked)).block(round_panel("STAGES · [ / ] select",TEAL,true)),p[0]);render_stage_activity(f,c,p[1]);if c.details_open{render_pulse(f,c,p[2]);}else{render_overview(f,c,p[2]);}}
+ else{let p=Layout::horizontal([Constraint::Length(31),Constraint::Min(30)]).spacing(1).split(body[0]);let stages=stage_lines(c,false);let mut rail=p[0];rail.height=wrapped_rows(&stages,rail.width.saturating_sub(2)).saturating_add(2).min(rail.height);f.render_widget(Paragraph::new(stages).wrap(Wrap{trim:false}).block(round_panel("STAGES · [ / ] select",TEAL,true)),rail);let right=Layout::vertical([Constraint::Length(if c.details_open{11}else{7}),Constraint::Min(5)]).split(p[1]);render_stage_activity(f,c,right[0]);render_overview(f,c,right[1]);}
  if narrow{let p=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(10)]).split(body[1]);let top=Layout::horizontal([Constraint::Percentage(50),Constraint::Percentage(50)]).split(p[0]);render_actions(f,c,top[0],true);render_tail(f,c,top[1]);render_next(f,c,p[1]);}else{let p=Layout::horizontal([Constraint::Percentage(48),Constraint::Percentage(52)]).spacing(1).split(body[1]);let left=Layout::vertical([Constraint::Length(compact_actions),Constraint::Min(3)]).split(p[0]);render_actions(f,c,left[0],true);render_tail(f,c,left[1]);render_next(f,c,p[1]);}
  }
  if gang_rows>0{render_gang(f,c,chunks[3]);}
@@ -1787,7 +1810,75 @@ mod feedback_tests {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
     }
     pub(super) fn fixture()->Center{
-        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None}
+        Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}
+    }
+    fn panel_text(lines:&[Line])->String{lines.iter().map(|line|line.to_string()).collect::<Vec<_>>().join("\n")}
+    fn panel_screen(c:&Center)->String{
+        let mut terminal=ratatui::Terminal::new(ratatui::backend::TestBackend::new(72,16)).unwrap();
+        terminal.draw(|f|panels::render(f,c,f.area())).unwrap();
+        let buffer=terminal.backend().buffer();
+        (0..16).map(|y|(0..72).map(|x|buffer[(x,y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n")
+    }
+    #[test]
+    fn panels_unavailable_renders_unavailable(){
+        let mut c=fixture();
+        assert!(c.state["ui"].get("panels").is_none());
+        c.panel_config.elements.insert("view-home".into(),magicstudio_engine::panels::Entry{component:"workspace".into(),label:Some("Home".into()),..Default::default()});
+        panels::sync(&mut c);
+        let text=panel_text(&c.panel_rows);
+        assert!(text.contains("Panels unavailable"),"{text}");
+        assert!(text.contains("Home"),"{text}");
+        assert!(text.contains('·'),"{text}");
+        assert!(!text.contains("open")&&!text.contains("dirty"),"{text}");
+        let screen=panel_screen(&c);
+        assert!(screen.contains("Panels unavailable"),"{screen}");
+        assert!(screen.contains("Home"),"{screen}");
+    }
+    #[test]
+    fn same_revision_does_not_rebuild(){
+        let mut c=fixture();
+        c.panel_config.elements.insert("block-song".into(),magicstudio_engine::panels::Entry{component:"block".into(),label:Some("Song".into()),..Default::default()});
+        c.state["ui"]["panels"]=json!({"revision":4,"available":true,"items":[],"unconfigured":[]});
+        panels::sync(&mut c);
+        c.panel_rows=vec![styled("SENTINEL",RED)];
+        panels::sync(&mut c);
+        assert_eq!(c.panel_rows[0].to_string(),"SENTINEL");
+        c.state["ui"]["panels"]["revision"]=json!(5);
+        c.state["ui"]["panels"]["items"]=json!([{"id":"block-song","label":"Song","signal":1,"busy":true}]);
+        panels::sync(&mut c);
+        let text=panel_text(&c.panel_rows);
+        assert!(!text.contains("SENTINEL"),"{text}");
+        assert!(text.contains("Song"),"{text}");
+        assert!(text.contains("busy"),"{text}");
+        assert!(text.contains("every element tracked and styled"),"{text}");
+        assert!(!text.contains("open")&&!text.contains("dirty"),"{text}");
+        let song=c.panel_rows.iter().find(|line|line.to_string().contains("Song")).unwrap();
+        assert!(song.to_string().starts_with('●'));
+        assert_eq!(song.spans[0].style.fg,Some(GREEN));
+    }
+    #[test]
+    fn unconfigured_count_shown(){
+        let mut c=fixture();
+        c.state["ui"]["panels"]=json!({"revision":1,"available":true,"items":[],"unconfigured":[
+            {"id":"button-17","tag":"button","reason":"untracked"},
+            {"id":"button-18","tag":"button","reason":"untracked"},
+            {"id":"button-19","tag":"button","reason":"untracked"},
+            {"id":"place-a","tag":"div","reason":"unstyled"},
+            {"id":"place-b","tag":"div","reason":"unstyled"}
+        ]});
+        panels::sync(&mut c);
+        let text=panel_text(&c.panel_rows);
+        assert!(text.contains("untracked 3"),"{text}");
+        assert!(text.contains("unstyled 2"),"{text}");
+        let detail=panel_text(&c.panel_detail);
+        for id in ["button-17","button-18","button-19","place-a","place-b"]{assert!(detail.contains(id),"{detail}");}
+        c.details_open=false;
+        let hidden=panel_screen(&c);
+        assert!(hidden.contains("untracked 3"),"{hidden}");
+        assert!(!hidden.contains("button-17"),"{hidden}");
+        c.details_open=true;
+        let shown=panel_screen(&c);
+        assert!(shown.contains("button-17")&&shown.contains("place-a"),"{shown}");
     }
     #[test]
     fn moppets_shows_only_the_selected_agents_details_at_each_width(){
