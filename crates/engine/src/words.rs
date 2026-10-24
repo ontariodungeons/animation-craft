@@ -256,6 +256,14 @@ fn default_document(report: &Value) -> Value {
 /// Untrimmed authored span. Word times stay song seconds; the composition's local time zero sits
 /// at `song_anchor = first_start - lead_in`, so
 /// `authored_duration = (last_end + hold) - (first_start - lead_in)`. Never moves the audio.
+/// Each word's time in the video's own lyric track (`words.studio_track`), by word id. Empty when
+/// the project has no video or no lyric clips; then the reference timing stands.
+fn studio_times(s: &mut Session) -> std::collections::HashMap<String, (f64, f64)> {
+    let track = cmd_words_studio_track(s, &json!({})).unwrap_or(Value::Null);
+    track["sections"].as_array().into_iter().flatten().flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default())
+        .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), (c["start"].as_f64()?, c["start"].as_f64()? + c["duration"].as_f64()?)))).collect()
+}
+
 fn timing(anim: &mut Value) {
     let times: Vec<(f64, f64)> = anim["words"].as_array().into_iter().flatten()
         .filter_map(|w| Some((w["start"].as_f64()?, w["end"].as_f64()?))).collect();
@@ -446,7 +454,16 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     if !hf.join("index.html").is_file() { return Err(invalid("This project has no HyperFrames project yet; run video.init first")); }
     let id = p["animation_id"].as_str().ok_or_else(|| invalid("animation_id is required"))?;
     let read = cmd_words_read(s, &json!({"animation_id":id}))?;
-    let anim = &read["document"]["animations"][0];
+    // The edit syncs to the lyric track already in the video, not to the hidden reference.
+    let mut synced = read["document"]["animations"][0].clone();
+    let times = studio_times(s);
+    if !times.is_empty() {
+        for w in synced["words"].as_array_mut().into_iter().flatten() {
+            if let Some((a, b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); w["timing_source"] = json!("studio"); }
+        }
+        timing(&mut synced);
+    }
+    let anim = &synced;
     let instance = match p["instance_id"].as_str() {
         Some(i) if !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => Some(i),
         Some(_) => return Err(invalid("instance_id must be letters, digits, '-' or '_'")),

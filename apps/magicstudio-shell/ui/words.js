@@ -166,16 +166,7 @@ function wordsRender() {
     ...animations.map((a) => el("button", { class: `panel-head item${a.animation_id === wordsPanel.selected ? " active" : ""}`, "data-section": a.animation_id, onclick: () => wordsSelect(a.animation_id) },
       wordsDot(mismatchedIn(a) ? "needs-attention" : "ready", mismatchedIn(a) ? "Some words differ from what was heard" : "Words match the timing reference"),
       el("span", { class: "title" }, wordsLabel(a)),
-      el("span", { class: "meta" }, (() => { const v = wordsStudioSection(a); return v ? `${wordsClock(v.start)} · ${v.clips.length} clips` : `rev ${a.source_revision}`; })()))),
-    el("div", { class: "words-reference" },
-      el("div", { class: "group-label" }, "Timing reference · hidden"),
-      el("p", {}, `${reference.word_count ?? "?"} heard words · ${summary.matched ?? "?"} of ${summary.canonical_words ?? "?"} artist words match`),
-      summary.timing_disagreements ? el("p", { class: "not-linked" }, `${summary.timing_disagreements} word${summary.timing_disagreements > 1 ? "s" : ""} timed differently by the measured alignment (dotted)`) : null,
-      el("p", { class: "muted" }, "Never shown in the video and never edited here."),
-      el("button", { class: "ghost", id: "words-inspect-reference", onclick: () => {
-        const doc = state.data?.status?.stages?.find((s) => s.id === "transcript")?.document;
-        lyricReaderOpen(state.lyrics, doc, wordsSongPath(), true);
-      } }, "Inspect (read only)")));
+      el("span", { class: "meta" }, (() => { const v = wordsStudioSection(a); return v ? `${wordsClock(v.start)} · ${v.clips.length} clips` : `rev ${a.source_revision}`; })()))));
   if (!anim) { view.replaceChildren(side, el("p", { class: "panel-empty inline" }, "No lyric sections yet.")); return; }
 
   const lines = [];
