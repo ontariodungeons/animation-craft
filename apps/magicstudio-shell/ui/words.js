@@ -3,7 +3,7 @@
 // changes only style, emphasis and motion (words.save). The stage plays the finished HyperFrames
 // video itself, one section at a time, through the preview player's control messages; its
 // lyric clips come from words.studio_track. One project, one clock, the song's own.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, word: null, pending: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null };
+const wordsPanel = { read: null, align: null, studio: null, selected: null, word: null, pending: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, laneHead: null };
 const WORD_ACTIONS = [["none", "Still"], ["wave", "Wave"], ["tiny", "Small"], ["swim", "Swim"], ["no", "Shake"], ["cry", "Droop"], ["big", "Grow"], ["float", "Float"]];
 const WORD_ENTRANCES = ["pop", "fade", "rise", "none"];
 const WORD_EXITS = ["fade", "drop", "none"];
@@ -171,8 +171,25 @@ function wordsStage(anim) {
     el("div", { class: "transport" },
       el("button", { class: "icon", id: "words-play", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
-      el("span", { class: "meta", id: "words-time" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)));
+      el("span", { class: "meta", id: "words-time" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)),
+    wordsLane("Lyric words · in the video", section));
   return wordsPanel.stage;
+}
+
+// One lane of the section: the video's lyric clips where they sit in time, a playhead on top.
+// Positions are data (--start, --len, --at); clicking a clip seeks the video to it.
+function wordsLane(name, section) {
+  const span = section.end - section.start;
+  const at = (t) => `${(100 * (t - section.start) / span).toFixed(3)}%`;
+  const head = el("span", { class: "lane-head" });
+  const track = el("div", { class: "lane-track" }, ...section.clips.map((clip) => {
+    const block = el("button", { class: "lane-block", title: `${clip.text} · ${wordsClock(clip.start)}`, "data-word-id": clip.word_id,
+      onclick: () => wordsVideo("seek", { timeSeconds: clip.start, seekMode: "commit" }) }, clip.text);
+    block.style.setProperty("--start", at(clip.start)); block.style.setProperty("--len", `${(100 * clip.duration / span).toFixed(3)}%`);
+    return block;
+  }), head);
+  wordsPanel.laneHead = (t) => head.style.setProperty("--at", at(Math.min(section.end, Math.max(section.start, t))));
+  return el("div", { class: "lane" }, el("span", { class: "lane-name" }, name), track);
 }
 
 // One control message to the video's preview player.
@@ -209,6 +226,7 @@ addEventListener("message", (event) => {
     const scrub = $("words-scrub");
     if (scrub) scrub.value = scrub.defaultValue = String(data.currentTime);
     if ($("words-time")) $("words-time").textContent = wordsClock(data.currentTime);
+    wordsPanel.laneHead?.(data.currentTime);
     $("words-play")?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
   }
 });

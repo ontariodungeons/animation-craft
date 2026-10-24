@@ -19,7 +19,8 @@
     "stage": [],
     "chip": [
       "word"
-    ]
+    ],
+    "lane": []
   },
   "densities": [
     "normal",

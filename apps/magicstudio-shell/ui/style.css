@@ -167,6 +167,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border: thin solid var(--line); border-radius: var(--radius);
   background: radial-gradient(120% 90% at 50% 35%, var(--surface-2), var(--surface) 55%, var(--bg)); }
 .stage > iframe { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform: scale(var(--scale)); transform-origin: 0 0; border: 0; background: transparent; }
+
+/* One lane: a named track of blocks on a section's span. Block positions come
+   as --start/--len and the playhead as --at; a look sets the fill. */
+.lane { display: grid; grid-template-columns: calc(var(--space-5) * 5) minmax(0, 1fr); gap: var(--space-2); align-items: center; color: var(--muted); font-size: var(--text-sm); }
+.lane-track { position: relative; height: calc(var(--space-5) - var(--space-1)); overflow: hidden; border-radius: var(--radius-sm); background: var(--surface); }
+.lane-block { position: absolute; top: var(--space-1); bottom: var(--space-1); left: var(--start); width: var(--len); overflow: hidden; padding: 0 var(--space-1);
+  border-radius: var(--radius-sm); background: var(--lane-fill, var(--tone-lyrics)); color: var(--accent-ink); font-size: var(--text-xs); white-space: nowrap; text-overflow: ellipsis; }
+.lane-head { position: absolute; top: 0; bottom: 0; left: var(--at, 0%); width: calc(var(--space-1) / 2); background: var(--playhead); pointer-events: none; }
 .magic-image-ok { display: inline-grid; width: 12px; height: 12px; place-items: center; color: var(--muted); font-size: 12px; line-height: 1; flex: none; }
 .magic-image-review { color: var(--amber); }
 @keyframes pulse { to { opacity: .35; } }
@@ -859,7 +867,7 @@ body.at-home .app-footer { display:none; }
 .song-details summary { color: var(--faint); font-size: 12px; cursor: pointer; }
 .song-details[open] { display: flex; flex-direction: column; gap: 6px; }
 /* Read-only transcript reader layered over the workstation panes. */
-.magic-reader { position: absolute; inset: 8px 8px 8px 0; z-index: 3; }
+.magic-reader { position: absolute; inset: var(--space-2) var(--space-2) var(--space-2) 0; z-index: 3; }
 .magic-reader .panel-head.pane { display: flex; align-items: center; gap: 8px; }
 .magic-reader .panel-head.pane > span:first-child { flex: 1; }
 .reader-body { overflow: auto; padding: 4px 14px 14px; line-height: 1.7; }
