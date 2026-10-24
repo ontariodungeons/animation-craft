@@ -635,7 +635,8 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
     // The Old MacDonald template's palette: cream page, rust kickers, slate bars.
     let swatch = |name: &str, rgb: [u8; 3]| -> Result<PathBuf> {
         let p = theme.join(format!("{name}.png"));
-        image::RgbaImage::from_pixel(4, 4, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).save(&p)?;
+        // pdfcraft-cli 0.9 refuses tiny images ("the image is too small"); a solid swatch scales freely.
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).save(&p)?;
         Ok(p)
     };
     let card_fill = swatch("card", [0xFF, 0xF8, 0xEC])?;
