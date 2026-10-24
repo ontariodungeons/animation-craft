@@ -5,15 +5,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     if s.project_path.is_some() {
-        return Err(EngineError::InvalidParams("Run mc exec motion.recipe project=<song.magic> bridge=<port> without --bridge; the batch connects each command to Studio itself".into()));
+        return Err(EngineError::InvalidParams("Run mc exec motion.recipe project=<song.magic> studio=<port> without --bridge; the batch connects each command to Studio itself".into()));
     }
     let raw = p["project"].as_str().ok_or_else(|| EngineError::InvalidParams("project is required".into()))?;
     let project = crate::workspace::resolve_workspace_path(s, raw).canonicalize()?;
     if !project.is_file() || project.extension().is_none_or(|ext| ext != "magic") {
         return Err(EngineError::InvalidParams("project must be an existing .magic file".into()));
     }
-    let bridge = p["bridge"].as_u64().filter(|port| *port > 0 && *port <= 65535)
-        .ok_or_else(|| EngineError::InvalidParams("bridge must be the selected Studio port".into()))?;
+    let bridge = p["studio"].as_u64().filter(|port| *port > 0 && *port <= 65535)
+        .ok_or_else(|| EngineError::InvalidParams("studio must be the selected Studio port".into()))?;
     let directory = project.parent().ok_or_else(|| EngineError::InvalidParams("project has no parent".into()))?.join("animation");
     let root = crate::workspace::workspace_root(s);
     let mc = std::env::current_exe()?.with_file_name("mc");
