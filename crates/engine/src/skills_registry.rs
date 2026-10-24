@@ -233,22 +233,24 @@ pub fn cmd_skills_diagram(s:&mut Session,p:&Value)->Result<Value>{
     for (i,ident) in ids.iter().enumerate(){
         let Some(record)=all.get(*ident).filter(|v|v["removed"]!=true) else {continue;};
         let md=markdown(s,record,ident)?;let block=parse_task(&md);
-        let col=if kind=="production"&&i>=4{7-i}else{i};let lane=if kind=="production"&&i>=4{"produce"}else{"prepare"};
-        nodes.push(json!({"id":ident,"lane":lane,"col":col,"type":if record["blocked"].is_string(){"security"}else{"backend"},"label":block["title"],"sublabel":block["action"]["kind"],"width":180usize.max(block["title"].as_str().unwrap_or("").chars().count()*8+32)}));present.push(*ident);
+        let col=0usize;let lane="tasks";let y_offset=(i as f64-(ids.len()-1) as f64/2.0)*80.0;
+        nodes.push(json!({"id":ident,"lane":lane,"col":col,"yOffset":y_offset,"type":if record["blocked"].is_string(){"security"}else{"backend"},"label":block["title"],"sublabel":block["action"]["kind"],"width":180usize.max(block["title"].as_str().unwrap_or("").chars().count()*8+32)}));present.push(*ident);
     }
     for ident in &present {if let Some(next)=all[*ident]["next"].as_array(){for target in next.iter().filter_map(Value::as_str).filter(|n|present.contains(n)){
         let mut edge=json!({"id":format!("{ident}-to-{target}"),"from":ident,"to":target,"variant":"default"});
-        if target=="report-note"{edge["variant"]=json!("dashed");edge["role"]=json!("branch");edge["route"]=json!("bottom-channel");edge["fromSide"]=json!("bottom");edge["toSide"]=json!("bottom");}
+        if target=="report-note"{edge["variant"]=json!("dashed");edge["role"]=json!("branch");edge["route"]=json!("outside-right");edge["fromSide"]=json!("right");edge["toSide"]=json!("right");}
+        else {edge["fromSide"]=json!("bottom");edge["toSide"]=json!("top");}
         edges.push(edge);
     }}}
-    let mut lanes=vec![json!({"id":"prepare","label":if kind=="production"{"Resolve / timing"}else{"Approved correction process"}})];if kind=="production"{lanes.push(json!({"id":"produce","label":"Native source / review"}));}
+    let lanes=vec![json!({"id":"tasks","label":if kind=="production"{"Production path — manual steps"}else{"Approved correction loop"}})];
     let output=format!("{kind}.html");let spec=json!({"schema_version":2,"diagram_type":"workflow","meta":{"title":if kind=="production"{"Music-video production tasks"}else{"Approved correction loop"},"subtitle":"Editable task records drive this manual view; no automatic execution or approval is implied.","quality_profile":"showcase","animation":"none","output":output},"lanes":lanes,"mainPath":present,"nodes":nodes,"edges":edges});
     if p["render"]!=true{return Ok(json!({"ok":true,"spec":spec,"editable_format":"Archify workflow schema v2 JSON; task Markdown is the instruction source"}));}
     let dir=root(s);if p["_expected_directory"].as_str().is_some_and(|v|Path::new(v)!=dir){return Err(invalid("Learning project changed; diagram request refused"));}fs::create_dir_all(&dir)?;
     let script=std::env::var_os("ARCHIFY_SCRIPT").map(PathBuf::from).or_else(||std::env::var_os("HOME").map(|h|PathBuf::from(h).join(".codex/skills/archify/bin/archify.mjs"))).ok_or_else(||invalid("Installed Archify script not configured"))?;
     if !script.is_file(){return Err(invalid("Archify is unavailable. Set ARCHIFY_SCRIPT to the existing installed bin/archify.mjs; nothing was installed"));}
-    let candidate=dir.join(format!("{kind}.workflow.json"));atomic_write(&candidate,&serde_json::to_vec_pretty(&spec).map_err(|e|invalid(e.to_string()))?)?;
-    let result=Command::new("node").arg(&script).args(["finalize","workflow"]).arg(candidate.file_name().unwrap()).arg(&output).args(["--quality","showcase","--json"]).current_dir(&dir).output()?;
+    let candidate=dir.join(format!("{kind}.workflow.json"));let bytes=serde_json::to_vec_pretty(&spec).map_err(|e|invalid(e.to_string()))?;atomic_write(&candidate,&bytes)?;
+    let evidence=dir.join(".archify-evidence").join(kind).join(format!("{:x}",Sha256::digest(&bytes)));
+    let result=Command::new("node").arg(&script).args(["finalize","workflow"]).arg(candidate.file_name().unwrap()).arg(&output).args(["--quality","showcase","--json","--out-dir"]).arg(&evidence).current_dir(&dir).output()?;
     if !result.status.success(){return Err(invalid(format!("Archify finalize failed; candidate retained at {}. {} {}",candidate.display(),String::from_utf8_lossy(&result.stdout).chars().take(1600).collect::<String>(),String::from_utf8_lossy(&result.stderr).chars().take(400).collect::<String>())));}
     let html=fs::read_to_string(dir.join(&output))?;
     Ok(json!({"ok":true,"spec":spec,"source":candidate,"output":dir.join(output),"html":html,"verified":"Archify finalize exit 0; visual review remains separate"}))

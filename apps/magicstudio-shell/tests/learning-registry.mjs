@@ -46,6 +46,8 @@ try {
   const restored=value(run([{id:'skills.undo',params:{id:task.id,expected_revision:removed.revision}}])).skill;assert.equal(restored.removed,false);
   assert.equal(restored.block.action.kind,'command');assert.match(restored.block.action.ref,/workshop.import_transcript/);
   const diagram=value(run([{id:'skills.diagram',params:{kind:'production'}}]));assert.equal(diagram.spec.nodes.find(x=>x.id===task.id).label,'Import supplied timings');
+  const ordered=diagram.spec.mainPath.map(id=>diagram.spec.nodes.find(n=>n.id===id));
+  assert.ok(ordered.every((n,i)=>!i||n.col>=ordered[i-1].col),'Archify main path must never move backward');
  }
 
  console.log('PASS Learning CLI: legacy preservation, Markdown roundtrip, stale writes, remove/restore, draft import, rejected unsafe source/id');

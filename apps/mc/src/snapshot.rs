@@ -141,6 +141,23 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
             _ => &[],
         };
         for kind in kinds {
+            let client = e["client_label"].as_str().unwrap_or("");
+            let client_emoji = match client {
+                c if c.contains("opencode") => "🤖",
+                c if c.contains("cursor") => "🖱️",
+                c if c.contains("claude") => "🐙",
+                c if c.contains("grok") => "🤖",
+                c if c.contains("codex") => "📜",
+                c if c.contains("beaker") => "🧪",
+                c if c.contains("fozzie") => "🐻",
+                c if c.contains("rizzo") => "🐭",
+                c if c.contains("bunsen") => "🔬",
+                c if c.contains("statler") => "👴",
+                c if c.contains("waldorf") => "👴",
+                c if c.contains("gonzo") => "🚀",
+                c if c.contains("sprocket") => "🐶",
+                _ => "?",
+            };
             out.push(json!({
                 "sequence": e["sequence"],
                 "unix_micros": e["unix_micros"],
@@ -151,6 +168,7 @@ pub fn tail(activity: &Value, project: Option<&str>) -> Vec<Value> {
                 "origin": e["origin"],
                 "pane_id": e["pane_id"],
                 "client": e["client_label"],
+                "client_emoji": client_emoji,
                 "request_id": e["request_id"],
                 "project": e["project"],
                 // Theatre reports its selection as [{sheet, part}]; the first object is the part.
