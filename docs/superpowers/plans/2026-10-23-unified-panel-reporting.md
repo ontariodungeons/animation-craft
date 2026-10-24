@@ -21,6 +21,7 @@ You are one of several agents in ONE shared checkout. This file is the contract.
 - No per-panel or per-character logic: code loops over panels and looks.
 - No silent fallbacks: a missing registry, look or Studio is reported, never drawn as a default.
 - If the plan is wrong or a step fails, stop and report `file:line` to the coordinator (Claude, pane wG:pS). Do not improvise.
+- **No manual test runs.** Never run `node tests/…`, `cargo test` or probes by hand. To run tests, commit: the pre-commit hook runs them. If the hook fails, fix and commit again.
 - Report each commit SHA to the coordinator in one line.
 
 ```mermaid
@@ -274,8 +275,8 @@ The TUI is the Rust side's UI and has the same problem: 31 `Color::Rgb(…)` lit
 |---|---|---|
 | `9559ef1` | artist's lyric sheet and song controls in the Song section | **yes**, as `17668a1` |
 | `3fc6a0d` | Words lyric animations composed as HyperFrames tracks | **yes**, as `6ddc530` |
-| `5c4be84` | Design > Words panel (`ui/words.js` 234 lines, 42-line CSS block, Design tab in `index.html`, `app.js` +1) | **no** |
-| `550162d` | Words view controls out of the unsaved-edit guard; `words.rs` reports `timing_disagreements` (reference vs measured > 0.5 s) | **no** |
+| `5c4be84` | Design > Words panel (`ui/words.js` 234 lines, 42-line CSS block, Design tab in `index.html`, `app.js` +1) **and** `words.rs` `timing_disagreements` (reference vs measured > 0.5 s) | **no** |
+| `550162d` | Words view controls out of the unsaved-edit guard (`words.js` only) | **no** |
 
 The unmerged UI predates the contract and would fail `ui-lint` as is: 3 hex + 55 px outside `:root`, own `.design-*` classes, 5 inline style writes in `words.js`, 2 hand-built dots, no panel registration. That is expected, not a defect; it is good work written before the rules.
 
@@ -283,8 +284,8 @@ Statler keeps ownership of its code. Nobody else rewrites `songSection()`, `lyri
 
 **Consumes:** Task 8's first commit (`components.json` + `el()` reading it). **Files:** Statler's: `ui/words.js`, the Song/Words region of `ui/app.js` (`songSection()`, lyric model/sheet/body), the Design tab in `ui/index.html`, `crates/engine/src/words.rs`; entries in `ui/components.json`; component rules in `ui/style.css` (coordinate the file with Beaker: one owner at a time).
 
-- [ ] Land `550162d`'s `words.rs` change on main first (engine-only, independent of the UI contract); test `timing_disagreements_are_reported_not_chosen` in the engine tests.
-- [ ] Port `5c4be84` + the UI half of `550162d` onto current main in the existing worktree (no new worktree), then convert: Design view and Words panel get `components.json` entries (`component`, `look`, `label`); `.design-*` rules become component looks/tokens (if a needed component does not exist, e.g. a segmented switch, ask the coordinator and it is added to the contract once, for everyone); inline styles → component rules or custom properties; dots → `dot(state)`; panels register through `el()`.
+- [ ] Land `5c4be84`'s `words.rs` hunk on main first (engine-only, independent of the UI contract); test `timing_disagreements_are_reported_not_chosen` in the engine tests.
+- [ ] Port the UI of `5c4be84` and `550162d` onto current main in the existing worktree (no new worktree), then convert: Design view and Words panel get `components.json` entries (`component`, `look`, `label`); `.design-*` rules become component looks/tokens (the Design view is a `workspace` entry (main/side split), not `.design-*` classes; reuse the existing `.chip` as a `chip` component (selected state, heard/timing marks as looks); the four components the contract lacks are added by Statler, once, for everyone: `segmented` (Words/Artwork switch), `field-row` (label + select/checkbox/range), `transport` (play + scrubber), `stage` (scaled preview fed `--w/--h/--scale`) — each with `components.json` looks and one rule in `style.css`, coordinated with Beaker as owner of `style.css`; inline styles → component rules or custom properties; dots → `dot(state)`; panels register through `el()`.
 - [ ] Convert `songSection()`'s hand-built sub-section heads (own dot, title, meta, `data-state`) to the shared panel head.
 - [ ] Acceptance: `ui-lint` per-file counts for `words.js` and the Song region at 0; `mc panels --check` shows 0 `untracked`/`unstyled` in the Design and Song views; `ui-lint --report` totals not higher than before the port.
 - [ ] Commits `fix(engine): words report timing disagreements (#26)`, `feat(ui): Design > Words panel on the panel contract (#26)`, `refactor(ui): Song sub-sections use the shared panel head (#26)`.
