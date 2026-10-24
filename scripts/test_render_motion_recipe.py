@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from render_motion_recipe import inputs_for, render, reusable, run
+from render_motion_recipe import inputs_for, place, reusable, run
 
 
 class RenderReceiptTests(unittest.TestCase):
@@ -40,10 +40,23 @@ class RenderReceiptTests(unittest.TestCase):
             response = argparse.Namespace(returncode=0, stderr='', stdout=json.dumps(
                 {'ok': True, 'result': {'ok': True, 'validation_ok': False}}))
             with patch('render_motion_recipe.subprocess.run', return_value=response):
-                self.assertTrue(run(argparse.Namespace(recipe=str(recipe), scene=None, force=False, mc='fake')))
+                self.assertTrue(run(argparse.Namespace(recipe=str(recipe), scene=None, force=False, mc='fake', place=None)))
             self.assertEqual(json.loads(current.read_text()), {'previous': {'receipt': 'keep'}})
             attempt = next(receipts.glob('*/receipt.json'))
             self.assertEqual(json.loads(attempt.read_text())['status'], 'failed')
+
+    def test_placement_refuses_a_stale_clip_before_contacting_studio(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec = root / 'scene.json'
+            spec.write_text('{"layers": []}')
+            recipe = root / 'place.jsonl'
+            recipe.write_text(json.dumps({'id': 'video.place_track', 'params': {'path': '/old/scene.webm'}}))
+            command = {'id': 'export.layered_motion', 'params': {'spec': str(spec), 'out_dir': str(root)}}
+            with patch('render_motion_recipe.subprocess.run') as native:
+                with self.assertRaisesRegex(ValueError, 'no receipt matches'):
+                    place(argparse.Namespace(place=str(recipe)), {'scene': command}, ['scene'], {}, root)
+                native.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -30,6 +30,8 @@ def inputs_for(command):
     files += [(spec_path.parent / layer['file']).resolve() for layer in spec['layers']]
     if spec.get('reference'):
         files.append((spec_path.parent / spec['reference']).resolve())
+    pipeline = Path(__file__).resolve().parent.parent / 'pipeline'
+    files += [pipeline / name for name in ('layered_motion.py', 'motion_validate.py', 'craft_cli.py')]
     files = {str(path): digest(path) for path in sorted(set(files))}
     value = {'command': command, 'files': files}
     fingerprint = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -77,6 +79,44 @@ def render(command, mc, receipts):
     return {**receipt, 'receipt': str(folder / 'receipt.json')}
 
 
+def place(args, scenes, selected, current, receipts):
+    commands = []
+    for line in Path(args.place).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        command = json.loads(line)
+        if command['id'] == 'video.place_track':
+            scene = Path(command['params']['path']).stem
+            if scene not in selected:
+                continue
+            entry = current.get(scene, {})
+            if not reusable(entry, inputs_for(scenes[scene])[0]):
+                raise ValueError(f'{scene}: no receipt matches the current inputs and outputs')
+            videos = [path for path in entry['outputs'] if Path(path).suffix == '.webm' and Path(path).stem == scene]
+            if len(videos) != 1:
+                raise ValueError(f'{scene}: expected exactly one verified clip')
+            command['params']['path'] = videos[0]
+            commands.append(command)
+        elif command['id'] != 'project.save':
+            raise ValueError(f'unsupported placement command: {command["id"]}')
+    if len(commands) != len(selected):
+        raise ValueError('placement recipe must place each selected scene exactly once')
+    commands.append({'id': 'project.save', 'params': {}})
+    folder = receipts / ('place-' + uuid4().hex)
+    folder.mkdir()
+    (folder / 'commands.jsonl').write_text(''.join(json.dumps(command) + '\n' for command in commands))
+    write_json(folder / 'inputs.json', {scene: current[scene] for scene in selected})
+    done = subprocess.run([args.mc, '--bridge', str(args.bridge), 'run', '-'],
+                          input=(folder / 'commands.jsonl').read_text(), capture_output=True, text=True)
+    (folder / 'stdout.jsonl').write_text(done.stdout)
+    (folder / 'stderr.log').write_text(done.stderr)
+    results = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
+    if done.returncode or len(results) != len(commands) or any(
+            not result.get('ok') or result.get('result', {}).get('ok') is False for result in results):
+        raise ValueError(f'placement failed; receipts: {folder}')
+    print(json.dumps({'status': 'placed', 'scenes': selected, 'receipt': str(folder)}), flush=True)
+
+
 def run(args):
     recipe = Path(args.recipe).resolve()
     commands = [json.loads(line) for line in recipe.read_text().splitlines()
@@ -116,6 +156,8 @@ def run(args):
             print(json.dumps({'scene': scene, 'status': entry['status'],
                               'receipt': entry['receipt'], 'outputs': entry['outputs'],
                               'error': entry.get('error')}), flush=True)
+        if args.place and not failed:
+            place(args, scenes, selected, current, receipts)
         return bool(failed)
 
 
@@ -125,7 +167,11 @@ def main():
     parser.add_argument('--mc', default='mc', help='current mc executable')
     parser.add_argument('--scene', action='append', help='render only this spec filename stem; repeat for more scenes')
     parser.add_argument('--force', action='store_true', help='rerender even when current inputs and outputs match')
+    parser.add_argument('--place', help='placement JSONL; paths are resolved from matching receipts')
+    parser.add_argument('--bridge', type=int, help='Studio control port for placement')
     args = parser.parse_args()
+    if args.place and not args.bridge:
+        parser.error('--place requires an explicit --bridge')
     try:
         return run(args)
     except (OSError, ValueError, KeyError) as error:
