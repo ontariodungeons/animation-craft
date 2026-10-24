@@ -90,7 +90,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .tab:hover { color: var(--text); background: var(--surface-2); }
 .tab.active { color: var(--text); }
 .tab-ink { position: absolute; bottom: -9px; width: var(--ink-w, 0); transform: translateX(var(--ink-x, 0)); height: 2px; border-radius: 2px; background: var(--accent); transition: transform var(--slow) var(--ease), width var(--slow) var(--ease); }
-.target { margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.target { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
 .dot { --dot-size: 8px; width: var(--dot-size); height: var(--dot-size); border-radius: 50%; background: var(--signal-0); flex: none; transition: background var(--fast); }
 .dot[data-signal="1"] { background: var(--signal-1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-1) 12%, transparent); }
 .dot[data-signal="2"] { background: var(--signal-2); }
@@ -592,6 +592,10 @@ body.movie-document:not(.project-details-open) #blocks { display:none; }
 .design-placement { left:var(--x); top:var(--y); width:var(--w); height:var(--h); outline:1px solid color-mix(in srgb,var(--accent) 55%,transparent); }
 .design-handle { position:absolute; width:10px;height:10px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);transform:translate(-50%,-50%);touch-action:none;z-index:5;padding:0; }
 .design-handle:hover { background:var(--accent); }
+.design-handle[data-hx="-1"] { left:0; } .design-handle[data-hx="0"] { left:50%; cursor:ns-resize; } .design-handle[data-hx="1"] { left:100%; }
+.design-handle[data-hy="-1"] { top:0; } .design-handle[data-hy="0"] { top:50%; cursor:ew-resize; } .design-handle[data-hy="1"] { top:100%; }
+.design-handle[data-hx="-1"][data-hy="-1"], .design-handle[data-hx="1"][data-hy="1"] { cursor:nwse-resize; }
+.design-handle[data-hx="-1"][data-hy="1"], .design-handle[data-hx="1"][data-hy="-1"] { cursor:nesw-resize; }
 
 
 /* ---- Animation: subject and composite modes ---------------------------------------------- */

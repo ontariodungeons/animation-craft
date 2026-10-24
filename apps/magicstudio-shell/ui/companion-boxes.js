@@ -223,7 +223,10 @@ function createCompanionBoxes() {
   }
   // The one indicator. The state picks the number; the variant changes the
   // shape only. The colour lives in CSS, as a token.
-  function dot(state, variant = "") {
+  // A light drawn for a panel is that panel's state: pass its id, and the light
+  // and the record are one call, so the screen and the TUI cannot disagree.
+  function dot(state, variant = "", id = null) {
+    if (id) show(id, state);
     const value = signal(state);
     const node = document.createElement("span");
     node.className = "dot";
@@ -232,6 +235,16 @@ function createCompanionBoxes() {
     node.setAttribute("role", "img");
     node.setAttribute("aria-label", SIGNAL_LABEL[value]);
     return node;
+  }
+  function show(id, state) {
+    if (!BOX_STATES.includes(state)) return;
+    const box = register(id);
+    if (!box || box.state === state) return;
+    box.state = state;
+    box.source = "light";
+    box.observed_at = Date.now();
+    box.seq = ++changeSeq;
+    notify();
   }
   function subscribe(fn) {
     listeners.add(fn);

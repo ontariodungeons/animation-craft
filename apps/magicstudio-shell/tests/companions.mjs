@@ -72,6 +72,19 @@ const tests = [
     assert.equal(snap.sproket.pose, 'alert');
     assert.equal(snap.gaffer.box, 'red', 'newest change wins for the cat');
   }],
+  ['a light drawn for a panel is that panel\'s signal', async () => {
+    const { ctx, boxes } = fixture();
+    const light = boxes.dot('needs-attention', '', 'block-song');
+    assert.equal(light.dataset.signal, '2');
+    assert.equal(boxes.panels().items.find(item => item.id === 'block-song').signal, 2, 'the record says what the screen shows');
+    const pets = ctx.createCompanions({ frames: {} }, { boxes });
+    pets.setEnabled(true);
+    await flush();
+    assert.equal(pets.snapshot().sproket.box, 'block-song', 'the dog follows the yellow light');
+    boxes.dot('ready', '', 'block-song');
+    await flush();
+    assert.equal(pets.snapshot().sproket.box, null, 'and leaves when it turns green');
+  }],
   ['each pet finishes its own burst', async () => {
     const { ctx, boxes, timers } = fixture();
     const sprites = { has: () => true, image: () => null };

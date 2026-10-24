@@ -129,7 +129,7 @@ function artworkElement(tag, attrs = {}, ...children) {
 }
 for (const id of ['view-animation', 'magic-target-image', 'magic-target-parts']) artworkElement('div', { id });
 const artworkContext = vm.createContext({
-  console, Map, Set, URL, Promise, performance, Event, clearTimeout, setTimeout, clearInterval, setInterval,
+  console, Map, Set, URL, Promise, queueMicrotask, performance, Event, clearTimeout, setTimeout, clearInterval, setInterval,
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,

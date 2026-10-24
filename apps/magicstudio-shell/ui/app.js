@@ -168,16 +168,16 @@ function renderAppFooter() {
   $('footer-stages').replaceChildren(...FOOTER_STAGES.map(([id, label]) => {
     const tone = footerStageState(id);
     return el('button', { class: 'footer-stage', id: `footer-stage-${id}`, title: `${label} · ${tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs work' : 'not started'}`,
-      onclick: () => footerGo(id).catch((e) => toast(String(e))) }, window.companionBoxes.dot(tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs-attention' : 'idle'), label);
+      onclick: () => footerGo(id).catch((e) => toast(String(e))) }, window.companionBoxes.dot(tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs-attention' : 'idle', '', `footer-stage-${id}`), label);
   }));
   const context = footerContext();
   $('footer-context').textContent = context; $('footer-context').title = context;
   const unsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
-  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready'), unsaved ? 'Unsaved edits' : 'Saved');
+  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready', '', 'footer-save-state'), unsaved ? 'Unsaved edits' : 'Saved');
   $('footer-save-state').title = unsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : 'No unsaved motion';
   const url = serverUrl();
   // A Studio that is off is simply idle: grey, never a red problem.
-  $('footer-server').replaceChildren(window.companionBoxes.dot(url ? 'ready' : 'idle'), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
+  $('footer-server').replaceChildren(window.companionBoxes.dot(url ? 'ready' : 'idle', '', 'target'), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
 }
 // Theatre's own listener (theatre.js) updates its revisions first; render after it.
 window.addEventListener('message', (event) => { if (event.data?.magicTheatre && event.data.type !== 'values') setTimeout(updateAppFooter); });
@@ -275,7 +275,7 @@ async function openPath(path) {
 const SONG_SECTIONS = ['lyrics', 'transcript'];
 
 function songSection(id, title, meta, done, sectionState, body) {
-  const head = window.companionBoxes.dot(done ? "ready" : "needs-attention");
+  const head = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", `song-${id}`);
   head.title = done ? "Ready" : "Needs work";
   return el("div", { class: "song-section", id: `song-${id}`, "data-section": id, "data-state": sectionState },
     el("div", { class: "panel-head" },
@@ -441,7 +441,7 @@ function readerFollow() {
 // that does not care about companions inherits the contract for free.
 function block(id, icon, title, meta, done, body, blockState, action) {
   const open = state.open === id;
-  const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention");
+  const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", id);
   dot.title = done ? "Ready" : "Needs work";
   const head = el("button", { class: "panel-head control", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
       onclick: () => { state.open = open ? null : id; renderBlocks(); } },
@@ -722,7 +722,7 @@ function renderTarget() {
   const url = serverUrl();
   const project = videoProject();
   $("target-name").textContent = `${s.video_target}${url ? " · " + url.replace(/^https?:\/\//, "").replace(/\/$/, "") : " · off"}`;
-  const serverDot = window.companionBoxes.dot(url ? "ready" : "idle");
+  const serverDot = window.companionBoxes.dot(url ? "ready" : "idle", "", "target");
   serverDot.id = "server-dot";
   $("server-dot").replaceWith(serverDot);
   updateAppFooter();
@@ -732,7 +732,7 @@ function renderTarget() {
 async function toggleServer() {
   if (!state.project) return;
   const on = !serverUrl();
-  const startingDot = window.companionBoxes.dot("working", "pulse");
+  const startingDot = window.companionBoxes.dot("working", "pulse", "target");
   startingDot.id = "server-dot";
   $("server-dot").replaceWith(startingDot);
   try {
@@ -881,7 +881,7 @@ function renderDesignPlacements(){
   place(x,y,w,h);
   node.append(el('img',{src:convertFileSrc(item.path),alt:'Placed design asset',draggable:'false'}));
   for(const [hx,hy] of [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]]){
-   const handle=el('button',{class:'design-handle',title:'Drag to scale', 'aria-label':'Scale placed image',style:`left:${(hx+1)*50}%;top:${(hy+1)*50}%;cursor:${hx===0?'ns':hy===0?'ew':hx===hy?'nwse':'nesw'}-resize`});
+   const handle=el('button',{class:'design-handle',title:'Drag to scale', 'aria-label':'Scale placed image','data-hx':hx,'data-hy':hy});
    handle.addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();selectedPlacement=item.id;handle.setPointerCapture(e.pointerId);
     const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let rect=[x,y,w,h];
