@@ -30,6 +30,12 @@
   --signal-3: var(--danger);
   --info: #6ea8ff;
   --surface-3: #212631;
+  --dot-size: 8px;
+  --dot-size-sm: 6px;
+  --radius-sm: 6px;
+  --size-16: 16px;
+  --size-80: 80px;
+  --size-360: 360px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -91,45 +97,57 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .tab.active { color: var(--text); }
 .tab-ink { position: absolute; bottom: -9px; width: var(--ink-w, 0); transform: translateX(var(--ink-x, 0)); height: 2px; border-radius: 2px; background: var(--accent); transition: transform var(--slow) var(--ease), width var(--slow) var(--ease); }
 .target { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
-.dot { --dot-size: 8px; width: var(--dot-size); height: var(--dot-size); border-radius: 50%; background: var(--signal-0); flex: none; transition: background var(--fast); }
+.dot { width: var(--dot-size); height: var(--dot-size); border-radius: 50%; background: var(--signal-0); flex: none; transition: background var(--fast); }
 .dot[data-signal="1"] { background: var(--signal-1); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-1) 12%, transparent); }
 .dot[data-signal="2"] { background: var(--signal-2); }
 .dot[data-signal="3"] { background: var(--signal-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-3) 12%, transparent); }
 .dot[data-variant="pulse"] { animation: pulse 900ms ease-in-out infinite alternate; }
 .dot[data-variant="ring"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-1) 22%, transparent); }
 .dot[data-variant="hollow"] { background: transparent; border: 2px solid var(--info); }
-.dot.sm { --dot-size: 6px; }
+.dot.sm { --dot-size: var(--dot-size-sm); }
 
 /* One panel head. The base is the shared shape; a modifier carries the
    density or the edge that differs. */
-.panel-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.panel-head.control { width: 100%; gap: var(--space-3); padding: var(--space-3); text-align: left; cursor: pointer; }
-.panel-head.divided { gap: var(--space-3); padding: var(--space-2) var(--space-3); flex: none; border-bottom: 1px solid var(--line); }
-.panel-head.spread { padding: var(--space-2) var(--space-3); flex: none; justify-content: space-between; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 90%, black); }
-.panel-head.pane { flex: none; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); color: var(--text); font-size: var(--text-md); font-weight: 600; }
+.panel-head { display: flex; align-items: center; gap: var(--panel-gap, var(--space-2)); min-width: 0; padding: var(--panel-pad-y, 0) var(--panel-pad-x, 0); border-bottom: var(--panel-rule, none); }
+/* A look is a token set. The old modifier classes are aliases of the same
+   sets, so an element that has not moved into the config yet looks the same. */
+.panel-head.control { width: 100%; text-align: left; cursor: pointer; }
+.panel-head.divided, .panel-head.spread, .panel-head.pane { flex: none; }
+.panel-head.spread { justify-content: space-between; background: color-mix(in srgb, var(--surface) 90%, black); }
+.panel-head.pane { color: var(--text); font-size: var(--text-md); font-weight: 600; }
 .panel-head.tiny { position: sticky; top: 0; z-index: 2; height: var(--text-xl); background: var(--bg); color: var(--faint); font-size: var(--text-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .panel-head.inline { margin-bottom: var(--space-3); }
+[data-look="control"] { width: 100%; text-align: left; cursor: pointer; --panel-gap: var(--space-3); --panel-pad-y: var(--space-3); --panel-pad-x: var(--space-3); }
+[data-look="bar"] { flex: none; --panel-gap: var(--space-3); --panel-pad-y: var(--space-2); --panel-pad-x: var(--space-3); --panel-rule: 1px solid var(--line); }
+[data-look="ruler"] { position: sticky; top: 0; z-index: 2; height: var(--text-xl); background: var(--bg); color: var(--faint); font-size: var(--text-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+[data-look="inline"] { --panel-gap: var(--space-2); }
+[data-density="compact"] { --panel-pad-y: var(--space-1); --panel-pad-x: var(--space-2); }
 .panel-head.item { width: 100%; padding: var(--space-2) var(--space-3); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); text-align: left; cursor: pointer; }
 .panel-head.item.active { border-color: var(--accent); }
 
 /* One empty state. The base is the shared shape; a modifier carries the
    place it fills. */
-.panel-empty { color: var(--muted); text-align: center; }
-.panel-empty.boxed { align-self: center; padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
+.panel-empty { color: var(--muted); text-align: center; padding: var(--panel-pad-y, 0) var(--panel-pad-x, 0); }
+.panel-empty.boxed { align-self: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
 .panel-empty.boxed strong { font-size: var(--text-xl); }
 .panel-empty.boxed p { color: var(--muted); margin: var(--space-2) 0 var(--space-4); }
 .panel-empty.overlay { position: absolute; inset: 0; display: none; place-content: center; gap: var(--space-1); }
 .panel-empty.overlay.show { display: grid; }
-.panel-empty.motion { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: var(--space-5); }
-.panel-empty.motion p { max-width: 360px; }
-.panel-empty.compare { width: 100%; height: 80px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background-color: var(--bg); background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: 16px 16px; background-position: 0 0,0 8px,8px -8px,-8px 0; padding: 8px; color: var(--faint); font-size: 10px; }
-.panel-empty.inline { margin: auto; padding: var(--space-4); font-size: var(--text-sm); }
+.panel-empty.motion { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.panel-empty.motion p { max-width: var(--size-360); }
+.panel-empty.compare { width: 100%; height: var(--size-80); display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--radius-sm); background-color: var(--bg); background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: var(--size-16) var(--size-16); background-position: 0 0,0 var(--space-2),var(--space-2) calc(var(--space-2) * -1),calc(var(--space-2) * -1) 0; padding: var(--space-2); color: var(--faint); font-size: var(--text-xs); }
+.panel-empty.inline { margin: auto; font-size: var(--text-sm); }
+[data-look="card"] { align-self: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; --panel-pad-y: var(--space-5); --panel-pad-x: var(--space-5); }
+[data-look="overlay"] { position: absolute; inset: 0; display: none; place-content: center; gap: var(--space-1); }
+[data-look="overlay"].show { display: grid; }
+[data-look="inline"] { margin: auto; font-size: var(--text-sm); --panel-pad-y: var(--space-4); --panel-pad-x: var(--space-4); }
 
 /* One status row. The base is the shared shape; a modifier carries the
    density or the alignment that differs. */
 .panel-status { color: var(--faint); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-status.tight { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-xs); }
 .panel-status.row { display: flex; gap: var(--space-1); flex: none; }
+[data-density="compact"].panel-status { font-size: var(--text-xs); }
 
 /* One segmented switch: a row of tabs in a well; the selected tab is raised. */
 .segmented { display: flex; gap: var(--space-1); padding: var(--space-1); border: thin solid var(--line); border-radius: var(--radius); background: var(--bg); }

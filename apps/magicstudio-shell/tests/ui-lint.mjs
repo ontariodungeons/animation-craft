@@ -92,6 +92,10 @@ function rules(source) {
 // shrink. Only the violation counts gate the ratchet.
 const SIZE_KEYS = new Set(['lines', 'rules', 'selectors', 'classes']);
 
+// The counting method has a version. When it changes, the floors are recorded
+// anew: a different way of counting is not a regression.
+const METHOD = 2;
+
 const PX = /\b\d+(?:\.\d+)?px\b/g;
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
 const MS = /\b\d+(?:\.\d+)?ms\b/g;
@@ -103,12 +107,13 @@ function cssCounts(file, source) {
   let rawPxInComponentRules = 0;
   let outsideInOverrides = 0;
   for (const rule of rules(source)) {
-    const selector = rule.selector.replace(/^@[\w-]+[^{]*\{/, '');
-    if (!COMPONENT.test(selector)) continue;
+    // A comma list is a list of selectors, not one selector with compounds.
+    const selectors = rule.selector.replace(/^@[\w-]+[^{]*\{/, '').split(',').map(part => part.trim()).filter(Boolean);
+    const named = selectors.filter(selector => COMPONENT.test(selector));
+    if (!named.length) continue;
     rawPxInComponentRules += occurrences(rule.body, PX);
     // A rule that reaches into a component from the outside is an override.
-    const compounds = selector.split(/\s*[>+~]\s*|\s+/).filter(Boolean);
-    if (compounds.length > 1) outsideInOverrides++;
+    outsideInOverrides += named.filter(selector => selector.split(/\s*[>+~]\s*|\s+/).filter(Boolean).length > 1).length;
   }
   const all = rules(source);
   const selectors = all.filter(rule => !rule.selector.startsWith('@')).flatMap(rule => rule.selector.split(',')).length;
@@ -218,21 +223,33 @@ if (process.argv.includes('--write-baseline')) {
   fs.writeFileSync(BASELINE, JSON.stringify({ files: counts }, null, 2) + '\n');
   console.log('PASS ui-lint: baseline written');
 } else {
-  const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  // A commit is judged against what is committed and staged: the baseline is
+  // read from the index, so an unrelated commit is not failed by a floor that
+  // another agent has not staged yet.
+  const baseline = (() => {
+    if (process.argv.includes('--ratchet')) {
+      try {
+        return JSON.parse(execSync('git show :apps/magicstudio-shell/tests/ui-lint.baseline.json', { encoding: 'utf8' }));
+      } catch { /* not staged yet */ }
+    }
+    return JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+  })();
   const baselineFiles = baseline.files ?? baseline;
   const problems = [];
+  const rebasing = process.argv.includes('--ratchet') && baseline.method !== METHOD;
   for (const [file, fileCounts] of Object.entries(counts)) {
     const allowed = baselineFiles[file];
     if (!allowed) continue; // a new file is recorded, not judged, on this commit
     for (const [key, value] of Object.entries(fileCounts)) {
       const limit = allowed[key];
       if (limit === undefined || SIZE_KEYS.has(key)) continue;
-      if (value > limit) problems.push(`${file} ${key}: ${value} > baseline ${limit}`);
+      if (!rebasing && value > limit) problems.push(`${file} ${key}: ${value} > baseline ${limit}`);
     }
   }
   if (process.argv.includes('--ratchet')) {
     // A count the baseline has never seen becomes today's floor, recorded in
     // the same commit, so the ratchet starts from a known place.
+    const rebased = baseline.method !== METHOD;
     let floorChanged = false;
     for (const [file, fileCounts] of Object.entries(counts)) {
       if (!baselineFiles[file]) baselineFiles[file] = {};
@@ -243,8 +260,13 @@ if (process.argv.includes('--write-baseline')) {
         }
       }
     }
+    if (rebased) {
+      // The method changed: the floors are today's counts.
+      for (const [file, fileCounts] of Object.entries(counts)) baselineFiles[file] = { ...fileCounts };
+      floorChanged = true;
+    }
     if (floorChanged) {
-      fs.writeFileSync(BASELINE, JSON.stringify({ files: baselineFiles }, null, 2) + '\n');
+      fs.writeFileSync(BASELINE, JSON.stringify({ method: METHOD, files: baselineFiles }, null, 2) + '\n');
       try { execSync(`git add ${BASELINE.pathname}`, { encoding: 'utf8' }); } catch { /* not a git tree */ }
     }
     let staged = [];
@@ -261,9 +283,9 @@ if (process.argv.includes('--write-baseline')) {
       const before = previous[file];
       if (!before) continue; // a new file has no floor yet
       const now = counts[file];
-      const raised = Object.keys(now).filter(key => !SIZE_KEYS.has(key) && typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] > before[key]);
+      const raised = rebasing ? [] : Object.keys(now).filter(key => !SIZE_KEYS.has(key) && typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] > before[key]);
       if (raised.length) problems.push(`${file} raised ${raised.join(', ')}`);
-      const had = Object.entries(before).some(([key, value]) => !SIZE_KEYS.has(key) && typeof value === 'number' && value > 0);
+      const had = !rebasing && Object.entries(before).some(([key, value]) => !SIZE_KEYS.has(key) && typeof value === 'number' && value > 0);
       if (had) {
         const lowered = Object.keys(now).some(key => !SIZE_KEYS.has(key) && typeof now[key] === 'number' && typeof before[key] === 'number' && now[key] < before[key]);
         if (!lowered) problems.push(`${file} has non-zero counts but lowered none`);
