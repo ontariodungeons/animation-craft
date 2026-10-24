@@ -1284,13 +1284,25 @@ fn render_tail(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let inner=block.inner(area);let rows=inner.height as usize;let width=inner.width as usize;
  let tiles=gang_tiles(c);
  let start=if c.event_focus{c.event_index.saturating_sub(rows.saturating_sub(1))}else{0};
+ let tick=(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d|d.as_millis()/350).unwrap_or(0)) as u64;
  let mut lines:Vec<Line<'static>>=c.state["tail"].as_array().into_iter().flatten().rev().enumerate().skip(start).take(rows).map(|(i,e)|{
   let owner=event_agent(c,e).and_then(|index|tiles.get(index));
   let identity=owner.map(|g|g.1).unwrap_or(MUTED);
   let label=owner.map(|g|format!("{} {}",moppet_icon(&g.0),g.0)).unwrap_or_else(||"?".into());
-  let mark=if e["ok"]==false{"✗"}else{"·"};
+  // A success twinkles, an error sirens; ordinary events stay a quiet dot.
+  let mood=crate::github_health::Mood::for_kind(e["type"].as_str().unwrap_or(""),e["ok"]!=false);
+  let mark=match mood{
+   crate::github_health::Mood::Sparkle=>mood.frame(tick),
+   crate::github_health::Mood::Siren=>"✗",
+   crate::github_health::Mood::Quiet=>"·",
+  };
   let text=format!("{} {} {} {} {}",if c.event_focus&&i==c.event_index{"›"}else{" "},stamp(e),label,e["command"].as_str().unwrap_or_else(||e["type"].as_str().unwrap_or("?")),e["error"].as_str().unwrap_or(""));
-  let mut line=bounded_line(Line::from(vec![Span::styled(mark,if e["ok"]==false{RED}else{identity}),Span::styled(text,identity)]),width);
+  let mark_colour=match mood{
+   crate::github_health::Mood::Siren=>RED,
+   crate::github_health::Mood::Sparkle=>GREEN,
+   crate::github_health::Mood::Quiet=>identity,
+  };
+  let mut line=bounded_line(Line::from(vec![Span::styled(mark,mark_colour),Span::styled(text,identity)]),width);
   if c.event_focus&&i==c.event_index{line=line.style(Style::default().bg(DESK_SELECTED));}line
  }).collect();
  if lines.is_empty(){lines.push(styled("No events recorded",MUTED));}
@@ -1770,15 +1782,80 @@ fn render_config(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
 }
 fn render_telemetry(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  if area.width<118{
-  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Length(14),Constraint::Min(9),Constraint::Length(10)]).split(area);
-  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_trend(f,c,p[5]);render_logs(f,c,p[6]);
+  let p=Layout::vertical([Constraint::Length(13),Constraint::Length(12),Constraint::Length(12),Constraint::Length(14),Constraint::Length(14),Constraint::Length(16),Constraint::Min(9),Constraint::Length(10)]).split(area);
+  render_host(f,c,p[0]);render_known_apps(f,c,p[1]);render_processes(f,c,p[2]);render_studios(f,c,p[3]);render_mcp_servers(f,c,p[4]);render_trend(f,c,p[5]);render_github_health(f,c,p[6]);render_logs(f,c,p[7]);
   return;
  }
  let p=Layout::vertical([Constraint::Min(12),Constraint::Length(16)]).split(area);
  let columns=Layout::horizontal([Constraint::Length(42),Constraint::Length(48),Constraint::Min(30)]).split(p[0]);
  render_host(f,c,columns[0]);render_known_apps(f,c,columns[1]);render_logs(f,c,columns[2]);
- let bottom=Layout::horizontal([Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20),Constraint::Percentage(20)]).split(p[1]);
- render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_trend(f,c,bottom[3]);render_agent_usage(f,c,bottom[4]);
+ let bottom=Layout::horizontal([Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(17),Constraint::Percentage(16),Constraint::Percentage(16)]).split(p[1]);
+ render_studios(f,c,bottom[0]);render_mcp_servers(f,c,bottom[1]);render_processes(f,c,bottom[2]);render_trend(f,c,bottom[3]);render_github_health(f,c,bottom[4]);render_agent_usage(f,c,bottom[5]);
+}
+/// Hand a message to an agent pane. The multiplexer decides whether it is accepted;
+/// a refusal is reported as it happened, never as a delivery.
+pub(crate) fn send_agent_note(pane:&str,text:&str)->Result<(),String>{
+ let output=std::process::Command::new("herdr").args(["agent","prompt",pane,text]).output()
+  .map_err(|e|format!("could not reach {pane}: {e}"))?;
+ let said=String::from_utf8_lossy(&output.stdout).trim().to_string();
+ let parsed=serde_json::from_str::<Value>(&said).ok();
+ let error=parsed.as_ref().and_then(|v|v.get("error").or_else(||v["result"].get("error"))).filter(|v|!v.is_null());
+ if let Some(error)=error{return Err(format!("{error}"));}
+ if !output.status.success(){return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());}
+ Ok(())
+}
+
+/// GITHUB HEALTH: what an agent did to the repository's GitHub state. Every line is a
+/// measured fact from `git` and `gh`; the worst problems come first.
+fn render_github_health(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
+ let mut lines:Vec<Line<'static>>=Vec::new();
+ let repo=crate::github_health::repo_root(&std::env::current_dir().unwrap_or_default());
+ let health=crate::github_health::inspect(&repo);
+ for(area,value,state)in health.lines(){
+  let colour=match state{"ready"=>GREEN,"attention"=>AMBER,_=>RED};
+  lines.push(Line::from(vec![
+   Span::styled(format!("{area:<16}"),Style::default().fg(MUTED)),
+   Span::styled(format!("{value}"),Style::default().fg(colour)),
+  ]));
+ }
+ // Unpushed work, and which agent still holds it: the line that was lost last time.
+ let recovery=crate::github_health::recovery(&repo);
+ if !recovery.is_empty(){
+  lines.push(Line::raw(""));
+  lines.push(styled("UNPUSHED WORK:",AMBER));
+  for item in recovery.iter().take(6){
+   let fanfare=crate::github_health::Fanfare::for_event("unpushed",false,item.branch.as_str(),&format!("{} commit(s) ahead",item.ahead));
+   let mood_glyph=fanfare.mood.frame(0);
+   let holder=item.pane.clone().or_else(||item.worktree.as_ref().map(|p|p.display().to_string()));
+   lines.push(Line::from(vec![
+    Span::styled(format!("{mood_glyph} "),Style::default().fg(AMBER)),
+    Span::styled(format!("{:<28}",crate::github_health::worktree_label(item.worktree.as_deref().unwrap_or(std::path::Path::new("?")))),Style::default().fg(DESK_FG)),
+    Span::styled(format!("{:>4} ahead  ",item.ahead),Style::default().fg(AMBER)),
+    Span::styled(holder.clone().unwrap_or_else(||"no agent found".into()),Style::default().fg(if item.pane.is_some(){TEAL}else{MUTED})),
+   ]));
+   if let Some(pane)=&item.pane{
+    let id=format!("github-recover-{}",item.branch.replace('/', "-"));
+    c.hits.borrow_mut().push(Hit{id:id.clone(),label:format!("Ask {} to push {}",pane,item.branch),area:ratatui::layout::Rect::new(area.x,area.y+lines.len() as u16,area.width.saturating_sub(2),1),action:"recover".into(),params:json!({"pane":pane,"branch":item.branch,"ahead":item.ahead,"worktree":item.worktree}),enabled:true});
+   }
+  }
+ }
+ let breaking=health.issues.iter().filter(|i|i.severity=="break").count();
+ if breaking>0{
+  lines.push(Line::raw(""));
+  lines.push(styled(format!("{breaking} BREAKING:"),RED));
+  for issue in health.issues.iter().filter(|i|i.severity=="break").take(6){
+   lines.push(styled(format!("  · {}",issue.detail),RED));
+  }
+ }
+ let warnings=health.issues.iter().filter(|i|i.severity=="warn").count();
+ if warnings>0{
+  lines.push(Line::raw(""));
+  lines.push(styled(format!("{warnings} to fix:"),AMBER));
+  for issue in health.issues.iter().filter(|i|i.severity=="warn").take(4){
+   lines.push(styled(format!("  · {}",issue.detail),AMBER));
+  }
+ }
+ f.render_widget(Paragraph::new(lines).block(round_panel("GITHUB · what did we break",TEAL,false)),area);
 }
 /// The measured trend since the first recorded sample: are we closing processes and
 /// using less memory, or not? Every number comes from a recorded sample.
