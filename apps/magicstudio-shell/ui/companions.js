@@ -20,11 +20,7 @@ function createCompanions(frames, options = {}) {
   const travelling = {};
 
   for (const name of ["sproket", "gaffer"]) {
-    const node = document.createElement("pre");
-    node.id = `companion-${name}`;
-    node.className = "ambient-companion";
-    node.setAttribute("aria-hidden", "true");
-    node.setAttribute("inert", "");
+    const node = el("pre", { id: `companion-${name}`, "aria-hidden": "true", inert: "" });
     nodes[name] = node;
     pets[name] = { pose: "rest", box: null, slot: null, signal: 0, timer: null, step: 0, lastBurstAt: 0 };
   }
@@ -36,8 +32,7 @@ function createCompanions(frames, options = {}) {
     const img = sprites.image(name, pets[name].pose || "rest");
     if (!img) return null;
     if (!nodes[name].sprite) {
-      const holder = document.createElement("span");
-      holder.className = "companion-sprite";
+      const holder = el("span", { id: `companion-${name}-sprite` });
       nodes[name].sprite = holder;
       // The holder is the pet's only child: without this the sprite is built but never painted.
       nodes[name].replaceChildren(holder);
@@ -76,10 +71,7 @@ function createCompanions(frames, options = {}) {
     if (!rect) return;
     pets[name].slot = slot.slotId;
     if (!stage) {
-      stage = document.createElement("div");
-      stage.className = "companion-stage";
-      stage.setAttribute("aria-hidden", "true");
-      stage.setAttribute("inert", "");
+      stage = el("div", { id: "companion-stage", "aria-hidden": "true", inert: "" });
       document.body.append(stage);
     }
     if (node.parentElement !== stage) stage.append(node);
@@ -171,7 +163,9 @@ function createCompanions(frames, options = {}) {
 
   document.addEventListener?.("visibilitychange", sync);
   media.addEventListener?.("change", sync);
-  globalThis.addEventListener?.("resize", () => { rails?.invalidate(); for (const name of Object.keys(nodes)) place(name); });
+  const reposition = () => { rails?.invalidate(); for (const name of Object.keys(nodes)) place(name); };
+  globalThis.addEventListener?.("resize", reposition);
+  globalThis.addEventListener?.("scroll", reposition, true);
 
   // Change-driven: the page reports box changes; nothing here polls or scans per frame.
   boxes?.subscribe?.(() => react());
@@ -215,9 +209,7 @@ async function initCompanions() {
     if (!list || !boxes) return;
     const rows = boxes.panels().items.filter(row => row.signal > 0);
     list.replaceChildren(...rows.slice(0, 6).map(row => {
-      const item = document.createElement("li");
-      item.textContent = `${row.id}: signal ${row.signal}${row.reason ? ` — ${row.reason}` : ""}`;
-      return item;
+      return el("li", {}, `${row.id}: signal ${row.signal}${row.reason ? ` — ${row.reason}` : ""}`);
     }));
   };
   paint();

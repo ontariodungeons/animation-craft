@@ -36,6 +36,10 @@ function fixture() {
     clearTimeout: i => timers.delete(i),
   });
   vm.runInContext(read('companion-boxes.js'), ctx);
+  ctx.el = (tag, attrs = {}, ...children) => {
+    const element = doc.createElement(tag); Object.assign(element, attrs);
+    element.replaceChildren(...children); return element;
+  };
   vm.runInContext(read('companions.js'), ctx);
   return { ctx, boxes: ctx.window.companionBoxes, timers };
 }
@@ -66,6 +70,13 @@ const tests = [
     slot.getBoundingClientRect = () => ({left: 12, top: 8, width: 0, height: 28});
     rails.invalidate();
     assert.equal(rails.measure('panel'), null, 'zero-width slots cannot host a pet');
+    ctx.innerWidth = 200; ctx.innerHeight = 100;
+    slot.getBoundingClientRect = () => ({left: 12, top: 90, width: 64, height: 28});
+    rails.invalidate();
+    assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }), null, 'partially offscreen slots cannot host a pet');
+    slot.getBoundingClientRect = () => ({left: 12, top: 8, width: 64, height: 28});
+    rails.invalidate();
+    assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }).slotId, 'panel');
     delete ctx.window.uiConfig.slots.panel; rails.discover();
     assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }), null);
   }],

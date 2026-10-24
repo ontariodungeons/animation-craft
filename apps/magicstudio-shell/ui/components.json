@@ -802,6 +802,67 @@
       "component": "ghost",
       "label": "Open transcript",
       "indicator": "hidden"
+    },
+    "companion-stage": {
+      "component": "companion-stage",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-sproket": {
+      "component": "ambient-companion",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-sproket-sprite": {
+      "component": "companion-sprite",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-gaffer": {
+      "component": "ambient-companion",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "companion-gaffer-sprite": {
+      "component": "companion-sprite",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "words-save": {
+      "component": "start",
+      "target": "words-main",
+      "label": "Save lyric changes",
+      "indicator": "hidden"
+    },
+    "words-style-font": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Font",
+      "indicator": "hidden"
+    },
+    "words-style-color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Colour",
+      "indicator": "hidden"
+    },
+    "words-style-emphasis_color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Emphasis colour",
+      "indicator": "hidden"
+    },
+    "words-style-outline_color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Outline colour",
+      "indicator": "hidden"
+    },
+    "words-style-background": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Background",
+      "indicator": "hidden"
     }
   },
   "rails": {

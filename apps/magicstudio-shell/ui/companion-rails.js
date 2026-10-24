@@ -77,7 +77,11 @@ function createCompanionRails({ root = document } = {}) {
 
   function resolve({ name, role = null, target = null } = {}) {
     if (!target) return null;
-    const candidates = eligibleSlots({ name, role, target }).filter(entry => railVisible(entry.rail.id));
+    const candidates = eligibleSlots({ name, role, target }).filter(entry => {
+      const rect = measure(entry.slot.id);
+      return railVisible(entry.rail.id) && rect && rect.x >= 0 && rect.y >= 0 &&
+        rect.x + rect.width <= (globalThis.innerWidth ?? Infinity) && rect.y + rect.height <= (globalThis.innerHeight ?? Infinity);
+    });
     candidates.sort((a, b) => b.slot.priority - a.slot.priority || b.rail.priority - a.rail.priority || a.slot.order - b.slot.order);
     if (!candidates.length) return null;
     const { rail, slot } = candidates[0];

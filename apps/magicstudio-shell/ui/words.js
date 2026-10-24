@@ -250,7 +250,7 @@ function wordsRender() {
   sizeInput.value = String(size);
   sizeInput.defaultValue = String(anim.style?.size ?? 120); // only a moved slider is an unsaved edit
   const changes = wordsPanel.pending.size + Object.keys(wordsPanel.styleEdits).length;
-  const save = el("button", { class: "start", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
+  const save = el("button", { id: "words-save", "data-commands": "words.save", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
   save.disabled = !changes;
 
   const main = el("section", { id: "words-main", "aria-label": `${wordsLabel(anim)} words` },
@@ -277,7 +277,7 @@ function wordsRender() {
 function wordsStyleFields(anim) {
   const field = (key, label, type, fallback) => {
     const saved = anim.style?.[key] ?? fallback;
-    const input = el("input", { type, "aria-label": label, oninput: (e) => {
+    const input = el("input", { id: `words-style-${key}`, type, "aria-label": label, oninput: (e) => {
       if (e.target.value === saved) delete wordsPanel.styleEdits[key]; else wordsPanel.styleEdits[key] = e.target.value; } ,
       onchange: () => wordsRender() });
     input.value = wordsPanel.styleEdits[key] ?? saved;
