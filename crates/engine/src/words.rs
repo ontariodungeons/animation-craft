@@ -276,6 +276,36 @@ fn studio_times(s: &mut Session) -> std::collections::HashMap<String, (f64, f64)
         .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), (c["start"].as_f64()?, c["start"].as_f64()? + c["duration"].as_f64()?)))).collect()
 }
 
+/// Printed words the singer didn't sing as written have no time. Each run of them is spread evenly
+/// between the timed words around it (marked `interpolated`), so a line still reads and moves in
+/// place; a section with no timed word at all stays untimed and is refused by compose.
+fn fill_untimed(anim: &mut Value) {
+    let Some(words) = anim["words"].as_array_mut() else { return };
+    let timed = |w: &Value| w["start"].is_number() && w["end"].is_number();
+    let mut i = 0;
+    while i < words.len() {
+        if timed(&words[i]) { i += 1; continue; }
+        let run_end = (i..words.len()).find(|&k| timed(&words[k])).unwrap_or(words.len());
+        let before = (0..i).rev().find(|&k| timed(&words[k])).and_then(|k| words[k]["end"].as_f64());
+        let after = words.get(run_end).and_then(|w| w["start"].as_f64());
+        let n = (run_end - i) as f64;
+        let (from, to) = match (before, after) {
+            (Some(a), Some(b)) if b > a => (a, b),
+            (Some(a), _) => (a, a + 0.35 * n),
+            (None, Some(b)) => ((b - 0.35 * n).max(0.0), b),
+            (None, None) => return,
+        };
+        let step = (to - from) / n;
+        for (k, w) in words[i..run_end].iter_mut().enumerate() {
+            let start = from + step * k as f64;
+            w["start"] = json!((start * 1e6).round() / 1e6);
+            w["end"] = json!(((start + step) * 1e6).round() / 1e6);
+            w["timing_source"] = json!("interpolated");
+        }
+        i = run_end;
+    }
+}
+
 fn timing(anim: &mut Value) {
     let times: Vec<(f64, f64)> = anim["words"].as_array().into_iter().flatten()
         .filter_map(|w| Some((w["start"].as_f64()?, w["end"].as_f64()?))).collect();
@@ -588,9 +618,12 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
         let clips: Vec<String> = track["sections"].as_array().into_iter().flatten()
             .filter(|sec| sec["section"] == scope["section"] && sec["occurrence"] == scope["occurrence"])
             .flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default()).filter_map(|c| c["clip_id"].as_str().map(|c| format!("#{c}"))).collect();
-        if clips.is_empty() { return Err(invalid(format!("The video has no lyric clips for {id} to replace"))); }
-        let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
-        html.insert_str(head, &format!("<style data-magicstudio-words=\"{id}\">{} {{ visibility: hidden !important; }}</style>\n", clips.join(", ")));
+        // A video with lyric clips of its own has them hidden for this section; a video without them
+        // (a new song with no lyric track yet) simply gains the designed lyrics.
+        if !clips.is_empty() {
+            let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
+            html.insert_str(head, &format!("<style data-magicstudio-words=\"{id}\">{} {{ visibility: hidden !important; }}</style>\n", clips.join(", ")));
+        }
         let root = html.find("data-composition-id=").and_then(|at| html[at..].find('>').map(|e| at + e + 1))
             .ok_or_else(|| invalid("The video has no root composition"))?;
         let track_index = html.split("data-track-index=\"").skip(1).filter_map(|r| r.split('"').next()?.parse::<u64>().ok()).max().unwrap_or(0) + 1;
@@ -635,8 +668,9 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
         for w in synced["words"].as_array_mut().into_iter().flatten() {
             if let Some((a, b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); w["timing_source"] = json!("studio"); }
         }
-        timing(&mut synced);
     }
+    fill_untimed(&mut synced);
+    timing(&mut synced);
     let anim = &synced;
     let instance = match p["instance_id"].as_str() {
         Some(i) if !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') => Some(i),
@@ -885,7 +919,10 @@ mod tests {
         let read = cmd_words_read(&mut s, &json!({})).unwrap();
         assert_eq!((read["fonts"][0]["family"].clone(), read["fonts"][0]["weight"].clone()), (json!("Andika"), json!("700")), "the video's own lettering");
         assert!(read["fonts"][0]["path"].as_str().unwrap().ends_with("hyperframes/assets/vendor/Andika-Bold.ttf"));
-        assert!(cmd_words_apply(&mut s, &json!({"animation_id":"words-verse-1-1"})).is_err(), "no clips of that section in this video");
+        let alone = cmd_words_apply(&mut s, &json!({"animation_id":"words-verse-1-1"})).unwrap();
+        assert_eq!((alone["hidden_clips"].clone(), alone["changed"].clone()), (json!(0), json!(true)), "a section without lyric clips still goes in");
+        cmd_words_apply(&mut s, &json!({"animation_id":"words-verse-1-1","use":false})).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("hyperframes/index.html")).unwrap(), video, "and comes back out exactly");
         let item = |ids: &[&str], motion: &str, accent: Option<&str>| json!({"word_ids":ids,"x":200,"y":120,"size":140,"weight":400,"italic":true,
             "color":"#173F49","font":"serif","outline":null,"rotate":0,"motion":motion,"accent":accent});
         let design = json!({"ch-l1":{"items":[item(&["ch-l1/w0","ch-l1/w1"],"pop",Some("ch-l1/w1")),item(&["ch-l1/w2","ch-l1/w3"],"settle",Some("ch-l1/w3"))],
