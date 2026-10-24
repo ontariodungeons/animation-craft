@@ -100,6 +100,7 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"synfig.start"
             | b"motion.pose.export"
             | b"motion.export_track"
+            | b"sequence.render"
             | b"animation.source.render"
             | b"video.init"
             | b"intake.validate"
