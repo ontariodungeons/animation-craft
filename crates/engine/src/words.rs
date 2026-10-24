@@ -120,6 +120,61 @@ pub fn cmd_words_align(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(report)
 }
 
+/// Value of `name="..."` inside one start tag, matched as a whole attribute name.
+fn tag_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!(" {name}=\"");
+    let at = tag.find(&needle)? + needle.len();
+    tag[at..].split('"').next()
+}
+
+/// `words.studio_track`: the lyric word clips already in the HyperFrames video, grouped by the
+/// artist's printed sections. A clip belongs to a sung line when its id ends in `<line id>-<n>`;
+/// its word id is then `<line id>/w<n>`, the same id Words uses. Reads only.
+pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
+    let dir = crate::workshop::project_dir(s)?;
+    let path = dir.join("hyperframes/index.html");
+    let html = fs::read_to_string(&path).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
+    let mut clips = Vec::new();
+    let mut from = 0;
+    while let Some(open) = html[from..].find('<').map(|i| i + from) {
+        let close = html[open..].find('>').map_or(html.len(), |i| i + open + 1);
+        let tag = &html[open..close];
+        from = close;
+        if !tag_attr(tag, "class").is_some_and(|c| c.split_whitespace().any(|c| c == "lyric-word-clip")) { continue; }
+        let (Some(id), Some(start), Some(duration)) = (tag_attr(tag, "id"), tag_attr(tag, "data-start").and_then(|v| v.parse::<f64>().ok()),
+            tag_attr(tag, "data-duration").and_then(|v| v.parse::<f64>().ok())) else { continue };
+        // The clip's own text, without its markup.
+        let inner = html[close..].split("</div>").next().unwrap_or_default();
+        let mut text = String::new();
+        let mut in_tag = false;
+        for c in inner.chars() { match c { '<' => in_tag = true, '>' => in_tag = false, c if !in_tag => text.push(c), _ => {} } }
+        clips.push((id.to_owned(), text.trim().to_owned(), start, duration));
+    }
+    let lyrics = crate::lyrics::cmd_song_lyrics(s, &json!({}))?;
+    let mut used = vec![false; clips.len()];
+    let mut sections = Vec::new();
+    for section in lyrics["sections"].as_array().into_iter().flatten() {
+        let mut found = Vec::new();
+        for line in section["lines"].as_array().into_iter().flatten() {
+            let sung = line["sung_id"].as_str().or(line["id"].as_str()).unwrap_or_default();
+            if sung.is_empty() { continue; }
+            for (i, (id, text, start, duration)) in clips.iter().enumerate() {
+                let Some(n) = id.rsplit_once('-').filter(|(head, _)| *head == sung || head.ends_with(&format!("-{sung}")))
+                    .and_then(|(_, n)| n.parse::<usize>().ok()) else { continue };
+                used[i] = true;
+                found.push(json!({"clip_id":id,"word_id":format!("{sung}/w{n}"),"line_id":line["id"],"text":text,"start":start,"duration":duration}));
+            }
+        }
+        if found.is_empty() { continue; }
+        found.sort_by(|a, b| a["start"].as_f64().partial_cmp(&b["start"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+        let start = found.iter().filter_map(|c| c["start"].as_f64()).fold(f64::INFINITY, f64::min);
+        let end = found.iter().filter_map(|c| Some(c["start"].as_f64()? + c["duration"].as_f64()?)).fold(0.0, f64::max);
+        sections.push(json!({"section":section["section"],"label":section["label"],"occurrence":section["occurrence"],"start":start,"end":end,"clips":found}));
+    }
+    let unmatched: Vec<&str> = clips.iter().zip(&used).filter(|(_, u)| !**u).map(|((id, ..), _)| id.as_str()).collect();
+    Ok(json!({"source":path,"clip_count":clips.len(),"sections":sections,"unmatched":unmatched}))
+}
+
 /// One animation per printed section occurrence; nothing styled or moving until edited.
 fn default_document(report: &Value) -> Value {
     let mut animations: Vec<Value> = Vec::new();
@@ -333,6 +388,28 @@ mod tests {
         let ho = report["words"].as_array().unwrap().iter().find(|w| w["word_id"] == found[0]["word_id"]).unwrap();
         assert_eq!((ho["start"].clone(), ho["timing_source"].clone()), (json!(4.3), json!("reference")), "reference timing kept, not replaced");
         assert!(report["words"].as_array().unwrap().iter().all(|w| w.get("forced").is_none()));
+    }
+
+    #[test]
+    fn studio_track_groups_the_videos_lyric_clips_by_section() {
+        let (dir, mut s) = project("studio");
+        assert!(cmd_words_studio_track(&mut s, &json!({})).is_err(), "needs a HyperFrames video");
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        fs::write(dir.join("hyperframes/index.html"), r#"<div data-composition-id="main">
+<div id="kinetic-ch-l1-1" class="clip lyric-word-clip" data-start="4.3" data-duration="0.5"><span>ho</span></div>
+<div id="kinetic-ch-l1-0" class="clip lyric-word-clip" data-start="4.0" data-duration="0.6"><span class="ink">Hey</span></div>
+<div id="kinetic-v1-l1-0" class="clip lyric-word-clip" data-start="1.0" data-duration="0.4"><span>A</span></div>
+<div id="kinetic-x-9" class="clip lyric-word-clip" data-start="9" data-duration="1"><span>stray</span></div>
+<img id="backdrop" class="clip" data-start="0" data-duration="10"></div>"#).unwrap();
+        let track = cmd_words_studio_track(&mut s, &json!({})).unwrap();
+        assert_eq!(track["clip_count"], 4);
+        let sections = track["sections"].as_array().unwrap();
+        assert_eq!(sections.iter().map(|s| s["section"].as_str().unwrap()).collect::<Vec<_>>(), ["verse_1", "chorus"]);
+        let chorus = sections[1]["clips"].as_array().unwrap();
+        assert_eq!(chorus.iter().map(|c| c["word_id"].as_str().unwrap()).collect::<Vec<_>>(), ["ch-l1/w0", "ch-l1/w1"], "ordered by time");
+        assert_eq!((chorus[0]["text"].clone(), chorus[0]["clip_id"].clone()), (json!("Hey"), json!("kinetic-ch-l1-0")));
+        assert_eq!((sections[1]["start"].clone(), sections[1]["end"].clone()), (json!(4.0), json!(4.8)));
+        assert_eq!(track["unmatched"], json!(["kinetic-x-9"]), "a clip outside the sheet is reported, not dropped");
     }
 
     #[test]
