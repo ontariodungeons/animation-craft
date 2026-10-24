@@ -49,8 +49,8 @@
       "label": "Song workflow"
     },
     "sb-chips": {
-      "component": "storyboard",
-      "label": "Storyboard"
+      "component": "chips",
+      "label": "Storyboard pages"
     },
     "sb-cards": {
       "component": "storyboard",
