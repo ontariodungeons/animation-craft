@@ -307,6 +307,26 @@ impl Center {
         }else{Self::poke_prompt().to_string()};
         self.poke=Some(Poke{target,name,text});
     }
+    /// The team check-in: work counts only once it is committed, so that is all it asks for.
+    fn check_in_prompt()->&'static str{
+        "Check in: commit what you have through the pre-commit hook (no manual test runs), then reply with one line: the SHA and what changed, or 'nothing to commit'."
+    }
+    /// Send the check-in to every idle agent at once; busy agents are named, never interrupted.
+    fn check_in_all(&mut self){
+        let agents:Vec<(String,String,String)>=self.agent_gang.as_array().into_iter().flatten()
+            .filter_map(|g|Some((g["name"].as_str()?.to_string(),g["pane_id"].as_str()?.to_string(),g["agent_status"].as_str().unwrap_or("").to_string())))
+            .collect();
+        let (mut sent,mut busy,mut failed)=(Vec::new(),Vec::new(),Vec::new());
+        for (name,target,status) in agents {
+            if !Self::pokeable(&status){busy.push(name);}
+            else if self.send_poke(&target,Self::check_in_prompt()){sent.push(name);}
+            else {failed.push(name);}
+        }
+        let list=|names:&Vec<String>|if names.is_empty(){"nobody".to_string()}else{names.join(", ")};
+        self.message=format!("Check-in sent to {}{}{}",list(&sent),
+            if busy.is_empty(){String::new()}else{format!(" · busy, not interrupted: {}",list(&busy))},
+            if failed.is_empty(){String::new()}else{format!(" · not delivered: {}",list(&failed))});
+    }
     /// Send the default nudge immediately, without the composer.
     fn quick_poke(&mut self){
         let Some(agent)=self.selected_agent() else {self.message="No agent selected in the gang strip.".into();return;};
@@ -1522,7 +1542,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
    let room=width.saturating_sub(8+Line::from(spans.clone()).width());
    spans.extend(agent_strip(c,room).spans);
   }else{
-   let hints=if control&&!c.muppets_view&&!c.telemetry_view{"Arrows Select · Enter Booth · I Inactive · B Agent Booth · D Details · C Copy · G MOPS · ^Q Exit"}else if c.muppets_view{"1–9/0 Select · ← → Agent · Pg Scroll · F9 Sproket · ^Q Exit"}else{"G MOPS · E Events · [ ] Stage · , . Agent · F9 Sproket · D Details · C Copy · ^Q Exit"};
+   let hints=if control&&!c.muppets_view&&!c.telemetry_view{"Arrows Select · Enter Booth · I Inactive · B Agent Booth · A Check in all · D Details · C Copy · G MOPS · ^Q Exit"}else if c.muppets_view{"1–9/0 Select · ← → Agent · Pg Scroll · F9 Sproket · ^Q Exit"}else{"G MOPS · E Events · [ ] Stage · , . Agent · A Check in all · F9 Sproket · D Details · C Copy · ^Q Exit"};
    for hint in hints.split(" · "){
     let span=Span::styled(format!(" · {hint}"),MUTED);
     if Line::from(spans.clone()).width()+Line::from(span.clone()).width()+8<=width{spans.push(span);}
@@ -1808,6 +1828,17 @@ mod feedback_tests {
     #[test]
     fn unmapped_click_is_not_reported_as_failed_engine_work() {
         assert_eq!(engine_badge(&json!({"events":[{"stage":"ui_click","request_id":"click-1"}]})).0,"— UI INTERACTION");
+    }
+    #[test]
+    fn check_in_never_interrupts_busy_agents_and_names_them() {
+        let mut c=fixture();
+        // Only busy agents here: a reachable one would receive a real prompt through Herdr.
+        c.agent_gang=json!([{"name":"beaker","pane_id":"wG:pB","agent_status":"working"},{"name":"waldorf","pane_id":"wG:pN","agent_status":"running"}]);
+        c.scope=None;
+        c.check_in_all();
+        assert!(c.message.contains("busy, not interrupted: beaker, waldorf"),"{}",c.message);
+        assert!(c.message.starts_with("Check-in sent to nobody"),"{}",c.message);
+        assert!(!c.message.contains("sent to beaker"),"a working agent is never sent the check-in");
     }
     pub(super) fn fixture()->Center{
         Center{session:Session::default(),scope:None,onboarding:None,fields:std::array::from_fn(|_|String::new()),selected:0,editing:false,state:json!({"project":"/fixture.magic","ui":{"connection":"connected","active_project":"/fixture.magic","engine_unsaved":false,"draft_fields":[],"ui_ready":true,"engine_revision":2,"ack_engine_revision":2,"frontend_report_age_ms":10},"activity":{"next_cursor":42,"actions":[{"root_request_id":"save","first_sequence":40,"last_sequence":42,"events":[{"stage":"dispatch_running","request_id":"save","command":"storyboard.save_version"},{"stage":"engine_success","request_id":"save","command":"storyboard.save_version","engine_revision":2},{"stage":"frontend_ack","request_id":"save","engine_revision":2}]}]}}),message:String::new(),scroll:0,show_form:false,control_view:false,command_selected:0,seen_cursor:0,flash_after:0,flash_started:None,pinned_instance:None,stage_selected:0,details_open:false,chat_draft:String::new(),chat_draft_project:None,chat_editing:false,chat_sent:String::new(),chat_sent_request:None,chat_receiver:None,doctor_receiver:None,doctor_error:None,agent_gang:json!([]),agent_gang_at:None,studios:json!({"sessions":[],"errors":[]}),studios_at:None,studios_receiver:None,telemetry_view:false,dials:None,dials_at:None,proc_snapshot:Vec::new(),procs:Vec::new(),history:Vec::new(),logs:json!({"blender":[],"studio":[],"omarchy":[],"commits":[]}),logs_at:None,usage:Vec::new(),gang_selected:0,event_index:0,event_focus:false,event_open:false,event_detail:None,hits:Default::default(),poke:None,muppets_view:false,catalog_selected:0,catalog_show_inactive:None,catalog_columns:std::cell::Cell::new(1),pulse:None,pulse_at:None,spy:None,spy_at:None,panel_config:magicstudio_engine::panels::Config::default(),panel_config_error:None,panel_report:magicstudio_engine::panels::PanelReport::default(),last_panels_revision:None,panel_rows:Vec::new(),panel_detail:Vec::new()}

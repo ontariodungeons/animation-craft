@@ -92,6 +92,7 @@ pub(super) fn key(c:&mut Center,key:KeyEvent)->Flow{
                     KeyCode::Char('p')=>c.begin_poke(),
                     KeyCode::Char('R')=>{if !c.chat_draft.is_empty()||c.show_form{c.message="Resolve draft/intake fields before reloading the TUI.".into();}else{return Flow::Reload;}},
                     KeyCode::Char('P')=>c.quick_poke(),
+                    KeyCode::Char('A')=>c.check_in_all(),
                     KeyCode::Char('j') if c.control_view=>c.catalog_selected+=1,
                     KeyCode::Char('k') if c.control_view=>c.catalog_selected=c.catalog_selected.saturating_sub(1),
                     KeyCode::Enter if c.control_view=>c.observe_selected(),
