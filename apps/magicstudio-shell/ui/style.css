@@ -1,5 +1,7 @@
 /* Magic Studio shell — calm, focused, one accent. Tokens follow magic-studio-timeline.figcraft. */
 :root {
+  /* Design page: designed lyric lettering shows on paper, as on the video's light scenes. */
+  --lettering-paper: #f4efe4; --lettering-ink: #1f2a33;
   --bg: #0b1017;
   --surface: #141c28;
   --surface-2: #1c2a3b;
@@ -985,7 +987,7 @@ body.at-home .app-footer { display:none; }
    (right) share --song-s per second, so a sung line sits level with its frame;
    the stage, the section's lanes and what goes on them stay pinned in the centre.
    Items carry their song time and length as --at-s / --len-s, the playhead --now-s. */
-#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8.5), 22vw) minmax(0, 1fr) calc(var(--space-5) * 6); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto;
+#view-design.active { display: grid; grid-template-columns: minmax(calc(var(--space-5) * 8), 20vw) minmax(0, 1fr) minmax(calc(var(--space-5) * 6), 16vw); align-items: start; gap: var(--space-3); padding: var(--space-3); overflow: auto;
   --song-s-px: 18; --song-s: calc(var(--space-1) * 4.5); }
 :is(#words-lyrics,#words-film), #words-main, .words-preview { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
 #words-main { position: sticky; top: 0; z-index: 2; gap: var(--space-3); background: var(--bg); }
@@ -1007,8 +1009,14 @@ body.at-home .app-footer { display:none; }
 .words-band[data-kind="chorus"] { --band: var(--tone-lyrics); }
 .words-band.active { background: color-mix(in srgb, var(--band) 14%, transparent); }
 .words-band > .meta { color: var(--faint); }
-.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 2.4), 1fr)); grid-auto-rows: max-content;
-  align-content: start; gap: var(--space-1); padding-left: var(--space-1); border-left: medium solid transparent; overflow: hidden; cursor: pointer; }
+.words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: block; line-height: 1.25;
+  padding: var(--space-1) var(--space-2); border-left: medium solid transparent; border-radius: var(--radius-sm); background: var(--lettering-paper); overflow: hidden; cursor: pointer; }
+/* A sung word in its own lettering; the line's design sets these through --word-* values. */
+.words-line > .word.lettered { display: inline; padding: 0 .12em; border: 0; border-radius: var(--radius-sm); background: none; color: var(--word-color, var(--lettering-ink));
+  font-family: var(--word-font, inherit); font-weight: var(--word-weight, 400); font-style: var(--word-slant, normal); font-size: calc(var(--text-md) * var(--word-scale, 1)); cursor: text; }
+.words-line > .word.lettered:hover { box-shadow: inset 0 -.12em 0 var(--muted); }
+.words-line > .word.lettered.active { box-shadow: inset 0 -.18em 0 var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.words-line > .word.lettered[data-changed] { text-decoration: underline dotted var(--faint); }
 .words-tl > .words-line.active { border-left-color: var(--accent); }
 .words-tl > .first { margin-top: var(--space-5); height: calc(var(--len-s) * var(--song-s) - var(--space-5) - var(--space-1)); }
 .words-tl > .words-tl-head { top: calc(var(--now-s, 0) * var(--song-s)); z-index: 1; border-top: medium solid var(--playhead); pointer-events: none; }

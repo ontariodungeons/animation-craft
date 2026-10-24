@@ -29,6 +29,13 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - Run required hooks through normal commits. Report their actual running, failed or
   passed state and failure reason. Do not pretest, bypass hooks, or call an unrun check passed.
 
+- Active agents keep their review app open and report its real PID, control port,
+  branch/worktree and build identity; Claude is exempt to conserve credits. Jesse
+  reviews the canonical main app. Never claim live Studio work without a matching
+  open instance and native activity evidence. Save and check dirty state before updates.
+- Beaker monitors completed agent work, reviews its changes and follows each PR
+  through integration to main. Do not leave a handoff dependent on an old chat.
+
 ## Isolate source only when needed
 
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
