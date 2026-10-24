@@ -29,7 +29,7 @@ These requirements supersede conflicting details in the recovered diagram and th
 ## Current execution status
 
 - Base: `5ab274ba`; branch: `fix/panel-unification`; worktree: `.worktrees/panel-unification` inside this project.
-- There are **uncommitted implementation changes**, not a delivered feature. They include companion-render fixes, SVG starter assets, optional indicators, preliminary config/telemetry/CLI work and tests.
+- Registration/telemetry foundation committed as **775c6a02** on `fix/panel-unification`; normal commit hooks and workspace tests passed. This is a partial implementation, not whole-app completion. Starter SVG assets remain uncommitted and inactive.
 - Focused panel/companion tests and a workspace compile check have passed during development. They do **not** establish completion of the architecture or full telemetry.
 - A live preview exposed the wrong order: pets were displayed on the old right-hand panel structure. That preview has been closed and its process exit verified. The SVG manifest activation has been removed from the working changes.
 - The next work is the registration contract and shared right-hand panel structure. No more artwork preview or cosmetic pet positioning before those gates pass.
@@ -79,7 +79,7 @@ Run these gates in order. Update this checklist with commit SHAs and evidence as
 - [ ] Export complete paginated records and totals through CLI, with exact existing action routes, component/parent references and positions. Invalid/stale targets must fail explicitly.
 - [ ] Publish shared panel state and requests for attention without depending on the companion controller being loaded or enabled.
 - [ ] Test nested components, unnamed controls, dynamic replacement, project switching, hidden/disabled controls, missing registry/config, stale indices, more than 64 components and missing command mappings.
-- [ ] Commit this contract and record passing checks. Prepare the handoff for Jesse's TUI agent; no uncommitted integration handoff.
+- [x] Commit registration/telemetry foundation: `775c6a02`; normal pre-commit checks and workspace tests passed. Handoff contract: [tui-contract.md](tui-contract.md). TUI recipient has not yet been supplied; no message sent.
 
 ### 2. Unify all panel construction and styling, including the right-hand UI
 

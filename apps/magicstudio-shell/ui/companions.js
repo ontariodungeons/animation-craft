@@ -19,7 +19,6 @@ function createCompanions(frames, options = {}) {
   const pets = {};
   const anchors = {};
   const travelling = {};
-  const ROLE = { gaffer: "artwork", sproket: "issue/chat" };
 
   for (const name of ["sproket", "gaffer"]) {
     const node = document.createElement("pre");
@@ -66,15 +65,9 @@ function createCompanions(frames, options = {}) {
   // A box declares where a pet may stand. No slot declared means the pet keeps
   // its place and only changes pose.
   function slotFor(name, boxId) {
-    if (!rails) return null;
-    boxId ||= name === "sproket" ? "chat" : "artwork";
-    const owner = [...document.querySelectorAll("[data-box-id]")].find(n => n.getAttribute("data-box-id") === boxId);
-    const declared = owner?.getAttribute("data-companion-slot");
-    if (declared) {
-      rails.discover();
-      return { slotId: declared, target: boxId };
-    }
-    return rails.resolve({ name, role: ROLE[name] || null, target: boxId, prefer: [boxId], current: pets[name].slot ? { slotId: pets[name].slot } : null });
+    const config = window.uiConfig?.companions?.[name];
+    if (!rails || !config) return null;
+    return rails.resolve({ name, role: config.role, target: boxId || config.home });
   }
 
   // ONE compositor transform per retarget. Nothing is measured per frame.
@@ -93,7 +86,7 @@ function createCompanions(frames, options = {}) {
     }
     if (node.parentElement !== stage) stage.append(node);
     node.classList.add("companion-traveling");
-    node.style.setProperty("--companion-position", `translate3d(${Math.round(rect.x - (name === "gaffer" && pets.sproket.slot === slot.slotId ? 30 : 0))}px, ${Math.round(rect.y)}px, 0)`);
+    node.style.setProperty("--companion-position", `translate3d(${Math.round(rect.x + rect.width * Object.keys(pets).filter(p => pets[p].slot === slot.slotId).indexOf(name) / Object.keys(pets).filter(p => pets[p].slot === slot.slotId).length)}px, ${Math.round(rect.y)}px, 0)`);
     clearTimeout(travelling[name]);
     travelling[name] = setTimeout(() => {
       delete travelling[name];
@@ -105,8 +98,11 @@ function createCompanions(frames, options = {}) {
     const pet = pets[name];
     if (!enabled || !project || document.hidden) { nodes[name].hidden = true; return; }
     if (useSprite(name)) {
-      nodes[name].hidden = false;
-      travel(name, slotFor(name, pet.box));
+      const slot = slotFor(name, pet.box);
+      nodes[name].hidden = !slot;
+      pet.placement_error = slot ? null : "No configured visible rail for this component";
+      if (!slot) { pet.slot = null; return; }
+      travel(name, slot);
       return;
     }
     // ASCII fallback keeps its original inline behaviour: one anchor, no travel.

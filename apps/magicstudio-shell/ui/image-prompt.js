@@ -118,19 +118,6 @@ function imagePromptBlock() {
     el('details', {}, el('summary', {}, 'CLI command'), command, copy)];
   if (draft.result?.image) body.push(el('img', { class: 'image-result', src: convertFileSrc(draft.result.image), alt: 'Generated candidate artwork · needs visual review' }),
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
-  const section = block('image', '🐈', 'Gaffer · Artwork', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : draft.model, false, body, draft.error ? 'needs' : 'empty');
-  section.classList.add('image-prompt-block');
-  section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
-  const indicator = section.querySelector('.panel-head.control .dot');
-  if (indicator) {
-    if (draft.result) {
-      const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');
-      indicator.replaceWith(success);
-    } else {
-      const next = window.companionBoxes.dot(draft.error ? 'failed' : draft.busy ? 'working' : 'idle');
-      next.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
-      indicator.replaceWith(next);
-    }
-  }
-  return section;
+  window.uiRegistry.fact({ id: 'magic-image-pane', project: state.project, state: draft.error ? 'failed' : draft.busy ? 'working' : draft.result ? 'ready' : 'idle', reason: draft.error || null, source: 'artwork result' });
+  return el('div', { id: 'image-tools-body' }, ...body);
 }

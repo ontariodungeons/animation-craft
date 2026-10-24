@@ -33,7 +33,7 @@ document.addEventListener('click',e=>{
  const request_id=`ui-${Date.now()}-${Math.random().toString(16).slice(2,8)}`;
  const navigation=n.matches('#project-details,#sb-prev,#sb-next,.sb-link,#sb-chips [role=tab],.tab[data-view]');
  const previous=acFeedback.action,errors=acFeedback.errors.length;
- e.acAction={control,request_id};acFeedback.actions.set(n,e.acAction);acFeedback.action=e.acAction;
+ e.acAction={control,request_id,box:n.closest("[data-companion-rail]")?.getAttribute("data-companion-rail")||n.closest("[data-box-id]")?.getAttribute("data-box-id")||null};acFeedback.actions.set(n,e.acAction);acFeedback.action=e.acAction;
  // Static handlers run during this dispatch too; invoke captures this context before awaiting.
  queueMicrotask(()=>{if(acFeedback.action===e.acAction)acFeedback.action=previous;});
  acFeedback.report(null,null,{stage:'ui_click',control,request_id,interaction:navigation?'navigation':'control',verified_commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:navigation?'existing navigation handler':n.dataset.commands?'verified handler annotation':'unknown'});

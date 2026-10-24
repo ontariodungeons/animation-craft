@@ -226,17 +226,27 @@ async function loadComponents() {
   Object.assign(uiConfig, await response.json());
   for (const [id, entry] of Object.entries(uiConfig.elements)) {
     const node = document.getElementById(id);
-    if (node) { applyEntry(node, entry); node.setAttribute("data-box-id", id); window.companionBoxes?.register(id, { project: state.project, ...entry }); }
+    if (node) { applyEntry(node, entry, id); node.setAttribute("data-box-id", id); window.companionBoxes?.register(id, { project: state.project, ...entry }); }
   }
   for (const node of document.body.querySelectorAll("*")) window.uiRegistry?.registerElement(node);
   return uiConfig;
 }
 
-function applyEntry(node, entry) {
+function applyEntry(node, entry, id = node.id) {
   if (!entry) return node;
+  node.dataset.uiConfig = id;
   if (entry.component) node.className = [...new Set(`${node.className || ''} ${entry.component}`.trim().split(/\s+/))].join(' ');
   if (entry.look) node.dataset.look = entry.look;
   if (entry.density) node.dataset.density = entry.density;
+  if (entry.component === 'panel' && entry.rail && !node.querySelector('[data-companion-slot]')) {
+    const head = node.querySelector('.panel-head');
+    if (!head) { node.dataset.contractError = 'Panel has no shared header'; return node; }
+    node.setAttribute('data-companion-rail', entry.rail);
+    const slot = document.createElement('span');
+    slot.className = 'panel-rail'; slot.setAttribute('data-companion-slot', entry.rail);
+    slot.setAttribute('aria-hidden', 'true'); head.append(slot);
+    window.uiRegistry?.registerElement(slot);
+  }
   return node;
 }
 
@@ -254,7 +264,7 @@ function el(tag, attrs = {}, ...children) {
   const project = typeof state === "undefined" ? null : state.project;
   const boxId = box || attrs.id || null;
   const entry = boxId ? uiConfig.elements[boxId] : null;
-  if (entry) applyEntry(node, entry);
+  if (entry) applyEntry(node, entry, boxId);
   if (boxId) {
     node.setAttribute("data-box-id", boxId);
     if (window.companionBoxes) window.companionBoxes.register(boxId, { project, label: entry?.label || null, look: entry?.look || null, density: entry?.density || null });
@@ -415,8 +425,8 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
         ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
         : [el("span", {}, line.text)]))))));
   const title = model.canonical ? "Lyrics" : "Transcript";
-  const pane = el("section", { class: "magic-pane magic-reader", id: "magic-reader", "aria-label": `${title}, read only` },
-    el("div", { class: "panel-head pane" }, el("span", {}, title),
+  const pane = el("section", { id: "magic-reader", "aria-label": `${title}, read only` },
+    el("div", { id: "magic-reader-head" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
       el("button", { class: "ghost", id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
@@ -449,7 +459,11 @@ function block(id, icon, title, meta, done, body, blockState, action) {
   const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", id);
   dot.title = done ? "Ready" : "Needs work";
   const head = el("button", { class: "panel-head", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
-      onclick: () => { state.open = open ? null : id; renderBlocks(); } },
+      onclick: () => {
+        const narrow = getComputedStyle(document.documentElement).getPropertyValue("--workspace-narrow").trim() === "1";
+        if (narrow && agent.open) { agentToggle(false); state.open = id; } else state.open = open ? null : id;
+        renderBlocks();
+      } },
     dot,
     el("span", { class: "ico", html: icon }),
     el("span", { class: "title" }, title),
@@ -457,12 +471,10 @@ function block(id, icon, title, meta, done, body, blockState, action) {
     el("span", { class: "chev", html: ICONS.chev }));
   // The header row carries the slot. It sits on the block's own edge, outside
   // the clickable head button, so a companion never covers a control.
-  const slot = el("span", { class: "companion-slot", "data-companion-slot": `block-${id}`, "data-companion-target": id, "data-box-id": id });
   // Readiness informs a prerequisite status. An empty block is not an error.
   if (window.companionBoxes) window.companionBoxes.readiness(id, { state: blockState, reason: done ? "Ready" : "Needs work" });
-  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
+  return el("section", { box: id, class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
     action ? el("div", { class: "block-headrow" }, head, action) : head,
-    slot,
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 

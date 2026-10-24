@@ -33,11 +33,11 @@ const MOTION_ICONS = {
  layers:'<path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/>', export:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>', step:'<path d="m5 5 10 7-10 7zM19 5v14"/>'
 };
 function motionButton(id,label,icon,fn){return el('button',{id,class:'icon',title:label,'aria-label':label,html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`,onclick:fn});}
-function motionSection(title,body,open=false,toneOverride=null){
- const groups={Action:['motion','play'],'Path & depth':['depth','pen'],'Motion & timing':['motion','step'],Layers:['layers','layers'],'Expression & pose':['pose','eye'],'Quality checks':['check','fit'],'Export & integrations':['export','export']};
- const [tone,icon]=groups[title]||[toneOverride||'layers','layers'];
- const heading=el('summary',{},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`}),el('span',{},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
- const node=el('details',{class:'motion-section','data-tone':tone},heading,el('div',{class:'motion-section-body'},body));
+function motionSection(title,body,open=false){
+ const id=uiConfig.sections?.[title];
+ if(!id)throw Error(`Unconfigured animation panel: ${title}`);
+ const heading=el('summary',{id:`${id}-head`},el('span',{class:'motion-section-icon',html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[uiConfig.elements[id].icon]}</svg>`}),el('span',{class:'panel-title'},title),el('span',{class:'motion-section-chevron',html:ICONS.chev}));
+ const node=el('details',{id,class:'motion-section'},heading,el('div',{class:'motion-section-body'},body));
  node.open=Object.hasOwn(motion.openSections,title)?motion.openSections[title]===true:open;
  node.addEventListener('toggle',()=>{
   motion.openSections[title]=node.open;

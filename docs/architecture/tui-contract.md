@@ -2,7 +2,7 @@
 
 Implementation branch: `fix/panel-unification`, base `5ab274ba`.
 Worktree: `.worktrees/panel-unification` inside the Magic Studio repository.
-No PR yet. This document describes the source contract; completion evidence belongs in implementation-plan.md.
+Foundation commit: `775c6a02`. No PR yet. This document describes the source contract; completion evidence belongs in implementation-plan.md.
 
 ## Configuration and state
 
@@ -37,7 +37,7 @@ Every item includes:
 | `id` | Authored stable DOM ID, or null |
 | `target` | Authored ID or `@INDEX` for CLI interaction |
 | `parent_index`, `parent_id` | Containing DOM component |
-| `component`, `config`, `container` | Type, direct config entry, canonical state owner |
+| `tag`, `component`, `config`, `container`, `rail` | DOM type, shared component, config entry, canonical state owner and configured rail |
 | `rect` | Actual CSS-pixel x, y, width, height in the viewport |
 | `visible`, `enabled`, `selected` | Observed control state |
 | `label`, `text` | Accessible label and bounded direct text; private chat contents excluded |
@@ -79,3 +79,7 @@ The exact open project and registered target are required. Attention is separate
 ## Handoff boundary
 
 The assigned TUI agent owns terminal presentation and consumption of these records. Codex owns UI registration, shared config, CLI/engine transport and pet/rail behavior. Send the agent the actual commit SHA and evidence before integration; this file alone is not proof that every implementation gate passed.
+
+## Shared panel construction
+
+A `panel` config entry names its `rail`. The common constructor mounts exactly one slot in its shared header. Rail policy and slot identity come from the same config; coordinates are measured from that slot. Missing or invisible destinations are unavailable, never redirected to a different panel. The registry publishes state changes through the existing feedback transport even when companions are disabled.

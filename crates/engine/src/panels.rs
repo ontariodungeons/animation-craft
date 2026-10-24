@@ -79,6 +79,10 @@ pub struct Entry {
     #[serde(default)]
     pub priority: i64,
     #[serde(default)]
+    pub rail: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
     pub look: Option<String>,
     #[serde(default)]
     pub density: Option<String>,
@@ -102,12 +106,22 @@ pub struct Config {
     pub slots: Value,
     #[serde(default)]
     pub signals: Value,
+    #[serde(default)]
+    pub companions: Value,
+    #[serde(default)]
+    pub sections: std::collections::BTreeMap<String, String>,
 }
 
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
         if self.elements.is_empty() { return Err("no configured elements".into()); }
         for (id, entry) in &self.elements {
+            if let Some(target) = &entry.target {
+                if !self.elements.contains_key(target) || self.elements[target].target.is_some() { return Err(format!("{id}: target must name a canonical component")); }
+            }
+            if let Some(rail) = &entry.rail {
+                if !self.rails.get(rail).is_some_and(Value::is_object) || !self.slots.get(rail).is_some_and(Value::is_object) { return Err(format!("{id}: missing configured rail or slot")); }
+            }
             if entry.component.trim().is_empty() { return Err(format!("{id}: missing component")); }
             if let Some(look) = &entry.look {
                 if !self.looks.get(&entry.component).is_some_and(|looks| looks.contains(look)) { return Err(format!("{id}: unknown look {look}")); }

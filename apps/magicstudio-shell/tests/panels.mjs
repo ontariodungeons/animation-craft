@@ -95,7 +95,11 @@ function elFixture(entries) {
     const element = { tagName: tag.toUpperCase(), className: '', dataset: {}, attributes: {}, children: [],
       setAttribute(name, value) { this.attributes[name] = String(value); },
       getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; },
-      append(...items) { this.children.push(...items); }, addEventListener() {} };
+      append(...items) { this.children.push(...items); for (const item of items) if (typeof item === 'object') item.parentElement = this; },
+      querySelector(selector) {
+        const all = this.children.flatMap(child => typeof child === 'object' ? [child, ...(child.children || [])] : []);
+        return all.find(child => selector === '.panel-head' ? child.className?.split(' ').includes('panel-head') : child.getAttribute?.('data-companion-slot') !== null) || null;
+      }, addEventListener() {} };
     created.push(element);
     return element;
   };
@@ -110,6 +114,17 @@ function elFixture(entries) {
 }
 
 const tests = [
+  ['one shared panel constructor mounts the configured rail exactly once', async () => {
+    const { ctx } = elFixture({ panel: { component: 'panel', look: 'chat', rail: 'panel' } });
+    await ctx.loadComponents();
+    const head = ctx.el('div', { class: 'panel-head' });
+    const panel = ctx.el('section', { id: 'panel' }, head);
+    ctx.applyEntry(panel, ctx.uiConfig.elements.panel, 'panel');
+    assert.equal(panel.getAttribute('data-companion-rail'), 'panel');
+    assert.equal(head.children.length, 1);
+    assert.equal(head.children[0].getAttribute('data-companion-slot'), 'panel');
+    assert.equal(panel.dataset.uiConfig, 'panel');
+  }],
   ['CLI toggles update checked state and indexed actions require instance', () => {
     const { bridge, elements } = fixture();
     const control = element('input', { id: 'toggle' });

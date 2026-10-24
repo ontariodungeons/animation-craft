@@ -40,7 +40,7 @@ function createCompanionBoxes() {
   const instance = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let nextIndex = 0, componentRevision = 0, componentSignature = "";
   function registerElement(node) {
-    if (!node || !node.tagName || node.closest?.('svg,script,style,head')) return null;
+    if (!node || !node.tagName || node.closest?.('script,style,head') || (node.namespaceURI === 'http://www.w3.org/2000/svg' && node.tagName.toLowerCase() !== 'svg')) return null;
     let record = elementRecords.get(node);
     if (!record) {
       record = { index: ++nextIndex };
@@ -55,16 +55,18 @@ function createCompanionBoxes() {
     const nodes = [root, ...root.querySelectorAll('*')].filter(n => registerElement(n));
     const items = nodes.map(node => {
       const record = registerElement(node), parent = registerElement(node.parentElement), rect = node.getBoundingClientRect(), computed = getComputedStyle(node);
-      const entry = window.uiConfig?.elements?.[node.id], owner = node.closest('[data-box-id]')?.getAttribute('data-box-id');
+      const configId = node.dataset.uiConfig || node.id, entry = window.uiConfig?.elements?.[configId], owner = node.closest('[data-companion-rail]')?.getAttribute('data-companion-rail') || node.closest('[data-box-id]')?.getAttribute('data-box-id');
+      const live = owner ? get(owner) : null;
       const kind = node.tagName.toLowerCase(), editable = node.matches('input,select,textarea,[contenteditable=true]');
       const clickable = node.matches('button,a[href],[role=button],[role=tab],.chip,.proj,.object,.lyric');
       const data = node.type === 'checkbox' || node.type === 'radio' ? { checked: !!node.checked } :
         node.matches('input[type=number],input[type=range]') ? { value: node.value, min: node.min, max: node.max, step: node.step } :
         kind === 'select' ? { value: node.value, options: [...node.options].map(o => ({ value: o.value, label: o.label, disabled: o.disabled })) } : null;
       return { index: record.index, id: node.id || null, target: node.id || `@${record.index}`, parent_index: parent?.index ?? null, parent_id: node.parentElement?.id || null,
-        component: entry?.component || kind, config: entry ? node.id : null, container: owner ? canonical(owner) : null,
+        tag: kind, component: entry?.component || kind, config: entry ? configId : null, rail: entry?.rail || null, container: owner ? canonical(owner) : null,
         rect: [rect.x, rect.y, rect.width, rect.height], visible: rect.width > 0 && rect.height > 0 && computed.visibility !== 'hidden' && !node.closest('[hidden],[aria-hidden=true]'),
         enabled: !node.disabled, selected: node.getAttribute('aria-selected') || node.getAttribute('aria-pressed') || null,
+        signal: live ? boxSignal(live) : null, busy: live ? live.state === "working" : null,
         label: node.getAttribute('aria-label') || node.title || entry?.label || null, data,
         text: editable || node.closest('#agent-log,#agent-messages') ? null : [...(node.childNodes || [])].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).filter(Boolean).join(' ').slice(0, 160),
         style: Object.fromEntries(['display','visibility','color','backgroundColor','fontSize','fontWeight','overflow','position'].map(key => [key, computed[key]])),
@@ -104,7 +106,12 @@ function createCompanionBoxes() {
   // where the box lives, so an observation can be matched to it later.
   function register(id, { project = null, context = null, priority = 0, title = null, label = null, look = null, density = null } = {}) {
     if (!id) return null;
+    const original = id;
     id = canonical(id);
+    if (original !== id) {
+      const entry = window.uiConfig?.elements?.[id];
+      label = entry?.label ?? label; look = entry?.look ?? look; density = entry?.density ?? density;
+    }
     priority = window.uiConfig?.elements?.[id]?.priority ?? priority;
     let box = boxes.get(canonical(id));
     if (!box) {
@@ -216,7 +223,7 @@ function createCompanionBoxes() {
   function capture(command, params = {}) {
       const action = typeof acFeedback === "undefined" ? null : acFeedback.action;
       const node = document.getElementById(params?._control || action?.control) || [...document.querySelectorAll("[data-commands]")].find(n => (n.getAttribute("data-commands") || "").split(/\s+/).includes(command));
-      const box = node?.closest("[data-box-id]")?.getAttribute("data-box-id") || null;
+      const box = action?.box || node?.closest("[data-companion-rail]")?.getAttribute("data-companion-rail") || node?.closest("[data-box-id]")?.getAttribute("data-box-id") || null;
       return { command, params, box, request: params?._request_id || action?.request_id || null, project: state.project, view: state.view };
   }
 
@@ -224,6 +231,7 @@ function createCompanionBoxes() {
     const box = boxes.get(canonical(id));
     if (!box) throw new Error("Unknown panel: " + id);
     if (reason !== null && (typeof reason !== "string" || !reason.trim())) throw new Error("Attention needs a reason");
+    box.project = currentProject();
     box.attention = reason === null ? null : reason.trim().slice(0, 180);
     box.seq = ++changeSeq;
     box.observed_at = Date.now();
@@ -332,3 +340,5 @@ function createCompanionBoxes() {
 // One shared registry, created before the app renders, so every control can
 // join the contract the moment it is built.
 window.uiRegistry = window.companionBoxes = createCompanionBoxes();
+
+window.uiRegistry.subscribe(() => window.acFeedback?.report());

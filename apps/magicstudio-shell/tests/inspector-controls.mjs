@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../ui/animation.js',import.meta.url),'utf8'),storage=new Map();
 function fixture(){
  const el=(tag,attrs={},...children)=>({tag,...attrs,children:children.flat(),events:{},addEventListener(k,fn){this.events[k]=fn}});
- const c=vm.createContext({el,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v)},window:{addEventListener(){}},ICONS:{chev:''}});vm.runInContext(source,c);return c;
+ const c=vm.createContext({uiConfig:JSON.parse(readFileSync(new URL('../ui/components.json',import.meta.url),'utf8')),el,localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v)},window:{addEventListener(){}},ICONS:{chev:''}});vm.runInContext(source,c);return c;
 }
 let c=fixture();
 vm.runInContext(`const a=motionSection('Action',[],true),b=motionSection('Path & depth',[]);const parent={id:'motion-inspector',querySelectorAll:()=>[a,b]};a.parentElement=b.parentElement=parent;b.open=true;b.events.toggle();`,c);

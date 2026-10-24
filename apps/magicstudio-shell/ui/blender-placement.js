@@ -2,7 +2,7 @@
 function blenderPlacementControls({project,getJob,current,jobParameter='blender_job'}){
  let scene=null,placing=false,renderBusy=false,lastJob=null,defaultId='',sceneRevision=0,validationError=false;
  const field=(name,label,value,type='number')=>{
-  const input=el('input',{id:`blender-place-${name}`,type,value:String(value),step:'any','aria-label':label,style:'width:100%;min-width:0;box-sizing:border-box'});
+  const input=el('input',{id:`blender-place-${name}`,type,value:String(value),step:'any','aria-label':label});
   return {input,node:el('label',{},label,input)};
  };
  const scenePicker=el('select',{id:'blender-place-scene','aria-label':'Destination scene'});
@@ -10,8 +10,8 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
  const rect=[field('x','X (video pixels)',0),field('y','Y (video pixels)',0),field('width','Width (video pixels)',0),field('height','Height (video pixels)',0)];
  const jobInfo=el('p',{class:'muted',id:'blender-place-job'});
  const status=el('p',{id:'blender-place-status',role:'status','aria-live':'polite',class:'muted'});
- const command=el('code',{id:'blender-place-command',style:'white-space:pre-wrap;overflow-wrap:anywhere'});
- const readback=el('pre',{id:'blender-place-result','aria-label':'Placement result',style:'white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;overflow:auto'});
+ const command=el('code',{id:'blender-place-command'});
+ const readback=el('pre',{id:'blender-place-result','aria-label':'Placement result'});
  const place=el('button',{id:'blender-place-submit',class:'ghost','data-commands':'video.place_track',disabled:true},'Place in scene');
  const copy=el('button',{id:'blender-place-copy',class:'ghost',disabled:true},'Copy placement command');
  const inputs=[scenePicker,id.input,start.input,duration.input,rate.input,...rect.map(f=>f.input)];
@@ -96,10 +96,10 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
   }catch(error){if(current()&&getJob()?.job===params[jobParameter])message(String(error),true);}
   finally{placing=false;if(current())update();}
  };
- const node=el('details',{id:'blender-placement',class:'motion-section'},el('summary',{},'Place in scene'),
-  el('div',{class:'card',style:'padding:8px;display:grid;gap:8px'},jobInfo,el('label',{},'Authored scene',scenePicker),id.node,
+ const node=el('details',{id:'blender-placement'},el('summary',{id:'blender-placement-head'},el('span',{class:'panel-title'},'Place in scene')),
+  el('div',{id:'blender-placement-body'},jobInfo,el('label',{},'Authored scene',scenePicker),id.node,
    el('p',{class:'muted'},'An existing placement with this ID is replaced. Rectangle frames the original canvas in video pixels; the backend maps the rendered frame.'),
-   start.node,duration.node,rate.node,el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:6px'},...rect.map(f=>f.node)),place,status,
+   start.node,duration.node,rate.node,el('div',{id:'blender-place-coordinates'},...rect.map(f=>f.node)),place,status,
    el('details',{},el('summary',{},'Exact CLI command'),command,copy),el('details',{},el('summary',{},'Placement result'),readback)));
  refresh();
  return {node,load,refresh,setBusy(value){renderBusy=value;update();}};

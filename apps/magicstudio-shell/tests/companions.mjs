@@ -42,6 +42,20 @@ function fixture() {
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 const tests = [
+  ['rails require a configured destination and never fall back elsewhere', () => {
+    const { ctx } = fixture();
+    const rail = { getAttribute: key => key === 'data-companion-rail' ? 'panel' : null, getBoundingClientRect: () => ({ width: 100, height: 40 }) };
+    const slot = { getAttribute: key => key === 'data-companion-slot' ? 'panel' : null, closest: () => rail, getBoundingClientRect: () => ({ left: 12, top: 8, width: 64, height: 28 }) };
+    ctx.document.querySelectorAll = selector => selector === '[data-companion-rail]' ? [rail] : selector === '[data-companion-slot]' ? [slot] : [];
+    ctx.window.uiConfig = { rails: { panel: { accept: 'yes' } }, slots: { panel: { target: 'panel' } } };
+    vm.runInContext(read('companion-rails.js'), ctx);
+    const rails = ctx.createCompanionRails(); rails.discover();
+    assert.equal(rails.resolve({ name: 'sproket', target: 'missing' }), null);
+    assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }).slotId, 'panel');
+    assert.equal(rails.measure('panel').x, 12);
+    delete ctx.window.uiConfig.slots.panel; rails.discover();
+    assert.equal(rails.resolve({ name: 'sproket', target: 'panel' }), null);
+  }],
   ['UI and bridge results update the same box, ignoring stale project events', async () => {
     const { ctx, boxes } = fixture();
     const owner = { getAttribute: () => 'task' };
