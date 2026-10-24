@@ -46,3 +46,10 @@ When the combined Studio is up: open Design, check the column on Three Times Aro
 ## Lyrics designed (Jesse's task)
 
 `mc exec words.design` designed and used all 26 sung lines (24 printed + the 2-line ending repeat) from `project/lyrics-design.json`; recipe `animation/recipe/06-design-lyrics.jsonl`. The caption track was removed (every section designed), so each line shows once. Checked in snapshots at 3.5, 14.6, 32, 52, 65, 80, 100.5, 118 and 130 s (`animation/preview/lyrics-check-2/sheet.jpg`). The video index before this is kept in `animation/recipe/history/index.before-words-design.html`. Change the art direction in the recipe and run the command again; adjust single lines in Design.
+
+## Kinetic lyrics and the Layers panel (2026-10-24 evening)
+
+- Settings file: `pipeline/templates/kinetic-library.json` (14 acts, 6 entrances, 6 layouts, 8 overlays: registry blocks with blend and opacity). The song's choices: the `kinetic` block in `project/lyrics-design.json` (meaning word → act, the layouts, entrances and overlays to vary through, lettering).
+- Commands: `words.track` (the lyric line: one anchor clip per sung word), `words.design seed= layout= entrance= overlay= section=` (kinetic sections), `words.save kinetic=…`, `words.apply` (mounts the section and its overlay).
+- Design page: a kinetic section shows Layers under the stage (Layout, Words arrive, Meaning words with acts, Overlay), Shuffle and Static lines.
+- Track 15: all seven sections kinetic (frames in `animation/preview/kinetic-check-1/`); overlays were mid-run when the Studio on 19971 (shared-target build, pid 1721943) took the project. With this branch (1660df5f) in that build: `mc --bridge 19971 exec words.track`, then `mc --bridge 19971 exec words.design seed=0`, then snapshot.

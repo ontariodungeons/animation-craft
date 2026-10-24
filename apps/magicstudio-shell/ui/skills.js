@@ -5,7 +5,7 @@ const lnode=(tag,cls,...children)=>el(tag,{class:cls},...children);
 const lbutton=(id,label,action,title=label)=>el('button',{id,class:'ghost',onclick:action,title},label);
 const lkey=(suffix='draft')=>`learning:${suffix}:${learning.directory}:${learning.selected?.id}`;
 function learningStored(key){try{return JSON.parse(localStorage.getItem(key));}catch{return null;}}
-function learningStore(key,value){try{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value));}catch{learning.message='Draft could not be persisted locally. Keep this window open or copy it.';}}
+function learningStore(key,value){try{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value));return true;}catch{learning.message='Draft could not be persisted locally. Keep this window open or copy it.';return false;}}
 async function learningApi(id,params={}) {return invoke('engine_command',{id,params:{...params,...(learning.directory?{_expected_directory:learning.directory}:{})}});}
 function learningError(e){learning.message=String(e);const n=$('learning-message');if(n)n.textContent=learning.message;}
 async function renderSkills(){

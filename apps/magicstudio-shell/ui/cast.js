@@ -10,13 +10,13 @@ function castDraft(item=castItem()) {
   const id=item.document.department.id;
   if(!cast.drafts.has(id)) {
     const retained=learningStored(castKey(id));
-    cast.drafts.set(id,retained||{document:structuredClone(item.document),revision:item.revision});
+    cast.drafts.set(id,retained?.document?.department?.id===id?retained:{document:structuredClone(item.document),revision:item.revision});
   }
   return cast.drafts.get(id);
 }
 function castChanged() {
-  const draft=castDraft();learningStore(castKey(cast.department),draft);
-  castStatus();
+  const draft=castDraft(),stored=learningStore(castKey(cast.department),draft);
+  castStatus(stored===false?learning.message:undefined);
 }
 function castStatus(message) {
   if(!cast.active)return;
@@ -36,6 +36,10 @@ async function castOpen() {
     const result=await castApi('crew.list');
     await learning.editor?.destroy();learning.editor=null;learning.selected=null;learning.epoch++;
     if(cast.workspace!==result.workspace)cast.drafts.clear();
+    else for(const item of cast.items){
+      const id=item.document.department.id,draft=cast.drafts.get(id);
+      if(draft&&JSON.stringify(draft.document)===JSON.stringify(item.document))cast.drafts.delete(id);
+    }
     cast.workspace=result.workspace;cast.items=result.departments;cast.active=true;
     for(const id of ['learning-new','learning-import'])$(id).hidden=true;
     $('learning-save').textContent='Save AGENTS.md';$('learning-save').onclick=castSave;
@@ -138,7 +142,7 @@ async function castSave() {
     if(cast.active&&cast.department===id){$('cast-saved-file').querySelector('pre').textContent=saved.department.markdown;castStatus(`Saved ${saved.department.path}`);}
   }catch(e){
     if(cast.workspace===workspace&&cast.active&&cast.department===id){
-      try{const latest=await castApi('crew.list',{workspace});cast.items=latest.departments;}catch{}
+      try{const latest=await castApi('crew.list',{workspace});if(cast.workspace===workspace)cast.items=latest.departments;}catch{}
       castStatus(`${e} · Your draft is retained.`);
     }
   }finally{cast.busy=false;if(cast.active)castStatus($('learning-message').textContent);}

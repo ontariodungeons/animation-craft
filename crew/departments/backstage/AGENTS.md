@@ -19,7 +19,7 @@
   ],
   "commands": [
     "ui.controls",
-    "ui.panels",
+    "ui.components",
     "ui.feedback",
     "center.status"
   ],

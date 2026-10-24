@@ -190,6 +190,28 @@ html, body, [data-composition-id] { background: #1b2430 !important; }
 
 /// The opposite view: the video's scene with its lyric word clips hidden, for designing new lyrics
 /// over the picture they will sit in.
+/// The lyrics page's stage: the scene's backdrop, the music and the lyrics (designed sections and their
+/// overlays). A picture or video clip is a backdrop when no lower track plays under it at its time;
+/// every other picture or video (the cast) is hidden. Timing stays the saved video's.
+fn stage_only_style(html: &str) -> String {
+    let mut visuals: Vec<(String, u64, f64, f64)> = Vec::new();
+    let mut from = 0;
+    while let Some(open) = html[from..].find('<').map(|i| i + from) {
+        let close = html[open..].find('>').map_or(html.len(), |i| i + open + 1);
+        let tag = &html[open..close];
+        from = close;
+        if !(tag.starts_with("<video") || tag.starts_with("<img")) || !tag_attr(tag, "class").is_some_and(|c| c.split_whitespace().any(|c| c == "clip")) { continue; }
+        let num = |k: &str| tag_attr(tag, k).and_then(|v| v.parse::<f64>().ok());
+        if let (Some(id), Some(start)) = (tag_attr(tag, "id"), num("data-start")) {
+            visuals.push((id.to_owned(), num("data-track-index").unwrap_or(0.0) as u64, start, start + num("data-duration").unwrap_or(f64::MAX)));
+        }
+    }
+    let cast: Vec<String> = visuals.iter().filter(|(_, track, a, b)| visuals.iter().any(|(_, t, x, y)| t < track && x < b && a < y))
+        .map(|(id, ..)| format!("#{id}")).collect();
+    let hide = if cast.is_empty() { String::new() } else { format!("{} {{ visibility: hidden !important; }}\n", cast.join(", ")) };
+    format!("<style data-magicstudio=\"stage\">\n{hide}.lyric-word-clip, .lyric-word-clip * {{ visibility: hidden !important; }}\n</style>")
+}
+
 const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
 .lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: hidden !important; }
 </style>"#;
@@ -198,15 +220,17 @@ const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
 /// (`show: "lyrics"`, the default) or only its scene (`show: "scene"`). Written beside the Words
 /// compositions and rewritten only when the video changes; the video itself is never touched.
 pub fn cmd_words_lyrics_view(s: &mut Session, p: &Value) -> Result<Value> {
-    let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
-        "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
-        "scene" => (SCENE_ONLY_STYLE, "scene-only"),
-        other => return Err(invalid(format!("show must be lyrics or scene, not {other}"))),
-    };
     let dir = crate::workshop::project_dir(s)?;
     let hf = dir.join("hyperframes");
     let html = fs::read_to_string(hf.join("index.html")).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
-    if !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
+    let stage_style;
+    let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
+        "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
+        "scene" => (SCENE_ONLY_STYLE, "scene-only"),
+        "stage" => { stage_style = stage_only_style(&html); (stage_style.as_str(), "stage") }
+        other => return Err(invalid(format!("show must be stage, lyrics or scene, not {other}"))),
+    };
+    if name != "stage" && !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
     let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
     let derived = format!("{}{style}\n{}", &html[..head], &html[head..]);
     let src = format!("compositions/words/{name}.html");
@@ -459,7 +483,9 @@ pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let video = fs::read_to_string(dir.join("hyperframes/index.html")).unwrap_or_default();
     let in_video: Vec<&str> = video.split("data-magicstudio-words=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-    Ok(json!({"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video)}))
+    let kinetic_library: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
+    Ok(json!({"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video),
+        "kinetic_library":kinetic_library}))
 }
 
 /// The fonts the video declares (`@font-face` family, file and weight), so the designer can letter
@@ -627,11 +653,12 @@ pub fn cmd_words_effect_install(s: &mut Session, p: &Value) -> Result<Value> {
     let hf = dir.join("hyperframes");
     let name = p["name"].as_str().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
         .ok_or_else(|| invalid("name must be a registry effect name (letters, digits or '-')"))?;
-    let src = format!("compositions/components/{name}.html");
-    if hf.join(&src).is_file() { return Ok(json!({"name":name,"src":src,"installed":false,"already":true})); }
+    // Components install to compositions/components/, blocks to compositions/.
+    let found = || [format!("compositions/components/{name}.html"), format!("compositions/{name}.html")].into_iter().find(|p| hf.join(p).is_file());
+    if let Some(src) = found() { return Ok(json!({"name":name,"src":src,"installed":false,"already":true})); }
     let cli = crate::video_target::hyperframes_cli(p["hyperframes_cli"].as_str(), Some(&hf))?;
-    let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into()])?;
-    if !hf.join(&src).is_file() { return Err(invalid(format!("hyperframes add {name} did not write {src}: {}", out.trim()))); }
+    let out = crate::workspace::run_tool_in(&hf, &cli.to_string_lossy(), &["add".into(), name.into(), "--json".into(), "--no-clipboard".into()])?;  // the clipboard copy never returns headless
+    let src = found().ok_or_else(|| invalid(format!("hyperframes add {name} wrote no {name}.html: {}", out.trim())))?;
     Ok(json!({"name":name,"src":src,"installed":true,"already":false,"receipt":serde_json::from_str::<Value>(&out).unwrap_or(json!(out.trim()))}))
 }
 
@@ -886,13 +913,15 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
             let installed = cmd_words_effect_install(s, &json!({"name":block}))?;
             // One copy per section, under its own composition id (host id, scene root and timeline key match).
             let own = format!("{id}-overlay");
-            let comp = dir.join("hyperframes/compositions/components");
-            let source = fs::read_to_string(dir.join("hyperframes").join(installed["src"].as_str().unwrap_or_default()))?;
-            fs::write(comp.join(format!("{own}.html")), source.replace(&format!("\"{block}\""), &format!("\"{own}\"")).replace(&format!("'{block}'"), &format!("'{own}'")))?;
-            html.insert_str(root, &format!("<div id=\"{own}\" class=\"clip lyric-overlay-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{own}\" data-composition-src=\"compositions/components/{own}.html\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:75;mix-blend-mode:{};opacity:{}\"></div>\n",
+            // The copy sits beside the installed block, so its relative library paths still resolve.
+            let src = installed["src"].as_str().unwrap_or_default();
+            let own_src = Path::new(src).with_file_name(format!("{own}.html")).to_string_lossy().into_owned();
+            let source = fs::read_to_string(dir.join("hyperframes").join(src))?;
+            fs::write(dir.join("hyperframes").join(&own_src), source.replace(&format!("\"{block}\""), &format!("\"{own}\"")).replace(&format!("'{block}'"), &format!("'{own}'")))?;
+            html.insert_str(root, &format!("<div id=\"{own}\" class=\"clip lyric-overlay-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{own}\" data-composition-src=\"{own_src}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:75;mix-blend-mode:{};opacity:{}\"></div>\n",
                 composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0), track_index + 1,
                 look["blend"].as_str().unwrap_or("normal"), look["opacity"].as_f64().unwrap_or(1.0)));
-            receipt["overlay"] = json!({"name":overlay,"block":block,"src":format!("compositions/components/{own}.html")});
+            receipt["overlay"] = json!({"name":overlay,"block":block,"src":own_src});
         }
         receipt["src"] = composed["src"].clone();
         receipt["start"] = composed["song_anchor"].clone();
@@ -971,6 +1000,17 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_stage_keeps_the_backdrop_and_hides_the_cast() {
+        let html = r#"<video id="bg-a" class="clip" data-start="0" data-duration="10" data-track-index="18"></video>
+<video id="bg-b" class="clip" data-start="10" data-duration="10" data-track-index="19"></video>
+<video id="ship" class="clip" data-start="2" data-duration="6" data-track-index="22"></video>
+<img id="crab" class="clip" data-start="12" data-duration="3" data-track-index="30">"#;
+        let style = stage_only_style(html);
+        assert!(style.contains("#ship") && style.contains("#crab"), "the cast is hidden: {style}");
+        assert!(!style.contains("#bg-a") && !style.contains("#bg-b"), "backdrops stay");
+    }
 
     #[test]
     fn kinetic_designs_use_the_library_and_the_section_words() {

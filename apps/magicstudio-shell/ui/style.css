@@ -1012,6 +1012,9 @@ body.at-home .app-footer { display:none; }
 .words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: block; line-height: 1.25;
   padding: var(--space-1) var(--space-2); border-left: medium solid transparent; border-radius: var(--radius-sm); background: var(--lettering-paper); overflow: hidden; cursor: pointer; }
 /* A sung word in its own lettering; the line's design sets these through --word-* values. */
+/* Kinetic layers under the stage: rows of library cards and the section's meaning words. */
+.words-layers { display: flex; flex-direction: column; gap: var(--space-2); }
+.words-meaning { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .words-line > .word.lettered { display: inline; padding: 0 .12em; border: 0; border-radius: var(--radius-sm); background: none; color: var(--word-color, var(--lettering-ink));
   font-family: var(--word-font, inherit); font-weight: var(--word-weight, 400); font-style: var(--word-slant, normal); font-size: calc(var(--text-md) * var(--word-scale, 1)); cursor: text; }
 .words-line > .word.lettered:hover { box-shadow: inset 0 -.12em 0 var(--muted); }

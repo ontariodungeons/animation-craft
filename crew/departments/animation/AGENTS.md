@@ -22,7 +22,7 @@
     "image.generate",
     "rig.from_sheet",
     "motion.sample",
-    "motion.theatre_save"
+    "motion.theatre.save"
   ],
   "candidates": [
     {

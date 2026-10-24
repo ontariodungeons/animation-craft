@@ -32,4 +32,17 @@ assert.equal(vm.runInContext('JSON.stringify(wordsPanel.picked)',c),'["l1/w0"]',
 click(1,false);
 assert.equal(vm.runInContext('JSON.stringify(wordsPickedItems(anim.design.l1))',c),'[1]','a plain click picks one word');
 assert.equal(vm.runInContext('anim.words.map((w)=>w.text).join(" ")',c),'Three times around','the printed text is never edited');
-console.log('PASS words lettering: column words use the line design; Shift-click picks several; text locked');
+// Kinetic layers: an act card gives the picked words that act and saves the section's kinetic design.
+const saves=[];c.invoke=async(_,r)=>{saves.push(r);return r.id==='words.save'?{animation:{source_revision:2}}:{}};c.toast=()=>{};c.wordsOpen=async()=>{};
+vm.runInContext(`anim.scope={section:'verse_1',occurrence:1};anim.kinetic={layout:'scatter',entrance:'pop',overlay:'none',acts:{'l1/w2':'spin'},seed:1,style:{}};anim.source_revision=1;
+  wordsPanel.read.kinetic_library={layouts:{scatter:{name:'Scatter'}},entrances:{pop:{name:'Pop'}},overlays:{none:{name:'None'}},acts:{spin:{name:'Spin'},drop:{name:'Drop'}}};
+  wordsPanel.read.in_video=[];wordsPanel.picked=['l1/w0'];`,c);
+const flat=(n)=>[n,...(n.kids||[]).flat(Infinity).filter((k)=>k&&typeof k==='object').flatMap(flat)];
+const panel=vm.runInContext('wordsLayers(anim)',c);
+const words=(n)=>typeof n==='string'?[n]:(n?.kids||[]).flat(Infinity).flatMap(words);
+const drop=flat(panel).find((n)=>n.tag==='button'&&words(n).includes('Drop'));
+await drop.onclick();
+const save=saves.find((r)=>r.id==='words.save').params;
+assert.equal(JSON.stringify(save.kinetic.acts),'{"l1/w2":"spin","l1/w0":"drop"}','the picked word gets the act; others keep theirs');
+assert.equal(save.kinetic.layout,'scatter');
+console.log('PASS words lettering: column words use the line design; Shift-click picks several; text locked; kinetic act cards save the picked words');
