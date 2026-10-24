@@ -508,7 +508,7 @@ function wordsRender() {
   const segmented = (label, current, options, pick) => el("div", { class: "segmented", role: "tablist", "aria-label": label },
     ...options.map(([key, name]) => el("button", { role: "tab", "aria-selected": String(current === key), onclick: () => pick(key) }, name)));
 
-  const designer = wordsPanel.view === "design" && wordsPanel.line;
+  const designer = wordsPanel.view === "design" && wordsPanel.line && !anim.kinetic;
   const main = el("section", { class: "words-main", "aria-label": `${wordsLabel(anim)} lyrics` },
     el("div", { class: "words-head" },
       el("span", { class: "words-crumb" }, "Changing: ", el("strong", {}, wordsLabel(anim)), ` › line ${lineNo}`, it ? el("strong", {}, ` › “${itemText}”`) : " · the whole line"),
@@ -525,7 +525,8 @@ function wordsRender() {
       wordsPanel.read.in_video?.includes(anim.animation_id)
         ? el("button", { class: "ghost", title: "Put the video's original lyrics back for this section", onclick: () => wordsApply(false) }, "In the video · Restore original")
         : el("button", { class: "ghost", title: "Replace this section's lyrics in the video with the designed lines", onclick: () => wordsApply(true) }, "Use in the video")),
-    ...(designer ? [
+    ...(anim.kinetic ? [wordsLayers(anim)] : designer ? [
+      el("button", { class: "start", title: "Kinetic text for this section from the song's recipe", onclick: () => wordsShuffle(true) }, "Make it kinetic"),
       wordsLanes(anim),
       segmented("What to change", wordsPanel.tab, [["look", "Look"], ["move", "Move"], ["draw", "Draw"]], (key) => { wordsPanel.tab = key; wordsRender(); }),
       ...wordsOptions(anim)]
@@ -711,6 +712,51 @@ new MutationObserver(() => {
   .observe(document.getElementById("view-design") || document.body, { attributes: true, attributeFilter: ["class"] });
 
 // Put the section's designed lines into the video, or take them back out.
+// Kinetic sections: the layers under the stage, each a row of library cards. A pick saves the section and,
+// when it is in the video, composes it again so the stage shows the change.
+async function wordsKinetic(change) {
+  const anim = wordsCurrent();
+  if (!anim?.kinetic) return;
+  const kinetic = { ...anim.kinetic, ...change };
+  try {
+    const result = await wordsCommand("words.save", { animation_id: anim.animation_id, expected_source_revision: anim.source_revision, origin: "magicstudio-design", kinetic });
+    if (result.conflict) { toast("Someone changed these lyrics first; reloaded the latest"); return wordsOpen(); }
+    if (wordsPanel.read.in_video?.includes(anim.animation_id)) { await wordsCommand("words.apply", { animation_id: anim.animation_id }); wordsPanel.stage = null; }
+    await wordsOpen();
+  } catch (error) { toast(String(error).replace(/^.*?: /, "")); }
+}
+// Shuffle (or first make kinetic) one section from the project's lyric recipe, with a fresh seed.
+async function wordsShuffle(kinetic = true) {
+  const anim = wordsCurrent();
+  if (!anim) return;
+  try {
+    await wordsCommand("words.design", { section: anim.animation_id, seed: Math.floor(Math.random() * 1000), kinetic });
+    wordsPanel.stage = null; await wordsOpen();
+  } catch (error) { toast(String(error).replace(/^.*?: /, "")); }
+}
+function wordsLayers(anim) {
+  const lib = wordsPanel.read.kinetic_library || {}, k = anim.kinetic;
+  const row = (label, kind, current, pick) => [el("div", { class: "group-label" }, label), el("div", { class: "words-effects" },
+    ...Object.entries(lib[kind] || {}).map(([key, item]) => wordsCard(current === key, item.name, item.does, () => pick(key))))];
+  const picked = wordsPanel.picked.filter((id) => anim.words.some((w) => w.word_id === id));
+  const text = (id) => anim.words.find((w) => w.word_id === id)?.text || id;
+  const actsFor = (act) => { const acts = { ...k.acts }; for (const id of picked) { if (act) acts[id] = act; else delete acts[id]; } return acts; };
+  return el("section", { class: "words-layers", "aria-label": `${wordsLabel(anim)} layers` },
+    el("div", { class: "words-head" }, el("strong", {}, `Layers · ${wordsLabel(anim)}`), el("span", { class: "words-spacer" }),
+      el("button", { class: "ghost", title: "A new layout, entrance and overlay for this section from the song's recipe", onclick: () => wordsShuffle(true) }, "Shuffle"),
+      el("button", { class: "ghost", title: "Back to static designed lines for this section", onclick: () => wordsShuffle(false) }, "Static lines")),
+    ...row("Layout", "layouts", k.layout, (layout) => wordsKinetic({ layout })),
+    ...row("Words arrive", "entrances", k.entrance, (entrance) => wordsKinetic({ entrance })),
+    el("div", { class: "group-label" }, "Meaning words · pick words in the lyrics, then an act"),
+    el("div", { class: "words-meaning" }, ...Object.entries(k.acts || {}).map(([id, act]) => el("button", { class: `chip${picked.includes(id) ? " active" : ""}`,
+      onclick: () => { wordsPanel.picked = [id]; wordsPanel.line = anim.words.find((w) => w.word_id === id)?.line_id; wordsRender(); } }, `${text(id)} · ${lib.acts?.[act]?.name || act}`))),
+    picked.length ? el("div", { class: "words-effects" },
+      wordsCard(false, "No act", "Arrives like the other words", () => wordsKinetic({ acts: actsFor(null) })),
+      ...Object.entries(lib.acts || {}).map(([key, item]) => wordsCard(picked.every((id) => k.acts?.[id] === key), item.name, item.does, () => wordsKinetic({ acts: actsFor(key) }))))
+      : el("p", { class: "muted" }, "Click a word in the lyrics on the left to give it an act."),
+    ...row("Overlay · a transparent layer over the scene", "overlays", k.overlay || "none", (overlay) => wordsKinetic({ overlay })));
+}
+
 async function wordsApply(use) {
   const anim = wordsCurrent();
   if (!anim) return;
