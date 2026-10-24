@@ -15,16 +15,31 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - MCP: register command `mc`, args `["mcp"]` (headless engine) or
   `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
 
-## Start with an isolated checkout
+## Review on main
+
+- Jesse reviews the app from `main`. Commit completed changes, integrate current main,
+  push them to main, and rebuild the canonical app so the visible UI matches the source.
+  Jesse has authorized this integration; do not leave finished fixes only in feature
+  checkouts or require another chat to find and cherry-pick them. Keep PRs as review records.
+- Preserve concurrent edits. Use a normal fast-forward for the main checkout; resolve
+  any overlap in the owning feature checkout before updating main. Never reset or force it.
+- Use one shared build directory, `<repository>/target`, and one compiler job on this
+  machine. Do not create a separate multi-GB build cache for each task. Retire merged,
+  inactive, clean checkouts and disposable build files; preserve unfinished source.
+- Run required hooks through normal commits. Report their actual running, failed or
+  passed state and failure reason. Do not pretest, bypass hooks, or call an unrun check passed.
+
+## Isolate source only when needed
 
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
-- Use a separate named branch and worktree for each task. Start from a committed
-  baseline; uncommitted files in another checkout are not part of a branch.
+- Reuse the existing task checkout where possible. When isolation is needed, use a
+  named branch and a checkout under this repository’s `.worktrees/` folder. Start from
+  a committed baseline; uncommitted files in another checkout are not part of a branch.
 - State your branch, worktree, intended files, and validation before editing.
 - If another agent owns overlapping files, coordinate the overlap first. Do not
   restart its task, silently replace its implementation, or change its checkout.
-- Keep build outputs and preview instances local to your worktree. Do not restart
-  another agent's running app or operate its control port.
+- Share the canonical build directory; keep preview ownership explicit. Do not restart
+  another agent's running app or operate its control port without coordinating it.
 
 ## Preserve ownership
 
@@ -78,9 +93,8 @@ uncommitted files. Do not treat a local patch or a running preview as a commit.
   and help text even when Git reports a clean merge.
 - Keep a feature PR scoped to the feature. If the application baseline is missing,
   establish it separately with the user's authorization before opening the PR.
-- Create the PR with accurate evidence and unresolved limitations. Creating a PR
-  does not authorize merging it; merge only when the user requests it and checks
-  permit it.
+- Create the PR with accurate evidence and unresolved limitations. For this project, Jesse has requested integration to main; finish that integration
+  rather than stopping at PR creation. Keep required checks and unresolved results visible.
 - Updating an actively used main checkout must be a normal safe fast-forward that
   preserves concurrent edits. If Git refuses, stop and report the overlap; do not
   force the working files to match the remote.

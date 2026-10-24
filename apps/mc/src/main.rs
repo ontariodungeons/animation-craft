@@ -27,6 +27,7 @@ mod snapshot;
 mod studios;
 mod telemetry;
 mod touch;
+mod mayhem;
 mod settings;
 mod theme;
 mod tui;
@@ -1195,6 +1196,63 @@ fn main() {
                     "guidance": "Use --stop to kill all MCP bridges. Use --clean to remove stale endpoints."
                 });
                 outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+                return;
+            }
+            if a.flag_report {
+                // MAYHEM report: a focused summary plus the expanded lists behind it,
+                // and the measured trend since the first recorded sample.
+                let servers = mcp_watch::scan();
+                let (by, findings) = mcp_watch::analyze(&servers);
+                let (rows, errors) = studios::rows();
+                let sample = mayhem::Sample::capture(&servers, rows.len(), errors.len());
+                mayhem::record(&sample);
+                let mut families: Vec<_> = by.iter().collect();
+                families.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
+                let hosts: std::collections::BTreeSet<u32> = servers.iter().map(|s| s.host_pid).collect();
+                let report = json!({
+                    "ok": true,
+                    "summary": {
+                        "mcp_servers": servers.len(),
+                        "mcp_agents": hosts.len(),
+                        "mcp_rss_kb": servers.iter().map(|s| s.rss_kb).sum::<u64>(),
+                        "collisions": findings.len(),
+                        "studios": rows.len(),
+                        "stale_studios": errors.len(),
+                        "host_mem_used_kb": sample.host_mem_used_kb,
+                        "host_mem_total_kb": sample.host_mem_total_kb,
+                    },
+                    "trend": mayhem::trend().map(|t| json!({
+                        "samples": t.samples,
+                        "span_seconds": t.span_ms / 1000,
+                        "mcp_servers": mayhem::delta_text(t.servers_delta, "servers"),
+                        "mcp_agents": mayhem::delta_text(t.agents_delta, "agents"),
+                        "mcp_memory": mayhem::delta_text(t.rss_delta_kb, "MiB"),
+                        "collisions": mayhem::delta_text(t.collisions_delta, "collisions"),
+                        "stale_studios": mayhem::delta_text(t.stale_delta, "stale"),
+                        "host_memory": mayhem::delta_text(t.host_mem_delta_kb, "MiB"),
+                        "improving": mayhem::improved(t.servers_delta) || mayhem::improved(t.rss_delta_kb),
+                    })),
+                    "findings": findings.iter().map(|f| json!({"family": f.family, "problem": f.text})).collect::<Vec<_>>(),
+                    "families": families.iter().map(|(family, group)| {
+                        let mut who: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::<&str, usize>::new();
+                        for s in group.iter() { *who.entry(s.host.as_str()).or_default() += 1; }
+                        json!({
+                            "family": family,
+                            "count": group.len(),
+                            "agents": who,
+                            "rss_kb": group.iter().map(|s| s.rss_kb).sum::<u64>(),
+                            "servers": group.iter().map(|s| json!({"pid": s.pid, "host": s.host, "age_seconds": s.age_secs, "rss_kb": s.rss_kb, "write_root": s.write_root})).collect::<Vec<_>>(),
+                        })
+                    }).collect::<Vec<_>>(),
+                    "studios": rows,
+                    "stale_studios": errors,
+                    "next_step": if findings.is_empty() {
+                        "No collisions. Keep the sample cadence running; the trend shows whether the footprint shrinks."
+                    } else {
+                        "Close the colliding agents for the families listed, then run this report again: fewer servers and less memory is the goal."
+                    },
+                });
+                outln!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
                 return;
             }
             if a.flag_stop {
