@@ -61,6 +61,7 @@ The design is locked by a ratchet, not by a big-bang rewrite. Any commit that to
 
 | 8 | Beaker | `components.json` (one entry per element) + one `style.css`; no inline styling; looks/density as token sets | `ui/components.json`, `ui/style.css`, `ui/app.js` `el()`, inline-style sites, `tests/ui-lint.mjs`, `tests/panels.mjs` | 7 |
 | 9 | Gonzo | TUI theme: colours and styles only in `theme.rs`, palette read from `style.css` | `apps/mc/src/theme.rs` (new), `apps/mc/src/center*.rs`, `apps/mc/src/logo.rs` | 5, 8 |
+| 10 | Statler | Words / lyrics (Design > Words, Song sub-sections) onto the contract; land unmerged `5c4be84`, `550162d` | `ui/words.js`, Song region of `ui/app.js`, Design tab in `ui/index.html`, `crates/engine/src/words.rs` | 8 (UI part) |
 
 `ui/` and `tests/` are under `apps/magicstudio-shell/`. Shared files (`companion-boxes.js`, `.githooks/pre-commit`) change in the order above, one owner at a time.
 
@@ -265,6 +266,29 @@ The TUI is the Rust side's UI and has the same problem: 31 `Color::Rgb(…)` lit
 - [ ] Acceptance: `Color::Rgb` and `Style::default()` appear only in `theme.rs` (`grep -rc` over `apps/mc/src`), and `apps/mc/src` total lines are lower than before the task. Commit message ends with the counts before → after.
 - [ ] Commit `refactor(tui): one theme, read from the Studio palette (#23)`.
 
+### Task 10 (Statler): Words / lyrics onto the panel architecture
+
+**State on 2026-10-23 (checked by patch content, not SHA):** branch `feature/song-lyrics-reader` (worktree `.worktrees/song-lyrics-reader`, tip `550162d`, 63 commits behind main).
+
+| Commit | What | In main? |
+|---|---|---|
+| `9559ef1` | artist's lyric sheet and song controls in the Song section | **yes**, as `17668a1` |
+| `3fc6a0d` | Words lyric animations composed as HyperFrames tracks | **yes**, as `6ddc530` |
+| `5c4be84` | Design > Words panel (`ui/words.js` 234 lines, 42-line CSS block, Design tab in `index.html`, `app.js` +1) | **no** |
+| `550162d` | Words view controls out of the unsaved-edit guard; `words.rs` reports `timing_disagreements` (reference vs measured > 0.5 s) | **no** |
+
+The unmerged UI predates the contract and would fail `ui-lint` as is: 3 hex + 55 px outside `:root`, own `.design-*` classes, 5 inline style writes in `words.js`, 2 hand-built dots, no panel registration. That is expected, not a defect; it is good work written before the rules.
+
+Statler keeps ownership of its code. Nobody else rewrites `songSection()`, `lyricModel`/`lyricSheet`/`lyricsBody`, `words.js` or the Design tab.
+
+**Consumes:** Task 8's first commit (`components.json` + `el()` reading it). **Files:** Statler's: `ui/words.js`, the Song/Words region of `ui/app.js` (`songSection()`, lyric model/sheet/body), the Design tab in `ui/index.html`, `crates/engine/src/words.rs`; entries in `ui/components.json`; component rules in `ui/style.css` (coordinate the file with Beaker: one owner at a time).
+
+- [ ] Land `550162d`'s `words.rs` change on main first (engine-only, independent of the UI contract); test `timing_disagreements_are_reported_not_chosen` in the engine tests.
+- [ ] Port `5c4be84` + the UI half of `550162d` onto current main in the existing worktree (no new worktree), then convert: Design view and Words panel get `components.json` entries (`component`, `look`, `label`); `.design-*` rules become component looks/tokens (if a needed component does not exist, e.g. a segmented switch, ask the coordinator and it is added to the contract once, for everyone); inline styles → component rules or custom properties; dots → `dot(state)`; panels register through `el()`.
+- [ ] Convert `songSection()`'s hand-built sub-section heads (own dot, title, meta, `data-state`) to the shared panel head.
+- [ ] Acceptance: `ui-lint` per-file counts for `words.js` and the Song region at 0; `mc panels --check` shows 0 `untracked`/`unstyled` in the Design and Song views; `ui-lint --report` totals not higher than before the port.
+- [ ] Commits `fix(engine): words report timing disagreements (#26)`, `feat(ui): Design > Words panel on the panel contract (#26)`, `refactor(ui): Song sub-sections use the shared panel head (#26)`.
+
 ## Order
 
-Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first) → Task 8 after Task 7 → Task 9 after Tasks 5 and 8.
+Task 1 → (Task 2 ∥ Task 3) → (Task 4 ∥ Task 5) → Task 6 any time after 1 → Task 7 after Task 2 (all of it touches `companion-boxes.js`/`app.js`, which Tasks 1 and 2 change first) → Task 8 after Task 7 → Task 9 after Tasks 5 and 8. Task 10: the `words.rs` step any time; the UI port after Task 8's first commit.
