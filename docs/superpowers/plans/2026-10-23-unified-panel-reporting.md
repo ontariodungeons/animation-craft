@@ -122,6 +122,19 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 - The panel record gains `look` (string). `unconfigured` also lists a registered panel whose `look` is missing or not in the list.
 - One palette: the TUI signal colours come from the same values as `--signal-0..3`. Today they differ (UI green `#35e1c0`, TUI `#4fe88f`; amber `#f0a83c`/`#f6c168`; red `#e0524a`/`#ff7682`). Jesse picks which side wins; until then the UI tokens win.
 
+### One universal stylesheet, components locked
+
+`style.css` (899 lines today) splits into three layers, loaded in this order from `index.html`:
+
+| File | Holds | May contain |
+|---|---|---|
+| `ui/tokens.css` | palette, `--signal-*`, scale (`--space-*`, `--text-*`, `--radius`), motion | the ONLY literal values (hex, px, ms) in the shell |
+| `ui/components.css` | `.dot`, `.panel-head`, `.panel-empty`, `.panel-status`, buttons/chips, every `[data-look]` / `[data-density]` token set | `var(--…)` only; no literals |
+| `ui/views.css` | page layout: grids, columns, where panels sit | layout properties on view containers; **no selector that names a component class** (`.panel-*`, `.dot`, …) |
+
+- A view changes how a component looks only by choosing its `look`/`density` at registration, never by a CSS override. That is what "components lock it in" means, and `ui-lint.mjs` enforces it: literals outside `tokens.css`, and any `views.css` selector containing a component class, are counted (target 0).
+- Rust `tui_signal_colours_match_ui_tokens` reads `ui/tokens.css`, so the TUI, the Studio and the pets share one palette file.
+
 ## Global Constraints
 
 - No new IPC channel, no new poller (companions contract C13).
@@ -213,10 +226,10 @@ companionBoxes.register("block-song", { label: "Song", look: "control", density:
 
 ### Task 8 (Beaker): Looks, density and one scale
 
-**Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/style.css`, `ui/companion-boxes.js` (`register` accepts `look`, `density`; `panels()` items carry `look`), `ui/app.js` (panel builders pass `look`), `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: `apps/mc/src/center.rs` `feedback_tests` (coordinate with Gonzo, who owns that file).
+**Consumes:** Task 7 (`.panel-head`, `.panel-empty`, tokens, `ui-lint`). **Files:** `ui/style.css` → split into `ui/tokens.css`, `ui/components.css`, `ui/views.css` (update `ui/index.html` links), `ui/companion-boxes.js` (`register` accepts `look`, `density`; `panels()` items carry `look`), `ui/app.js` (panel builders pass `look`), `tests/ui-lint.mjs` + baseline, `tests/panels.mjs`. Palette test: `apps/mc/src/center.rs` `feedback_tests` (coordinate with Gonzo, who owns that file).
 
-- [ ] Tests: `panels.mjs` — `look is reported in panels()`; `unknown look is listed as unconfigured`; `missing look is listed as unconfigured`. `ui-lint.mjs` — new counts `raw_px_in_panel_rules` (today 69) and `context_overrides` (today 18), baseline today, target 0. Rust — `tui_signal_colours_match_ui_tokens` parses `apps/magicstudio-shell/ui/style.css` `:root` and compares with `signal_color(Signal::*)`.
-- [ ] Add the scale tokens; rewrite heads and empties as one rule each plus token sets per look/density; delete the merged modifiers and the context overrides; set `data-look`/`data-density` from `register()`.
+- [ ] Tests: `panels.mjs` — `look is reported in panels()`; `unknown look is listed as unconfigured`; `missing look is listed as unconfigured`. `ui-lint.mjs` — new counts `raw_px_in_panel_rules` (today 69) and `context_overrides` (today 18), baseline today, target 0. Rust — `tui_signal_colours_match_ui_tokens` parses `apps/magicstudio-shell/ui/tokens.css` and compares with `signal_color(Signal::*)`.
+- [ ] Split the stylesheet into the three layers first (pure move, no visual change; lint counts `literals_outside_tokens` and `component_selectors_in_views` with today's baseline). Then add the scale tokens; rewrite heads and empties as one rule each plus token sets per look/density; delete the merged modifiers and the context overrides; set `data-look`/`data-density` from `register()`.
 - [ ] Set the TUI signal colours to the UI token values (one `fn signal_color`).
 - [ ] Make the baseline per file and enforce the "Refactor as you go" ratchet in `ui-lint.mjs` (staged UI files with non-zero counts must lower one). Lower the baseline in the same commit; final: `raw_px_in_panel_rules` 0, `context_overrides` 0.
 - [ ] Visual check of each view with the live-window screenshot recipe before each commit; Jesse judges the look.
