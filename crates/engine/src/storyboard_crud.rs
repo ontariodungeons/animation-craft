@@ -120,8 +120,8 @@ fn regroup(packets: &mut Vec<Value>, words: &[Value], p: &Value, operation: &str
     }
     Ok(())
 }
-fn rebuild(s:&mut Session, board:&Value, design:&Value, packets:Vec<Value>)->Result<Value>{
-    let result=crate::storyboard::cmd_workshop_build_storyboard(s,&json!({"draft":true,"_scenes":packets,"_page_content":design["text_fields"],"_previous_board":board}))?;
+fn rebuild(s:&mut Session, board:&Value, design:&Value, packets:Vec<Value>, backgrounds:Option<Vec<Value>>)->Result<Value>{
+    let result=crate::storyboard::cmd_workshop_build_storyboard(s,&json!({"draft":true,"_scenes":packets,"_page_content":design["text_fields"],"_previous_board":board,"_backgrounds":backgrounds}))?;
     if result["ok"]!=true || result["mapping"]["needs_correction"]==true { return Err(invalid(&format!("Storyboard draft could not be saved; current version unchanged: {result}"))); }
     let mut next=result;next["draft"]=json!(false);next["status"]=json!("saved; needs review");
     let design=json!({"placements":next["design"]["placements"].as_array().cloned().unwrap_or_default(),"text_edits":[],"text_fields":next["pdf_fields"],"dirty":false});
@@ -139,11 +139,22 @@ pub fn create(s:&mut Session,p:&Value)->Result<Value>{
 }
 pub fn delete(s:&mut Session,p:&Value)->Result<Value>{change(s,p,"delete")}
 pub fn update(s:&mut Session,p:&Value)->Result<Value>{
+    if let Some(ids)=p["backgrounds"].as_array(){
+        let (board,design,scenes)=packets(s)?;check_revision(&board,&design,p)?;
+        let mut records=Vec::new();let mut seen=std::collections::HashSet::new();
+        for id in ids{
+            let id=id.as_str().ok_or_else(||invalid("backgrounds must contain registered image IDs"))?;
+            if !seen.insert(id){return Err(invalid("Duplicate background image"));}
+            let asset=s.project_assets.iter().find(|a|a.id==id && a.kind=="image" && a.path.as_ref().is_some_and(|p|p.is_file())).ok_or_else(||invalid("Select an existing registered background image"))?;
+            records.push(json!({"id":asset.id,"asset_id":asset.id,"name":asset.name,"file":asset.path,"category":"Backgrounds & locations"}));
+        }
+        return rebuild(s,&board,&design,scenes,Some(records));
+    }
     if p["edge"].is_string(){return change(s,p,"update");}
     if p["field"]=="status"{
         let (board,design,mut scenes)=packets(s)?;check_revision(&board,&design,p)?;
-        let status=p["value"].as_str().filter(|s|["draft","needs review","approved"].contains(s)).ok_or_else(||invalid("Unknown storyboard status"))?;
-        let i=scene_index(&scenes,p)?;scenes[i]["status"]=json!(status);return rebuild(s,&board,&design,scenes);
+        let status=p["value"].as_str().filter(|s|crate::storyboard::SCENE_STATUSES.contains(s)).ok_or_else(||invalid("Unknown storyboard status"))?;
+        let i=scene_index(&scenes,p)?;scenes[i]["status"]=json!(status);return rebuild(s,&board,&design,scenes,None);
     }
     if let Some(path)=p["restore"].as_str(){
         let (current,design,_)=packets(s)?;check_revision(&current,&design,p)?;
@@ -164,7 +175,7 @@ fn change(s:&mut Session,p:&Value,operation:&str)->Result<Value>{
     let words=words(&board)?;
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     regroup(&mut scenes,&words,p,operation,&format!("scene-{stamp}"))?;
-    rebuild(s,&board,&design,scenes)
+    rebuild(s,&board,&design,scenes,None)
 }
 pub(crate) fn search(s:&mut Session,query:&str)->Result<Value>{
     let design=crate::storyboard_design::inspect(s,&json!({}))?;let query=query.to_lowercase();
@@ -173,6 +184,22 @@ pub(crate) fn search(s:&mut Session,query:&str)->Result<Value>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn backgrounds_only_return_images_assigned_to_the_locations_section(){
+        let root=std::env::temp_dir().join(format!("storyboard-backgrounds-{}",std::process::id()));std::fs::create_dir_all(root.join("storyboard")).unwrap();
+        let image=root.join("sky.png");image::RgbaImage::from_pixel(1,1,image::Rgba([10,20,30,255])).save(&image).unwrap();
+        let mut s=Session::default();s.execute("project.new",json!({"path":root.join("Song.magic")})).unwrap();
+        s.execute("project.add_asset",json!({"path":image,"kind":"image","id":"sky","load":false})).unwrap();
+        let path=root.join("storyboard/movie-board.json");
+        let mut board=json!({"page_plan":[{"kind":"locations","sheet":[{"id":"inventory"}]},{"kind":"scene"}],"design":{"placements":[{"page":2,"asset":"sky","path":image}]}});
+        std::fs::write(&path,board.to_string()).unwrap();
+        assert!(backgrounds(&mut s,&json!({})).unwrap()["images"].as_array().unwrap().is_empty());
+        board["page_plan"][0]["sheet"]=json!([{"id":"sky","file":image}]);std::fs::write(&path,board.to_string()).unwrap();let before=std::fs::read(&path).unwrap();
+        assert_eq!(backgrounds(&mut s,&json!({})).unwrap()["images"][0]["asset_id"],"sky");
+        assert_eq!(std::fs::read(&path).unwrap(),before);
+        std::fs::remove_file(image).unwrap();assert!(backgrounds(&mut s,&json!({})).unwrap()["images"].as_array().unwrap().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn stale_versions_and_unsaved_drafts_block_scene_changes(){
         let board=json!({"pdf":"version-one.pdf"});let clean=json!({"dirty":false});
