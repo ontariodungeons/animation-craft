@@ -118,3 +118,18 @@ vm.runInContext(`var repeated={...anim,scope:{section:'verse_1',occurrence:2},wo
  wordsPanel.studio={sections:[{section:'verse_1',occurrence:1,clips:[{word_id:'l1/w0',start:1}]},{section:'verse_1',occurrence:2,clips:[{word_id:'l1/w0',start:11}]}]};`,c);
 assert.equal(vm.runInContext('wordsAt(anim.words[0])',c),1);
 assert.equal(vm.runInContext('wordsAt(repeated.words[0])',c),11,'repeated lines use their own clip timing');
+
+// Scene choices come only from the storyboard background section, never the whole asset library.
+c.convertFileSrc=path=>`asset://${path}`;
+vm.runInContext(`wordsPanel.backgrounds={images:[{asset_id:'sea',name:'Sea',path:'/sea.png'},{asset_id:'lagoon',name:'Lagoon',path:'/lagoon.png'}]};
+ wordsPanel.read.images=[{id:'character',name:'Whale',path:'/whale.png'}];anim.background_asset='sea';`,c);
+const backgrounds=vm.runInContext('wordsBackdropPicker(anim)',c);
+const choices=flat(backgrounds).filter(n=>n.tag==='button');
+assert.equal(choices.length,2);assert.equal(choices[0]['aria-pressed'],'true');
+assert.equal(choices[1]['aria-label'],'Use background Lagoon');
+assert.equal(flat(backgrounds).some(n=>n.tag==='select'),false);
+saves.length=0;await choices[1].onclick();
+assert.equal(saves.find(r=>r.id==='words.save').params.background_asset,'lagoon');
+vm.runInContext('wordsPanel.backgrounds={images:[]}',c);
+assert.equal(flat(vm.runInContext('wordsBackdropPicker(anim)',c)).filter(n=>n.tag==='button').length,0,'empty storyboard never falls back to library images');
+console.log('PASS storyboard-only background thumbnail selection');

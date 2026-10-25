@@ -48,12 +48,14 @@ async function wordsOpen() {
   if (!view) return;
   view.replaceChildren(el("p", { class: "panel-empty inline" }, "Loading the words…"));
   try {
-    const [read, align, studio] = await Promise.all([
+    const [read, align, studio, backgrounds] = await Promise.all([
       wordsCommand("words.read"),
       wordsCommand("words.align"),
       wordsCommand("words.studio_track").catch((error) => ({ error: String(error).replace(/^.*?: /, "") })),
+      wordsCommand("storyboard.backgrounds").catch(error=>({images:[],error:String(error).replace(/^.*?: /, "")})),
     ]);
     wordsPanel.read = read;
+    wordsPanel.backgrounds = backgrounds;
     wordsPanel.align = align;
     await wordsLoadFonts(read.fonts || []);
     wordsPanel.studio = studio;
@@ -922,13 +924,20 @@ function wordsStyleFields(anim) {
 }
 
 function wordsBackdropPicker(anim) {
-  const select=el("select",{"aria-label":"Scene image for this verse",onchange:async(event)=>{
-    try {const result=await wordsCommand("words.save",{animation_id:anim.animation_id,expected_source_revision:anim.source_revision,background_asset:event.target.value,_expected_project:state.project});
-      if(result.conflict){toast("This verse changed elsewhere; reloaded");} wordsPanel.stage=null;await wordsOpen();
-    }catch(error){toast(String(error));}
-  }},el("option",{value:""},"Choose this verse’s scene image…"),...(wordsPanel.read.images||[]).map(a=>el("option",{value:a.id},a.name)));
-  select.value=select.defaultValue=anim.background_asset||"";
-  return el("label",{class:"words-backdrop"},el("span",{class:"meta"},"Scene"),select);
+  const backgrounds=wordsPanel.backgrounds||{images:[]};
+  return el("div",{class:"words-backdrop",role:"group","aria-label":"Storyboard backgrounds"},
+    el("span",{class:"meta"},"Scene"),
+    backgrounds.images?.length ? el("div",{class:"words-backgrounds"},...backgrounds.images.map(image=>el("button",{
+      class:"words-background",title:image.name,"aria-label":`Use background ${image.name}`,"aria-pressed":String(anim.background_asset===image.asset_id),
+      onclick:async()=>{
+        try {const result=await wordsCommand("words.save",{animation_id:anim.animation_id,expected_source_revision:anim.source_revision,background_asset:image.asset_id,_expected_project:state.project});
+          if(result.conflict)toast("This verse changed elsewhere; reloaded");
+          wordsPanel.stage=null;await wordsOpen();
+        }catch(error){toast(String(error));}
+      }
+    },el("img",{src:convertFileSrc(image.path),alt:image.name,loading:"lazy"}))))
+      : el("span",{class:"muted",title:backgrounds.error||"Assign images in the storyboard’s Backgrounds & locations section"},
+        backgrounds.error ? "Storyboard backgrounds unavailable" : "Add backgrounds in Storyboard"));
 }
 
 // The stage is the finished video, kept across re-renders so editing never reloads it.
