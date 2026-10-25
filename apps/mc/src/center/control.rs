@@ -304,7 +304,7 @@ pub(super) fn look(c:&Center,buffer:&ratatui::buffer::Buffer,frame:u64,endpoint:
  let tiles=gang_tiles(c);
  let agents:Vec<_>=tiles.iter().enumerate().map(|(i,(name,identity,status,word))|{
   let agent=&c.state["agent_gang"][i];
-  json!({"index":i,"name":name,"icon":moppet_icon(name),"colour":colour(*identity),"status_colour":colour(*status),"status":word,"pane":agent["pane_id"],"provider":agent["agent"],"task":agent["terminal_title_stripped"],"task_source":agent["task_source"].as_str().unwrap_or("terminal title; not an assignment record"),"selected":i==c.gang_selected,"studio":agent["pane_id"].as_str().map(|pane|crate::studios::assignment(pane,&c.studios))})
+  json!({"index":i,"name":name,"icon":moppet_icon(name),"colour":colour(*identity),"status_colour":colour(*status),"status":word,"pane":agent["pane_id"],"provider":agent["agent"],"task":agent["terminal_title_stripped"],"task_source":agent["task_source"].as_str().unwrap_or("terminal title; not an assignment record"),"selected":i==c.gang_selected,"studio":agent["studio"]})
  }).collect();
  let host=c.dials.as_ref().filter(|_|c.scope.is_none()).map(|h|json!({"cpu_percent":h.cpu_pct,"cores":h.cores,"memory_used_kb":h.mem_used_kb,"memory_total_kb":h.mem_total_kb,"swap_used_kb":h.swap_used_kb,"swap_total_kb":h.swap_total_kb,"load":h.load,"age_ms":h.at.elapsed().as_millis()}));
  let processes:Vec<_>=c.procs.iter().filter(|_|c.scope.is_none()).map(|p|json!({"pid":p.pid,"name":p.name,"cpu_percent":p.cpu_pct,"rss_kb":p.rss_kb})).collect();

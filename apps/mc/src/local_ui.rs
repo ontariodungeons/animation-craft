@@ -36,7 +36,7 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                 .as_array()
                 .cloned()
                 .unwrap_or_default();
-            choose_studio(&sessions, crate::studios::pinned_endpoint().as_deref(), &std::env::current_dir().unwrap_or_default())?
+            choose_studio(&sessions, crate::studios::pinned_endpoint().as_deref(), std::env::var("HERDR_PANE_ID").ok().as_deref(), &std::env::current_dir().unwrap_or_default())?
                 .map(|one| (one["endpoint"].as_str().unwrap_or_default().trim_start_matches("unix:").to_string(), one))
         };
         if let Some((path, feedback)) = selected {
@@ -135,10 +135,17 @@ mod tests {
     }
 }
 
-fn choose_studio(sessions: &[Value], pin: Option<&str>, cwd: &Path) -> Result<Option<Value>, String> {
+fn choose_studio(sessions: &[Value], pin: Option<&str>, pane: Option<&str>, cwd: &Path) -> Result<Option<Value>, String> {
     if let Some(endpoint) = pin {
         return sessions.iter().find(|s|s["endpoint"].as_str()==Some(endpoint)).cloned().map(Some)
             .ok_or_else(||"This agent's assigned Studio is unavailable; no other window was selected. Run mc studios to reconnect.".into());
+    }
+    if let Some(pane) = pane {
+        let owned: Vec<_> = sessions.iter().filter(|s|s["identity"]["agent_pane"].as_str()==Some(pane)).collect();
+        return match owned.as_slice() {
+            [one] => Ok(Some((*one).clone())),
+            _ => Err("No unique Studio assigned to this agent. Use mc studios <port> or pass project=<path>; no other agent's app was selected.".into()),
+        };
     }
     match sessions {
         [] => Ok(None),
@@ -153,7 +160,11 @@ mod assignment_tests {
     #[test]
     fn a_closed_assignment_never_falls_through_to_somebody_elses_only_window() {
         let sessions = vec![json!({"endpoint":"unix:/other.sock","active_project":"/other.magic"})];
-        assert!(choose_studio(&sessions, Some("unix:/mine.sock"), Path::new("/")).is_err());
-        assert_eq!(choose_studio(&sessions, Some("unix:/other.sock"), Path::new("/")).unwrap().unwrap()["active_project"], "/other.magic");
+        assert!(choose_studio(&sessions, Some("unix:/mine.sock"), Some("p1"), Path::new("/")).is_err());
+        assert_eq!(choose_studio(&sessions, Some("unix:/other.sock"), Some("p1"), Path::new("/")).unwrap().unwrap()["active_project"], "/other.magic");
+        assert!(choose_studio(&sessions,None,Some("p1"),Path::new("/")).is_err(),"an unassigned agent cannot borrow another project's only app");
+        assert!(choose_studio(&sessions,None,None,Path::new("/")).unwrap().is_some(),"human single-window behavior stays available");
+        let owned=vec![json!({"endpoint":"unix:/mine.sock","identity":{"agent_pane":"p1"}})];
+        assert_eq!(choose_studio(&owned,None,Some("p1"),Path::new("/")).unwrap().unwrap()["endpoint"],"unix:/mine.sock");
     }
 }

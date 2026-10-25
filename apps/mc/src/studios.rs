@@ -47,6 +47,14 @@ pub fn assignment(pane: &str, discovery: &Value) -> Value {
     assignment_from(pane, pin.as_deref(), discovery["sessions"].as_array().map(Vec::as_slice).unwrap_or(&[]))
 }
 
+pub fn annotate_agents(agents: &mut Value, discovery: &Value) {
+    for agent in agents.as_array_mut().into_iter().flatten() {
+        if let Some(pane) = agent["pane_id"].as_str() {
+            agent["studio"] = assignment(pane, discovery);
+        }
+    }
+}
+
 fn assignment_from(pane: &str, pin: Option<&str>, sessions: &[Value]) -> Value {
     let matches: Vec<_> = sessions.iter().filter(|s| match pin {
         Some(endpoint) => s["endpoint"].as_str() == Some(endpoint),

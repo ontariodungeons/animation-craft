@@ -250,6 +250,7 @@ impl Center {
                         }
                     }
                 }
+                crate::studios::annotate_agents(&mut self.agent_gang,&self.studios);
                 self.state["agent_gang"]=self.agent_gang.clone();
                 // The backstage watch: read what an agent last said, straight from its pane.
                 if self.scope.is_some(){self.spy=self.selected_agent().and_then(|g|g["pane_id"].as_str()).map(|pane|roles::activity(self,pane));}
@@ -1538,7 +1539,7 @@ fn mops_agents(c:&Center)->Vec<MopsAgent>{
    Some(format!("{:.1}M today · {} sessions · provider total",u["todayTotalTokens"].as_u64()? as f64/1_000_000.0,u["todaySessions"].as_u64().unwrap_or(0)))
   });
   let session=g.map(|g|&g["agent_session"]);
-  let studio=field("pane_id").map(|pane|crate::studios::assignment(&pane,&c.studios)).unwrap_or(Value::Null);
+  let studio=g.map(|g|g["studio"].clone()).unwrap_or(Value::Null);
   MopsAgent{index,pane:g.and_then(|g|g["pane_id"].as_str()).map(str::to_owned),name:name.clone(),icon:moppet_icon(name),identity:*identity,provider:provider.clone().unwrap_or_else(||if g.is_none(){"in-app".into()}else{"?".into()}),
    word,state:*state,mcp,task:field("terminal_title_stripped").unwrap_or_else(||if g.is_none(){"the app's own agent".into()}else{String::new()}),
    folder:field("cwd").or(field("foreground_cwd")).unwrap_or_default(),
@@ -2336,6 +2337,7 @@ mod feedback_tests {
         c.state["agent_gang"]=c.agent_gang.clone();
         c.studios=json!({"sessions":[{"endpoint":"unix:/owned.sock","active_project":"/songs/A.magic","writer_owner":true,
             "identity":{"agent_pane":"ownership-fixture","control_port":19971,"pid":123,"build_id":"build-proof","branch":"main"}}]});
+        crate::studios::annotate_agents(&mut c.agent_gang,&c.studios);c.state["agent_gang"]=c.agent_gang.clone();
         let agents=mops_agents(&c);let facts=mops_facts(&c,&agents[0]);
         for(label,value)in[("Port","19971"),("Project","A.magic"),("Build","main · build-proof"),("Access","project writer")]{
             assert!(facts.iter().any(|f|f.0==label&&f.1==value),"{label}: {facts:?}");
