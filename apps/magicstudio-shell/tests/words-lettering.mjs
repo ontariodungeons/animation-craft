@@ -133,3 +133,24 @@ assert.equal(saves.find(r=>r.id==='words.save').params.background_asset,'lagoon'
 vm.runInContext('wordsPanel.backgrounds={images:[]}',c);
 assert.equal(flat(vm.runInContext('wordsBackdropPicker(anim)',c)).filter(n=>n.tag==='button').length,0,'empty storyboard never falls back to library images');
 console.log('PASS storyboard-only background thumbnail selection');
+
+// Cue timing: an overlay effect saves the engine's overlay_offset / overlay_duration from its anchor; a drawing
+// keeps offset / duration / hold; the picked cue's Start/End fields and replay show in Timing and in Motion.
+vm.runInContext(`wordsPanel.selected='verse-1';anim.kinetic={...anim.kinetic,overlay:'godrays',draws:[{word_id:'l1/w0',stroke:'hill',offset:0,duration:1.4,hold:0.5}]};
+  wordsPanel.read.document={animations:[anim]};wordsLines=()=>[{id:'l1',words:anim.words}];wordsLineSpan=()=>({start:0,end:4});`,c);
+saves.length=0;
+await vm.runInContext(`wordsRetimeCue({id:'o',kind:'overlay',animation_id:'verse-1',anchor:10,start:10,end:20,line_id:'l1'},12.5,18)`,c);
+const overlaySave=saves.find(r=>r.id==='words.save').params.kinetic;
+assert.equal(overlaySave.overlay_offset,2.5,'overlay start is saved relative to its anchor');
+assert.equal(overlaySave.overlay_duration,5.5,'overlay length is saved as its duration');
+saves.length=0;
+await vm.runInContext(`wordsRetimeCue({id:'d',kind:'drawing',index:0,animation_id:'verse-1',anchor:1,start:1,end:2.9,draw_end:2.4,line_id:'l1'},1.5,3.5)`,c);
+const draw=saves.find(r=>r.id==='words.save').params.kinetic.draws[0];
+assert.equal(JSON.stringify([draw.offset,draw.duration,draw.hold]),'[0.5,1.4,0.6]','drawing timing keeps offset, draw duration and hold');
+vm.runInContext(`wordsPanel.read.graphics=[{id:'o',kind:'overlay',name:'Sun rays',animation_id:'verse-1',anchor:10,start:10,end:20}];wordsPanel.cue='o';`,c);
+const editor=vm.runInContext('wordsCueEditor(anim)',c);
+assert.equal(flat(editor).filter(n=>n.tag==='input'&&n.type==='number').length,2,'Start and End seconds are editable');
+assert.ok(flat(editor).some(n=>n.tag==='button'&&String(n['aria-label']).includes('Replay')),'the cue can be replayed');
+vm.runInContext(`wordsPanel.mode='motion'`,c);
+assert.ok(vm.runInContext('wordsInnerControls(anim)',c).some(n=>n?.['data-cue-kind']==='overlay'),'Motion shows the cue timing editor too');
+console.log('PASS cue timing: overlay offset/duration, drawing offset/duration/hold, Start/End fields in Timing and Motion');

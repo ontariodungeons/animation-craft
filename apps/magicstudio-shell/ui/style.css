@@ -622,8 +622,6 @@ body.at-home .tabs, body.at-home .target { visibility: hidden; }
 .sb-link:hover,.sb-link:focus-visible { background:color-mix(in srgb,var(--accent) 9%,transparent); border-color:var(--accent); outline:none; }
 .panel-head .agent-title { margin-right:auto; }
 
-body.movie-document:not(.project-details-open) #blocks { display:none; }
-#project-details { flex-shrink:0; }
 
 .sb-sheet.drop-target { outline:var(--size-2) dashed var(--accent); outline-offset:var(--size-4); }
 .sb-sheet .design-placement { position:absolute; max-width:none; object-fit:contain; border-radius:0; box-shadow:none; cursor:grab; touch-action:none; z-index:3; }
@@ -1113,7 +1111,7 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-timing { display: flex; flex-direction: column; gap: var(--space-3); }
 .words-timing-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .words-timing-summary > p { flex-basis: 100%; }
-#view-design:not([data-words-mode="timing"]) .words-cue-handle { display: none; }
+#view-design:not([data-words-mode="timing"]):not([data-words-mode="motion"]) .words-cue-handle { display: none; }
 
 .words-link-anchor { fill: var(--surface); stroke: var(--accent); stroke-width: 2; pointer-events: all; cursor: ns-resize; touch-action: none; }
 .words-link-anchor:hover, .words-link-anchor:focus { fill: var(--accent); stroke: var(--text); outline: none; }
@@ -1135,3 +1133,12 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-background img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm); }
 .words-background[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 var(--size-1) var(--accent); }
 .words-background:hover { border-color: var(--accent); }
+
+/* Lyrics centre: no box and no opaque fill over the connectors; the scene is a flush 16:9 drawing surface
+   (1920x1080) sized from the height it may take, and the transport sits right on its lower edge. */
+#view-design.active > #words-main { background: none; border: 0; box-shadow: none; padding: 0; gap: var(--space-2); }
+#words-main .words-preview { gap: 0; }
+#words-main .words-preview > #words-preview { max-height: none; width: min(100%, calc(var(--words-available) * .46 * 16 / 9)); aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
+#words-main .words-preview > .transport { margin-top: 0; border-top: 0; }
+#words-main .words-timing-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+#words-main .words-timing-summary input[type="number"] { width: 6em; }

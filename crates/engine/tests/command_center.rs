@@ -132,6 +132,7 @@ fn shared_observation_does_not_confuse_files_or_saved_receipts_with_readiness() 
     assert_eq!(find("song")["state"],"missing");
     assert_eq!(find("transcript")["state"],"missing");
     assert_eq!(find("deckcraft")["state"],"missing");
+    assert_eq!(find("storyboard")["state"],"unknown");
     assert_eq!(find("hyperframes")["state"],"missing");
     let art=observed["next_commands"].as_array().unwrap().iter().find(|v|v["params"]["filter"]=="project.add_asset").unwrap();
     assert_eq!(art["command"],"command.list");assert_eq!(art["operation"],"exec");assert_eq!(art["label"],"See asset import arguments");assert!(art["reason"].as_str().unwrap().starts_with("No reference art is registered"));

@@ -475,7 +475,7 @@ function wordsRoll(animations, end) {
       }
       return image;
     };
-    const handle = (edge, label) => cue.index == null ? null : el("button", { class: `words-cue-handle ${edge}`, "aria-label": `${label} ${cue.name}`, title: `${label} · drag or use ↑ ↓ (Shift for fine timing)`,
+    const handle = (edge, label) => cue.index == null && cue.kind !== "overlay" ? null : el("button", { class: `words-cue-handle ${edge}`, "aria-label": `${label} ${cue.name}`, title: `${label} · drag or use ↑ ↓ (Shift for fine timing)`,
       onpointerdown: (event) => wordsCueDrag(event, cue, edge), onclick: (event) => event.stopPropagation(),
       onkeydown: (event) => {
         if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
@@ -533,11 +533,15 @@ function wordsPreviewCue(cue) {
 }
 async function wordsRetimeCue(cue, start, end) {
   const anim = wordsCurrent();
-  if (!anim?.kinetic || cue.index == null) return;
-  const duration = Math.min(cue.draw_end - cue.start, end - start);
-  const draws = anim.kinetic.draws.map((d, i) => i === cue.index ? { ...d, offset: +(start - cue.anchor).toFixed(2), duration: +duration.toFixed(2), hold: +(end - start - duration).toFixed(2) } : d);
-  wordsPanel.previewRange = wordsCueWindow({ ...cue, start, end }, wordsLineSpan(anim, cue.line_id));
+  if (!anim?.kinetic || (cue.index == null && cue.kind !== "overlay")) return;
+  start = Math.max(0,start);
+  end = Math.max(start + .05, end);
+  wordsPanel.previewRange = wordsCueWindow({ ...cue, start, end }, wordsLineSpan(anim, cue.line_id || wordsLines(anim)[0]?.id));
   wordsPanel.autoPlay = false;
+  // An overlay is timed from its anchor (the engine's overlay_offset / overlay_duration).
+  if (cue.kind === "overlay") return wordsKinetic({ overlay_offset: +(start - cue.anchor).toFixed(2), overlay_duration: +(end - start).toFixed(2) });
+  const duration = Math.min((cue.draw_end ?? end) - cue.start, end - start);
+  const draws = anim.kinetic.draws.map((d, i) => i === cue.index ? { ...d, offset: +(start - cue.anchor).toFixed(2), duration: +duration.toFixed(2), hold: +(end - start - duration).toFixed(2) } : d);
   await wordsKinetic({ draws });
 }
 function wordsCueDrag(event, cue, edge) {
@@ -553,10 +557,10 @@ addEventListener("pointermove", (event) => {
   if (!d) return;
   const delta = (event.clientY - d.y) / d.scale;
   if (d.edge === "start") {
-    d.cue.start = Math.max(0, Math.min(d.before.anchor + 30, Math.max(d.before.anchor - 30, d.before.start + delta)));
+    d.cue.start = Math.max(0, Math.min(d.before.anchor + 600, Math.max(d.before.anchor - 600, d.before.start + delta)));
     d.cue.end = d.cue.start + d.before.end - d.before.start;
-    d.cue.draw_end = d.cue.start + d.before.draw_end - d.before.start;
-  } else d.cue.end = Math.max(d.cue.start + .05, Math.min(d.cue.start + 30, d.before.end + delta));
+    if (d.before.draw_end != null) d.cue.draw_end = d.cue.start + d.before.draw_end - d.before.start;
+  } else d.cue.end = Math.max(d.cue.start + .05, Math.min(d.cue.start + (d.cue.kind === "overlay" ? 600 : 30), d.before.end + delta));
   const frame = [...$("view-design").querySelectorAll(".words-graphic")].find((f) => f.dataset.cueId === d.cue.id);
   if (frame) wordsPlace(frame, d.cue.start, d.cue.end - d.cue.start);
   wordsArrows($("view-design"));
@@ -696,13 +700,16 @@ function wordsNow(t) {
   }
   if (wordsPanel.playing) wordsFollow(t);
 }
-// The lyrics and the film roll move with the song: the moment t sits level with the middle of the
-// stage, where the eye rests. While playing this tracks every frame; a new pick glides there.
+// The lyrics and the film roll move with the song: the moment t sits level with the transport under the
+// stage, so the playheads track playback there. While playing this tracks every frame; a new pick glides.
 function wordsFollow(t, smooth = false) {
-  const view = $("view-design"), tl = view?.querySelector(".words-tl"), eye = view?.querySelector(".lyric-canvas, .words-preview");
+  const view = $("view-design"), tl = view?.querySelector(".words-tl");
+  const eye = view?.querySelector(".words-preview .transport, .words-toolbar") || view?.querySelector(".lyric-canvas, .words-preview");
   if (!tl || !eye) return;
-  const seconds = Number(tl.style.getPropertyValue("--len-s"));
-  const target = tl.offsetTop + tl.clientHeight * t / seconds - (eye.getBoundingClientRect().top - view.getBoundingClientRect().top + eye.clientHeight / 2);
+  const seconds = Number(tl.style.getPropertyValue("--len-s")), box = view.getBoundingClientRect();
+  // Both measured in the view's scroll space (offsetTop is relative to the column, not the view).
+  const tlTop = tl.getBoundingClientRect().top - box.top + view.scrollTop, eyeY = eye.getBoundingClientRect().top - box.top;
+  const target = tlTop + tl.clientHeight * t / seconds - eyeY;
   view.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "instant" });
 }
 
@@ -802,17 +809,23 @@ function wordsLinkControls() {
     toggle("front","Bring connections in front",'<svg viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12"/><path d="M8 4h12v12M11 13l8-8M13 5h6v6"/></svg>'),
     toggle("pulse","Slow connection colour blend",'<svg viewBox="0 0 24 24"><path d="M3 12c3-8 6 8 9 0s6 8 9 0"/></svg>'));
 }
-function wordsTimingPanel(anim) {
+// The picked cue (drawing or effect): exact Start and End seconds and a replay, in Timing and Motion.
+function wordsCueEditor(anim) {
   const cue=wordsPanel.read.graphics?.find(c=>c.id===wordsPanel.cue&&c.animation_id===anim.animation_id);
-  return el("section",{class:"words-timing","aria-label":"Timing controls"},wordsLinkControls(),
-    cue ? el("div",{class:"words-timing-summary"},el("strong",{},cue.name),el("span",{class:"meta"},`${wordsClock(cue.start)} – ${wordsClock(cue.end)}`),
-      el("button",{class:"icon","aria-label":"Replay linked learning moment",title:"Replay the lyric and drawing together",html:ICONS.play,onclick:()=>wordsPreviewCue(cue)}),
-      el("p",{class:"muted"},cue.word?`Linked to “${cue.word}” · drag the left point to choose another word.`:"This effect overlaps the connected lyric lines."))
-      : el("p",{class:"muted"},"Select a drawing clip or connection. Move its top point, trim its lower edge, then replay the linked moment."));
+  if(!cue)return el("p",{class:"muted"},"Select a drawing or effect clip on the right. Drag its top to move it, its lower edge to trim it, or type exact seconds here.");
+  const field=(label,value,apply)=>{const input=el("input",{type:"number",step:"0.01",min:"0","aria-label":`${label} of ${cue.name} (seconds)`,
+    onchange:e=>{const v=Number(e.target.value);if(e.target.value!=="" && Number.isFinite(v) && v>=0){e.target.defaultValue=e.target.value;apply(v);}}});input.value=input.defaultValue=value.toFixed(2);return el("label",{class:"field-row"},label,input);};
+  return el("div",{class:"words-timing-summary","data-cue-kind":cue.kind},el("strong",{},cue.name),
+    field("Start",cue.start,v=>wordsRetimeCue(cue,v,v+cue.end-cue.start)),field("End",cue.end,v=>wordsRetimeCue(cue,cue.start,v)),
+    el("button",{class:"icon","aria-label":"Replay linked learning moment",title:"Replay the lyric and this cue together",html:ICONS.play,onclick:()=>wordsPreviewCue(cue)}),
+    el("p",{class:"muted"},cue.word?`Linked to “${cue.word}” · drag the left point to choose another word.`:"This effect overlaps the connected lyric lines."));
+}
+function wordsTimingPanel(anim) {
+  return el("section",{class:"words-timing","aria-label":"Timing controls"},wordsLinkControls(),wordsCueEditor(anim));
 }
 function wordsInnerControls(anim) {
   if(wordsPanel.mode==="timing")return [wordsTimingPanel(anim)];
-  if(anim.kinetic)return [wordsLayers(anim)];
+  if(anim.kinetic)return wordsPanel.mode==="motion"?[wordsCueEditor(anim),wordsLayers(anim)]:[wordsLayers(anim)];
   wordsPanel.tab=wordsPanel.mode==="motion"?"draw":"look";
   return [wordsLanes(anim),...wordsOptions(anim)];
 }

@@ -18,7 +18,50 @@ pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
  doc["dirty"]=json!(doc["dirty"]==true);
  doc["deck"]=board["deck"].clone();doc["pdf"]=board["pdf"].clone();
  doc["text_fields"]=native_fields(s,&board)?;
+ doc["readiness"]=content_readiness(&doc);
  Ok(doc)
+}
+
+
+/// A document existing is different from its authoring fields being complete.
+fn content_readiness(design:&Value)->Value{
+ let fields=design["text_fields"].as_array();
+ let mut missing=Vec::new();
+ for field in fields.into_iter().flatten(){
+  if field["field"]=="source" || field["field"]=="lyrics"{continue;}
+  let value=field["value"].as_str().unwrap_or("").trim();
+  let placed=design["placements"].as_array().into_iter().flatten().any(|p|p["page"]==field["page"]);
+  let instruction=value.starts_with("Describe the story, characters") || value.starts_with("Name this location and place") || value.starts_with("Name the cast and reusable props") || value.starts_with("Register existing artwork") || value.contains("\nRegister existing artwork") || value.starts_with("Place the scene reference") || (value.starts_with("See the four panels") && !placed);
+  if (value.is_empty() || instruction) && !(field["field"]=="reference" && placed){
+   missing.push(json!({"page":field["page"],"field":field["field"]}));
+  }
+ }
+ let known=fields.is_some_and(|f|!f.is_empty());
+ let complete=known && missing.is_empty() && design["dirty"]!=true;
+ let reason=if !known{"Storyboard content has not been inspected".into()}else if !missing.is_empty(){format!("{} storyboard fields still need content",missing.len())}else if design["dirty"]==true{"Save pending storyboard changes".into()}else{"Storyboard fields filled; visual approval remains separate".into()};
+ json!({"state":if complete{"ready"}else if known{"blocked"}else{"unknown"},"reason":reason,"missing_fields":missing})
+}
+
+#[cfg(test)]
+mod readiness_tests{
+ use super::*;
+ #[test]
+ fn writing_area_uses_the_existing_card_not_the_placeholder_height(){
+  let shape=json!({"altText":"user.story","box":[78,276,924,25.2]});
+  assert_eq!(writing_area(&shape,&json!([{"altText":"layout.card.story","box":[60,220,960,280]}])),json!([78,276,924,206.0]));
+  assert_eq!(writing_area(&shape,&json!([])),shape["box"]);
+ }
+ #[test]
+ fn previews_and_a_saved_template_are_not_complete(){
+  let mut d=json!({"dirty":false,"placements":[],"text_fields":[{"page":1,"field":"story","value":"Describe the story, characters and progression of this song."},{"page":5,"field":"reference","value":"Place the scene reference here"}]});
+  assert_eq!(content_readiness(&d)["missing_fields"].as_array().unwrap().len(),2);
+  d["text_fields"][0]["value"]=json!("The ship circles a sunny sandbar.");
+  d["placements"]=json!([{"page":5}]);
+  assert_eq!(content_readiness(&d)["state"],"ready");
+  d["dirty"]=json!(true);
+  assert_eq!(content_readiness(&d)["state"],"blocked");
+  assert_eq!(content_readiness(&json!({}))["state"],"unknown");
+ }
 }
 
 fn pdf_run(s:&Session,steps:Value)->Result<Value>{
@@ -48,19 +91,25 @@ fn pdf_previews(s:&Session,pdf:&Path,folder:&Path,count:usize)->Result<Vec<std::
  for page in 1..=count{let path=folder.join(format!("slide-{page:03}.png"));crate::workspace::run_tool_in(&crate::workshop::project_dir(s)?,"pdfcraft-cli",&["render".into(),pdf.to_string_lossy().into_owned(),"--page".into(),page.to_string(),"--dpi".into(),"72".into(),"--out".into(),path.to_string_lossy().into_owned()])?;paths.push(path);}
  Ok(paths)
 }
-fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
+pub(crate) fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
  let dir=crate::workshop::project_dir(s)?;let mut baseline=base(&board);let original=baseline["pdf"].as_str().ok_or_else(||invalid("Storyboard PDF is missing"))?;
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
  let pdf=out.join("movie-board.pdf");let text_base=out.join("text-base.pdf");
  let mut values=serde_json::Map::new();for edit in design["text_edits"].as_array().into_iter().flatten(){values.insert(edit["name"].as_str().ok_or_else(||invalid("Missing PDF field name"))?.into(),edit["value"].clone());}
  let mut steps=vec![json!({"tool":"doc_open","args":{"path":original}})];
+ // Older PDFs used the placeholder line height instead of the template card's writing area.
+ for field in design["text_fields"].as_array().into_iter().flatten(){
+  let r=&field["rect"];let rect=json!([r[0],r[1],r[0].as_f64().unwrap_or(0.0)+r[2].as_f64().unwrap_or(0.0),r[1].as_f64().unwrap_or(0.0)+r[3].as_f64().unwrap_or(0.0)]);
+  steps.push(json!({"tool":"form_set_props","args":{"doc":1,"field":field["name"],"rect":rect,"multiline":true}}));
+ }
+
  if !values.is_empty(){steps.push(json!({"tool":"form_fill","args":{"doc":1,"values":values}}));}
  steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":text_base}}));
  for item in design["placements"].as_array().into_iter().flatten(){let r=&item["rect"];let x=r[0].as_f64().unwrap_or(0.0);let y=r[1].as_f64().unwrap_or(0.0);let w=r[2].as_f64().unwrap_or(0.0);let h=r[3].as_f64().unwrap_or(0.0);steps.push(json!({"tool":"page_add_image","args":{"doc":1,"page":item["page"],"path":item["path"],"rect":[x,y,x+w,y+h]}}));}
  steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":pdf}}));pdf_run(s,json!(steps))?;
  let count=board["previews"].as_array().map_or(0,Vec::len);let previews=pdf_previews(s,&pdf,&out.join("pages"),count)?;
  baseline["previews"]=json!(pdf_previews(s,&text_base,&out.join("text-pages"),count)?);
- board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
+ board["manifest"]=json!(out.join("manifest.json"));board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
  write(&out.join("manifest.json"),&board)?;write(&dir.join("storyboard/movie-board.json"),&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
  Ok(json!({"ok":true,"pdf":pdf,"dirty":false,"placements":design["placements"],"editable_pdf":true}))
 }
@@ -75,7 +124,9 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
   }
   let report=pdf_run(s,json!([{"tool":"doc_open","args":{"path":pdf}},{"tool":"form_fields","args":{"doc":1}}]))?;
   let actual=report["steps"][1]["result"][0]["fields"].as_array().ok_or_else(||invalid("PDFCraft returned no form fields"))?;
-  let mut result=Vec::new();for metadata in fields{let field=actual.iter().find(|f|f["name"]==metadata["name"]).ok_or_else(||invalid("Saved PDF field missing; refusing stale metadata"))?;let mut item=metadata.clone();item["value"]=field["value"].clone();result.push(item);}
+  let mut source=board.clone();source["pdf_fields"]=Value::Null;
+  let layout=native_fields(s,&source)?;
+  let mut result=Vec::new();for metadata in fields{let field=actual.iter().find(|f|f["name"]==metadata["name"]).ok_or_else(||invalid("Saved PDF field missing; refusing stale metadata"))?;let mut item=metadata.clone();item["value"]=field["value"].clone();if let Some(area)=layout.as_array().into_iter().flatten().find(|f|f["id"]==item["id"] && f["page"]==item["page"]){item["rect"]=area["rect"].clone();}result.push(item);}
   let val=json!(result);
   if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
   return Ok(val);
@@ -103,7 +154,7 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
    let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user.")).or_else(||(role=="auto.scene.lyrics").then_some("lyrics"));
    if let Some(field)=field{
     let scene=page.checked_sub(first_scene).map(|n|n+1);
-    fields.push(json!({"page":page,"scene":scene,"field":field,"role":role,"id":shape["id"],"rect":shape["box"],"value":shape["text"].as_str().unwrap_or_default()}));
+    fields.push(json!({"page":page,"scene":scene,"field":field,"role":role,"id":shape["id"],"rect":writing_area(shape, &slide["shapes"]),"value":shape["text"].as_str().unwrap_or_default()}));
    }
   }
  }
@@ -111,6 +162,18 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
  let val=json!(fields);
  if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
  Ok(val)
+}
+
+fn writing_area(shape:&Value,shapes:&Value)->Value{
+ let role=shape["altText"].as_str().unwrap_or_default();
+ let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user."));
+ let mut rect=shape["box"].clone();
+ if let Some(card)=field.and_then(|f|shapes.as_array()?.iter().find(|s|s["altText"]==format!("layout.card.{f}"))){
+  if let (Some(y),Some(bottom),Some(height))=(rect[1].as_f64(),card["box"][1].as_f64(),card["box"][3].as_f64()){
+   rect[3]=json!((bottom+height-18.0-y).max(rect[3].as_f64().unwrap_or(0.0)));
+  }
+ }
+ rect
 }
 
 /// Stage a native text replacement in the existing design draft, then use its Save path.

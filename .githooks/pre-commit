@@ -108,6 +108,9 @@ run_step "Lyrics lettering and graphics regression" node apps/magicstudio-shell/
 run_step "UI lint ratchet" node apps/magicstudio-shell/tests/ui-lint.mjs --ratchet --report || exit $?
 
 STAGED_FILES=$(git diff --cached --name-only)
+if grep -qE '^pipeline/(deckcraft_template|movie_board|test_movie_board)\.py$' <<<"$STAGED_FILES"; then
+    run_step "storyboard template regression" python pipeline/test_movie_board.py || exit $?
+fi
 if grep -qE '^(scripts/agent_window.py|tests/test_agent_window.py)$' <<<"$STAGED_FILES"; then
     run_step "agent window context regression" python tests/test_agent_window.py || exit $?
 fi

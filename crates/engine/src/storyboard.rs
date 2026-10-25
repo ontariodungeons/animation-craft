@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::{EngineError, Result, Session};
 use crate::workshop::{
     ASSETS_DIR, IMAGE_EXTENSIONS, STORYBOARD_DIR, STORYBOARD_PDF,
-    brief_header, files_in, panel_files, project_dir, song_seconds, stage_body, studio,
+    files_in, panel_files, project_dir, song_seconds,
     transcript_files, workshop_status,
 };
 use crate::workspace::{has_extension, resolve_workspace_path, run_tool_in};
@@ -357,118 +357,6 @@ pub(crate) fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
     Ok(list)
 }
 
-/// The project's backgrounds, characters and props: the workshop's asset files plus connected
-/// project images (the backlot mirror lists them all).
-fn overview_images(s: &Session, dir: &Path) -> Vec<PathBuf> {
-    let mut images = crate::workshop::workshop_asset_files(dir);
-    for a in &s.project_assets {
-        if let Some(p) = &a.path
-            && p.is_file()
-            && has_extension(p, IMAGE_EXTENSIONS)
-            && !images.contains(p)
-        {
-            images.push(p.clone());
-        }
-    }
-    images
-}
-
-/// What a Cast & sets card shows.
-pub(crate) enum CardArt {
-    /// One picture (a reference image or a background).
-    Image(PathBuf),
-    /// A character's parts, assembled (they share one canvas).
-    Parts(Vec<PathBuf>),
-    /// An empty slot to fill in.
-    Empty,
-}
-
-/// One card on the Cast & sets board: its section, its name and its art.
-pub(crate) struct Card {
-    pub section: &'static str,
-    pub name: String,
-    pub art: CardArt,
-}
-
-/// Cards on the board: a character per `assets/characters/<name>/` with a `parts/` or
-/// `reference/` folder, a location per `assets/backgrounds/<name>/` (or image directly in it).
-/// Each section has at least one row of three, padded with empty slots to fill in.
-pub(crate) fn board_cards(dir: &Path) -> Vec<Card> {
-    let images = |d: &Path| {
-        let mut f = files_in(d, Some(IMAGE_EXTENSIONS));
-        f.sort();
-        f
-    };
-    let subdirs = |d: &Path| {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
-        v.sort();
-        v
-    };
-    let name = |p: &Path| p.file_stem().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-    let assets = dir.join(ASSETS_DIR);
-    let mut cast: Vec<Card> = subdirs(&assets.join("characters"))
-        .into_iter()
-        .filter_map(|c| {
-            let art = match (images(&c.join("reference")).into_iter().next(), images(&c.join("parts"))) {
-                (Some(r), _) => CardArt::Image(r),
-                (None, parts) if !parts.is_empty() => CardArt::Parts(parts),
-                _ => return None,
-            };
-            Some(Card { section: "CAST", name: name(&c), art })
-        })
-        .collect();
-    let backgrounds = assets.join("backgrounds");
-    let mut sets: Vec<Card> = subdirs(&backgrounds)
-        .into_iter()
-        .filter_map(|b| {
-            let files = images(&b);
-            let own = files.iter().find(|f| name(f) == name(&b)).or(files.first())?.clone();
-            Some(Card { section: "LOCATIONS", name: name(&b), art: CardArt::Image(own) })
-        })
-        .chain(images(&backgrounds).into_iter().map(|f| Card { section: "LOCATIONS", name: name(&f), art: CardArt::Image(f) }))
-        .collect();
-    for (list, section) in [(&mut cast, "CAST"), (&mut sets, "LOCATIONS")] {
-        while list.len() < 3 || list.len() % 3 != 0 {
-            list.push(Card { section, name: String::new(), art: CardArt::Empty });
-        }
-    }
-    cast.into_iter().chain(sets).collect()
-}
-
-/// Board geometry (portrait A4): where each card goes, as (page offset, x, y), and how many
-/// pages the board takes. The first page also holds the master prompt and the locks.
-pub(crate) const BOARD_TOP: f64 = 236.0;
-pub(crate) fn board_layout(cards: &[Card]) -> (Vec<(usize, f64, f64)>, usize) {
-    let (pw, ph, m, gap) = (595.0, 842.0, 32.0, 12.0);
-    let cw = (pw - 2.0 * m - 2.0 * gap) / 3.0;
-    let row_h = cw * 9.0 / 16.0 + 48.0;
-    let (mut page, mut y, mut col) = (0usize, BOARD_TOP, 0usize);
-    let mut last_section = "";
-    let mut out = Vec::new();
-    for card in cards {
-        if card.section != last_section {
-            if col != 0 {
-                y += row_h;
-                col = 0;
-            }
-            y += 22.0;
-            last_section = card.section;
-        }
-        if col == 0 && y + row_h > ph - 40.0 {
-            page += 1;
-            y = 96.0;
-        }
-        out.push((page, m + col as f64 * (cw + gap), y));
-        col += 1;
-        if col == 3 {
-            col = 0;
-            y += row_h;
-        }
-    }
-    (out, page + 1)
-}
-
-/// A character's parts stacked in order (they share one canvas), cropped to what is drawn,
 /// written to `out`. None when they don't share a canvas.
 pub fn assembled_parts(parts: &[PathBuf], out: &Path) -> Option<PathBuf> {
     let mut canvas: Option<image::RgbaImage> = None;
@@ -498,27 +386,7 @@ pub fn assembled_parts(parts: &[PathBuf], out: &Path) -> Option<PathBuf> {
 /// The PDF page of scene 1: after the lyrics page and the Cast & sets board.
 fn first_scene_page(dir: &Path) -> usize {
     if let Some(page)=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["first_scene_page"].as_u64()) {return page as usize;}
-    2 + board_layout(&board_cards(dir)).1
-}
-
-/// Text typed into the existing storyboard.pdf's fields, by field name, so a rebuild keeps it.
-fn saved_field_values(dir: &Path, pdf: &Path) -> std::collections::HashMap<String, String> {
-    let script = dir.join(".storyboard.read.pdfcraft.json");
-    let steps = json!([{"tool": "doc_open", "args": {"path": pdf}}, {"tool": "form_fields", "args": {"doc": 1}}]);
-    if !pdf.is_file() || std::fs::write(&script, steps.to_string()).is_err() {
-        return Default::default();
-    }
-    let out = run_tool_in(dir, "pdfcraft-cli", &["run".into(), "--script".into(), script.to_string_lossy().into_owned(), "--report".into()]);
-    let _ = std::fs::remove_file(&script);
-    let report: Value = out.ok().and_then(|o| serde_json::from_str(&o).ok()).unwrap_or_default();
-    report["steps"][1]["result"][0]["fields"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|f| f["type"] == json!("text"))
-        .filter_map(|f| Some((f["name"].as_str()?.to_string(), f["value"].as_str()?.to_string())))
-        .filter(|(_, v)| !v.trim().is_empty())
-        .collect()
+    2
 }
 
 pub(crate) fn scene_label(i: usize, scene: &Value) -> String {
@@ -572,7 +440,7 @@ fn storyboard_inputs_changed(dir: &Path) -> Option<std::time::SystemTime> {
 
 /// Builds storyboard/storyboard.pdf with pdfcraft-cli.
 pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<Value> {
-    if params["template"]=="backlot" {
+    if params["template"].is_null() || params["template"]=="backlot" {
         let dir=project_dir(s)?;
         let active_board=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file()).or_else(||transcript_files(&dir).into_iter().next()).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
@@ -585,13 +453,13 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         }else{dir.join("storyboard").join(format!("movie-board-{stamp}"))};
         let title=title.to_owned();
         let count=storyboard_scenes(&dir)?.len();
-        let scenes=(1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?;
+        let scenes=if let Some(scenes)=params["_scenes"].as_array(){scenes.clone()}else if active_board["page_plan"].is_array(){crate::storyboard_crud::packets(s)?.2}else{(1..=count).map(|scene|cmd_storyboard_read(s,&json!({"scene":scene}))).collect::<Result<Vec<_>>>()?};
         std::fs::create_dir_all(&out)?;
         let scene_map=out.join("scene-map.json");
         let provenance=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let recording_duration=song_seconds(&dir);
         let timing_extent=recording_duration.or_else(||provenance["duration_sec"].as_f64()).or_else(||scenes.last().and_then(|v|v["end"].as_f64()));
-        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){Value::Null}else if active_board["source_transcript"]==json!(transcript){active_board["source_captions"].clone()}else{json!(caption_file(&dir))},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"page_content":params["_page_content"],"previous_board":params["_previous_board"],"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){Value::Null}else if active_board["source_transcript"]==json!(transcript){active_board["source_captions"].clone()}else{json!(caption_file(&dir))},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
         let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
         if params["allow_timing_overrun"]==true{if params["draft"]!=true{return Err(EngineError::InvalidParams("Timing-overrun source may only produce an explicitly warned draft".into()));}args.push("--allow-timing-overrun".into());}
@@ -610,301 +478,7 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         if result["ok"]==true && result["draft"]!=true{std::fs::write(dir.join("storyboard/movie-board.json"),result.to_string())?;}
         return Ok(result);
     }
-    let dir = project_dir(s)?;
-    let title = s.project_path.as_ref().and_then(|p| p.file_stem()).and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
-    let transcript_path = match caption_file(&dir) {
-        Some(srt) => srt,
-        None => {
-            let path = transcript_files(&dir).into_iter().next().ok_or_else(|| {
-                EngineError::InvalidParams("transcribe or import the transcript first: the storyboard lines scenes up with it".into())
-            })?;
-            let _transcript: Value = serde_json::from_str(&std::fs::read_to_string(&path)?)
-                .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?;
-            path
-        }
-    };
-    let total = song_seconds(&dir);
-    let scene_list = storyboard_scenes(&dir)?;
-    let panels = panel_files(&dir);
-    let out_dir = dir.join(STORYBOARD_DIR);
-    let pdf = out_dir.join(STORYBOARD_PDF);
-    // Text typed into the current PDF's fields wins over everything else on a rebuild.
-    let saved = saved_field_values(&dir, &pdf);
-    let theme = dir.join(STORYBOARD_DIR).join(".theme");
-    std::fs::create_dir_all(&theme)?;
-    // The Old MacDonald template's palette: cream page, rust kickers, slate bars.
-    let swatch = |name: &str, rgb: [u8; 3]| -> Result<PathBuf> {
-        let p = theme.join(format!("{name}.png"));
-        // pdfcraft-cli 0.9 refuses tiny images ("the image is too small"); a solid swatch scales freely.
-        image::RgbaImage::from_pixel(32, 32, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).save(&p)?;
-        Ok(p)
-    };
-    let card_fill = swatch("card", [0xFF, 0xF8, 0xEC])?;
-    let rust_fill = swatch("rust", [0x9A, 0x3B, 0x2B])?;
-    let slate_fill = swatch("slate", [0x2F, 0x5D, 0x73])?;
-    let line_fill = swatch("line", [0xE2, 0xD3, 0xBA])?;
-    const PAGE: &str = "#F4E9D7";
-    const INK: &str = "#292A25";
-    const MUTE: &str = "#7A7062";
-    const RUST: &str = "#9A3B2B";
-    const ON_SLATE: &str = "#F4E9D7";
-    const SLATE_LABEL: &str = "#A9C7D6";
-
-    let asset_images = overview_images(s, &dir);
-    let cards = board_cards(&dir);
-    let (card_spots, board_pages) = board_layout(&cards);
-    let first_scene_page = 2 + board_pages;
-    let pages = 1 + board_pages + scene_list.len() + 1;
-    let mut layout: Vec<Value> = Vec::new();
-
-    // Portrait A4, to fill the tall storyboard pane.
-    let (pw, ph, m) = (595.0_f64, 842.0_f64, 32.0_f64);
-    let mut steps = vec![
-        json!({"tool": "doc_create", "args": {"from": "blank", "pages": pages, "width": pw, "height": ph, "name": title}}),
-        json!({"tool": "doc_background", "args": {"doc": 1, "color": PAGE}}),
-    ];
-    let text = |page: usize, rect: [f64; 4], t: String, size: f64, color: &str, bold: bool| {
-        json!({"tool": "page_add_text", "args": {"doc": 1, "page": page, "rect": rect, "text": t, "size": size, "font": "helvetica", "color": color, "bold": bold}})
-    };
-    let image = |page: usize, path: &Path, rect: [f64; 4]| json!({"tool": "page_add_image", "args": {"doc": 1, "page": page, "path": path, "rect": rect}});
-    let header = |page: usize, kicker: String, heading: String| {
-        vec![
-            image(page, &rust_fill, [0.0, 0.0, pw, 6.0]),
-            text(page, [m, 22.0, pw - m - 120.0, 36.0], kicker, 8.5, RUST, true),
-            text(page, [m, 38.0, pw - m - 120.0, 86.0], heading, 19.0, INK, true),
-        ]
-    };
-    // Fillable fields: (name, page, rect, multiline, style), their starting values, and images.
-    let mut fields: Vec<(String, usize, [f64; 4], bool, &str)> = Vec::new();
-    let mut values = serde_json::Map::new();
-    let mut field_images: Vec<(String, PathBuf)> = Vec::new();
-    let mut field = |name: String, page: usize, rect: [f64; 4], multiline: bool, style: &'static str, start: Option<String>| {
-        let value = saved.get(&name).cloned().or(start).filter(|v| !v.trim().is_empty());
-        if let Some(v) = value {
-            values.insert(name.clone(), json!(v));
-        }
-        fields.push((name, page, rect, multiline, style));
-    };
-    let label = |page: usize, at: [f64; 2], t: &str, color: &str| text(page, [at[0], at[1], at[0] + 240.0, at[1] + 12.0], t.into(), 7.0, color, true);
-
-    // Page 1: the lyrics, one numbered row per scene, each a link to its page.
-    let studio_info = studio(&dir);
-    let kicker = format!("{} · STORYBOARD", studio_info.name.clone().unwrap_or_else(|| "SONG".into()).to_uppercase());
-    steps.extend(header(1, kicker, title.clone()));
-    let liner = files_in(&dir.join("liner-notes"), None);
-    let facts = [
-        format!("Song  {}", s.song_audio.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("not set")),
-        format!("Captions  {}", transcript_path.strip_prefix(&dir).unwrap_or(&transcript_path).display()),
-        format!("Liner notes  {}", if liner.is_empty() { "none attached".to_string() } else { liner.iter().filter_map(|p| p.file_name()?.to_str()).collect::<Vec<_>>().join(", ") }),
-        format!("Edit in  {}", s.video_target),
-        format!("Status  {}", if s.draft_approved { "approved" } else { "draft · needs review" }),
-    ];
-    steps.push(image(1, &card_fill, [m, 92.0, pw - m, 150.0]));
-    steps.push(text(1, [m + 14.0, 100.0, pw - m - 14.0, 146.0], facts.join("     "), 8.5, MUTE, false));
-    if let Some(intent) = &studio_info.intent {
-        let first_line = intent.lines().find(|l| !l.trim().is_empty()).unwrap_or_default();
-        steps.push(text(1, [m, 156.0, pw - m, 176.0], first_line.chars().take(160).collect(), 8.0, MUTE, false));
-    }
-    steps.push(label(1, [m, 182.0], "LYRICS · TAP A LINE TO OPEN ITS SCENE", RUST));
-    let row_step = ((ph - 200.0 - 30.0) / scene_list.len().max(1) as f64).min(34.0);
-    for (i, scene) in scene_list.iter().enumerate() {
-        let y = 198.0 + i as f64 * row_step;
-        let row = [m, y, pw - m, y + row_step - 4.0];
-        steps.push(image(1, &card_fill, row));
-        let range = format!("{}–{}", clock(scene["start"].as_f64().unwrap_or(0.0)), clock(scene["end"].as_f64().unwrap_or(0.0)));
-        let lyric = scene["lines"][0]["text"].as_str().map(str::to_owned);
-        let mid = y + (row_step - 4.0) / 2.0 - 7.0;
-        steps.push(text(1, [m + 12.0, mid, m + 40.0, mid + 16.0], format!("{:02}", i + 1), 11.0, RUST, true));
-        steps.push(text(1, [m + 44.0, mid + 1.0, m + 110.0, mid + 15.0], range, 8.5, MUTE, false));
-        steps.push(match lyric {
-            Some(words) => text(1, [m + 112.0, mid, pw - m - 10.0, mid + 16.0], words, 11.0, INK, true),
-            None => text(1, [m + 112.0, mid, pw - m - 10.0, mid + 16.0], "Instrumental · design this stretch".into(), 11.0, MUTE, false),
-        });
-        steps.push(json!({"tool": "link_add", "args": {"doc": 1, "page": 1, "rect": row, "to_page": first_scene_page + i, "visible": false}}));
-    }
-
-    // Cast & sets: the instruction board. Master prompt and locks, then a card per character
-    // and per location; every box is a field to type or drop an image into.
-    for k in 0..board_pages {
-        let title = if board_pages > 1 { format!("Cast & sets {}/{board_pages}", k + 1) } else { "Cast & sets".into() };
-        steps.extend(header(2 + k, "INSTRUCTION BOARD".into(), title));
-    }
-    steps.push(label(2, [m, 92.0], "MASTER PROMPT · STYLE, MATERIALS, WHAT NEVER APPEARS", RUST));
-    field("board_master_prompt".into(), 2, [m, 106.0, pw - m, 160.0], true, "body", None);
-    steps.push(label(2, [m, 168.0], "LOCKS · WHAT MUST STAY THE SAME IN EVERY SCENE", RUST));
-    field("board_locks".into(), 2, [m, 182.0, pw - m, 220.0], true, "body", None);
-    let cw = (pw - 2.0 * m - 24.0) / 3.0;
-    let mut last_section = "";
-    for (n, (card, (pg, x, y))) in cards.iter().zip(&card_spots).enumerate() {
-        let page = 2 + pg;
-        if card.section != last_section {
-            steps.push(label(page, [m, y - 18.0], card.section, RUST));
-            last_section = card.section;
-        }
-        let img_box = [*x, *y, x + cw, y + cw * 9.0 / 16.0];
-        steps.push(image(page, &card_fill, [img_box[0], img_box[1], img_box[2], img_box[3] + 30.0]));
-        let slug = format!("{}_{n}", card.section.to_lowercase());
-        // Transparent art is cropped to what is drawn, so a character fills its card.
-        let art = match &card.art {
-            CardArt::Image(p) => assembled_parts(std::slice::from_ref(p), &theme.join(format!("{slug}.png"))).or(Some(p.clone())),
-            CardArt::Parts(parts) => assembled_parts(parts, &theme.join(format!("{slug}.png"))),
-            CardArt::Empty => None,
-        };
-        if let Some(p) = art {
-            layout.push(json!({"page": page, "path": p, "rect": img_box}));
-            field_images.push((format!("{slug}_image"), p));
-        }
-        field(format!("{slug}_image"), page, img_box, false, "image", None);
-        field(format!("{slug}_name"), page, [img_box[0] + 6.0, img_box[3] + 6.0, img_box[2] - 6.0, img_box[3] + 24.0], false, "name",
-            (!card.name.is_empty()).then(|| card.name.clone()));
-    }
-
-    // One page per scene: the still, its fields, and the motion/caption bar.
-    let image_box = [m, 96.0, pw - m, 96.0 + (pw - 2.0 * m) * 9.0 / 16.0];
-    let card_top = image_box[3] + 12.0;
-    let bar_top = 646.0;
-    for (i, scene) in scene_list.iter().enumerate() {
-        let page = first_scene_page + i;
-        let n = i + 1;
-        let range = format!("{} – {}", clock(scene["start"].as_f64().unwrap_or(0.0)), clock(scene["end"].as_f64().unwrap_or(0.0)));
-        let lines = scene["lines"].as_array().cloned().unwrap_or_default();
-        let lyric = lines.iter().filter_map(|l| l["text"].as_str()).collect::<Vec<_>>().join(" / ");
-        let heading = match scene["title"].as_str().filter(|t| !t.starts_with("Scene ")) {
-            Some(t) => t.to_string(),
-            None if lyric.is_empty() => "Instrumental".into(),
-            None => lyric.clone(),
-        };
-        steps.extend(header(page, format!("SCENE {n} OF {} · {range}", scene_list.len()), heading));
-        field(format!("scene{n}_status"), page, [pw - m - 110.0, 24.0, pw - m, 42.0], false, "status",
-            Some(scene["status"].as_str().unwrap_or("draft").to_string()));
-        steps.push(image(page, &card_fill, image_box));
-        match scene["reference"].as_str().map(PathBuf::from).filter(|p| p.is_file()) {
-            Some(reference) => {
-                layout.push(json!({"page": page, "path": reference, "rect": image_box}));
-                field_images.push((format!("scene{n}_image"), reference));
-            }
-            None => {
-                let mid = (image_box[1] + image_box[3]) / 2.0;
-                steps.push(json!({"tool": "page_add_text", "args": {"doc": 1, "page": page, "rect": [image_box[0], mid - 8.0, image_box[2], mid + 8.0],
-                    "text": "IMAGE · drop the still here (16:9)", "size": 10.0, "font": "helvetica", "color": MUTE, "align": "center"}}));
-            }
-        }
-        field(format!("scene{n}_image"), page, image_box, false, "image", None);
-
-        let sections = scene["sections"].as_object().cloned().unwrap_or_default();
-        let section = |k: &str| sections.get(k).and_then(Value::as_str).map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "));
-        let notes = scene["notes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(" ");
-        let cues: Vec<String> = lines.iter().filter_map(|l| l["cue"].as_str()).filter(|c| !c.trim().is_empty()).map(|c| format!("Action: {c}")).collect();
-        let hold = scene["end"].as_f64().unwrap_or(0.0) - scene["start"].as_f64().unwrap_or(0.0);
-        steps.push(image(page, &card_fill, [m, card_top, pw - m, bar_top - 12.0]));
-        let (lx, rx, col_w) = (m + 14.0, pw / 2.0 + 6.0, pw / 2.0 - m - 20.0);
-        let cell = |x: f64, y: f64, h: f64| [x, y + 12.0, x + col_w, y + 12.0 + h];
-        let mut y = card_top + 12.0;
-        for (key, title, h, start) in [
-            ("lyric", "LYRIC CUE", 40.0, Some(if lyric.is_empty() { "Instrumental · no sung words".to_string() } else { [vec![lyric.clone()], cues.clone()].concat().join("\n") })),
-            ("hold", "PLANNED HOLD", 18.0, Some(format!("{hold:.1} s"))),
-            ("cast", "VISIBLE CAST", 50.0, section("layer_stack")),
-        ] {
-            steps.push(label(page, [lx, y], title, RUST));
-            field(format!("scene{n}_{key}"), page, cell(lx, y, h), h > 20.0, "body", start);
-            y += h + 22.0;
-        }
-        let mut y = card_top + 12.0;
-        for (key, title, h, start) in [
-            ("beat", "STORY BEAT · WHAT HAPPENS AND WHY", 70.0, section("reference_prompt").or_else(|| (!notes.is_empty()).then(|| notes.clone()))),
-            ("lock", "CONTINUITY LOCK · WHAT MUST NOT CHANGE", 64.0, section("visual_review")),
-        ] {
-            steps.push(label(page, [rx, y], title, RUST));
-            field(format!("scene{n}_{key}"), page, cell(rx, y, h), true, "body", start);
-            y += h + 22.0;
-        }
-        steps.push(image(page, &slate_fill, [m, bar_top, pw - m, ph - 34.0]));
-        steps.push(label(page, [lx, bar_top + 10.0], "MOTION · CAMERA MOVE AND ACCENTS", SLATE_LABEL));
-        field(format!("scene{n}_motion"), page, [lx, bar_top + 22.0, pw - m - 14.0, bar_top + 82.0], true, "slate", section("animation_prompt"));
-        steps.push(label(page, [lx, bar_top + 90.0], "EDITABLE CAPTION · ON-SCREEN WORDS, NEVER BAKED INTO ART", SLATE_LABEL));
-        field(format!("scene{n}_caption"), page, [lx, bar_top + 102.0, pw - m - 14.0, bar_top + 124.0], false, "slate", (!lyric.is_empty()).then(|| lyric.clone()));
-        steps.push(image(page, &line_fill, [m, ph - 30.0, pw - m, ph - 29.0]));
-        steps.push(text(page, [m, ph - 26.0, pw - m, ph - 12.0],
-            format!("ASSET scene-{n:02}.png  ·  STORYBOARD PAGE {page} OF {pages}  ·  source storyboard/scene-{n}.md"), 7.0, MUTE, false));
-    }
-
-    // Last page: the hand-off brief for agents.
-    steps.extend(header(pages, "HANDOFF".into(), "Agent brief".into()));
-    let brief = std::iter::once(brief_header(&dir))
-        .chain(["song", "transcript", "reference", "animate"].iter().map(|st| stage_body(s, &dir, st)))
-        .collect::<Vec<_>>()
-        .join("\n");
-    steps.push(image(pages, &card_fill, [m, 92.0, pw - m, ph - 32.0]));
-    steps.push(json!({"tool": "page_add_text", "args": {"doc": 1, "page": pages, "rect": [m + 14.0, 104.0, pw - m - 14.0, ph - 40.0],
-        "text": brief.replace(['—', '–'], "-"), "size": 7.5, "font": "courier", "color": INK}}));
-
-    // The fields themselves, styled per kind, then their values and images.
-    for (name, page, rect, multiline, kind) in &fields {
-        let kind_type = if *kind == "image" { "image" } else { "text" };
-        steps.push(json!({"tool": "form_add_field", "args": {"doc": 1, "page": page, "rect": rect, "name": name, "type": kind_type, "multiline": multiline}}));
-    }
-    for (kind, props) in [
-        ("body", json!({"font_size": 9, "appearance": {"border": "#E2D3BA", "fill": "#FFFFFF", "text_color": INK, "width": 1, "font": "helvetica"}})),
-        ("name", json!({"font_size": 9, "align": "center", "appearance": {"border": "none", "fill": "none", "text_color": INK, "font": "helvetica"}})),
-        ("status", json!({"font_size": 8, "align": "center", "appearance": {"border": "none", "fill": "#5A7D3A", "text_color": "#FFFFFF", "font": "helvetica"}})),
-        ("slate", json!({"font_size": 9, "appearance": {"border": "#5C8093", "fill": "none", "text_color": ON_SLATE, "width": 1, "font": "helvetica"}})),
-        ("image", json!({"appearance": {"border": RUST, "style": "dashed", "width": 1, "fill": "none"}})),
-    ] {
-        let names: Vec<&String> = fields.iter().filter(|f| f.4 == kind).map(|f| &f.0).collect();
-        if !names.is_empty() {
-            let mut args = props;
-            args["doc"] = json!(1);
-            args["fields"] = json!(names);
-            steps.push(json!({"tool": "form_set_props", "args": args}));
-        }
-    }
-    if !values.is_empty() {
-        steps.push(json!({"tool": "form_fill", "args": {"doc": 1, "values": values}}));
-    }
-    for (name, path) in &field_images {
-        steps.push(json!({"tool": "form_set_image", "args": {"doc": 1, "field": name, "path": path}}));
-    }
-    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Lyrics", "page": 1}}));
-    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Cast & sets", "page": 2}}));
-    for (i, scene) in scene_list.iter().enumerate() {
-        steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": scene_label(i, scene), "page": first_scene_page + i}}));
-    }
-    steps.push(json!({"tool": "bookmark_add", "args": {"doc": 1, "title": "Agent brief", "page": pages}}));
-    std::fs::create_dir_all(&out_dir)?;
-    steps.push(json!({"tool": "doc_save", "args": {"doc": 1, "path": pdf}}));
-    let script = dir.join(".storyboard.pdfcraft.json");
-    std::fs::write(&script, Value::Array(steps).to_string())?;
-    let run = run_tool_in(&dir, "pdfcraft-cli", &["run".into(), "--script".into(), script.to_string_lossy().into_owned(), "--report".into()]);
-    let _ = std::fs::remove_file(&script);
-    let report: Value = serde_json::from_str(&run?).map_err(|e| EngineError::ExternalTool("pdfcraft-cli".into(), e.to_string()))?;
-    if report.get("ok").and_then(Value::as_bool) != Some(true) {
-        return Err(EngineError::ExternalTool("pdfcraft-cli".into(), report.to_string()));
-    }
-    let previews = out_dir.join(".preview");
-    std::fs::create_dir_all(&previews)?;
-    for old in files_in(&previews, Some(&["png"])) {
-        std::fs::remove_file(old)?;
-    }
-    let mut preview_files = Vec::new();
-    for page in 1..=pages {
-        let png = previews.join(format!("page-{page:02}.png"));
-        run_tool_in(&dir, "pdfcraft-cli", &["render".into(), pdf.to_string_lossy().into_owned(), "--page".into(), page.to_string(), "--dpi".into(), "110".into(), "--out".into(), png.to_string_lossy().into_owned()])?;
-        preview_files.push(png);
-    }
-    let titles: Vec<String> = scene_list.iter().enumerate().map(|(i, sc)| scene_label(i, sc)).collect();
-    let full_prompts: Vec<Option<String>> = panels
-        .iter()
-        .map(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok().map(|t| t.trim().to_string()))
-        .collect();
-    write_backlot_mirror(&dir, &title, &scene_list, &panels, &full_prompts, &asset_images, total)?;
-    std::fs::write(previews.join("layout.json"), json!({"page_size": [pw, ph], "images": layout, "scene_titles": titles, "first_scene_page": first_scene_page}).to_string())?;
-    s.draft_approved = false;
-    crate::project::write_project_file(s)?;
-    let mut status = workshop_status(s)?;
-    status["storyboard"] = json!(pdf);
-    status["scenes"] = json!(scene_list);
-    status["previews"] = json!(preview_files);
-    Ok(status)
+    Err(EngineError::InvalidParams("Only the native storyboard template is supported".into()))
 }
 
 /// Current storyboard build state: PDF exists, previews, staleness.
@@ -956,6 +530,7 @@ pub fn cmd_storyboard_init(s: &mut Session, _: &Value) -> Result<Value> {
 }
 
 pub fn cmd_storyboard_toc(s: &mut Session, _: &Value) -> Result<Value> {
+    if crate::workshop::project_dir(s)?.join("storyboard/movie-board.json").is_file(){return crate::storyboard_crud::read(s,&json!({}));}
     let dir = project_dir(s)?;
     let list = storyboard_scenes(&dir)?;
     let panels = panel_files(&dir).len();
@@ -1007,6 +582,7 @@ pub fn cmd_storyboard_doctor(s:&mut Session,p:&Value)->Result<Value>{
 }
 
 pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
+    if crate::workshop::project_dir(s)?.join("storyboard/movie-board.json").is_file(){return crate::storyboard_crud::read(s,params);}
     let dir = project_dir(s)?;
     let list = storyboard_scenes(&dir)?;
     let n = scene_number(params, list.len())?;
@@ -1049,119 +625,9 @@ pub fn cmd_storyboard_read(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(result)
 }
 
-pub fn cmd_storyboard_search(s: &mut Session, params: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let query = params.get("query").and_then(Value::as_str).filter(|q| !q.trim().is_empty()).ok_or_else(|| EngineError::InvalidParams("missing 'query'".into()))?.to_lowercase();
-    let list = storyboard_scenes(&dir)?;
-    let panels = panel_files(&dir);
-    let mut hits = Vec::new();
-    for (i, scene) in list.iter().enumerate() {
-        for (j, l) in scene["lines"].as_array().cloned().unwrap_or_default().iter().enumerate() {
-            let lyric = l["text"].as_str().unwrap_or_default();
-            if lyric.to_lowercase().contains(&query) {
-                hits.push(json!({"scene": i + 1, "line": j + 1, "where": "lyric", "text": lyric}));
-            }
-            if let Some(prompt) = panels.get(j).and_then(|p| std::fs::read_to_string(p.with_extension("prompt.md")).ok())
-                && prompt.to_lowercase().contains(&query)
-            {
-                hits.push(json!({"scene": i + 1, "line": j + 1, "where": "prompt", "text": prompt.chars().take(200).collect::<String>()}));
-            }
-        }
-        for note in scene["notes"].as_array().cloned().unwrap_or_default() {
-            if note.as_str().is_some_and(|t| t.to_lowercase().contains(&query)) {
-                hits.push(json!({"scene": i + 1, "where": "note", "text": note}));
-            }
-        }
-    }
-    Ok(json!({"ok": true, "query": query, "hits": hits}))
-}
-
 /// Changes one scene's source: a lyric correction, a line's panel prompt or image, a note, or the status.
 pub fn cmd_storyboard_edit(s: &mut Session, params: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    if let Ok(bytes)=std::fs::read(dir.join("storyboard/movie-board.json")) {
-        if serde_json::from_slice::<Value>(&bytes).ok().and_then(|b|b["deck"].as_str().map(str::to_owned)).is_some() {
-            return crate::storyboard_design::edit_text(s,params);
-        }
-    }
-    let dir = project_dir(s)?;
-    let list = storyboard_scenes(&dir)?;
-    let n = scene_number(params, list.len())?;
-    let field = params.get("field").and_then(Value::as_str).unwrap_or_default();
-    let value = params.get("value").and_then(Value::as_str).unwrap_or_default().to_string();
-    let line = params.get("line").and_then(Value::as_u64).map(|l| l as usize);
-    let lines = list[n - 1]["lines"].as_array().map_or(0, Vec::len);
-    let need_line = || -> Result<usize> {
-        line.filter(|l| *l >= 1 && *l <= lines).ok_or_else(|| EngineError::InvalidParams(format!("'line' must be 1..={lines} for this scene")))
-    };
-    let mut doc = read_scene_doc(&dir, n);
-    match field {
-        "lyric" => {
-            doc.lyrics.insert(need_line()?, value.clone());
-        }
-        "cue" => {
-            doc.cues.insert(need_line()?, value.clone());
-        }
-        "note" => doc.notes.push(value.clone()),
-        "prompt" => {
-            let l = need_line()?;
-            let panel = dir.join(STORYBOARD_DIR).join(format!("panel-{l:02}.png"));
-            std::fs::write(panel.with_extension("prompt.md"), format!("{value}\n"))?;
-        }
-        "panel" => {
-            let l = need_line()?;
-            let src = resolve_workspace_path(s, &value);
-            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
-                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
-            }
-            std::fs::copy(&src, dir.join(STORYBOARD_DIR).join(format!("panel-{l:02}.png")))?;
-        }
-        "time" => {
-            let (a, b) = value.split_once(['-', '–']).and_then(|(a, b)| Some((a.trim().parse::<f64>().ok()?, b.trim().parse::<f64>().ok()?)))
-                .filter(|(a, b)| b > a).ok_or_else(|| EngineError::InvalidParams("time is start-end in seconds, e.g. 0-21.3".into()))?;
-            doc.time = Some((a, b));
-        }
-        "reference" => {
-            let src = resolve_workspace_path(s, &value);
-            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
-                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
-            }
-            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
-            let rel = format!("{STORYBOARD_DIR}/scene-{n}-reference.{ext}");
-            if src != dir.join(&rel) {
-                std::fs::copy(&src, dir.join(&rel))?;
-            }
-            doc.reference = Some(rel);
-        }
-        "teaching_reference" => {
-            let src = resolve_workspace_path(s, &value);
-            if !src.is_file() || !has_extension(&src, IMAGE_EXTENSIONS) {
-                return Err(EngineError::InvalidParams(format!("not an image: {}", src.display())));
-            }
-            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
-            let rel = format!("{STORYBOARD_DIR}/scene-{n}-teaching.{ext}");
-            if src != dir.join(&rel) {
-                std::fs::copy(&src, dir.join(&rel))?;
-            }
-            doc.teaching_reference = Some(rel);
-        }
-        key if SCENE_SECTIONS.iter().any(|(k, _)| *k == key) => {
-            doc.sections.insert(key.to_string(), value.clone());
-        }
-        "status" => {
-            if !SCENE_STATUSES.contains(&value.as_str()) {
-                return Err(EngineError::InvalidParams(format!("status must be one of {SCENE_STATUSES:?}")));
-            }
-        }
-        _ => return Err(EngineError::InvalidParams(format!(
-            "field must be lyric, cue, prompt, panel, note, status, time, reference, teaching_reference or a section: {}",
-            SCENE_SECTIONS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
-        ))),
-    }
-    doc.status = if field == "status" { value } else { "needs review".into() };
-    write_scene_doc(&dir, n, &scene_label(n - 1, &list[n - 1]), &doc)?;
-    cmd_workshop_build_storyboard(s, &json!({}))?;
-    cmd_storyboard_read(s, &json!({"scene": n}))
+    crate::storyboard_crud::update(s,params)
 }
 
 /// Imports an existing OpenMontage-style project's scenes into this storyboard template.
@@ -1248,60 +714,7 @@ pub fn cmd_storyboard_import_openmontage(s: &mut Session, params: &Value) -> Res
 pub fn cmd_storyboard_approve(s: &mut Session, params: &Value) -> Result<Value> {
     let approved = params.get("approved").and_then(Value::as_bool).unwrap_or(true);
     let status = if approved { "approved" } else { "needs review" };
-    cmd_storyboard_edit(s, &json!({"scene": params.get("scene"), "field": "status", "value": status}))
+    let revision=crate::storyboard_crud::read(s,&json!({}))?["revision"].clone();
+    cmd_storyboard_edit(s, &json!({"scene": params.get("scene"), "field": "status", "value": status,"expected_revision":revision}))
 }
-
-/// Write the storyboard backlot mirror for OpenMontage.
-fn write_backlot_mirror(
-    dir: &Path,
-    title: &str,
-    scene_list: &[Value],
-    panels: &[PathBuf],
-    prompts: &[Option<String>],
-    assets: &[PathBuf],
-    total: Option<f64>,
-) -> Result<()> {
-    let art = dir.join("artifacts");
-    std::fs::create_dir_all(&art)?;
-    let rel = |p: &Path| p.strip_prefix(dir).map(|r| r.display().to_string()).unwrap_or_else(|_| p.display().to_string());
-    let mut scenes = Vec::new();
-    let mut sections = Vec::new();
-    let mut manifest = Vec::new();
-    for (i, scene) in scene_list.iter().enumerate() {
-        let (id, section) = (format!("scene-{}", i + 1), format!("section-{}", i + 1));
-        let lines = scene["lines"].as_array().cloned().unwrap_or_default();
-        let text = lines.iter().map(|l| format!("{}  {}", clock(l["start"].as_f64().unwrap_or(0.0)), l["text"].as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
-        scenes.push(json!({"id": id, "type": scene["kind"], "description": scene_label(i, scene),
-            "start_seconds": scene["start"], "end_seconds": scene["end"], "script_section_id": section}));
-        sections.push(json!({"id": section, "start_seconds": scene["start"], "end_seconds": scene["end"],
-            "text": if text.is_empty() { "(instrumental)".to_string() } else { text }}));
-        for (j, _) in lines.iter().enumerate() {
-            if let Some(panel) = panels.get(j) {
-                let stem = panel.file_stem().and_then(|n| n.to_str()).unwrap_or("panel");
-                manifest.push(json!({"id": format!("{stem}@{id}"), "type": "image", "scene_id": id, "path": rel(panel),
-                    "prompt": prompts.get(j).cloned().flatten(), "source_tool": "magicstudio"}));
-            }
-        }
-    }
-    for a in assets {
-        let stem = a.file_stem().and_then(|n| n.to_str()).unwrap_or("asset");
-        manifest.push(json!({"id": stem, "type": "image", "scene_id": null, "path": rel(a),
-            "prompt": std::fs::read_to_string(a.with_extension("prompt.md")).ok(), "source_tool": "magicstudio"}));
-    }
-    let write = |name: &str, v: Value| -> Result<()> {
-        let text = serde_json::to_string_pretty(&v).map_err(|e| EngineError::InvalidParams(e.to_string()))?;
-        std::fs::write(art.join(name), text)?;
-        Ok(())
-    };
-    write("scene_plan.json", json!({"scenes": scenes, "metadata": {"total_duration_seconds": total, "source": "magicstudio workshop.build_storyboard"}}))?;
-    write("script.json", json!({"title": title, "sections": sections}))?;
-    write("asset_manifest.json", json!({"assets": manifest}))?;
-    let project_json = dir.join("project.json");
-    if !project_json.is_file() {
-        let id = dir.file_name().and_then(|n| n.to_str()).unwrap_or("project");
-        std::fs::write(&project_json, json!({"version": "1.0", "project_id": id, "title": title, "pipeline_type": "animation"}).to_string())?;
-    }
-    Ok(())
-}
-
 
