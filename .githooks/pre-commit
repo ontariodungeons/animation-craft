@@ -85,6 +85,7 @@ check_staged_paths() {
 }
 
 run_step "staged-file policy" check_staged_paths || exit $?
+run_step "staged whitespace" git diff --cached --check || exit $?
 
 RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
 FULL_CHECKS=$CHECK_ALL
