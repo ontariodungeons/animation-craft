@@ -43,6 +43,12 @@ class RawTranscriptDraft(unittest.TestCase):
   import deckcraft_template as d
   fields=d.pdf_fields([dict(shapes=[dict(altText='user.scene.action',id=9,box=[10,20,300,40],text='Unchanged wording.')])],[dict(kind='scene')])
   self.assertEqual(fields[0]['rect'],[10,20,300,40]);self.assertEqual(fields[0]['value'],'Unchanged wording.');self.assertNotIn('.',fields[0]['name'])
+ def test_overview_fields_fill_the_existing_card(self):
+  import deckcraft_template as d
+  shapes=[dict(altText='user.story',id=1,box=[78,276,924,25.2],text='A story.'),dict(altText='layout.card.story',box=[60,220,960,280])]
+  fields=d.pdf_fields([dict(shapes=shapes)],[dict(kind='overview')])
+  self.assertEqual(fields[0]['rect'],[78,276,924,206])
+
 class AssetSheets(unittest.TestCase):
  def test_category_sheets_repeat_four_slots_without_losing_assets(self):
   import sys

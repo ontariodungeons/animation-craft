@@ -307,6 +307,8 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
             reference=dict(panels=panels,original=record['file'])
             fill('state.scene.reference','')
         else:reference=place_scene_picture(d,slide,record,page['group']['id'])
+    for field in c.get('page_content',{}).get(page['key'],[]):
+        fill_text(d,slide,field['role'],field['value'],field.get('font_size'),fit=True)
     meta=dict(sb_generator=VERSION,page_key=page['key'],kind=kind,status='needs review',group=page.get('group'),source_transcript=c['transcript'],source_captions=c.get('captions'),sheet=page.get('sheet'))
     if kind=='scene':meta['source_packet']=c.get('scene_content',{}).get(page['group']['id'],{});meta['asset_links']=c.get('asset_links',[]);meta['official_lyrics_source']=c.get('official_lyrics_source')
     if reference:meta['reference_image']=reference
@@ -360,7 +362,10 @@ def pdf_fields(slides,pages):
             if not (role.startswith('user.') or role=='auto.scene.lyrics') or role.startswith('user.picture.') or 'text' not in sh:continue
             if role=='user.scene.reference' and not sh['text']:continue
             field=role.removeprefix('user.scene.').removeprefix('user.') if role!='auto.scene.lyrics' else 'lyrics'
-            x,y,w,h=sh['box'];name=f'page_{i+1}_'+re.sub(r'[^a-zA-Z0-9_]', '_',role)
+            x,y,w,h=sh['box']
+            card=next((s for s in slide['shapes'] if s.get('altText')=='layout.card.'+field),None)
+            if card:h=max(h,card['box'][1]+card['box'][3]-18-y)
+            name=f'page_{i+1}_'+re.sub(r'[^a-zA-Z0-9_]', '_',role)
             fields.append(dict(name=name,id=sh['id'],page=i+1,scene=scene if page['kind']=='scene' else None,field=field,role=role,rect=[x,y,w,h],value=sh['text'],font_size=27 if field=='lyrics' else 14 if role.startswith('user.scene.panel.') else 18 if role.startswith('user.sheet.') else 12 if len(sh['text'])>100 else 21,fill='#F3ECD7' if field=='lyrics' else '#08090C' if role=='user.scene.reference' else '#1B1D22',text_color='#211E18' if field=='lyrics' else MUTED))
     return fields
 

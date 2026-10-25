@@ -54,6 +54,7 @@ pub mod lyrics;
 pub mod words;
 pub mod storyboard;
 pub mod storyboard_design;
+pub mod storyboard_crud;
 pub mod studio_cues;
 pub mod turnaround;
 pub mod video_target;

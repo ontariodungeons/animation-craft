@@ -1136,7 +1136,7 @@ fn saved_observation(ui:&Value)->(&'static str,Color){
 }
 // These are views of CLI-owned evidence, never an independent readiness evaluator.
 // The engine reports lyrics and notes as one "lyrics" item; official artist lyrics are not assessed.
-const PROJECT_STAGES:[(&str,&str);7]=[("Audio","song"),("Transcript","transcript"),("Lyrics & notes","lyrics"),("Reference art","assets"),("Storyboard","deckcraft"),("Animation","animate"),("Video / captions","hyperframes")];
+const PROJECT_STAGES:[(&str,&str);7]=[("Audio","song"),("Transcript","transcript"),("Lyrics & notes","lyrics"),("Reference art","assets"),("Storyboard","storyboard"),("Animation","animate"),("Video / captions","hyperframes")];
 const STORYBOARD_STAGE:usize=4;
 fn stage_evidence(c:&Center,index:usize)->Option<&Value>{let id=PROJECT_STAGES[index%PROJECT_STAGES.len()].1;c.state["prerequisites"].as_array()?.iter().find(|v|v["id"]==id)}
 fn state_badge(state:Option<&str>)->(&'static str,Color){match state{Some("ready"|"replied")=>("[OK]",DESK_FG),Some("running"|"working")=>("● working",GREEN),Some("blocked"|"error"|"failed")=>("● failed",RED),Some("stalled")=>("● stalled",AMBER),Some("missing")=>("● missing",BLUE),_=>("? unknown",MUTED)}}

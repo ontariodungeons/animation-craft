@@ -296,7 +296,7 @@ fn command_input_schema(id: &str) -> Value {
         "agent.models" => json!({"type":"object","properties":{"agent":{"type":"string","enum":["opencode","codex","omp","claude"]}},"additionalProperties":false}),
         "agent.new_chat" => json!({"type":"object","properties":{"free_only":{"type":"boolean"},"image_task":{"type":"boolean","description":"Native restricted image-job tools; no chat self-invocation"}},"additionalProperties":false}),
         "agent.send" => json!({"type":"object","properties":{"message":{"type":"string"},"attachments":{"type":"array","items":{"type":"string"}},"new_chat":{"type":"boolean","default":true},"wait":{"type":"integer","minimum":0,"maximum":300},"free_only":{"type":"boolean"},"image_task":{"type":"boolean","description":"Native restricted image-job tools; no chat self-invocation"}},"required":["message"],"additionalProperties":false}),
-        "workshop.build_storyboard" => json!({"type":"object","properties":{"template":{"type":"string","enum":["pdf","backlot"]},"source":{"type":"string","description":"Optional OpenMontage project folder containing scene plan, script and reference artwork"}},"additionalProperties":false}),
+        "workshop.build_storyboard" => json!({"type":"object","properties":{"template":{"type":"string","enum":["backlot"]},"source":{"type":"string","description":"Optional OpenMontage project folder containing scene plan, script and reference artwork"}},"additionalProperties":false}),
         "image.break_apart" => json!({
             "type": "object",
             "properties": {
