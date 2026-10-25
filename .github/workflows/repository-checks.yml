@@ -1,71 +1,34 @@
-name: Repository checks
+name: Minimal CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One active CI job for this repository, across every branch and PR.
 concurrency:
-  group: repository-checks-${{ github.ref }}
+  group: magic-studio-minimal-ci
   cancel-in-progress: true
 
 jobs:
-  repository-checks:
-    name: Repository checks
+  sanity:
+    name: Syntax and UI sanity
     runs-on: ubuntu-24.04
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            build-essential \
-            curl \
-            ffmpeg \
-            file \
-            libasound2-dev \
-            libayatana-appindicator3-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            libxdo-dev \
-            libxkbcommon-dev \
-            patchelf \
-            wget
-      - name: Install the native storyboard tools
-        env:
-          DECKCRAFT_SHA256: 227b8c9cdd2c06b7866807f995fe5d2d0675523a61208f9bc26cf2760fddcb8f
-          PDFCRAFT_SHA256: cdba2bec4d502d016dd78101a402d07845b708c49d77bc85e0ab640aca65372b
+          fetch-depth: 2
+      - name: Lightweight checks only
         run: |
           set -euo pipefail
-          tools="$RUNNER_TEMP/craft-tools"
-          mkdir -p "$tools/deckcraft" "$tools/pdfcraft"
-          curl --fail --location --retry 3 https://github.com/storytold/deckcraft/releases/download/v0.8.0/deckcraft-0.8.0-linux-x86_64.tar.gz -o "$tools/deckcraft.tar.gz"
-          curl --fail --location --retry 3 https://github.com/storytold/pdfcraft/releases/download/v0.9.0/pdfcraft-cli-0.9.0-linux-x86_64.tar.gz -o "$tools/pdfcraft.tar.gz"
-          printf '%s  %s\n' "$DECKCRAFT_SHA256" "$tools/deckcraft.tar.gz" "$PDFCRAFT_SHA256" "$tools/pdfcraft.tar.gz" | sha256sum --check --strict
-          tar -xzf "$tools/deckcraft.tar.gz" -C "$tools/deckcraft"
-          tar -xzf "$tools/pdfcraft.tar.gz" -C "$tools/pdfcraft"
-          for app in deckcraft pdfcraft; do
-            binary=$(find "$tools/$app" -type f -name "$app-cli" -print -quit)
-            test -n "$binary"
-            chmod +x "$binary"
-            dirname "$binary" >> "$GITHUB_PATH"
-          done
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Run the commit hook as the repository check
-        env:
-          MAGICSTUDIO_CHECK_ALL: "1"
-          CARGO_BUILD_JOBS: "1"
-          RUST_TEST_THREADS: "1"
-        run: bash .githooks/pre-commit
+          node --version
+          git diff --check HEAD^ HEAD
+          for source in apps/magicstudio-shell/ui/*.js; do node --check "$source"; done
+          node apps/magicstudio-shell/tests/agent-selection.mjs
+          node apps/magicstudio-shell/tests/panels.mjs
+          node apps/magicstudio-shell/tests/cast.mjs
+          node apps/magicstudio-shell/tests/drawers.mjs
+          node apps/magicstudio-shell/tests/ui-lint.mjs --report

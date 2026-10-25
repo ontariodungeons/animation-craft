@@ -15,6 +15,13 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - MCP: register command `mc`, args `["mcp"]` (headless engine) or
   `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
 
+## Validation budget
+
+- Full compilation and tests run locally through the visible normal commit hooks.
+- GitHub has one lightweight sanity job, capped at three minutes, with one shared
+  concurrency group for the whole repository. Do not add remote Rust builds, native
+  app downloads, extra jobs, agent calls or runners without Jesse’s explicit approval.
+
 ## Review on main
 
 - Jesse reviews the app from `main`. Commit completed changes, integrate current main,
