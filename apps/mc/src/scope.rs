@@ -3,7 +3,7 @@ use serde_json::{Value,json};
 use std::{path::{Path,PathBuf},sync::OnceLock,os::unix::fs::{MetadataExt,PermissionsExt}};
 
 pub const ENV:&str="MAGICSTUDIO_ASSIGNMENT";
-const READ:&[&str]=&["project.identity","project.attach","center.status","backstage.status","workshop.status","center.events","backstage.events","center.snapshot","center.tail","booth.snapshot","booth.tail","backstage.snapshot","backstage.tail","ui.feedback","agent.session","agent.log","blender.list","blender.status","command.list"];
+const READ:&[&str]=&["project.identity","project.attach","center.status","backstage.status","workshop.status","center.events","backstage.events","center.snapshot","center.tail","booth.snapshot","booth.tail","backstage.snapshot","backstage.tail","ui.feedback","agent.session","agent.log","blender.list","blender.status","command.list","skills.list","skills.info","skills.limits"];
 #[derive(Clone,Debug)]
 pub struct Scope{pub file:PathBuf,pub project:PathBuf,pub members:Vec<Value>,pub allow:Vec<String>}
 impl Scope{
