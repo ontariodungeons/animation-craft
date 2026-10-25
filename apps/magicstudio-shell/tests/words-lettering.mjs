@@ -45,4 +45,10 @@ await drop.onclick();
 const save=saves.find((r)=>r.id==='words.save').params;
 assert.equal(JSON.stringify(save.kinetic.acts),'{"l1/w2":"spin","l1/w0":"drop"}','the picked word gets the act; others keep theirs');
 assert.equal(save.kinetic.layout,'scatter');
+// The Design view's own width picks its layout: narrow drops the film roll, tight goes to one column.
+for (const [width, narrow, tight] of [[1400, false, false], [900, true, false], [401, true, true]]) {
+  const classes = new Set(); const view = { clientWidth: width, classList: { toggle: (k, on) => on ? classes.add(k) : classes.delete(k) } };
+  vm.runInContext('wordsWidth', c)(view);
+  assert.equal(classes.has('narrow'), narrow, `narrow at ${width}px`); assert.equal(classes.has('tight'), tight, `tight at ${width}px`);
+}
 console.log('PASS words lettering: column words use the line design; Shift-click picks several; text locked; kinetic act cards save the picked words');
