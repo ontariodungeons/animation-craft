@@ -770,7 +770,7 @@
     "words-film": {
       "component": "panel",
       "look": "lyrics",
-      "label": "Film roll",
+      "label": "Visual cues",
       "rail": "words-film",
       "indicator": "hidden"
     },

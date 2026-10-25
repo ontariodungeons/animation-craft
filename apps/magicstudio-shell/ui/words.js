@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
 // How a designed lyric item moves on its accent word (the engine's MOVES), and what each does.
 const WORDS_MOVES = [["quiet", "Quiet", "Fades in and holds"], ["sleep", "Sleep", "Letters sink one by one"], ["settle", "Settle", "Drops and squashes into place"],
   ["fall", "Fall", "Drops down"], ["pop", "Pop", "A quick swell on the beat"], ["rise", "Rise", "Arcs up and away"], ["east", "East", "Slides right"],
@@ -329,7 +329,7 @@ function wordsChip(anim, w) {
       if (anim.animation_id !== wordsPanel.selected) return;
       const same = wordsPanel.line === w.line_id && event.shiftKey;
       wordsPanel.picked = same ? (wordsPanel.picked.includes(w.word_id) ? wordsPanel.picked.filter((id) => id !== w.word_id) : [...wordsPanel.picked, w.word_id]) : [w.word_id];
-      wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsPose(anim, w.line_id); wordsRender();
+      wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsLineSpan(anim, w.line_id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange();
     } }, w.text);
   if (it) {
     chip.style.setProperty("--word-font", it.font === "song" || !it.font ? wordsSongFont(anim) : it.font);
@@ -337,6 +337,14 @@ function wordsChip(anim, w) {
     chip.style.setProperty("--word-slant", it.italic ? "italic" : "normal");
     chip.style.setProperty("--word-color", /^#[0-9a-f]{6}$/i.test(it.color) ? it.color : "currentColor");
     chip.style.setProperty("--word-scale", Math.min(1.7, Math.max(0.8, (it.size || 110) / 110)).toFixed(2));
+  }
+  if (anim.kinetic) {
+    const st = anim.kinetic.style || {}, hero = !!anim.kinetic.acts?.[w.word_id];
+    chip.style.setProperty("--word-font", hero ? st.hero_font || st.font || "sans-serif" : st.font || "sans-serif");
+    chip.style.setProperty("--word-weight", String(hero ? st.hero_weight || 700 : st.weight || 700));
+    chip.style.setProperty("--word-slant", hero && st.hero_italic ? "italic" : "normal");
+    chip.style.setProperty("--word-color", hero ? st.hero_color || "currentColor" : st.color || "currentColor");
+    chip.style.setProperty("--word-scale", String(hero ? Math.min(1.7, (st.hero_size || 110) / (st.size || 64)) : 1));
   }
   if (wordsPanel.designs.has(w.line_id)) chip.dataset.changed = "";
   return chip;
@@ -361,28 +369,159 @@ function wordsTimeline(animations, end) {
   return wordsPlace(el("div", { class: "words-tl", "aria-label": "Lyrics on the song timeline" }, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "button", { "data-section": a.animation_id, onclick: () => a.animation_id === wordsPanel.selected || wordsSelect(a.animation_id) })),
     ...wordsRows(animations).map(([a, j, line, at, len]) => wordsPlace(el("div", { class: `words-line${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`,
+      "data-kind": a.scope?.section === "chorus" ? "chorus" : "verse", "data-animation-id": a.animation_id,
       title: "Click around the words to design the whole line",
       onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
-        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsPose(a, line.id); wordsRender(); } },
+        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsLineSpan(a, line.id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange(); } },
       ...line.words.map((w) => wordsChip(a, w))), at, len)),
     el("span", { class: "words-tl-head" })), 0, end);
 }
 
-// Right: the film roll, level with the lyrics. Each frame is the line's design, settled.
+// Right: independently timed visual teaching cues. Concurrent cues occupy separate lanes.
 function wordsRoll(animations, end) {
-  const ticks = [];
-  for (let t = 0; t < end; t += 10) ticks.push(wordsPlace(el("span", { class: "words-tick" }, wordsClock(t).replace(/\.\d$/, "")), t));
-  const frames = wordsRows(animations).map(([a, j, line, at, len]) => {
-    const world = el("div", { class: "lyric-world" });
-    const frame = wordsPlace(el("button", { class: `words-frame${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`, title: line.words.map((w) => w.text).join(" "),
-      onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
-        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsPose(a, line.id); wordsRender(); } }, world), at, len);
-    requestAnimationFrame(() => wordsDrawLine(world, a, line.id, wordsPose(a, line.id), false));
-    wordsFitter.observe(frame);
+  const cues = wordsPanel.read.graphics || [], laneEnds = [];
+  const placed = cues.map((cue) => {
+    let lane = laneEnds.findIndex((t) => t <= cue.start);
+    if (lane < 0) lane = laneEnds.length;
+    laneEnds[lane] = cue.end; return { cue, lane };
+  });
+  const frames = placed.map(({ cue, lane }) => {
+    const anim = animations.find((a) => a.animation_id === cue.animation_id);
+    const thumb = (progress) => {
+      const image = cue.kind === "drawing" ? wordsStroke(cue.stroke) : wordsOptionPreview("overlays", cue.overlay);
+      image.setAttribute("class", "words-cue-preview");
+      if (cue.kind === "drawing") {
+        const path = image.querySelector("path"); path.setAttribute("pathLength", "1");
+        path.setAttribute("stroke-dasharray", "1"); path.setAttribute("stroke-dashoffset", String(1-progress));
+      }
+      return image;
+    };
+    const handle = (edge, label) => cue.index == null ? null : el("button", { class: `words-cue-handle ${edge}`, "aria-label": `${label} ${cue.name}`, title: `${label} · drag or use ↑ ↓ (Shift for fine timing)`,
+      onpointerdown: (event) => wordsCueDrag(event, cue, edge), onclick: (event) => event.stopPropagation(),
+      onkeydown: (event) => {
+        if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        if (cue.animation_id !== wordsPanel.selected) wordsSelect(cue.animation_id);
+        const delta = (event.key === "ArrowUp" ? -1 : 1) * (event.shiftKey ? .01 : .1);
+        const start = edge === "start" ? Math.max(0, cue.start+delta) : cue.start;
+        wordsRetimeCue(cue,start,edge === "start" ? start+cue.end-cue.start : Math.max(start+.05,cue.end+delta));
+      } }, edge === "start" ? "●" : "━");
+    const frame = wordsPlace(el("div", { class: `words-graphic${wordsPanel.cue === cue.id ? " active" : ""}`, "data-cue-id": cue.id, role: "button", tabindex: "0",
+      "aria-label": `${cue.name} at ${wordsClock(cue.start)}`, title: `${cue.name}${cue.word ? ` · “${cue.word}”` : ""} · ${wordsClock(cue.start)} – ${wordsClock(cue.end)} · Click to replay this connection`,
+      onclick: () => wordsPreviewCue(cue), onkeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); wordsPreviewCue(cue); } } },
+      el("div", { class: "words-cue-film" }, thumb(.35), thumb(.7), thumb(1)),
+      handle("start", "Move"), handle("end", "Trim end of"),
+      el("span", { class: "words-cue-caption" }, cue.name)), cue.start, cue.end - cue.start);
+    frame.style.setProperty("--cue-lane", String(lane));
+    frame.style.setProperty("--cue-ink", cue.color || "var(--accent)");
+    if (cue.draw_end != null) frame.style.setProperty("--draw-share", `${100 * (cue.draw_end - cue.start) / (cue.end - cue.start)}%`);
     return frame;
   });
-  return wordsPlace(el("div", { class: "words-tl words-roll", "aria-label": "Film roll of the song" }, ...ticks, ...wordsGaps(animations),
-    ...animations.map((a) => wordsBand(a, "div")), ...frames, el("span", { class: "words-tl-head" })), 0, end);
+  const roll = wordsPlace(el("div", { class: "words-tl words-roll", "aria-label": "Motion graphics on the song timeline" },
+    ...Array.from({ length: Math.ceil(end / 10) }, (_, i) => wordsPlace(el("span", { class: "words-tick" }, wordsClock(i * 10)), i * 10)),
+    ...frames, !cues.length ? el("p", { class: "words-graphics-empty" }, "Pick a word, then add a drawing to show its meaning here.") : null,
+    el("span", { class: "words-tl-head" })), 0, end);
+  roll.style.setProperty("--cue-lanes", String(Math.max(1, laneEnds.length)));
+  return roll;
+}
+
+// The same library path is shown in the picker, motion-graphics track and rendered video.
+function wordsStroke(stroke) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  svg.setAttribute("viewBox", stroke.view_box); svg.setAttribute("aria-hidden", "true");
+  path.setAttribute("d", stroke.d); path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2"); path.setAttribute("vector-effect", "non-scaling-stroke"); path.setAttribute("stroke-linecap", "round");
+  svg.appendChild(path); return svg;
+}
+
+function wordsCueIntersects(cue, animationId, start, end, wordIds) {
+  return cue.animation_id === animationId && (cue.word_ids?.length
+    ? cue.word_ids.some((id) => wordIds.includes(id)) : cue.start < end && cue.end > start);
+}
+function wordsCueWindow(cue, line) {
+  return { start: Math.max(0, Math.min(cue.start, line.start) - .25), end: Math.max(cue.end, line.end) + .25 };
+}
+function wordsPreviewCue(cue) {
+  const anim = wordsPanel.read.document.animations.find((a) => a.animation_id === cue.animation_id);
+  if (!anim) return;
+  if (anim.animation_id !== wordsPanel.selected) wordsSelect(anim.animation_id);
+  if (anim.animation_id !== wordsPanel.selected) return;
+  wordsPanel.line = cue.line_id || wordsLines(anim)[0]?.id;
+  wordsPanel.picked = cue.word_ids || []; wordsPanel.cue = cue.id;
+  wordsPanel.previewRange = wordsCueWindow(cue, wordsLineSpan(anim, wordsPanel.line));
+  wordsPanel.autoPlay = true; wordsPanel.time = wordsPanel.previewRange.start;
+  wordsRender(); wordsVideoRange();
+}
+async function wordsRetimeCue(cue, start, end) {
+  const anim = wordsCurrent();
+  if (!anim?.kinetic || cue.index == null) return;
+  const duration = Math.min(cue.draw_end - cue.start, end - start);
+  const draws = anim.kinetic.draws.map((d, i) => i === cue.index ? { ...d, offset: +(start - cue.anchor).toFixed(2), duration: +duration.toFixed(2), hold: +(end - start - duration).toFixed(2) } : d);
+  wordsPanel.previewRange = wordsCueWindow({ ...cue, start, end }, wordsLineSpan(anim, cue.line_id));
+  wordsPanel.autoPlay = false;
+  await wordsKinetic({ draws });
+}
+function wordsCueDrag(event, cue, edge) {
+  event.preventDefault(); event.stopPropagation(); wordsVideo("pause");
+  if (cue.animation_id !== wordsPanel.selected) wordsSelect(cue.animation_id);
+  if (cue.animation_id !== wordsPanel.selected) return;
+  const view = $("view-design");
+  view.setPointerCapture(event.pointerId);
+  wordsPanel.cueDrag = { cue, before: { ...cue }, edge, y: event.clientY, scale: parseFloat(getComputedStyle(view).getPropertyValue("--song-s")) || 18 };
+}
+addEventListener("pointermove", (event) => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  const delta = (event.clientY - d.y) / d.scale;
+  if (d.edge === "start") {
+    d.cue.start = Math.max(0, Math.min(d.before.anchor + 30, Math.max(d.before.anchor - 30, d.before.start + delta)));
+    d.cue.end = d.cue.start + d.before.end - d.before.start;
+    d.cue.draw_end = d.cue.start + d.before.draw_end - d.before.start;
+  } else d.cue.end = Math.max(d.cue.start + .05, Math.min(d.cue.start + 30, d.before.end + delta));
+  const frame = [...$("view-design").querySelectorAll(".words-graphic")].find((f) => f.dataset.cueId === d.cue.id);
+  if (frame) wordsPlace(frame, d.cue.start, d.cue.end - d.cue.start);
+  wordsArrows($("view-design"));
+});
+addEventListener("pointerup", () => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  wordsPanel.cueDrag = null;
+  const { start, end } = d.cue; Object.assign(d.cue, d.before);
+  wordsRetimeCue(d.before, start, end);
+});
+addEventListener("pointercancel", () => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  Object.assign(d.cue, d.before); wordsPanel.cueDrag = null; wordsRender();
+});
+
+
+// Connections describe intersections in song time, never matching row numbers.
+function wordsArrows(view) {
+  view.querySelector(":scope > svg.words-arrows")?.remove();
+  const lines = [...view.querySelectorAll(".words-tl > .words-line")], frames = [...view.querySelectorAll(".words-roll > .words-graphic")];
+  if (!lines.length || !frames.length || !frames[0].offsetParent) return;
+  const box = view.getBoundingClientRect(), svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "words-arrows"); svg.setAttribute("aria-hidden", "true");
+  svg.style.setProperty("--arrows-width", `${view.scrollWidth}px`); svg.style.setProperty("--arrows-height", `${view.scrollHeight}px`);
+  const at = (r, side) => [r[side] - box.left + view.scrollLeft, r.top + r.height / 2 - box.top + view.scrollTop];
+  for (const frame of frames) {
+    const cue = wordsPanel.read.graphics.find((c) => c.id === frame.dataset.cueId);
+    if (!cue) continue;
+    for (const line of lines) {
+      const start = Number(line.style.getPropertyValue("--at-s")), end = start + Number(line.style.getPropertyValue("--len-s"));
+      const chips = [...line.querySelectorAll("[data-word-id]")];
+      if (!wordsCueIntersects(cue, line.dataset.animationId, start, end, chips.map((c) => c.dataset.wordId))) continue;
+      const source = chips.find((c) => cue.word_ids?.includes(c.dataset.wordId)) || line;
+      const [x1, y1] = at(source.getBoundingClientRect(), "right"), [x2] = at(frame.getBoundingClientRect(), "left");
+      const r = frame.getBoundingClientRect(), fraction = (Math.max(start, cue.start) - cue.start) / (cue.end - cue.start);
+      const y2 = r.top - box.top + view.scrollTop + Math.min(r.height - 4, Math.max(4, r.height * fraction));
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2 - 6} ${y2} l -8 -4 m 8 4 l -8 4`);
+      path.setAttribute("class", line.classList.contains("active") ? "active" : ""); path.setAttribute("data-kind", line.dataset.kind); svg.appendChild(path);
+    }
+  }
+  view.appendChild(svg);
 }
 
 // Centre, under the stage: the line's minimal lanes. Timing only; the Studio owns clip length.
@@ -426,7 +565,7 @@ function wordsFollow(t, smooth = false) {
   view.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "instant" });
 }
 
-const wordsCard = (on, title, does, onclick) => el("button", { class: "effect", role: "radio", "aria-checked": String(!!on), onclick },
+const wordsCard = (on, title, does, onclick) => el("button", { class: "effect", role: "radio", "aria-checked": String(!!on), title: `${title} · ${does}`, "aria-label": title, onclick },
   el("strong", {}, title), el("span", { class: "muted" }, does));
 
 // What the centre offers for the pick: Look, Move or Draw, for the whole line or one item.
@@ -535,10 +674,10 @@ function wordsRender() {
   view.replaceChildren(
     el("aside", { id: "words-lyrics" }, el("div", { id: "words-lyrics-head" }, el("strong", { class: "panel-title" }, "Lyrics · on the song timeline")), wordsTimeline(animations, end)),
     main,
-    el("aside", { id: "words-film" }, el("div", { id: "words-film-head" }, el("strong", { class: "panel-title" }, "Film roll · the whole song")), wordsRoll(animations, end)));
-  wordsWidth(view);
+    el("aside", { id: "words-film" }, el("div", { id: "words-film-head" }, el("strong", { class: "panel-title" }, "Visual cues · motion graphics")), wordsRoll(animations, end)));
+  wordsViewFitter.observe(view); wordsWidth(view);
   requestAnimationFrame(() => {
-    wordsCanvasDraw(); wordsFitClock(view);
+    wordsCanvasDraw(); wordsFitClock(view); wordsArrows(view);
     // A new pick brings its line level with the stage.
     const pick = `${wordsPanel.selected}/${wordsPanel.line}`;
     if (pick !== wordsPanel.followed && wordsPanel.line && !wordsPanel.playing) { wordsPanel.followed = pick; wordsFollow(wordsLineSpan(anim, wordsPanel.line).start, true); }
@@ -671,12 +810,14 @@ function wordsVideo(action, params = {}) {
 
 // Hold the player to the selected section: it plays and loops only that stretch of the song.
 function wordsVideoRange() {
-  const section = wordsStudioSection(wordsCurrent());
+  const anim = wordsCurrent();
+  const section = wordsPanel.previewRange || (anim && wordsPanel.line ? wordsLineSpan(anim, wordsPanel.line) : wordsStudioSection(anim));
   if (!section) return;
   wordsVideo("pause");
   const o = wordsPanel.offset;
   wordsVideo("set-play-range", { startSeconds: Math.max(0, section.start - o), endSeconds: section.end - o });
   wordsSeekSong(section.start);
+  if (wordsPanel.autoPlay) wordsVideo("play");
 }
 
 // The video's own size, as data; the stage rule scales the frame to fit.
@@ -697,6 +838,7 @@ addEventListener("message", (event) => {
   if (data.type === "state") {
     const song = data.currentTime + wordsPanel.offset; // the player's time, on the song clock
     wordsPanel.time = song; wordsPanel.playing = !!data.isPlaying;
+    if (data.isPlaying) wordsPanel.autoPlay = false;
     const scrub = $("words-scrub");
     if (scrub) scrub.value = scrub.defaultValue = String(song);
     if (wordsPanel.timeLabel) wordsPanel.timeLabel.textContent = wordsClock(song);
@@ -710,7 +852,8 @@ function wordsWidth(view = $("view-design")) {
   view.classList.toggle("narrow", view.clientWidth < 1100);
   view.classList.toggle("tight", view.clientWidth < 600);
 }
-addEventListener("resize", () => { wordsWidth(); wordsFit(); });
+const wordsViewFitter = new ResizeObserver(() => requestAnimationFrame(() => { const view = $("view-design"); if (view?.classList.contains("active")) { wordsWidth(view); wordsFitClock(view); wordsArrows(view); } }));
+addEventListener("resize", () => { wordsWidth(); wordsFit(); const view = $("view-design"); if (view) wordsArrows(view); });
 // Leaving the Design view stops the video, so nothing plays behind another view.
 new MutationObserver(() => {
   if ($("view-design")?.classList.contains("active")) return;
@@ -741,10 +884,66 @@ async function wordsShuffle(kinetic = true) {
     wordsPanel.stage = null; await wordsOpen();
   } catch (error) { toast(String(error).replace(/^.*?: /, "")); }
 }
+// Tiny diagrams explain the choice before it is applied; motion plays only on hover/focus.
+function wordsOptionPreview(kind, key) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 160 64"); svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "words-option-preview"); svg.setAttribute("data-kind", kind); svg.setAttribute("data-choice", key);
+  const add = (tag, attrs, text) => {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+    if (text) node.textContent = text; svg.appendChild(node); return node;
+  };
+  if (kind === "layouts") {
+    const places = { karaoke: [[36,35],[68,35],[112,35]], stack: [[60,24],[99,24],[80,44]],
+      cascade: [[28,19],[73,34],[122,49]], scatter: [[32,26,-9],[80,44,7],[126,23,-5]],
+      push: [[36,35],[70,35],[116,35]], giant: [[27,18],[60,18],[87,48]] };
+    (places[key] || places.karaoke).forEach(([x,y,angle], i) => add("text", { x, y, "text-anchor": "middle",
+      class: i === 2 ? "hero" : "", "font-size": key === "giant" && i === 2 ? 29 : 12,
+      transform: `rotate(${angle || 0} ${x} ${y})` }, ["Sing", "your", "song"][i]));
+    if (key === "push") add("path", {d:"M 17 22 V 12 H 30 M 130 12 H 143 V 22 M 17 42 V 52 H 30 M 130 52 H 143 V 42", class:"cue"});
+  } else if (kind === "entrances") {
+    add("text", {x:80,y:40,"text-anchor":"middle","font-size":25,class:"preview-word"}, "Sing");
+    const cues = { "fade-up":"M 80 59 V 47 m -4 4 4 -4 4 4", slide:"M 10 34 H 43 m -5 -4 5 4 -5 4",
+      "drop-in":"M 80 5 V 17 m -4 -4 4 4 4 -4", pop:"M 38 18 l 7 5 M 122 18 l -7 5 M 38 49 l 7 -5 M 122 49 l -7 -5",
+      typewriter:"M 112 20 V 43", "blur-in":"M 37 24 V 40 M 31 27 V 37 M 123 24 V 40 M 129 27 V 37" };
+    add("path", {d:cues[key] || "",class:"cue"});
+  } else {
+    add("path", {d:"M 0 43 Q 20 31 40 43 T 80 43 T 120 43 T 160 43 M 0 54 Q 20 42 40 54 T 80 54 T 120 54 T 160 54",class:"scene"});
+    if (key === "godrays") for (const x of [30,65,100,135]) add("path",{d:`M 20 0 L ${x} 64`,class:"light"});
+    if (key === "lens-flare") for (const [x,y,r] of [[37,18,12],[73,30,7],[112,44,4]]) add("circle",{cx:x,cy:y,r,class:"light"});
+    if (key === "ripples") for (const r of [10,21,32]) add("ellipse",{cx:80,cy:32,rx:r*1.7,ry:r*.5,class:"cue"});
+    if (["snow","starfield","paper-grain","sparkle-lines"].includes(key)) for (let i=0;i<18;i++) {
+      const x=(i*47+13)%160,y=(i*23+9)%60;
+      if (key === "sparkle-lines") add("path",{d:`M ${x-3} ${y} h 6 M ${x} ${y-3} v 6`,class:"cue"});
+      else add("circle",{cx:x,cy:y,r:key === "paper-grain" ? .7 : key === "snow" ? 2 : 1,class:"speck"});
+    }
+  }
+  return svg;
+}
+
 function wordsLayers(anim) {
   const lib = wordsPanel.read.kinetic_library || {}, k = anim.kinetic;
   const row = (label, kind, current, pick) => [el("div", { class: "group-label" }, label), el("div", { class: "words-effects" },
-    ...Object.entries(lib[kind] || {}).map(([key, item]) => wordsCard(current === key, item.name, item.does, () => pick(key))))];
+    ...Object.entries(lib[kind] || {}).map(([key, item]) => {
+      const card = wordsCard(current === key, item.name, item.does, () => pick(key));
+      if (["layouts", "entrances", "overlays"].includes(kind)) card.prepend(wordsOptionPreview(kind, key));
+      if (kind === "letterings") {
+        const sample = el("span", { class: "words-lettering-sample", "aria-hidden": "true" }, "Sing ");
+        const hero = el("span", {}, "out");
+        sample.style.setProperty("--sample-font", `"${item.style.font}", sans-serif`);
+        sample.style.setProperty("--sample-weight", String(item.style.weight || 700));
+        sample.style.setProperty("--sample-color", item.style.color);
+        sample.style.setProperty("--sample-outline", item.style.outline || "transparent");
+        hero.style.setProperty("--hero-font", `"${item.style.hero_font || item.style.font}", sans-serif`);
+        hero.style.setProperty("--hero-weight", String(item.style.hero_weight || 700));
+        hero.style.setProperty("--hero-slant", item.style.hero_italic ? "italic" : "normal");
+        hero.style.setProperty("--hero-color", item.style.hero_color);
+        hero.style.setProperty("--hero-size", `${Math.min(1.7, (item.style.hero_size || 110) / (item.style.size || 64))}em`);
+        sample.appendChild(hero); card.prepend(sample);
+      }
+      return card;
+    }))];
   const picked = wordsPanel.picked.filter((id) => anim.words.some((w) => w.word_id === id));
   const text = (id) => anim.words.find((w) => w.word_id === id)?.text || id;
   const actsFor = (act) => { const acts = { ...k.acts }; for (const id of picked) { if (act) acts[id] = act; else delete acts[id]; } return acts; };
@@ -767,6 +966,18 @@ function wordsLayers(anim) {
       wordsCard(false, "No act", "Arrives like the other words", () => wordsKinetic({ acts: actsFor(null) })),
       ...Object.entries(lib.acts || {}).map(([key, item]) => wordsCard(picked.every((id) => k.acts?.[id] === key), item.name, item.does, () => wordsKinetic({ acts: actsFor(key) }))))
       : el("p", { class: "muted" }, "Click a word in the lyrics on the left to give it an act."),
+    ...row("Lettering", "letterings", Object.entries(lib.letterings || {}).find(([, l]) => Object.entries(l.style).every(([key, value]) => k.style?.[key] === value))?.[0],
+      (key) => wordsKinetic({ style: lib.letterings[key].style })),
+    // Drawings: a stroke anchored to a word, drawn on at its sung time (picked words get the stroke).
+    el("div", { class: "group-label" }, "Drawings · pick words, then a stroke; click a drawing to remove it"),
+    el("div", { class: "words-meaning" }, ...(k.draws || []).map((d, i) => el("button", { class: "chip", title: `Remove ${lib.strokes?.[d.stroke]?.name || d.stroke} from ${text(d.word_id)}`, "aria-label": `Remove drawing from ${text(d.word_id)}`,
+      onclick: () => wordsKinetic({ draws: k.draws.filter((_, j) => j !== i) }) }, `${text(d.word_id)} · ${lib.strokes?.[d.stroke]?.name || d.stroke}`))),
+    picked.length ? el("div", { class: "words-effects" }, ...Object.entries(lib.strokes || {}).map(([key, item]) => {
+      const card = wordsCard(picked.every((id) => k.draws?.some((d) => d.word_id === id && d.stroke === key)), item.name, item.does,
+        () => wordsKinetic({ draws: [...(k.draws || []).filter((d) => !picked.includes(d.word_id)), ...picked.map((word_id) => ({ word_id, stroke: key, place: key === "down" ? "beside" : "under" }))] }));
+      const svg = wordsStroke(item); svg.setAttribute("class", "words-stroke-sample"); card.prepend(svg); return card;
+    }))
+      : null,
     ...row("Overlay · a transparent layer over the scene", "overlays", k.overlay || "none", (overlay) => wordsKinetic({ overlay })));
 }
 
