@@ -791,7 +791,7 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
     for d in k["draws"].as_array().into_iter().flatten() {
         if !d["place"].is_null() && d["place"] != "beside" && d["place"] != "under" { return Err(invalid("kinetic.draws place must be under or beside")); }
         if !ids.contains(&&d["word_id"]) { return Err(invalid(format!("kinetic.draws: {} is not a word of this section", d["word_id"]))); }
-        let custom = if let Some(shape) = d.get("drawing") {
+        let custom = if let Some(shape) = d.get("drawing").filter(|shape| !shape.is_null()) {
             let path = shape["d"].as_str().filter(|v| !v.is_empty() && v.len() <= 16000 && v.chars().all(|c| c.is_ascii_digit() || " ,.-eMmLlHhVvCcSsQqTtAaZz".contains(c)))
                 .ok_or_else(|| invalid("drawing.d must be SVG path data"))?;
             let vb = shape["view_box"].as_str().unwrap_or("");
@@ -1222,6 +1222,12 @@ mod tests {
             assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":draws})).is_err());
         }
         assert_eq!((drawn["draws"][0]["stroke"].clone(), drawn["draws"][0]["place"].clone()), (json!("hill"), json!("under")));
+        let mut retimed = drawn.clone();
+        retimed["draws"][0]["offset"] = json!(0.1);
+        retimed["draws"][0]["duration"] = json!(1.2);
+        let saved_again = kinetic_design(&words, &retimed).unwrap();
+        assert_eq!(saved_again["draws"][0]["stroke"], json!("hill"));
+        assert_eq!(saved_again["draws"][0]["offset"], json!(0.1), "saved library strokes can be moved and trimmed");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":[{"word_id":"v1-l1/w1","stroke":"scribble"}]})).is_err(), "unknown stroke");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v9-l1/w0":"spin"}})).is_err(), "a word from another section");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
