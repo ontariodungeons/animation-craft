@@ -984,12 +984,12 @@ body.at-home .app-footer { display:none; }
 .words-spacer { flex: 1; }
 /* The stage keeps its room at any width the Design view gets (the agent panel takes part of the window).
    words.js sets these from the view's own width: narrow, the film roll steps aside; tight, one column
-   with the stage and its layers first. */
+   with the stage and its layers first. Element selectors: the columns' classes come from the component config. */
 #view-design.active.narrow { grid-template-columns: minmax(0, 34%) minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2); }
-#view-design.active.narrow > .words-side:last-child { display: none; }
+#view-design.active.narrow > aside:last-child { display: none; }
 #view-design.active.tight { grid-template-columns: minmax(0, 1fr); }
-#view-design.active.tight > .words-side:first-child { order: 2; }
-#view-design.active.tight .words-main { position: static; }
+#view-design.active.tight > aside:first-child { order: 2; }
+#view-design.active.tight > section { position: static; }
 .words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
