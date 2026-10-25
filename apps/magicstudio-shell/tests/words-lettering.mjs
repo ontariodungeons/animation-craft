@@ -118,3 +118,55 @@ vm.runInContext(`var repeated={...anim,scope:{section:'verse_1',occurrence:2},wo
  wordsPanel.studio={sections:[{section:'verse_1',occurrence:1,clips:[{word_id:'l1/w0',start:1}]},{section:'verse_1',occurrence:2,clips:[{word_id:'l1/w0',start:11}]}]};`,c);
 assert.equal(vm.runInContext('wordsAt(anim.words[0])',c),1);
 assert.equal(vm.runInContext('wordsAt(repeated.words[0])',c),11,'repeated lines use their own clip timing');
+
+// Scene choices come only from the storyboard background section, never the whole asset library.
+c.convertFileSrc=path=>`asset://${path}`;
+vm.runInContext(`wordsPanel.backgrounds={images:[{asset_id:'sea',name:'Sea',path:'/sea.png'},{asset_id:'lagoon',name:'Lagoon',path:'/lagoon.png'}]};
+ wordsPanel.read.images=[{id:'character',name:'Whale',path:'/whale.png'}];anim.background_asset='sea';`,c);
+const backgrounds=vm.runInContext('wordsBackdropPicker(anim)',c);
+const choices=flat(backgrounds).filter(n=>n.tag==='button');
+assert.equal(choices.length,2);assert.equal(choices[0]['aria-pressed'],'true');
+assert.equal(choices[1]['aria-label'],'Use background Lagoon');
+assert.equal(flat(backgrounds).some(n=>n.tag==='select'),false);
+saves.length=0;await choices[1].onclick();
+assert.equal(saves.find(r=>r.id==='words.save').params.background_asset,'lagoon');
+vm.runInContext('wordsPanel.backgrounds={images:[]}',c);
+assert.equal(flat(vm.runInContext('wordsBackdropPicker(anim)',c)).filter(n=>n.tag==='button').length,0,'empty storyboard never falls back to library images');
+console.log('PASS storyboard-only background thumbnail selection');
+
+// Cue timing: an overlay effect saves the engine's overlay_offset / overlay_duration from its anchor; a drawing
+// keeps offset / duration / hold; the picked cue's Start/End fields and replay show in Timing and in Motion.
+vm.runInContext(`wordsPanel.selected='verse-1';anim.kinetic={...anim.kinetic,overlay:'godrays',draws:[{word_id:'l1/w0',stroke:'hill',offset:0,duration:1.4,hold:0.5}]};
+  wordsPanel.read.document={animations:[anim]};wordsLines=()=>[{id:'l1',words:anim.words}];wordsLineSpan=()=>({start:0,end:4});`,c);
+saves.length=0;
+await vm.runInContext(`wordsRetimeCue({id:'o',kind:'overlay',animation_id:'verse-1',anchor:10,start:10,end:20,line_id:'l1'},12.5,18)`,c);
+const overlaySave=saves.find(r=>r.id==='words.save').params.kinetic;
+assert.equal(overlaySave.overlay_offset,2.5,'overlay start is saved relative to its anchor');
+assert.equal(overlaySave.overlay_duration,5.5,'overlay length is saved as its duration');
+saves.length=0;
+await vm.runInContext(`wordsRetimeCue({id:'d',kind:'drawing',index:0,animation_id:'verse-1',anchor:1,start:1,end:2.9,draw_end:2.4,line_id:'l1'},1.5,3.5)`,c);
+const draw=saves.find(r=>r.id==='words.save').params.kinetic.draws[0];
+assert.equal(JSON.stringify([draw.offset,draw.duration,draw.hold]),'[0.5,1.4,0.6]','drawing timing keeps offset, draw duration and hold');
+vm.runInContext(`wordsPanel.read.graphics=[{id:'o',kind:'overlay',name:'Sun rays',animation_id:'verse-1',anchor:10,start:10,end:20}];wordsPanel.cue='o';`,c);
+const editor=vm.runInContext('wordsCueEditor(anim)',c);
+assert.equal(flat(editor).filter(n=>n.tag==='input'&&n.type==='number').length,2,'Start and End seconds are editable');
+assert.ok(flat(editor).some(n=>n.tag==='button'&&String(n['aria-label']).includes('Replay')),'the cue can be replayed');
+vm.runInContext(`wordsPanel.mode='motion'`,c);
+assert.ok(vm.runInContext('wordsInnerControls(anim)',c).some(n=>n?.['data-cue-kind']==='overlay'),'Motion shows the cue timing editor too');
+console.log('PASS cue timing: overlay offset/duration, drawing offset/duration/hold, Start/End fields in Timing and Motion');
+
+const actions=vm.runInContext('wordsMotionActions(anim)',c);
+assert.ok(flat(actions).some(n=>n['aria-label']==='Draw cue on scene'));
+assert.ok(flat(actions).some(n=>n['aria-label']==='Add scene effect'));
+vm.runInContext(`wordsPanel.mode='motion';wordsPanel.motionAdd='effect'`,c);
+const effectsOnly=vm.runInContext('wordsLayers(anim)',c);
+assert.ok(words(effectsOnly).includes('Add scene effect'));
+assert.equal(words(effectsOnly).includes('Layout'),false,'adding an effect never exposes text layout choices');
+vm.runInContext(`wordsPanel.motionAdd=null;wordsPanel.read.graphics=[{id:'d',kind:'drawing',index:0,name:'Drawing',animation_id:'verse-1',anchor:1,start:1,end:3,word_ids:['l1/w0']}];wordsPanel.cue='d'`,c);
+const editCue=vm.runInContext('wordsCueEditor(anim)',c);
+assert.ok(flat(editCue).some(n=>n['aria-label']==='Redraw selected cue'));
+assert.ok(flat(editCue).some(n=>n['aria-label']==='Drawing colour'));
+saves.length=0;await flat(editCue).find(n=>n['aria-label']==='Delete selected visual cue').onclick();
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(saves.find(r=>r.id==='words.save').params.kinetic.draws.length,0,'explicit delete removes selected drawing');
+console.log('PASS explicit motion add, edit/redraw and delete controls');

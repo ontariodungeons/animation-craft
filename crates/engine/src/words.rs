@@ -557,8 +557,10 @@ fn graphic_cues(doc: &Value, lib: &Value, times: &std::collections::HashMap<Stri
         if k.is_object() {
             if let Some(key) = k["overlay"].as_str().filter(|key| *key != "none") {
                 if let Some(overlay) = lib["overlays"].get(key) {
+                    let start=(anchor+k["overlay_offset"].as_f64().unwrap_or(0.0)).max(0.0);
+                    let duration=k["overlay_duration"].as_f64().unwrap_or(section_end-anchor);
                     cues.push(json!({"id":format!("{}-overlay",anim["animation_id"].as_str().unwrap_or("words")),"kind":"overlay",
-                        "animation_id":anim["animation_id"],"name":overlay["name"],"overlay":key,"start":anchor,"end":section_end,"word_ids":[]}));
+                        "animation_id":anim["animation_id"],"name":overlay["name"],"overlay":key,"anchor":anchor,"start":start,"end":start+duration,"word_ids":[]}));
                 }
             }
         } else {
@@ -876,9 +878,13 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
         if let Some(track) = d.get("track") { draw["track"]=one_of(track,&["lettering","graphics"],"drawing.track")?; }
         draws.push(draw);
     }
-    Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,"draws":draws,
+    let mut result=json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,"draws":draws,
         "overlay":if k["overlay"].is_null() { json!("none") } else { named("overlays",&k["overlay"])? },
-        "band":if k["band"] == "bottom" { "bottom" } else { "top" },"seed":k["seed"].as_u64().unwrap_or(1),"style":style}))
+        "band":if k["band"] == "bottom" { "bottom" } else { "top" },"seed":k["seed"].as_u64().unwrap_or(1),"style":style});
+    for (key,lo,hi) in [("overlay_offset",-600.0,600.0),("overlay_duration",0.05,600.0)] {
+        if let Some(v)=k.get(key) { let value=v.as_f64().filter(|n|n.is_finite() && *n>=lo && *n<=hi).ok_or_else(||invalid(format!("{key} must be between {lo} and {hi}")))?;result[key]=json!(value); }
+    }
+    Ok(result)
 }
 
 /// The section as kinetic text: every word at its local time, laid out and performed in the browser.
@@ -1123,10 +1129,14 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
             let own_src = Path::new(src).with_file_name(format!("{own}.html")).to_string_lossy().into_owned();
             let source = fs::read_to_string(dir.join("hyperframes").join(src))?;
             fs::write(dir.join("hyperframes").join(&own_src), source.replace(&format!("\"{block}\""), &format!("\"{own}\"")).replace(&format!("'{block}'"), &format!("'{own}'")))?;
+            let cue=read["graphics"].as_array().into_iter().flatten().find(|c|c["kind"]=="overlay")
+                .ok_or_else(||invalid("Overlay timing is unavailable"))?;
+            let overlay_start=cue["start"].as_f64().ok_or_else(||invalid("Overlay start is unavailable"))?;
+            let overlay_duration=cue["end"].as_f64().ok_or_else(||invalid("Overlay end is unavailable"))?-overlay_start;
             html.insert_str(root, &format!("<div id=\"{own}\" class=\"clip lyric-overlay-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{own}\" data-composition-src=\"{own_src}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:75;mix-blend-mode:{};opacity:{}\"></div>\n",
-                composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0), track_index + 1,
+                overlay_start, overlay_duration, track_index + 1,
                 look["blend"].as_str().unwrap_or("normal"), look["opacity"].as_f64().unwrap_or(1.0)));
-            receipt["overlay"] = json!({"name":overlay,"block":block,"src":own_src});
+            receipt["overlay"] = json!({"name":overlay,"block":block,"src":own_src,"start":overlay_start,"duration":overlay_duration});
         }
         receipt["src"] = composed["src"].clone();
         receipt["start"] = composed["song_anchor"].clone();
@@ -1281,6 +1291,25 @@ mod tests {
         let changed = graphic_cues(&doc, &lib, &std::collections::HashMap::from([("#1:b".into(),(3.5,4.0))]));
         assert_eq!(changed[0]["start"],json!(3.5),"follows the Studio's saved word timing");
         assert!(graphic_cues(&json!({"animations":[]}), &lib, &std::collections::HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn overlay_timing_survives_save_and_rejects_invalid_ranges() {
+        let (dir,mut session)=project("overlay-timing");
+        let k=json!({"layout":"karaoke","entrance":"pop","overlay":"ripples","overlay_offset":2.5,"overlay_duration":1.75});
+        cmd_words_save(&mut session,&json!({"animation_id":"words-chorus-1","expected_source_revision":0,"kinetic":k})).unwrap();
+        let read=cmd_words_read(&mut session,&json!({"animation_id":"words-chorus-1"})).unwrap();
+        let cue=&read["graphics"][0];assert_eq!(cue["kind"],"overlay");
+        assert!((cue["start"].as_f64().unwrap()-cue["anchor"].as_f64().unwrap()-2.5).abs()<1e-9);
+        assert!((cue["end"].as_f64().unwrap()-cue["start"].as_f64().unwrap()-1.75).abs()<1e-9);
+        let before=fs::read(document_path(&dir)).unwrap();
+        for (key,value) in [("overlay_duration",0.0),("overlay_duration",601.0),("overlay_offset",601.0)] {
+            let mut bad=k.clone();bad[key]=json!(value);
+            assert!(cmd_words_save(&mut session,&json!({"animation_id":"words-chorus-1","expected_source_revision":1,"kinetic":bad})).is_err());
+            assert_eq!(fs::read(document_path(&dir)).unwrap(),before);
+        }
+        assert_eq!(load(&dir).unwrap().unwrap()["animations"][1]["kinetic"]["overlay_duration"],1.75);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
