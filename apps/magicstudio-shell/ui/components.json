@@ -171,7 +171,7 @@
       "indicator": "hidden"
     },
     "motion-inspector": {
-      "component": "workspace",
+      "component": "motion-inspector",
       "label": "Inspector",
       "indicator": "hidden"
     },
@@ -1218,6 +1218,11 @@
       "component": "start",
       "label": "Create storyboard",
       "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "motion-asset-browser": {
+      "component": "motion-inspector",
+      "label": "Animation assets",
       "indicator": "hidden"
     }
   },

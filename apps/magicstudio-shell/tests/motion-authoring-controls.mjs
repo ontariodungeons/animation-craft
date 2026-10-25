@@ -14,8 +14,8 @@ f=fixture();f.c.window={addEventListener(){}};f.c.ICONS={chev:''};f.c.$=id=>f.no
 f.c.document={createElement:tag=>f.c.el(tag)};
 vm.runInContext(readFileSync(new URL('../ui/companion-boxes.js',import.meta.url),'utf8'),f.c);
 vm.runInContext(readFileSync(new URL('../ui/animation.js',import.meta.url),'utf8'),f.c);
-vm.runInContext(`Object.assign(motion,fixtureMotion);motion.assets=[];motion.meta.layers=[];el('aside',{id:'motion-inspector'});animationControls();`,f.c);
-assert.equal(f.nodes.get('authoring-action-apply').disabled,false,'actual inspector mounts enabled contract-backed action controls');assert.ok(f.nodes.get('authoring-pose-export'));console.log('PASS actual inspector mounts shared authoring panels');
+vm.runInContext(`Object.assign(motion,fixtureMotion);motion.assets=[];motion.meta.layers=[];el('aside',{id:'motion-inspector'});el('aside',{id:'motion-asset-browser'});animationControls();`,f.c);
+assert.equal(f.nodes.get('authoring-action-apply').disabled,false,'actual inspector mounts enabled contract-backed action controls');assert.ok(f.nodes.get('authoring-pose-export'));assert.ok(f.nodes.get('motion-asset-browser').children.some(n=>n.id==='motion-assets'),'asset browser owns the asset list');assert.ok(!f.nodes.get('motion-inspector').children.some(n=>n?.id==='motion-assets'),'controls stay separate from assets');console.log('PASS actual inspector mounts shared authoring panels with separate assets');
 
 f=fixture();let finish;f.c.motionCommand=async(id,params)=>{f.calls.push({id,params});return new Promise(resolve=>finish=resolve)};f.change('authoring-rotation',25);const pending=f.click('authoring-part-apply');const duplicate=f.click('authoring-part-apply');assert.equal(f.calls.filter(v=>v.id==='motion.part.set').length,1,'rig mutations are single flight');finish({ok:true,character:'puppet',rig_sha256:'after',undo:'receipt'});await Promise.all([pending,duplicate]);console.log('PASS authoring single-flight mutation');
 

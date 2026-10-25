@@ -92,7 +92,7 @@ function fixture() {
 function elFixture(entries) {
   const created = [];
   const node = (tag) => {
-    const element = { tagName: tag.toUpperCase(), className: '', dataset: {}, attributes: {}, children: [],
+    const element = { tagName: tag.toUpperCase(), className: '', dataset: {}, attributes: {}, children: [], disabled: false, selected: false, checked: false,
       setAttribute(name, value) { this.attributes[name] = String(value); },
       getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; },
       append(...items) { this.children.push(...items); for (const item of items) if (typeof item === 'object') item.parentElement = this; },
@@ -114,6 +114,17 @@ function elFixture(entries) {
 }
 
 const tests = [
+  ['shared controls preserve false HTML boolean properties and ARIA text', () => {
+    const { ctx } = elFixture({});
+    const control = vm.runInContext('el("button", {disabled:false, "aria-expanded":false})', ctx);
+    assert.equal(control.disabled, false);
+    assert.equal(control.getAttribute('disabled'), null);
+    assert.equal(control.getAttribute('aria-expanded'), 'false');
+    assert.equal(vm.runInContext('el("button", {disabled:true})', ctx).disabled, true);
+    assert.equal(vm.runInContext('el("option", {selected:false})', ctx).selected, false);
+    assert.equal(vm.runInContext('el("option", {selected:true})', ctx).selected, true);
+    assert.equal(vm.runInContext('el("input", {checked:false})', ctx).checked, false);
+  }],
   ['missing shared panel header is a reported contract failure', () => {
     const { ctx, bridge, boxes, elements } = fixture();
     ctx.uiConfig.elements.lyrics = { component: 'panel', indicator: 'hidden' };

@@ -26,6 +26,15 @@ function animationReset(){
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
 const motionAssetUrl = path => `${convertFileSrc(path)}${String(convertFileSrc(path)).includes('?')?'&':'?'}v=${motion.meta?.image_revision??0}`;
 const MOTION_ICONS = {
+ idle:'<circle cx="12" cy="5" r="2"/><path d="M12 8v8m-5-5 5-3 5 3m-5 5-3 5m3-5 3 5"/>',
+ move:'<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+ jump:'<path d="M12 17V3m-5 5 5-5 5 5M4 21h16"/>',
+ walk:'<ellipse cx="7" cy="7" rx="3" ry="5" transform="rotate(-20 7 7)"/><ellipse cx="17" cy="17" rx="3" ry="5" transform="rotate(20 17 17)"/>',
+ run:'<circle cx="15" cy="4" r="2"/><path d="m4 10 5-1 4-3 3 5h4M13 7l-3 7 5 3-2 5M10 14l-4 6H2"/>',
+ wave:'<path d="M8 13V6a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v8-5a2 2 0 0 1 4 0v9a6 6 0 0 1-11 3l-5-6a2 2 0 0 1 3-3l3 3M3 3l2 2M21 2l-2 2"/>',
+ talk:'<path d="M21 11a8 8 0 0 1-8 8H7l-5 3 2-6a8 8 0 1 1 17-5Z"/><path d="M8 10h8M8 14h5"/>',
+ sway:'<path d="M3 12c3-10 6-10 9 0s6 10 9 0M3 5v2m18 10v2"/>',
+ rest:'<path d="M20 14A9 9 0 0 1 10 3a9 9 0 1 0 10 11Z"/>',
  pen:'<path d="m16 3 5 5-12 12-6 1 1-6zM14 5l5 5"/>', grid:'<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>',
  play:'<path d="m8 5 11 7-11 7z"/>', pause:'<path d="M8 5v14M16 5v14"/>',
  reset:'<path d="M3 10a9 9 0 1 1 2 9M3 4v6h6"/>', fit:'<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
@@ -82,7 +91,8 @@ function motionModeSwitch(){
 function animationShell(){
  theatreRequireSaved();
  const view=$('view-animation');view.replaceChildren();
- const inspector=el('aside',{class:'motion-inspector',id:'motion-inspector','aria-label':'Animation controls'});
+ const assets=el('aside',{id:'motion-asset-browser','aria-label':'Animation assets'});
+ const inspector=el('aside',{id:'motion-inspector','aria-label':'Animation controls'});
  const stage=el('div',{class:'motion-stage',id:'motion-stage'},el('canvas',{id:'motion-canvas','aria-label':'Character animation canvas',tabindex:0}));
  const grid=motionButton('motion-grid','Show or hide grid','grid',()=>{motion.grid=!motion.grid;localStorage.setItem('animation.grid',String(motion.grid));grid.setAttribute('aria-pressed',String(motion.grid));animationDraw();});grid.setAttribute('aria-pressed',String(motion.grid));
  const toolbar=el('div',{class:'motion-stagebar'},motionModeSwitch(),el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
@@ -91,7 +101,7 @@ function animationShell(){
   motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
  const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step-back','Previous frame','step',()=>animationStep(-1)),motionButton('motion-step','Next frame','step',()=>animationStep(1)),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>animationSeek(Number(e.target.value))}));
  const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar',hidden:''});
- view.append(inspector,el('div',{class:'motion-main'},toolbar,stage,transport,partBar));
+ view.append(assets,el('div',{class:'motion-main'},toolbar,stage,transport,partBar),inspector);
  if(motion.mode!=='composite'){
   const theatre=el('section',{class:'motion-theatre','aria-label':'Theatre timeline'});
   view.append(theatre);
@@ -128,11 +138,11 @@ function animationControls(){
  const authoring=motionAuthoringPanels(meta);
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
  const artworkDot=window.companionBoxes.dot('ready');artworkDot.title='Artwork loaded';
- box.append(el('div',{class:'panel-head inline'},artworkDot,picker),authoring.status);
- box.append(motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),false));
+ $('motion-asset-browser').replaceChildren(el('div',{class:'panel-head inline'},artworkDot,picker),motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),true));
+ box.append(authoring.status);
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
- const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'motion-action','aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}},t.label)),el('button',{id:'motion-action-rest',class:'motion-action','aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}},'Rest'));
+ const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'icon motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[t.id.slice(1)] || MOTION_ICONS.play}</svg>`,'aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}})),el('button',{id:'motion-action-rest',class:'icon motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg>`,'aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}}));
  box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks,authoring.action],true));
  box.append(pathControls());
  const loop=el('input',{id:'motion-preview-loop',type:'checkbox',onchange:e=>{motion.previewLoop=e.target.checked;e.target.defaultChecked=e.target.checked;animationRemember();}});loop.checked=motion.previewLoop??meta.tracks.find(t=>t.id===motion.track)?.loop??false;loop.defaultChecked=loop.checked;
