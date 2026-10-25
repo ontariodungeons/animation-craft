@@ -692,6 +692,10 @@ async function load() {
   await loadComponents();
   if (typeof setupSkillsAdd === "function") setupSkillsAdd();
   const start = await invoke("startup");
+  state.identity=start.identity;
+  const identity=start.identity||{},port=identity.control_port;
+  $('footer-instance').textContent=`Port ${port??'unavailable'} · ${identity.branch||'unknown build'}`;
+  $('footer-instance').title=`${identity.build_id||'Unknown build'} · PID ${identity.pid??'?'} · ${identity.executable||''} · Click to copy the CLI command`;
   state.studioUrl = start.studio || null;
   if (!start.project) return showHome();
   await openProject(start.project, start);
@@ -756,6 +760,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 })();
 $("target").addEventListener("click", toggleServer);
 $("footer-server").addEventListener("click", toggleServer);
+$("footer-instance").addEventListener("click",async()=>{const port=state.identity?.control_port;if(!port)return;try{await navigator.clipboard.writeText(`mc --bridge ${port} exec ui.feedback`);toast(`Copied Studio port ${port}`);}catch{toast(`Studio control port ${port}`);}});
 $("studio-start").addEventListener("click", toggleServer);
 $("sb-prev").addEventListener("click", () => showPage(state.page - 1));
 $("sb-next").addEventListener("click", () => showPage(state.page + 1));

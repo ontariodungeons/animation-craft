@@ -1132,6 +1132,11 @@
       "label": "Agent settings",
       "indicator": "hidden",
       "target": "magic-chat-pane"
+    },
+    "footer-instance": {
+      "component": "control",
+      "label": "Studio port and build",
+      "indicator": "hidden"
     }
   },
   "rails": {

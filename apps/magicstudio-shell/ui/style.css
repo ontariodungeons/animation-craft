@@ -774,7 +774,7 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 
 /* Unified footer across Project, Animation and Studio. */
 .app-footer { flex:none; height:var(--footer-h, var(--size-30)); display:flex; align-items:center; gap:var(--size-14); padding:0 var(--size-10); border-top:var(--size-1) solid var(--line); background:var(--surface); color:var(--muted); font-size:var(--size-11); position:relative; z-index:13; }
-body.at-home .app-footer { display:none; }
+#footer-instance { flex:none;white-space:nowrap;color:var(--text); }
 .footer-stages { display:flex; gap:var(--size-2); flex:none; }
 .footer-stage, .footer-item { display:inline-flex; align-items:center; gap:var(--size-5); padding:var(--size-2) var(--size-7); border-radius:var(--size-6); white-space:nowrap; color:var(--muted); }
 .footer-stage:hover, button.footer-item:hover { background:var(--surface-2); color:var(--text); }
@@ -944,10 +944,14 @@ body.at-home .app-footer { display:none; }
 .words-crumb { font-size: var(--text-md); }
 .words-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .words-spacer { flex: 1; }
-/* Narrow windows: the side columns tighten so the stage keeps its room. */
-@media (max-width: 70em) {
-  #view-design.active { grid-template-columns: calc(var(--space-5) * 7) minmax(0, 1fr) calc(var(--space-5) * 4.5); gap: var(--space-2); padding: var(--space-2); }
-}
+/* The stage keeps its room at any width the Design view gets (the agent panel takes part of the window).
+   words.js sets these from the view's own width: narrow, the film roll steps aside; tight, one column
+   with the stage and its layers first. Element selectors: the columns' classes come from the component config. */
+#view-design.active.narrow { grid-template-columns: minmax(0, 34%) minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2); }
+#view-design.active.narrow > aside:last-child { display: none; }
+#view-design.active.tight { grid-template-columns: minmax(0, 1fr); }
+#view-design.active.tight > aside:first-child { order: 2; }
+#view-design.active.tight > section { position: static; }
 .words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
@@ -961,6 +965,9 @@ body.at-home .app-footer { display:none; }
 /* A sung word in its own lettering; the line's design sets these through --word-* values. */
 /* Kinetic layers under the stage: rows of library cards and the section's meaning words. */
 .words-layers { display: flex; flex-direction: column; gap: var(--space-2); }
+.words-layers .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 3.4), 1fr)); gap: var(--space-1); }
+.words-layers .effect { padding: var(--space-1) var(--space-2); }
+.words-layers .effect > .muted { display: none; }
 .words-meaning { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .words-line > .word.lettered { display: inline; padding: 0 .12em; border: 0; border-radius: var(--radius-sm); background: none; color: var(--word-color, var(--lettering-ink));
   font-family: var(--word-font, inherit); font-weight: var(--word-weight, 400); font-style: var(--word-slant, normal); font-size: calc(var(--text-md) * var(--word-scale, 1)); cursor: text; }

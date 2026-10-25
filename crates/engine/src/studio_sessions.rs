@@ -131,5 +131,31 @@ pub fn for_project(path: &Path) -> Result<Option<Value>, String> {
         .filter(|s| s["canonical_project"].as_str() == project.to_str())
         .cloned()
         .collect();
-    match matches.as_slice(){[]=>{if found["errors"].as_array().is_some_and(|v|v.iter().any(|e|!e["error"].as_str().is_some_and(|s|s.starts_with("stale endpoint:")))){Err(format!("Studio ownership is unknown: {}",found["errors"]))}else{Ok(None)}},[one]=>Ok(Some(one.clone())),_=>Err("Multiple Studio sessions report this project; ownership ambiguous, no command executed".into())}
+    if matches.is_empty()&&found["errors"].as_array().is_some_and(|v|v.iter().any(|e|!e["error"].as_str().is_some_and(|s|s.starts_with("stale endpoint:")))){return Err(format!("Studio ownership is unknown: {}",found["errors"]));}
+    select(&matches)
+}
+
+fn select(matches:&[Value])->Result<Option<Value>,String>{
+    if matches.len()<2{return Ok(matches.first().cloned());}
+    let writers=matches.iter().filter(|s|s["writer_owner"]==true).collect::<Vec<_>>();
+    if writers.len()==1{return Ok(Some(writers[0].clone()));}
+    // Older builds lack the owner field. An explicit read-only attachment cannot be the writer.
+    let possible=matches.iter().filter(|s|s["writer_owner"]!=false).collect::<Vec<_>>();
+    if writers.is_empty()&&possible.len()==1{return Ok(Some(possible[0].clone()));}
+    Err("Multiple Studio sessions report this project; no unique writer. Inspect mc studios --json and select its port; no command executed".into())
+}
+
+#[cfg(test)]
+mod tests{
+    use super::*;
+    #[test]
+    fn read_only_review_windows_do_not_hide_the_existing_writer(){
+        let review=json!({"writer_owner":false,"identity":{"control_port":19971}});
+        let writer=json!({"writer_owner":true,"identity":{"control_port":19974}});
+        assert_eq!(select(&[review.clone(),writer.clone()]).unwrap(),Some(writer));
+        let legacy=json!({"identity":{"control_port":19974}});
+        assert_eq!(select(&[review.clone(),legacy.clone()]).unwrap(),Some(legacy));
+        assert!(select(&[review,json!({"writer_owner":false})]).is_err());
+        assert!(select(&[json!({"writer_owner":true}),json!({"writer_owner":true})]).is_err());
+    }
 }

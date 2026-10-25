@@ -120,7 +120,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
         "app.quit" => {
             crate::feedback::guard(app,id,false)?;
             magicstudio_engine::activity::append(json!({"stage":"close_requested","command":"app.quit","origin":params["_origin"],"client_label":params["_client"],"request_id":params["_request_id"],"project":crate::feedback::snapshot(app)?["active_project"]}));
-            let close_app=app.clone();std::thread::spawn(move||{std::thread::sleep(Duration::from_millis(100));close_app.exit(0);});
+            let close_app=app.clone();std::thread::spawn(move||{std::thread::sleep(Duration::from_millis(100));#[cfg(unix)] cleanup(&close_app);close_app.exit(0);});
             Ok(json!({"ok":true,"status":"close_requested","exited":false,"verification":"Check endpoint/process exit after this response; no force kill or silent discard."}))
         }
         _ => {
@@ -147,12 +147,10 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
 }
 
 /// Listens on 127.0.0.1:`port`, one thread per connection.
-pub fn serve(app: AppHandle, port: u16) {
+pub fn serve(app: AppHandle, port: u16) -> Result<(),String> {
+    let listener=std::net::TcpListener::bind(("127.0.0.1",port)).map_err(|e|format!("Studio port {port}: {e}"))?;
+    *app.state::<crate::ControlPort>().0.lock().map_err(|e|e.to_string())?=Some(listener.local_addr().map_err(|e|e.to_string())?.port());
     std::thread::spawn(move || {
-        let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
-            Ok(l) => l,
-            Err(e) => return eprintln!("--control {port}: {e}"),
-        };
         for stream in listener.incoming().flatten() {
             let app = app.clone();
             std::thread::spawn(move || {
@@ -178,7 +176,7 @@ pub fn serve(app: AppHandle, port: u16) {
                 }
             });
         }
-    });
+    });Ok(())
 }
 
 /// Same-user window IPC. Files are private; discovery does not require visibility into host PIDs.

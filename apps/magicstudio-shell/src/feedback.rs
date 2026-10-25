@@ -100,7 +100,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         v = json!({});
     }
     let engine = app.state::<Engine>();
-    let (project, dirty, chat_selection, edits) = if let Ok(s) = engine.0.try_lock() {
+    let (project, dirty, chat_selection, edits, writer_owner) = if let Ok(s) = engine.0.try_lock() {
         let dirty = if let Some(path) = &s.project_path {
             std::fs::read(path)
                 .ok()
@@ -120,10 +120,11 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
         } else {
             Some(false)
         };
-        (s.project_path.clone(), dirty, s.agent_selection.clone(), Some(s.edits_since_save))
+        (s.project_path.clone(), dirty, s.agent_selection.clone(), Some(s.edits_since_save),Some(s.project_owner.is_some()))
     } else {
         (
             v["session_project"].as_str().map(std::path::PathBuf::from),
+            None,
             None,
             None,
             None,
@@ -132,7 +133,8 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     v["project_guard_version"] = json!(1);
     v["ok"] = json!(true);
     v["connection"] = json!("connected");
-    v["identity"] = json!({"application":"Magic Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("MAGICSTUDIO_BUILD_ID")});
+    v["identity"] = crate::studio_identity(app);
+    v["writer_owner"] = json!(writer_owner);
     v["active_project"] = json!(project);
     v["project_id"] = json!(project);
     v["project_identity_kind"] = json!("canonical project path");

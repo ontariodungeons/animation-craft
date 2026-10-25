@@ -536,6 +536,7 @@ function wordsRender() {
     el("aside", { id: "words-lyrics" }, el("div", { id: "words-lyrics-head" }, el("strong", { class: "panel-title" }, "Lyrics · on the song timeline")), wordsTimeline(animations, end)),
     main,
     el("aside", { id: "words-film" }, el("div", { id: "words-film-head" }, el("strong", { class: "panel-title" }, "Film roll · the whole song")), wordsRoll(animations, end)));
+  wordsWidth(view);
   requestAnimationFrame(() => {
     wordsCanvasDraw(); wordsFitClock(view);
     // A new pick brings its line level with the stage.
@@ -703,7 +704,13 @@ addEventListener("message", (event) => {
     wordsPanel.playButton?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
   }
 });
-addEventListener("resize", () => wordsFit());
+// The view's own width (not the window's) picks its layout; see #view-design.narrow / .tight.
+function wordsWidth(view = $("view-design")) {
+  if (!view) return;
+  view.classList.toggle("narrow", view.clientWidth < 1100);
+  view.classList.toggle("tight", view.clientWidth < 600);
+}
+addEventListener("resize", () => { wordsWidth(); wordsFit(); });
 // Leaving the Design view stops the video, so nothing plays behind another view.
 new MutationObserver(() => {
   if ($("view-design")?.classList.contains("active")) return;
@@ -748,8 +755,14 @@ function wordsLayers(anim) {
     ...row("Layout", "layouts", k.layout, (layout) => wordsKinetic({ layout })),
     ...row("Words arrive", "entrances", k.entrance, (entrance) => wordsKinetic({ entrance })),
     el("div", { class: "group-label" }, "Meaning words · pick words in the lyrics, then an act"),
-    el("div", { class: "words-meaning" }, ...Object.entries(k.acts || {}).map(([id, act]) => el("button", { class: `chip${picked.includes(id) ? " active" : ""}`,
-      onclick: () => { wordsPanel.picked = [id]; wordsPanel.line = anim.words.find((w) => w.word_id === id)?.line_id; wordsRender(); } }, `${text(id)} · ${lib.acts?.[act]?.name || act}`))),
+    // One chip per meaning word and act; a word sung several times picks every time it is sung.
+    el("div", { class: "words-meaning" }, ...Object.values(Object.entries(k.acts || {}).reduce((groups, [id, act]) => {
+      const key = `${text(id).toLowerCase().replace(/[^a-z]/g, "")}|${act}`;
+      (groups[key] ??= { ids: [], act, word: text(id).replace(/[^\p{L}'-]/gu, "") }).ids.push(id);
+      return groups;
+    }, {})).map((g) => el("button", { class: `chip${g.ids.some((id) => picked.includes(id)) ? " active" : ""}`, title: "Pick every time this word is sung",
+      onclick: () => { wordsPanel.picked = g.ids; wordsPanel.line = anim.words.find((w) => w.word_id === g.ids[0])?.line_id; wordsRender(); } },
+      `${g.word}${g.ids.length > 1 ? ` ×${g.ids.length}` : ""} · ${lib.acts?.[g.act]?.name || g.act}`))),
     picked.length ? el("div", { class: "words-effects" },
       wordsCard(false, "No act", "Arrives like the other words", () => wordsKinetic({ acts: actsFor(null) })),
       ...Object.entries(lib.acts || {}).map(([key, item]) => wordsCard(picked.every((id) => k.acts?.[id] === key), item.name, item.does, () => wordsKinetic({ acts: actsFor(key) }))))

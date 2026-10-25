@@ -51,6 +51,7 @@ window.magicBridge = {
   },
   state() {
     return {
+      identity: state.identity||null,
       companions: window.magicCompanions?.snapshot() || null,
       animation: typeof animationFeedback === "function" ? animationFeedback() : null,
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
