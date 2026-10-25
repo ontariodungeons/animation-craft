@@ -376,7 +376,7 @@ function wordsPresentationEdits(words, text) {
   return words.map((w, slot) => ({ word_id:w.word_id, display_text:slots[slot].join(" ") }));
 }
 function wordsBeginEdit(anim, lineId, event) {
-  if (wordsPanel.editor) return;
+  if (wordsPanel.mode !== "lyrics" || wordsPanel.editor) return;
   const node = [...$("view-design").querySelectorAll(".words-line")].find((n) => n.dataset.animationId === anim.animation_id && n.dataset.lineId === lineId);
   if (!node) return;
   const words = wordsLineWords(anim,lineId), original = words.map(w=>w.text).join(" ");
@@ -828,7 +828,9 @@ function wordsRender() {
   const itemText = it ? it.word_ids.map((id) => anim.words.find((w) => w.word_id === id)?.text).join(" ") : "";
 
   const changes = wordsPanel.designs.size + Object.keys(wordsPanel.styleEdits).length;
-  const save = el("button", { class: "start", onclick: wordsSave }, changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved");
+  const saveLabel=changes ? `Save ${changes} change${changes > 1 ? "s" : ""}` : "Saved";
+  const save = el("button", { id:"words-save", class:"icon", title:saveLabel, "aria-label":saveLabel, onclick:wordsSave,
+    html:'<svg viewBox="0 0 24 24"><path d="M5 3h12l4 4v14H3V3h2zM7 3v6h9V3M7 21v-8h10v8"/></svg>' });
   save.disabled = !changes;
   const segmented = (label, current, options, pick) => el("div", { class: "segmented", role: "tablist", "aria-label": label },
     ...options.map(([key, name]) => el("button", { role: "tab", "aria-selected": String(current === key), onclick: () => pick(key) }, name)));
@@ -836,10 +838,9 @@ function wordsRender() {
   const designer = wordsPanel.view === "design" && wordsPanel.line && !anim.kinetic;
   const main = el("section", { id: "words-main", "aria-label": `${wordsLabel(anim)} lyrics` },
     el("div", { id: "words-main-head" },
-      el("span", { class: "words-crumb" }, "Changing: ", el("strong", {}, wordsLabel(anim)), ` › line ${lineNo}`, it ? el("strong", {}, ` › “${itemText}”`) : " · the whole line"),
-      save),
+      el("span", { class: "words-crumb", title:`${wordsLabel(anim)} · line ${lineNo}${it ? ` · ${itemText}` : ""}` }, el("strong", {}, wordsLabel(anim)), ` · ${lineNo}`),
+      wordsModeTabs(),save),
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
-    wordsModeTabs(),
     designer ? wordsCanvas(anim) : wordsStage(anim),
     // The stage's controls sit in one row under it, so the stage stays high in the column.
     el("div", { class: "words-toolbar" },
@@ -927,7 +928,7 @@ function wordsBackdropPicker(anim) {
     }catch(error){toast(String(error));}
   }},el("option",{value:""},"Choose this verse’s scene image…"),...(wordsPanel.read.images||[]).map(a=>el("option",{value:a.id},a.name)));
   select.value=select.defaultValue=anim.background_asset||"";
-  return el("label",{class:"words-backdrop"},el("span",{class:"meta"},"Scene image"),select);
+  return el("label",{class:"words-backdrop"},el("span",{class:"meta"},"Scene"),select);
 }
 
 // The stage is the finished video, kept across re-renders so editing never reloads it.
@@ -952,15 +953,15 @@ function wordsStage(anim) {
   frame.addEventListener("load", wordsVideoRange);
   const view = (show, label) => el("button", { role: "tab", "data-show": show, "aria-selected": String(wordsPanel.show === show), onclick: () => wordsShow(show) }, label);
   wordsPanel.stage = el("div", { class: "words-preview", "data-animation": anim.animation_id },
-    el("div", { class: "segmented", role: "tablist", "aria-label": "What the stage shows" },
-      view("still", "Scene image"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
+    anim.effects?.text ? el("div", { class: "segmented", role: "tablist", "aria-label": "What the stage shows" },
+      view("still", "Scene image"), view("edited", `Edited · ${anim.effects.text.name}`)) : null,
     wordsBackdropPicker(anim),
     el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
       wordsPanel.playButton = el("button", { class: "icon", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
       wordsPanel.timeLabel = el("span", { class: "meta" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)));
-  if (wordsPanel.show === "edited" && !anim.effects?.text) wordsPanel.show = "full";
+  if (wordsPanel.show === "edited" && !anim.effects?.text) wordsPanel.show = "still";
   wordsShow(wordsPanel.show, frame);
   return wordsPanel.stage;
 }
@@ -1161,9 +1162,8 @@ function wordsLayers(anim) {
   const text = (id) => anim.words.find((w) => w.word_id === id)?.text || id;
   const actsFor = (act) => { const acts = { ...k.acts }; for (const id of picked) { if (act) acts[id] = act; else delete acts[id]; } return acts; };
   return el("section", { class: "words-layers", "aria-label": `${wordsLabel(anim)} layers` },
-    el("div", { class: "words-head" }, el("strong", {}, `Layers · ${wordsLabel(anim)}`), el("span", { class: "words-spacer" }),
-      el("button", { class: "ghost", title: "A new layout, entrance and overlay for this section from the song's recipe", onclick: () => wordsShuffle(true) }, "Shuffle"),
-      el("button", { class: "ghost", title: "Back to static designed lines for this section", onclick: () => wordsShuffle(false) }, "Static lines")),
+    el("div", { class: "words-head" }, el("strong", {}, `${wordsPanel.mode === "motion" ? "Motion · drawings & effects" : "Lyrics · text & lettering"}`), el("span", { class: "words-spacer" }),
+      wordsPanel.mode === "lyrics" ? el("button", { class: "ghost", title: "Shuffle the lyric layout and entrance; keep drawings", onclick: () => wordsShuffle(true) }, "Shuffle") : null),
     ...(wordsPanel.mode === "lyrics" ? [
     ...row("Layout", "layouts", k.layout, (layout) => wordsKinetic({ layout })),
     ...row("Words arrive", "entrances", k.entrance, (entrance) => wordsKinetic({ entrance })),

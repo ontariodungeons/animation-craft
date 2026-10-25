@@ -749,9 +749,8 @@
       "indicator": "hidden"
     },
     "words-main-head": {
-      "component": "panel-head",
-      "look": "heading",
-      "target": "words-main",
+      "component": "transport",
+      "label": "Lyrics selection, view and save",
       "indicator": "hidden"
     },
     "words-lyrics": {
@@ -826,8 +825,7 @@
       "indicator": "hidden"
     },
     "words-save": {
-      "component": "start",
-      "target": "words-main",
+      "component": "icon",
       "label": "Save lyric changes",
       "indicator": "hidden"
     },

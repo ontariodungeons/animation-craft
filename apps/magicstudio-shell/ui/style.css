@@ -513,7 +513,7 @@ body.at-home .tabs, body.at-home .target { visibility: hidden; }
 .motion-main { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .motion-theatre { grid-column:1 / -1; height:clamp(var(--size-150),45vh,var(--size-300)); min-height:var(--size-150); resize:vertical; overflow:hidden; border-top:var(--size-1) solid var(--line); display:flex; flex-direction:column; }
 .theatre-heading { min-height:var(--size-34); display:flex; gap:var(--size-10); align-items:center; padding:var(--size-4) var(--size-10); font-size:var(--size-11); border-bottom:var(--size-1) solid var(--line); flex-wrap:wrap; }
-.theatre-clips { display:flex; gap:var(--size-6); align-items:center; overflow-x:auto; flex:1; min-width:var(--size-120); scrollbar-width:thin; }
+.theatre-clips { display:flex; gap:var(--size-6); align-items:center; overflow-x:auto; flex:1; min-width:var(--size-100); scrollbar-width:thin; }
 .theatre-clip-pill { padding:var(--size-3) var(--size-9); border-radius:var(--size-6); border:var(--size-1) solid var(--line); background:var(--surface-2); color:var(--muted); font-size:var(--size-11); white-space:nowrap; }
 .theatre-clip-pill:hover { border-color:var(--accent); color:var(--text); }
 .theatre-clip-pill.active { border-color:var(--amber); background:color-mix(in srgb,var(--amber) 16%,var(--surface-2)); color:var(--text); font-weight:600; }
@@ -1119,3 +1119,13 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-link-anchor:hover, .words-link-anchor:focus { fill: var(--accent); stroke: var(--text); outline: none; }
 @media (prefers-reduced-motion: no-preference) { #view-design > svg.words-arrows.blending path.active { animation: words-link-blend var(--words-link-cycle) ease-in-out infinite alternate; } }
 @keyframes words-link-blend { from { stroke: var(--link-a); } to { stroke: var(--link-b); } }
+
+/* Selection, editing mode and save share one compact toolbar. */
+#words-main-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1); min-width: 0; }
+#words-main-head .words-crumb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#words-main-head #words-view-modes { flex: 0 1 auto; min-width: 0; }
+#words-main-head #words-view-modes > button { padding: var(--space-1) var(--space-2); }
+#words-save { flex: 0 0 auto; }
+#words-main .words-backdrop { padding: 0 var(--space-1); }
+#words-main .words-backdrop select { padding: var(--space-1) var(--space-2); height: var(--size-30); }
+#view-design.narrow #words-main-head .words-crumb { max-width: var(--size-100); }
