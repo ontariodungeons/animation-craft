@@ -1104,7 +1104,7 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 #words-main > :not(#words-workspace-controls) { flex-shrink: 0; }
 #words-workspace-controls { min-height: 0; overflow: auto; padding-bottom: var(--space-3); overscroll-behavior: contain; }
 #words-workspace-controls .words-effects { max-height: none; overflow: visible; }
-#words-main .words-preview .stage { max-height: calc(var(--words-available) * .46); }
+#words-main .words-preview > #words-preview { max-height: calc(var(--words-available) * .46); }
 #words-video-frame { left: var(--frame-x, 0); top: var(--frame-y, 0); }
 #words-view-modes > button { display: flex; align-items: center; justify-content: center; gap: var(--space-1); }
 .words-view-icon { display: inline-flex; }
