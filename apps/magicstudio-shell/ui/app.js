@@ -191,6 +191,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k === "html") node.innerHTML = v;
     else if (k === "box") box = v;
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), event=>{const previous=acFeedback.action;acFeedback.action=event.acAction;try{return v(event);}finally{acFeedback.action=previous;}});
+    else if (typeof v === "boolean" && k in node) node[k] = v;
     else node.setAttribute(k, v);
   }
   for (const c of children.flat()) if (c != null) node.append(c);
