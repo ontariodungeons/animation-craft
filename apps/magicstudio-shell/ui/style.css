@@ -1095,11 +1095,15 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 @keyframes words-option-arrive { from { opacity: 0; transform: translate(var(--preview-x, 0), var(--preview-y, 0)) scale(var(--preview-scale, 1)); filter: blur(var(--preview-blur, 0)); } to { opacity: 1; transform: none; filter: none; } }
 @keyframes words-option-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
 
-.words-roll > .words-graphic { left: calc(var(--space-4) + (100% - var(--space-4) * 2) * var(--cue-lane) / var(--cue-lanes)); right: auto; width: calc((100% - var(--space-4) * 2) / var(--cue-lanes) - var(--space-1)); height: calc(var(--len-s) * var(--song-s)); padding: var(--space-1); border: thin solid var(--line); border-left: medium solid var(--cue-ink); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); overflow: hidden; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); text-align: left; }
-.words-graphic::after { content: ""; position: absolute; left: 0; top: 0; width: var(--space-1); height: var(--draw-share, 0%); background: var(--cue-ink); opacity: .6; }
-.words-graphic > strong { font-size: var(--text-xs); overflow-wrap: anywhere; }
-.words-graphic:hover, .words-graphic:focus-visible { border-color: var(--accent); background: var(--surface-2); }
-.words-graphic > svg.words-cue-preview { width: 100%; height: calc(var(--space-5) * 2); flex-shrink: 0; color: var(--cue-ink); }
+.words-roll > .words-graphic { left: calc(var(--space-4) + (100% - var(--space-4) * 2) * var(--cue-lane) / var(--cue-lanes)); right: auto; width: calc((100% - var(--space-4) * 2) / var(--cue-lanes) - var(--space-1)); height: calc(var(--len-s) * var(--song-s)); border: thin solid var(--line); border-left: medium solid var(--cue-ink); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
+.words-graphic.active, .words-graphic:focus-visible, .words-graphic:hover { border-color: var(--accent); outline: thin solid var(--accent); }
+.words-cue-film { height: 100%; overflow: hidden; display: flex; flex-direction: column; justify-content: space-around; background: repeating-conic-gradient(var(--surface) 0% 25%, var(--surface-2) 0% 50%) 0 0 / var(--space-4) var(--space-4); }
+.words-cue-film > svg.words-cue-preview { display: block; width: 100%; height: 30%; min-height: 0; color: var(--cue-ink); }
+.words-cue-handle { position: absolute; left: 50%; transform: translateX(-50%); z-index: 2; min-height: var(--space-4); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-ink); cursor: ns-resize; touch-action: none; line-height: 1; }
+.words-cue-handle.start { top: 0; }
+.words-cue-handle.end { bottom: 0; }
+.words-cue-caption { position: absolute; bottom: var(--space-4); left: var(--space-1); right: var(--space-1); padding: var(--space-1); background: var(--bg); font-size: var(--text-xs); opacity: 0; pointer-events: none; }
+.words-graphic:is(:hover, :focus-within) .words-cue-caption { opacity: .9; }
 .words-cue-preview .scene { fill: none; stroke: var(--muted); }
 .words-cue-preview .light { fill: none; stroke: var(--depth-gold); stroke-width: 6; opacity: .4; }
 .words-cue-preview .cue { fill: none; stroke: var(--accent); }

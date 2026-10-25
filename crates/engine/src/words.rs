@@ -184,7 +184,7 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
 /// clips, on a plain ground, so the lyrics can be judged on their own.
 const LYRICS_ONLY_STYLE: &str = r#"<style data-magicstudio="lyrics-only">
 [data-composition-id] * { visibility: hidden !important; }
-.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: visible !important; }
+.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip *, .lyric-drawing-clip, .lyric-drawing-clip * { visibility: visible !important; }
 html, body, [data-composition-id] { background: #1b2430 !important; }
 </style>"#;
 
@@ -213,7 +213,7 @@ fn stage_only_style(html: &str) -> String {
 }
 
 const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
-.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip * { visibility: hidden !important; }
+.lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip *, .lyric-drawing-clip, .lyric-drawing-clip * { visibility: hidden !important; }
 </style>"#;
 
 /// `words.lyrics_view`: a derived copy of the video for the Design stage: only its lyric word clips
@@ -484,18 +484,16 @@ fn graphic_cues(doc: &Value, lib: &Value, times: &std::collections::HashMap<Stri
         let k = &anim["kinetic"];
         for (i,d) in k["draws"].as_array().into_iter().flatten().enumerate() {
             let Some(word) = words.iter().find(|w| w["word_id"] == d["word_id"]) else { continue };
-            let Some(start) = word["start"].as_f64() else { continue };
-            let Some(stroke) = d["stroke"].as_str().and_then(|key| lib["strokes"].get(key)) else { continue };
-            let line: Vec<_> = words.iter().filter(|w| w["line_id"] == word["line_id"]).collect();
-            let last = line.last().and_then(|w| w["end"].as_f64()).unwrap_or(start) + 1.0;
-            let next = words.iter().find(|w| w["line_id"] != word["line_id"] && w["start"].as_f64().is_some_and(|t| t > start))
-                .and_then(|w| w["start"].as_f64()).unwrap_or(section_end);
-            let end = last.min(next).min(section_end);
-            if end <= start { continue; }
+            let Some(anchor) = word["start"].as_f64() else { continue };
+            let start = (anchor + d["offset"].as_f64().unwrap_or(0.0)).max(0.0);
+            let Some(stroke) = d.get("drawing").filter(|v|v.is_object()).or_else(||d["stroke"].as_str().and_then(|key| lib["strokes"].get(key))) else { continue };
+            if d["track"] == "lettering" || (d["track"].is_null() && stroke["track"] == "lettering") { continue; }
+            let duration = d["duration"].as_f64().or_else(||stroke["draw"].as_f64()).unwrap_or(1.0);
+            let end = start + duration + d["hold"].as_f64().unwrap_or(1.0);
             cues.push(json!({"id":format!("{}-draw-{i}",anim["animation_id"].as_str().unwrap_or("words")),"kind":"drawing",
                 "animation_id":anim["animation_id"],"line_id":word["line_id"],"word_ids":[word["word_id"]],"word":word["text"],
-                "name":stroke["name"],"stroke":stroke,"color":k["style"]["hero_color"],"start":start,"end":end,
-                "draw_end":(start + stroke["draw"].as_f64().unwrap_or(0.0)).min(end)}));
+                "name":stroke["name"],"stroke":stroke,"index":i,"anchor":anchor,"color":d.get("color").unwrap_or(&k["style"]["hero_color"]),"start":start,"end":end,
+                "draw_end":start + duration}));
         }
         if k.is_object() {
             if let Some(key) = k["overlay"].as_str().filter(|key| *key != "none") {
@@ -747,7 +745,22 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
     for d in k["draws"].as_array().into_iter().flatten() {
         if !d["place"].is_null() && d["place"] != "beside" && d["place"] != "under" { return Err(invalid("kinetic.draws place must be under or beside")); }
         if !ids.contains(&&d["word_id"]) { return Err(invalid(format!("kinetic.draws: {} is not a word of this section", d["word_id"]))); }
-        draws.push(json!({"word_id":d["word_id"],"stroke":named("strokes",&d["stroke"])?,"place":if d["place"] == "beside" { "beside" } else { "under" }}));
+        let custom = if let Some(shape) = d.get("drawing") {
+            let path = shape["d"].as_str().filter(|v| !v.is_empty() && v.len() <= 16000 && v.chars().all(|c| c.is_ascii_digit() || " ,.-eMmLlHhVvCcSsQqTtAaZz".contains(c)))
+                .ok_or_else(|| invalid("drawing.d must be SVG path data"))?;
+            let vb = shape["view_box"].as_str().unwrap_or("");
+            let nums: Vec<f64> = vb.split_whitespace().filter_map(|n| n.parse::<f64>().ok()).collect();
+            if nums.len() != 4 || !nums.iter().all(|n| n.is_finite()) || nums[2] <= 0.0 || nums[3] <= 0.0 { return Err(invalid("drawing.view_box must contain four finite numbers and positive dimensions")); }
+            json!({"name":shape["name"].as_str().unwrap_or("Drawing"),"view_box":vb,"d":path})
+        } else { Value::Null };
+        let mut draw = json!({"word_id":d["word_id"],"stroke":if custom.is_null() { named("strokes",&d["stroke"])? } else { Value::Null },
+            "drawing":custom,"place":if d["place"] == "beside" { "beside" } else { "under" }});
+        for (key,lo,hi) in [("offset",-30.0,30.0),("duration",0.05,30.0),("hold",0.0,30.0),("x",-2000.0,6000.0),("y",-2000.0,6000.0),("width",1.0,6000.0)] {
+            if let Some(v) = d.get(key) { let n=v.as_f64().filter(|n|n.is_finite() && *n>=lo && *n<=hi).ok_or_else(||invalid(format!("drawing.{key} must be between {lo} and {hi}")))?; draw[key]=json!(n); }
+        }
+        if d.get("color").is_some() { draw["color"]=hex(&d["color"]).ok_or_else(||invalid("drawing.color must be a hex colour"))?; }
+        if let Some(track) = d.get("track") { draw["track"]=one_of(track,&["lettering","graphics"],"drawing.track")?; }
+        draws.push(draw);
     }
     Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,"draws":draws,
         "overlay":if k["overlay"].is_null() { json!("none") } else { named("overlays",&k["overlay"])? },
@@ -755,9 +768,9 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
 }
 
 /// The section as kinetic text: every word at its local time, laid out and performed in the browser.
-fn kinetic_composition(anim: &Value, composition_id: &str, width: u64, height: u64, duration: f64, words: &[Value]) -> Result<String> {
+fn kinetic_composition(anim: &Value, composition_id: &str, width: u64, height: u64, duration: f64, words: &[Value], layer: &str) -> Result<String> {
     let lib: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
-    let data = json!({"width":width,"height":height,"duration":duration,"words":words,"kinetic":anim["kinetic"],"style":anim["kinetic"]["style"],"library":lib});
+    let data = json!({"width":width,"height":height,"duration":duration,"layer":layer,"words":words,"kinetic":anim["kinetic"],"style":anim["kinetic"]["style"],"library":lib});
     Ok(include_str!("../../../pipeline/templates/words-kinetic.html").replace("__COMPOSITION_ID__", composition_id)
         .replace("__WIDTH__", &width.to_string()).replace("__HEIGHT__", &height.to_string()).replace("__DURATION__", &format!("{duration:.6}"))
         .replace("__DATA__", &serde_json::to_string(&data).map_err(|e| invalid(e.to_string()))?.replace("</", "<\\/")))
@@ -970,6 +983,12 @@ pub fn cmd_words_apply(s: &mut Session, p: &Value) -> Result<Value> {
         html.insert_str(root, &format!("<div id=\"{composition_id}\" class=\"clip lyric-design-clip\" data-magicstudio-words=\"{id}\" data-composition-id=\"{composition_id}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{track_index}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;left:0;top:0;width:{w}px;height:{h}px;z-index:76\"></div>\n",
             composed["src"].as_str().unwrap_or_default(),
             composed["song_anchor"].as_f64().unwrap_or(0.0), composed["authored_duration"].as_f64().unwrap_or(0.0)));
+        for (index,draw) in composed["drawings"].as_array().into_iter().flatten().enumerate() {
+            html.insert_str(root,&format!("<div id=\"{}\" class=\"clip lyric-drawing-clip\" data-magicstudio-words=\"{id}\" data-track-kind=\"graphics\" data-composition-id=\"{}\" data-composition-src=\"{}\" data-start=\"{:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-width=\"{w}\" data-height=\"{h}\" style=\"position:absolute;inset:0;z-index:77\"></div>\n",
+                draw["composition_id"].as_str().unwrap_or_default(),draw["composition_id"].as_str().unwrap_or_default(),draw["src"].as_str().unwrap_or_default(),
+                draw["start"].as_f64().unwrap_or(0.0),draw["duration"].as_f64().unwrap_or(0.0),track_index+2+index as u64));
+        }
+        receipt["drawings"] = composed["drawings"].clone();
         // The section's overlay: a registry block over the section, blended so the scene shows through.
         let overlay = &read["document"]["animations"][0]["kinetic"]["overlay"];
         let lib: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
@@ -1047,7 +1066,7 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let data = json!({"composition_id":composition_id,"animation_id":id,"source_revision":anim["source_revision"],"duration":duration,
         "hold":anim["hold"],"style":anim["style"],"words":words});
     let designed = anim["design"].as_object().is_some_and(|d| d.values().any(Value::is_object));
-    let html = if anim["kinetic"].is_object() { kinetic_composition(anim, &composition_id, width, height, duration, &words)? }
+    let html = if anim["kinetic"].is_object() { kinetic_composition(anim, &composition_id, width, height, duration, &words, "text")? }
         else if designed { design_composition(anim, &composition_id, width, height, duration, &local)? }
         else if anim["effects"]["text"].is_object() { effect_composition(anim, &composition_id, width, height, duration, &local) }
         else { include_str!("../../../pipeline/templates/words-composition.html")
@@ -1057,7 +1076,24 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let file = hf.join("compositions/words").join(format!("{composition_id}.html"));
     fs::create_dir_all(file.parent().unwrap())?;
     fs::write(&file, &html)?;
-    Ok(json!({"ok":true,"animation_id":id,"instance_id":instance,"composition_id":composition_id,"file":file,
+    let drawing_cues: Vec<&Value> = read["graphics"].as_array().into_iter().flatten().filter(|c| c["kind"] == "drawing").collect();
+    let mut drawings = Vec::new();
+    if anim["kinetic"].is_object() {
+        for cue in drawing_cues {
+            let start = cue["start"].as_f64().unwrap_or(anchor);
+            let end = cue["end"].as_f64().unwrap_or(start+1.0);
+            let index = cue["index"].as_u64().unwrap_or(0) as usize;
+            let mut own_anim = anim.clone();
+            own_anim["kinetic"]["draws"] = json!([anim["kinetic"]["draws"][index]]);
+            let mut shifted = words.clone();
+            for w in &mut shifted { for key in ["start","end"] { w[key]=json!(w[key].as_f64().unwrap_or(0.0)+anchor-start); } }
+            let own = format!("{composition_id}-drawing-{index}");
+            let src = format!("compositions/words/{own}.html");
+            fs::write(hf.join(&src),kinetic_composition(&own_anim,&own,width,height,end-start,&shifted,"drawings")?)?;
+            drawings.push(json!({"composition_id":own,"src":src,"start":start,"duration":end-start}));
+        }
+    }
+    Ok(json!({"ok":true,"animation_id":id,"instance_id":instance,"composition_id":composition_id,"file":file,"drawings":drawings,
         "src":format!("compositions/words/{composition_id}.html"),"sha256":format!("{:x}", Sha256::digest(html.as_bytes())),
         "source_revision":anim["source_revision"],"authored_duration":duration,"song_anchor":anchor,"lead_in":anim["lead_in"],"hold":anim["hold"],
         "width":width,"height":height,"saved_source":read["saved"]}))
@@ -1084,10 +1120,10 @@ mod tests {
             {"word_id":"a","line_id":"line1","start":1.0,"end":2.0},
             {"word_id":"b","line_id":"line1","start":3.0,"end":4.0},
             {"word_id":"c","line_id":"line2","start":6.0,"end":7.0}],
-            "kinetic":{"draws":[{"word_id":"b","stroke":"hill"}],"overlay":"none","style":{"hero_color":"#112233"}}}]});
+            "kinetic":{"draws":[{"word_id":"b","stroke":"loop"}],"overlay":"none","style":{"hero_color":"#112233"}}}]});
         let cues = graphic_cues(&doc, &lib, &std::collections::HashMap::new());
         assert_eq!(cues.len(), 1, "two lyric lines yield one independently anchored visual cue");
-        assert_eq!((cues[0]["start"].clone(),cues[0]["end"].clone()),(json!(3.0),json!(5.0)));
+        assert_eq!((cues[0]["start"].clone(),cues[0]["end"].clone()),(json!(3.0),json!(5.6)));
         assert_eq!(cues[0]["word_ids"],json!(["b"]));
         let changed = graphic_cues(&doc, &lib, &std::collections::HashMap::from([("b".into(),(3.5,4.0))]));
         assert_eq!(changed[0]["start"],json!(3.5),"follows the Studio's saved word timing");
@@ -1113,6 +1149,11 @@ mod tests {
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
         let lib: Value = serde_json::from_str(KINETIC_LIBRARY).unwrap();
         assert!(lib["letterings"].as_object().unwrap().len() >= 4 && lib["strokes"]["underline"]["d"].is_string());
+        let custom = kinetic_design(&words, &json!({"layout":"karaoke","entrance":"pop","draws":[{"word_id":"v1-l1/w1","drawing":{"name":"Whale","view_box":"0 0 600 300","d":"M 10 20 Q 80 90 200 30"},"offset":1.25,"duration":2.0,"hold":0.5,"x":100.0,"y":300.0,"width":600.0}]})).unwrap();
+        assert_eq!(custom["draws"][0]["offset"],json!(1.25));
+        for drawing in [json!({"d":"<script>","view_box":"0 0 10 10"}),json!({"d":"M 0 0 L 2 2","view_box":"0 0 0 10"})] {
+            assert!(kinetic_design(&words,&json!({"layout":"karaoke","entrance":"pop","draws":[{"word_id":"v1-l1/w1","drawing":drawing}]})).is_err());
+        }
         assert!(lib["acts"].as_object().unwrap().len() >= 12 && lib["layouts"].as_object().unwrap().len() >= 4);
     }
 

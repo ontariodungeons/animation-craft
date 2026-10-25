@@ -476,7 +476,8 @@
       "does": "A hand-drawn line under the word",
       "view_box": "0 0 280 30",
       "d": "M 5 14 Q 61 5 125 13 T 269 10",
-      "draw": 0.55
+      "draw": 0.55,
+      "track": "lettering"
     },
     "swoop": {
       "name": "Swoop",
@@ -497,7 +498,8 @@
       "does": "A gentle wave under the word",
       "view_box": "0 0 410 95",
       "d": "M 7 77 Q 73 72 118 32 Q 171 -8 228 31 Q 279 75 400 76",
-      "draw": 1.4
+      "draw": 1.4,
+      "track": "lettering"
     },
     "down": {
       "name": "Arrow down",

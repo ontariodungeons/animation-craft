@@ -61,8 +61,8 @@ vm.runInContext(`anim.kinetic.style={font:'serif',weight:400,hero_weight:800};`,
 const intersects=vm.runInContext('wordsCueIntersects',c);
 const cue={animation_id:'verse-1',start:1.3,end:3,word_ids:['l1/w1']};
 assert.equal(intersects(cue,'verse-1',0,4,['l1/w1']),true);
-assert.equal(intersects(cue,'verse-1',0,1.3,['l1/w1']),false,'touching boundaries do not intersect');
-assert.equal(intersects(cue,'verse-1',3,4,['l1/w1']),false);
+assert.equal(intersects(cue,'verse-1',0,1.3,['l1/w1']),true,'the meaning link survives moving a drawing after its word');
+assert.equal(intersects(cue,'verse-1',3,4,['l1/w1']),true,'the meaning link survives an early drawing');
 assert.equal(intersects(cue,'verse-2',0,4,['l1/w1']),false,'another section does not inherit the connection');
 assert.equal(intersects(cue,'verse-1',0,4,['l1/w0']),false,'another word does not inherit the drawing');
 assert.equal(intersects({...cue,word_ids:[]},'verse-1',0,4,['l1/w0']),true,'section overlays intersect every overlapping line');
@@ -98,3 +98,7 @@ assert.equal(drawTween.from.strokeDashoffset,240);assert.equal(drawTween.to.stro
 assert.equal(drawTween.target.d,library.strokes.hill.d,'export uses the same stroke as the film frame');
 assert.equal(drawTween.target.parentElement.parentElement,root.kids[0],'drawing leaves with its lyric line');
 console.log('PASS kinetic previews and anchored drawing export timing');
+
+const previewRange=vm.runInContext('wordsCueWindow',c)({...cue,start:4,end:6},{start:1,end:3});
+assert.deepEqual(JSON.parse(JSON.stringify(previewRange)),{start:.75,end:6.25},'replay includes both the lyric and its delayed drawing');
+assert.equal(intersects({...cue,word_ids:[]},'verse-1',3,4,['l1/w1']),false,'unanchored effects still use interval intersections');

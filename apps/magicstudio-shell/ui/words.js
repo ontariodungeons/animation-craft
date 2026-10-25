@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
 // How a designed lyric item moves on its accent word (the engine's MOVES), and what each does.
 const WORDS_MOVES = [["quiet", "Quiet", "Fades in and holds"], ["sleep", "Sleep", "Letters sink one by one"], ["settle", "Settle", "Drops and squashes into place"],
   ["fall", "Fall", "Drops down"], ["pop", "Pop", "A quick swell on the beat"], ["rise", "Rise", "Arcs up and away"], ["east", "East", "Slides right"],
@@ -329,7 +329,7 @@ function wordsChip(anim, w) {
       if (anim.animation_id !== wordsPanel.selected) return;
       const same = wordsPanel.line === w.line_id && event.shiftKey;
       wordsPanel.picked = same ? (wordsPanel.picked.includes(w.word_id) ? wordsPanel.picked.filter((id) => id !== w.word_id) : [...wordsPanel.picked, w.word_id]) : [w.word_id];
-      wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsPose(anim, w.line_id); wordsRender();
+      wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsLineSpan(anim, w.line_id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange();
     } }, w.text);
   if (it) {
     chip.style.setProperty("--word-font", it.font === "song" || !it.font ? wordsSongFont(anim) : it.font);
@@ -372,7 +372,7 @@ function wordsTimeline(animations, end) {
       "data-kind": a.scope?.section === "chorus" ? "chorus" : "verse", "data-animation-id": a.animation_id,
       title: "Click around the words to design the whole line",
       onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
-        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsPose(a, line.id); wordsRender(); } },
+        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsLineSpan(a, line.id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange(); } },
       ...line.words.map((w) => wordsChip(a, w))), at, len)),
     el("span", { class: "words-tl-head" })), 0, end);
 }
@@ -387,19 +387,31 @@ function wordsRoll(animations, end) {
   });
   const frames = placed.map(({ cue, lane }) => {
     const anim = animations.find((a) => a.animation_id === cue.animation_id);
-    const preview = cue.kind === "drawing" ? wordsStroke(cue.stroke) : wordsOptionPreview("overlays", cue.overlay);
-    preview.setAttribute("class", "words-cue-preview");
-    const frame = wordsPlace(el("button", { class: "words-graphic", "data-cue-id": cue.id,
-      "aria-label": `${cue.name} at ${wordsClock(cue.start)}`, title: `${cue.name}${cue.word ? ` · “${cue.word}”` : ""}\n${wordsClock(cue.start)} – ${wordsClock(cue.end)}`,
-      onclick: () => {
-        if (!anim) return;
-        if (anim.animation_id !== wordsPanel.selected) wordsSelect(anim.animation_id);
-        if (anim.animation_id !== wordsPanel.selected) return;
-        wordsPanel.line = cue.line_id || wordsLines(anim)[0]?.id;
-        wordsPanel.picked = cue.word_ids || []; wordsPanel.time = cue.start;
-        wordsPanel.followed = `${anim.animation_id}/${wordsPanel.line}`;
-        wordsRender(); wordsVideo("seek", { timeSeconds: Math.max(0, cue.start - wordsPanel.offset), seekMode: "commit" });
-      } }, preview, el("strong", {}, cue.name), el("span", { class: "meta" }, wordsClock(cue.start))), cue.start, cue.end - cue.start);
+    const thumb = (progress) => {
+      const image = cue.kind === "drawing" ? wordsStroke(cue.stroke) : wordsOptionPreview("overlays", cue.overlay);
+      image.setAttribute("class", "words-cue-preview");
+      if (cue.kind === "drawing") {
+        const path = image.querySelector("path"); path.setAttribute("pathLength", "1");
+        path.setAttribute("stroke-dasharray", "1"); path.setAttribute("stroke-dashoffset", String(1-progress));
+      }
+      return image;
+    };
+    const handle = (edge, label) => cue.index == null ? null : el("button", { class: `words-cue-handle ${edge}`, "aria-label": `${label} ${cue.name}`, title: `${label} · drag or use ↑ ↓ (Shift for fine timing)`,
+      onpointerdown: (event) => wordsCueDrag(event, cue, edge), onclick: (event) => event.stopPropagation(),
+      onkeydown: (event) => {
+        if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        if (cue.animation_id !== wordsPanel.selected) wordsSelect(cue.animation_id);
+        const delta = (event.key === "ArrowUp" ? -1 : 1) * (event.shiftKey ? .01 : .1);
+        const start = edge === "start" ? Math.max(0, cue.start+delta) : cue.start;
+        wordsRetimeCue(cue,start,edge === "start" ? start+cue.end-cue.start : Math.max(start+.05,cue.end+delta));
+      } }, edge === "start" ? "●" : "━");
+    const frame = wordsPlace(el("div", { class: `words-graphic${wordsPanel.cue === cue.id ? " active" : ""}`, "data-cue-id": cue.id, role: "button", tabindex: "0",
+      "aria-label": `${cue.name} at ${wordsClock(cue.start)}`, title: `${cue.name}${cue.word ? ` · “${cue.word}”` : ""} · ${wordsClock(cue.start)} – ${wordsClock(cue.end)} · Click to replay this connection`,
+      onclick: () => wordsPreviewCue(cue), onkeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); wordsPreviewCue(cue); } } },
+      el("div", { class: "words-cue-film" }, thumb(.35), thumb(.7), thumb(1)),
+      handle("start", "Move"), handle("end", "Trim end of"),
+      el("span", { class: "words-cue-caption" }, cue.name)), cue.start, cue.end - cue.start);
     frame.style.setProperty("--cue-lane", String(lane));
     frame.style.setProperty("--cue-ink", cue.color || "var(--accent)");
     if (cue.draw_end != null) frame.style.setProperty("--draw-share", `${100 * (cue.draw_end - cue.start) / (cue.end - cue.start)}%`);
@@ -423,9 +435,66 @@ function wordsStroke(stroke) {
 }
 
 function wordsCueIntersects(cue, animationId, start, end, wordIds) {
-  return cue.animation_id === animationId && cue.start < end && cue.end > start
-    && (!cue.word_ids?.length || cue.word_ids.some((id) => wordIds.includes(id)));
+  return cue.animation_id === animationId && (cue.word_ids?.length
+    ? cue.word_ids.some((id) => wordIds.includes(id)) : cue.start < end && cue.end > start);
 }
+function wordsCueWindow(cue, line) {
+  return { start: Math.max(0, Math.min(cue.start, line.start) - .25), end: Math.max(cue.end, line.end) + .25 };
+}
+function wordsPreviewCue(cue) {
+  const anim = wordsPanel.read.document.animations.find((a) => a.animation_id === cue.animation_id);
+  if (!anim) return;
+  if (anim.animation_id !== wordsPanel.selected) wordsSelect(anim.animation_id);
+  if (anim.animation_id !== wordsPanel.selected) return;
+  wordsPanel.line = cue.line_id || wordsLines(anim)[0]?.id;
+  wordsPanel.picked = cue.word_ids || []; wordsPanel.cue = cue.id;
+  wordsPanel.previewRange = wordsCueWindow(cue, wordsLineSpan(anim, wordsPanel.line));
+  wordsPanel.autoPlay = true; wordsPanel.time = wordsPanel.previewRange.start;
+  wordsRender(); wordsVideoRange();
+}
+async function wordsRetimeCue(cue, start, end) {
+  const anim = wordsCurrent();
+  if (!anim?.kinetic || cue.index == null) return;
+  const duration = Math.min(cue.draw_end - cue.start, end - start);
+  const draws = anim.kinetic.draws.map((d, i) => i === cue.index ? { ...d, offset: +(start - cue.anchor).toFixed(2), duration: +duration.toFixed(2), hold: +(end - start - duration).toFixed(2) } : d);
+  wordsPanel.previewRange = wordsCueWindow({ ...cue, start, end }, wordsLineSpan(anim, cue.line_id));
+  wordsPanel.autoPlay = false;
+  await wordsKinetic({ draws });
+}
+function wordsCueDrag(event, cue, edge) {
+  event.preventDefault(); event.stopPropagation(); wordsVideo("pause");
+  if (cue.animation_id !== wordsPanel.selected) wordsSelect(cue.animation_id);
+  if (cue.animation_id !== wordsPanel.selected) return;
+  const view = $("view-design");
+  view.setPointerCapture(event.pointerId);
+  wordsPanel.cueDrag = { cue, before: { ...cue }, edge, y: event.clientY, scale: parseFloat(getComputedStyle(view).getPropertyValue("--song-s")) || 18 };
+}
+addEventListener("pointermove", (event) => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  const delta = (event.clientY - d.y) / d.scale;
+  if (d.edge === "start") {
+    d.cue.start = Math.max(0, Math.min(d.before.anchor + 30, Math.max(d.before.anchor - 30, d.before.start + delta)));
+    d.cue.end = d.cue.start + d.before.end - d.before.start;
+    d.cue.draw_end = d.cue.start + d.before.draw_end - d.before.start;
+  } else d.cue.end = Math.max(d.cue.start + .05, Math.min(d.cue.start + 30, d.before.end + delta));
+  const frame = [...$("view-design").querySelectorAll(".words-graphic")].find((f) => f.dataset.cueId === d.cue.id);
+  if (frame) wordsPlace(frame, d.cue.start, d.cue.end - d.cue.start);
+  wordsArrows($("view-design"));
+});
+addEventListener("pointerup", () => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  wordsPanel.cueDrag = null;
+  const { start, end } = d.cue; Object.assign(d.cue, d.before);
+  wordsRetimeCue(d.before, start, end);
+});
+addEventListener("pointercancel", () => {
+  const d = wordsPanel.cueDrag;
+  if (!d) return;
+  Object.assign(d.cue, d.before); wordsPanel.cueDrag = null; wordsRender();
+});
+
 
 // Connections describe intersections in song time, never matching row numbers.
 function wordsArrows(view) {
@@ -741,12 +810,14 @@ function wordsVideo(action, params = {}) {
 
 // Hold the player to the selected section: it plays and loops only that stretch of the song.
 function wordsVideoRange() {
-  const section = wordsStudioSection(wordsCurrent());
+  const anim = wordsCurrent();
+  const section = wordsPanel.previewRange || (anim && wordsPanel.line ? wordsLineSpan(anim, wordsPanel.line) : wordsStudioSection(anim));
   if (!section) return;
   wordsVideo("pause");
   const o = wordsPanel.offset;
   wordsVideo("set-play-range", { startSeconds: Math.max(0, section.start - o), endSeconds: section.end - o });
   wordsSeekSong(section.start);
+  if (wordsPanel.autoPlay) wordsVideo("play");
 }
 
 // The video's own size, as data; the stage rule scales the frame to fit.
@@ -767,6 +838,7 @@ addEventListener("message", (event) => {
   if (data.type === "state") {
     const song = data.currentTime + wordsPanel.offset; // the player's time, on the song clock
     wordsPanel.time = song; wordsPanel.playing = !!data.isPlaying;
+    if (data.isPlaying) wordsPanel.autoPlay = false;
     const scrub = $("words-scrub");
     if (scrub) scrub.value = scrub.defaultValue = String(song);
     if (wordsPanel.timeLabel) wordsPanel.timeLabel.textContent = wordsClock(song);
