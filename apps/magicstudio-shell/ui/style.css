@@ -1144,3 +1144,6 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 #words-main .words-timing-summary input[type="number"] { width: 6em; }
 /* The shared settings body is non-shrinking; this inspector must use only the space below the surface. */
 #words-main > #words-workspace-controls { flex: 1 1 0; max-height: none; min-height: 0; }
+
+#words-workspace-controls .words-option-preview { height: var(--size-48); width: 100%; }
+#words-workspace-controls .words-effects { grid-template-columns: repeat(3,minmax(0,1fr)); }

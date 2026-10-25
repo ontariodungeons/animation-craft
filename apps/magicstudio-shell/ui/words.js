@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { mode:"lyrics", links:{color:null,front:false,pulse:true}, linkDrag:null, editor: null, cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "still", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { mode:"lyrics", links:{color:null,front:true,pulse:true}, linkDrag:null, editor: null, cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "still", offset: 0, timeLabel: null, effects: null };
 try {const links=JSON.parse(localStorage.getItem("magicstudio.lyrics.links")||"{}");
   if(/^#[0-9a-f]{6}$/i.test(links.color))wordsPanel.links.color=links.color;
   for(const key of ["front","pulse"])if(typeof links[key]==="boolean")wordsPanel.links[key]=links[key];
@@ -858,7 +858,7 @@ function wordsRender() {
     wordsPanel.read.reference_changed ? el("p", { class: "not-linked" }, "The timing reference changed since this was saved; check the words before saving.") : null,
     designer ? wordsCanvas(anim) : wordsStage(anim),
     // The stage's controls sit in one row under it, so the stage stays high in the column.
-    el("div", { class: "words-toolbar" },
+    designer ? el("div", { class: "words-toolbar" },
       designer ? el("button", { class: "icon", "aria-label": "Play this line", title: "Play from this line", onclick: wordsPlay, html: ICONS.play }) : null,
       designer ? el("span", { class: "meta" }, wordsClock(wordsLineSpan(anim, wordsPanel.line).start)) : null,
 
@@ -866,7 +866,7 @@ function wordsRender() {
       el("span", { class: "words-spacer" }),
       wordsPanel.read.in_video?.includes(anim.animation_id)
         ? el("button", { class: "ghost", title: "Put the video's original lyrics back for this section", onclick: () => wordsApply(false) }, "In the video · Restore original")
-        : el("button", { class: "ghost", title: "Replace this section's lyrics in the video with the designed lines", onclick: () => wordsApply(true) }, "Use in the video")),
+        : el("button", { class: "ghost", title: "Replace this section's lyrics in the video with the designed lines", onclick: () => wordsApply(true) }, "Use in the video")) : null,
     el("div",{id:"words-workspace-controls"},...wordsInnerControls(anim)));
 
   view.replaceChildren(
@@ -936,6 +936,13 @@ function wordsStyleFields(anim) {
     field("outline_color", "Outline", "color", "#173b43"), field("background", "Background", "text", "")];
 }
 
+function wordsUseButton(anim) {
+  const used=wordsPanel.read.in_video?.includes(anim.animation_id);
+  const label=used?"Restore original video lyrics":"Use this lyric design in the video";
+  return el("button",{class:"icon",title:label,"aria-label":label,"aria-pressed":String(!!used),onclick:()=>wordsApply(!used),
+    html:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 12 3 3 7-7"/></svg>'});
+}
+
 function wordsBackdropPicker(anim) {
   const backgrounds=wordsPanel.backgrounds||{images:[]};
   return el("div",{class:"words-backdrop",role:"group","aria-label":"Storyboard backgrounds"},
@@ -982,7 +989,7 @@ function wordsStage(anim) {
     el("div", { class: "transport" },
       wordsPanel.playButton = el("button", { class: "icon", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
       scrub,
-      wordsPanel.timeLabel = el("span", { class: "meta" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`)));
+      wordsPanel.timeLabel = el("span", { class: "meta" }, `${wordsClock(section.start)} – ${wordsClock(section.end)}`),wordsUseButton(anim)));
   if (wordsPanel.show === "edited" && !anim.effects?.text) wordsPanel.show = "still";
   wordsShow(wordsPanel.show, frame);
   return wordsPanel.stage;
