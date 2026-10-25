@@ -15,6 +15,13 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - MCP: register command `mc`, args `["mcp"]` (headless engine) or
   `["--bridge", "<port>", "mcp"]` (the open window). Every engine command is a tool.
 
+## Validation budget
+
+- Full compilation and tests run locally through the visible normal commit hooks.
+- GitHub has one lightweight sanity job, capped at three minutes, with one shared
+  concurrency group for the whole repository. Do not add remote Rust builds, native
+  app downloads, extra jobs, agent calls or runners without Jesse’s explicit approval.
+
 ## Review on main
 
 - Jesse reviews the app from `main`. Commit completed changes, integrate current main,
@@ -65,6 +72,10 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 
 ## Isolate source only when needed
 
+- The workshop limit is five checkouts total: canonical main for Jesse and the Review Desk,
+  plus one shared checkout each for Creative, Animation, Production, and Backstage.
+  Agents and tasks share their department checkout and build cache. Do not create another
+  checkout while the workshop is above this limit. Preserve unfinished source when retiring old ones.
 - Inspect `git status`, the current branch, recent commits, and `git worktree list`.
 - Reuse the existing task checkout where possible. When isolation is needed, use a
   named branch and a checkout under this repository’s `.worktrees/` folder. Start from
@@ -98,6 +109,9 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - For UI changes, check narrow layouts, selection synchronization, tooltips,
   automation IDs, and a rendered preview. Keep unavailable measurements distinct
   from measured zero and manual review distinct from automated validation.
+- Use a preview workspace you control for every UI change. Review the actual app through mc
+  at 700, 941 and 1261 logical pixels before integrating it into main. Capture and inspect the
+  screens with drawers open and closed; identify the preview by its footer port and build.
 - Run checks appropriate to your changes. Identify inherited failures against the
   base revision and report their owner; do not hide them or duplicate another
   agent's active fix. Do not bypass required PR checks.
