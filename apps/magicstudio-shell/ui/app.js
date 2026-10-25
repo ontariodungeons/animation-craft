@@ -487,7 +487,7 @@ function renderBlocks() {
   const scenePicker = el('select',{id:'storyboard-scene','aria-label':'Storyboard scene',onchange:event=>{state.storyboardScene=event.target.value; const selected=scenes.find(s=>s.target===state.storyboardScene); if(selected)showPage(selected.page-1); renderBlocks();}},
     ...scenes.map(s=>el('option',{value:s.target,selected:s.target===scene?.target},`${s.scene} · ${s.title}`)));
   const wordPicker = el('select',{id:'storyboard-word','aria-label':'Recorded word at the scene cut'},
-    ...scenes.flatMap(s=>s.words || []).map(w=>el('option',{value:w.id,selected:w.id===scene?.words?.[1]?.id},`${Number(w.start).toFixed(2)} · ${w.text}`)));
+    ...scenes.filter(s=>Math.abs(s.scene-(scene?.scene || 1))<=1).flatMap(s=>s.words || []).map(w=>el('option',{value:w.id,selected:w.id===scene?.words?.[1]?.id},`${Number(w.start).toFixed(2)} · ${w.text}`)));
   const sceneAction = (id,label,command,params,disabled=false) => el('button',{id,disabled:disabled || !scene,'data-commands':command,onclick:async()=>{
     try{const result=await designCommand(command,{scene:scene.target,expected_revision:contents.revision,...params(),word:wordPicker.value});
       if(result.previous_version)state.storyboardUndo=result.previous_version;
@@ -496,11 +496,12 @@ function renderBlocks() {
   }},label);
   box.append(block('storyboard',ICONS.animate,'Storyboard',content?.state==='ready'?'Content filled':'Needs work',ready('storyboard'),[
     el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
+    !sb?.previews?.length ? el('button',{id:'storyboard-create','data-commands':'storyboard.create',onclick:()=>designCommand('storyboard.create').catch(error=>toast(String(error)))},'Create storyboard') : null,
     el('button',{id:'storyboard-overview',onclick:()=>openPage(1)},'Story & backgrounds'),
     el('p',{class:'why'},`${sb?.previews?.length || 0} pages · ${(sb?.page_size || []).join(' × ')} · Edit text on the page; drag assets onto it.`),
     ...missing.map(item=>el('button',{'aria-label':`Edit page ${item.page} ${item.field}`,onclick:()=>openPage(item.page)},`Page ${item.page} · ${item.field}`)),
     el('p',{class:'why'},`${scenes.length} scenes · Project creation owns lyric timing.`),scenePicker,wordPicker,
-    sceneAction('storyboard-add','Split before word','storyboard.create',()=>({}),(scene?.words?.length || 0)<2),
+    sceneAction('storyboard-add','Add scene before word','storyboard.create',()=>({}),(scene?.words?.length || 0)<2),
     sceneAction('storyboard-trim-start','Start scene at word','storyboard.update',()=>({edge:'start'}),scene?.scene===1),
     sceneAction('storyboard-trim-end','End scene at word','storyboard.update',()=>({edge:'end'}),scene?.scene===scenes.length),
     sceneAction('storyboard-delete','Combine with previous','storyboard.delete',()=>({into:'previous'}),scene?.scene===1),

@@ -140,6 +140,7 @@ SUBCOMMANDS
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
   storyboard --doctor                read-only section-boundary task list for the selected Studio project
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
+  storyboard create|read|update|delete [key=value ...]  shared native storyboard CRUD
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
   <project> image add <file> [name=...] [background=... | character=...]
@@ -296,6 +297,12 @@ fn command_input_schema(id: &str) -> Value {
         "agent.models" => json!({"type":"object","properties":{"agent":{"type":"string","enum":["opencode","codex","omp","claude"]}},"additionalProperties":false}),
         "agent.new_chat" => json!({"type":"object","properties":{"free_only":{"type":"boolean"},"image_task":{"type":"boolean","description":"Native restricted image-job tools; no chat self-invocation"}},"additionalProperties":false}),
         "agent.send" => json!({"type":"object","properties":{"message":{"type":"string"},"attachments":{"type":"array","items":{"type":"string"}},"new_chat":{"type":"boolean","default":true},"wait":{"type":"integer","minimum":0,"maximum":300},"free_only":{"type":"boolean"},"image_task":{"type":"boolean","description":"Native restricted image-job tools; no chat self-invocation"}},"required":["message"],"additionalProperties":false}),
+        "storyboard.create" | "storyboard.read" | "storyboard.update" | "storyboard.delete" => {
+            let mut schema=schema_from_description(id);
+            schema["properties"]["scene"]=json!({"oneOf":[{"type":"integer","minimum":1},{"type":"string"}]});
+            if id=="storyboard.read" || id=="storyboard.update" {schema["properties"]["page"]=json!({"type":"integer","minimum":1});}
+            schema
+        },
         "workshop.build_storyboard" => json!({"type":"object","properties":{"template":{"type":"string","enum":["backlot"]},"source":{"type":"string","description":"Optional OpenMontage project folder containing scene plan, script and reference artwork"}},"additionalProperties":false}),
         "image.break_apart" => json!({
             "type": "object",
@@ -789,23 +796,12 @@ fn call_app_quit(bridge: Option<&str>, mut args: Value) -> Result<Value, String>
     bridge_call(bridge.unwrap_or("auto"), "app.quit", args)
 }
 
-/// A short spelling of the existing storyboard.edit operation; dash-only text is literal.
-fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
- let mut args=Vec::new();let mut i=0;
- while i<raw.len(){if raw[i]=="--bridge"{i+=2;continue;}args.push(raw[i].as_str());i+=1;}
- if args.len()<5 || args[..3]!=["storyboard","edit","scene"] {return Err("storyboard edit scene <N> <text> [field=action]".into());}
- let scene=args[3].parse::<u64>().ok().filter(|n|*n>0).ok_or("scene must be a positive number")?;
- let field=match args.get(5){None=>"action",Some(value)=>value.strip_prefix("field=").filter(|s|!s.is_empty()).ok_or("expected field=<native field from storyboard.read>")?};
- if args.len()>6{return Err("unexpected arguments after field".into());}
- Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
-}
-
 const SUBCOMMANDS: &[&str] = &["help", "-h", "panels", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips", "image"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
     static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    ARGS.get_or_init(|| project_argument(std::env::args().collect()).and_then(image_add_argument).unwrap_or_else(|e| usage(e)))
+    ARGS.get_or_init(|| project_argument(std::env::args().collect()).and_then(friendly_argument).unwrap_or_else(|e| usage(e)))
 }
 
 /// `mc <project> <subcommand | command id> ...`: a leading project path becomes
@@ -830,10 +826,23 @@ fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
     Ok(raw)
 }
 
-/// Friendly spelling; all persistence, ownership and copying stay in project.add_asset.
-fn image_add_argument(mut raw: Vec<String>) -> Result<Vec<String>,String> {
+/// Small spellings only; the shared engine owns every operation.
+fn friendly_argument(mut raw: Vec<String>) -> Result<Vec<String>,String> {
     let mut i=1;
     while i<raw.len() && raw[i].starts_with('-') && !SUBCOMMANDS.contains(&raw[i].as_str()) { i+=if raw[i]=="--bridge"{2}else{1}; }
+    if raw.get(i).map(String::as_str)==Some("storyboard") {
+        if let Some(verb)=raw.get(i+1).filter(|v|["create","read","update","delete"].contains(&v.as_str())).cloned(){
+            raw.splice(i..i+2,["exec".into(),format!("storyboard.{verb}")]);return Ok(raw);
+        }
+        if raw.get(i+1).map(String::as_str)==Some("edit") {
+            if raw.get(i+2).map(String::as_str)!=Some("scene") || raw.get(i+4).is_none(){return Err("storyboard edit scene <N> <text> [field=action]".into());}
+            let scene=raw[i+3].parse::<u64>().ok().filter(|n|*n>0).ok_or("scene must be a positive number")?;
+            if raw[i+5..].iter().any(|v|!v.contains('=')){return Err("Options after the text use key=value".into());}
+            let text=raw[i+4].clone();let field=raw[i+5..].iter().any(|v|v.starts_with("field="));
+            raw.splice(i..i+5,["exec".into(),"storyboard.update".into(),format!("scene={scene}"),format!("value={text}")]);
+            if !field {raw.push("field=action".into());}return Ok(raw);
+        }
+    }
     if raw.get(i).map(String::as_str)!=Some("image"){return Ok(raw);}
     if raw.get(i+1).map(String::as_str)!=Some("add") || raw.get(i+2).is_none(){return Err("image add <file> [name=<label>] [background=<name> | character=<name>]".into());}
     if raw[i+3..].iter().any(|v|!v.contains('=')){return Err("image add takes one file; options use key=value".into());}
@@ -1102,10 +1111,7 @@ fn main() {
                 outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
                 std::process::exit(if result["healthy"]==true{0}else if result["healthy"]==false{1}else{2});
             }
-            let params=storyboard_edit_params(&cli_args().iter().cloned().skip(1).collect::<Vec<_>>()).unwrap_or_else(|e|usage(e));
-            let result=bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),"storyboard.edit",params).unwrap_or_else(|e|fail(e));
-            if is_payload_error(&result){fail(format!("storyboard.edit: {result}"));}
-            outln!("{}",serde_json::to_string_pretty(&result).unwrap_or_default());
+            usage("storyboard create|read|update|delete [key=value ...], or storyboard --doctor");
         }
         "clips" => {
             let mut params = a.params_from(1).unwrap_or_else(|e| usage(e));
@@ -1495,16 +1501,16 @@ mod project_argument_tests {
         let project=dir.join("Song.magic");let image=dir.join("Sea scene.svg");
         std::fs::write(&project,"{}").unwrap();std::fs::write(&image,"<svg/>").unwrap();
         let input=args(&["mc","--bridge","19971",project.to_str().unwrap(),"image","add",image.to_str().unwrap(),"name=Sea scene"]);
-        let got=image_add_argument(project_argument(input).unwrap()).unwrap();
+        let got=friendly_argument(project_argument(input).unwrap()).unwrap();
         assert_eq!(&got[3..5], &["exec","project.add_asset"]);
         for value in [format!("path={}",image.display()),"kind=image".into(),"image=Sea-scene".into(),"name=Sea scene".into(),format!("_expected_project={}",project.display())] {assert!(got.contains(&value),"{got:?}");}
-        let got=image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),"background=sea"])).unwrap();
+        let got=friendly_argument(args(&["mc","image","add",image.to_str().unwrap(),"background=sea"])).unwrap();
         assert!(got.contains(&"background=sea".into()));assert!(!got.iter().any(|v|v.starts_with("image=")));
         for tail in ["kind=video","path=elsewhere","preset=cat","second-file"] {
-            assert!(image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),tail])).is_err());
+            assert!(friendly_argument(args(&["mc","image","add",image.to_str().unwrap(),tail])).is_err());
         }
-        assert!(image_add_argument(args(&["mc","image","add",dir.to_str().unwrap()])).is_err());
-        assert!(image_add_argument(args(&["mc","image","add","/no/such/image.png"])).is_err());
+        assert!(friendly_argument(args(&["mc","image","add",dir.to_str().unwrap()])).is_err());
+        assert!(friendly_argument(args(&["mc","image","add","/no/such/image.png"])).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1590,16 +1596,14 @@ mod project_argument_tests {
 mod storyboard_text_tests {
  use super::*;
  #[test]
- fn shortcut_keeps_dash_text_and_uses_explicit_field(){
-  let raw=["--bridge","19897","storyboard","edit","scene","14","----","field=drawing"].map(str::to_owned);
-  let value=storyboard_edit_params(&raw).unwrap();
-  assert_eq!(value["scene"],14);assert_eq!(value["value"],"----");assert_eq!(value["field"],"drawing");
- }
- #[test]
- fn shortcut_defaults_to_named_action_field_and_rejects_ambiguous_extra_args(){
-  let raw=["storyboard","edit","scene","4","Saved action"].map(str::to_owned);
-  assert_eq!(storyboard_edit_params(&raw).unwrap()["field"],"action");
-  let bad=["storyboard","edit","scene","4","Saved action","other"].map(str::to_owned);
-  assert!(storyboard_edit_params(&bad).is_err());
+ fn storyboard_spellings_keep_guards_and_literal_text(){
+  let raw=["mc","--bridge","19897","storyboard","edit","scene","14","----","field=drawing","_expected_project=/song.magic"].map(str::to_owned).to_vec();
+  let value=friendly_argument(raw).unwrap();
+  for arg in ["storyboard.update","scene=14","value=----","field=drawing","_expected_project=/song.magic"]{assert!(value.iter().any(|v|v==arg));}
+  for verb in ["create","read","update","delete"]{
+   let raw=["mc","storyboard",verb,"scene=2","project=/song.magic"].map(str::to_owned).to_vec();
+   let value=friendly_argument(raw).unwrap();assert_eq!(value[1],"exec");assert_eq!(value[2],format!("storyboard.{verb}"));assert_eq!(value[4],"project=/song.magic");
+  }
+  let bad=["mc","storyboard","edit","scene","4","Saved action","other"].map(str::to_owned).to_vec();assert!(friendly_argument(bad).is_err());
  }
 }

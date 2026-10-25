@@ -368,3 +368,15 @@ for (const [name, test] of tests) {
   catch (e) { failed++; console.error('FAIL panels: ' + name + '\n' + e.stack); }
 }
 assert.equal(failed, 0, `${failed} panel regressions failed`);
+
+// Drawing a real timeline curve must use the same registered tones as its row.
+{
+ const draw={setTransform(){},beginPath(){},roundRect(){},fill(){},moveTo(){},lineTo(){},stroke(){},fillText(){}};
+ const canvas={clientWidth:100,clientHeight:30,getContext(){return draw;}};
+ const context=vm.createContext({uiConfig:{timeline_tones:{rotation:'--pose-purple'}},document:{documentElement:{}},devicePixelRatio:1,
+  ResizeObserver:class{},getComputedStyle:()=>({getPropertyValue:key=>{assert.ok(['--pose-purple','--depth-gold'].includes(key));return '#c3a4ff';}})});
+ vm.runInContext(read('timeline.js'),context);
+ context.canvas=canvas;
+ vm.runInContext('timelineDraw(canvas,{kind:"rotation",values:[0,1,0]},[],1)',context);
+ console.log('PASS timeline: curve colour uses the shared config');
+}

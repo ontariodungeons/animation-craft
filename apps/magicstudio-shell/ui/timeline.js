@@ -48,7 +48,7 @@ function timelineDraw(canvas, curve, keys, duration) {
   if (!w || !h) return;
   canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
   const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const tone = getComputedStyle(document.documentElement).getPropertyValue(TIMELINE_TONES[curve.kind] || '--accent').trim();
+  const tone = getComputedStyle(document.documentElement).getPropertyValue(uiConfig.timeline_tones[curve.kind] || '--accent').trim();
   ctx.fillStyle = tone; ctx.globalAlpha = 0.1;
   ctx.beginPath(); ctx.roundRect(0, 2, w, h - 4, 3); ctx.fill(); ctx.globalAlpha = 1;
   const lo = Math.min(...curve.values), hi = Math.max(...curve.values), flat = hi - lo < 1e-6;

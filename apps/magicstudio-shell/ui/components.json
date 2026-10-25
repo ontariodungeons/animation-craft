@@ -1168,7 +1168,7 @@
     },
     "storyboard-add": {
       "component": "ghost",
-      "label": "Split before word",
+      "label": "Add scene before word",
       "target": "storyboard",
       "indicator": "hidden"
     },
@@ -1211,6 +1211,12 @@
     "storyboard-word": {
       "component": "field",
       "label": "Recorded word at the scene cut",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-create": {
+      "component": "start",
+      "label": "Create storyboard",
       "target": "storyboard",
       "indicator": "hidden"
     }

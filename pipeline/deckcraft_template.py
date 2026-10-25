@@ -283,7 +283,7 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
                 if ids:d.q('edit.delete',ids=ids)
                 continue
             record=page['sheet'][slot];fill(f'auto.sheet.{slot}.title',record.get('name',record['id']),20)
-            fill(f'user.sheet.{slot}.notes',record.get('notes',record.get('id',''))+'\n'+(Path(record['file']).name if record.get('file') else 'Register existing artwork to populate this slot.'),18)
+            fill(f'user.sheet.{slot}.notes',record['notes'] if record.get('notes_exact') else record.get('notes',record.get('id',''))+'\n'+(Path(record['file']).name if record.get('file') else 'Register existing artwork to populate this slot.'),18)
             if record.get('file'):
                 path=Path(record['file']).resolve()
                 if not path.is_file():raise ValueError('Configured asset does not exist: '+str(path))

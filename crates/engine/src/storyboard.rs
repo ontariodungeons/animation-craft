@@ -9,9 +9,9 @@ use crate::{EngineError, Result, Session};
 use crate::workshop::{
     ASSETS_DIR, IMAGE_EXTENSIONS, STORYBOARD_DIR, STORYBOARD_PDF,
     files_in, panel_files, project_dir, song_seconds,
-    transcript_files, workshop_status,
+    transcript_files,
 };
-use crate::workspace::{has_extension, resolve_workspace_path, run_tool_in};
+use crate::workspace::{resolve_workspace_path, run_tool_in};
 
 /// A scene's packet sections, in the order they print.
 pub(crate) const SCENE_SECTIONS: &[(&str, &str)] = &[
@@ -459,7 +459,7 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let provenance=std::fs::read(dir.join("transcript-provenance.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let recording_duration=song_seconds(&dir);
         let timing_extent=recording_duration.or_else(||provenance["duration_sec"].as_f64()).or_else(||scenes.last().and_then(|v|v["end"].as_f64()));
-        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"page_content":params["_page_content"],"previous_board":params["_previous_board"],"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){Value::Null}else if active_board["source_transcript"]==json!(transcript){active_board["source_captions"].clone()}else{json!(caption_file(&dir))},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
+        std::fs::write(&scene_map,serde_json::to_vec_pretty(&json!({"scenes":scenes,"page_content":params["_page_content"],"previous_board":params["_previous_board"],"backgrounds":params["_backgrounds"],"source":"canonical CLI scene spans","transcript":transcript,"captions":if params["transcript"].is_string(){Value::Null}else if active_board["source_transcript"]==json!(transcript){active_board["source_captions"].clone()}else{json!(caption_file(&dir))},"duration_sec":timing_extent,"recording_duration_verified":recording_duration.is_some(),"audio":s.song_audio,"project":s.project_path,"assets":s.project_assets})).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
         let script=crate::workspace::workspace_root(s).join("pipeline/movie_board.py");
         let mut args=vec![script.to_string_lossy().into_owned(),"--transcript".into(),transcript.to_string_lossy().into_owned(),"--scene-map".into(),scene_map.to_string_lossy().into_owned(),"--out".into(),out.to_string_lossy().into_owned(),"--title".into(),title];
         if params["allow_timing_overrun"]==true{if params["draft"]!=true{return Err(EngineError::InvalidParams("Timing-overrun source may only produce an explicitly warned draft".into()));}args.push("--allow-timing-overrun".into());}
