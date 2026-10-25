@@ -31,7 +31,7 @@
       // Make and measure every word in its lettering.
       const els = line.words.map((w) => {
         const act = K.acts?.[w.word_id], hero = !!act, el = document.createElement("div");
-        el.className = "w"; el.textContent = w.text;
+        el.className = "w"; el.textContent = w.text; el.dataset.wordId = w.word_id;
         Object.assign(el.style, { fontFamily: family(hero ? S.hero_font || S.font : S.font), fontWeight: String(hero ? S.hero_weight || 700 : S.weight || 700),
           fontStyle: hero && S.hero_italic ? "italic" : "normal", fontSize: `${hero ? S.hero_size : S.size}px`, color: hero ? S.hero_color : S.color,
           webkitTextStroke: S.outline ? `${Math.max(2, (hero ? S.hero_size : S.size) * 0.07)}px ${S.outline}` : "" });
@@ -93,6 +93,27 @@
         }
       }
     });
+    // Drawings anchored to words: each stroke draws on at its word's sung time, under or beside the word.
+    for (const d of K.draws || []) {
+      const el = root.querySelector(`[data-word-id="${CSS.escape(d.word_id)}"]`), stroke = LIB.strokes?.[d.stroke];
+      const word = DATA.words.find((w) => w.word_id === d.word_id);
+      if (!el || !stroke || !word) continue;
+      const [, , vw, vh] = stroke.view_box.split(" ").map(Number), box = el.parentElement;
+      const w = d.place === "beside" ? el.offsetHeight * 0.8 * vw / vh : Math.max(el.offsetWidth, 160), h = w * vh / vw;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", stroke.view_box);
+      Object.assign(svg.style, { position: "absolute", overflow: "visible", width: `${w}px`, height: `${h}px`,
+        left: `${d.place === "beside" ? el.offsetLeft + el.offsetWidth + 16 : el.offsetLeft + (el.offsetWidth - w) / 2}px`,
+        top: `${d.place === "beside" ? el.offsetTop : el.offsetTop + el.offsetHeight * 0.95}px` });
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", stroke.d); path.setAttribute("fill", "none"); path.setAttribute("stroke", S.hero_color);
+      path.setAttribute("stroke-width", String(7 * vw / w)); path.setAttribute("stroke-linecap", "round");
+      svg.appendChild(path); box.appendChild(svg);
+      const len = path.getTotalLength();
+      path.style.strokeDasharray = `${len}`;
+      path.style.strokeDashoffset = `${len}`;
+      at(path, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: stroke.draw, ease: "power1.inOut" }, word.start);
+    }
     window.__timelines = window.__timelines || {};
     window.__timelines["__COMPOSITION_ID__"] = tl;
   })();

@@ -338,6 +338,14 @@ function wordsChip(anim, w) {
     chip.style.setProperty("--word-color", /^#[0-9a-f]{6}$/i.test(it.color) ? it.color : "currentColor");
     chip.style.setProperty("--word-scale", Math.min(1.7, Math.max(0.8, (it.size || 110) / 110)).toFixed(2));
   }
+  if (anim.kinetic) {
+    const st = anim.kinetic.style || {}, hero = !!anim.kinetic.acts?.[w.word_id];
+    chip.style.setProperty("--word-font", hero ? st.hero_font || st.font || "sans-serif" : st.font || "sans-serif");
+    chip.style.setProperty("--word-weight", String(hero ? st.hero_weight || 700 : st.weight || 700));
+    chip.style.setProperty("--word-slant", hero && st.hero_italic ? "italic" : "normal");
+    chip.style.setProperty("--word-color", hero ? st.hero_color || "currentColor" : st.color || "currentColor");
+    chip.style.setProperty("--word-scale", String(hero ? Math.min(1.7, (st.hero_size || 110) / (st.size || 64)) : 1));
+  }
   if (wordsPanel.designs.has(w.line_id)) chip.dataset.changed = "";
   return chip;
 }
@@ -361,6 +369,7 @@ function wordsTimeline(animations, end) {
   return wordsPlace(el("div", { class: "words-tl", "aria-label": "Lyrics on the song timeline" }, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "button", { "data-section": a.animation_id, onclick: () => a.animation_id === wordsPanel.selected || wordsSelect(a.animation_id) })),
     ...wordsRows(animations).map(([a, j, line, at, len]) => wordsPlace(el("div", { class: `words-line${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`,
+      "data-kind": a.scope?.section === "chorus" ? "chorus" : "verse",
       title: "Click around the words to design the whole line",
       onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
         wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsPose(a, line.id); wordsRender(); } },
@@ -377,12 +386,70 @@ function wordsRoll(animations, end) {
     const frame = wordsPlace(el("button", { class: `words-frame${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`, title: line.words.map((w) => w.text).join(" "),
       onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
         wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsPose(a, line.id); wordsRender(); } }, world), at, len);
-    requestAnimationFrame(() => wordsDrawLine(world, a, line.id, wordsPose(a, line.id), false));
+    requestAnimationFrame(() => a.kinetic ? wordsDrawKinetic(world, a, line) : wordsDrawLine(world, a, line.id, wordsPose(a, line.id), false));
     wordsFitter.observe(frame);
     return frame;
   });
   return wordsPlace(el("div", { class: "words-tl words-roll", "aria-label": "Film roll of the song" }, ...ticks, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "div")), ...frames, el("span", { class: "words-tl-head" })), 0, end);
+}
+
+// A kinetic line on the film roll: its words in the section's lettering (meaning words in the hero lettering),
+// its drawings under their words, and the layout's name. Drawn in video pixels like the static frames.
+function wordsDrawKinetic(world, anim, line) {
+  const [W] = wordsWorld(), k = anim.kinetic, st = k.style || {}, lib = wordsPanel.read.kinetic_library || {};
+  const fam = (f) => f === "serif" ? "serif" : !f || f === "sans" ? "sans-serif" : `"${f}", sans-serif`;
+  const row = el("div", { class: "kinetic-frame-line" });
+  for (const w of line.words) {
+    const hero = !!k.acts?.[w.word_id], span = el("span", {}, w.text);
+    span.style.setProperty("--kf-font", fam(hero ? st.hero_font || st.font : st.font));
+    span.style.setProperty("--kf-size", `${hero ? st.hero_size || 110 : st.size || 64}px`);
+    span.style.setProperty("--kf-color", hero ? st.hero_color || "#B8442A" : st.color || "#173F49");
+    span.style.setProperty("--kf-slant", hero && st.hero_italic ? "italic" : "normal");
+    span.style.setProperty("--kf-weight", String(hero ? st.hero_weight || 700 : st.weight || 700));
+    span.style.setProperty("--kf-outline", st.outline || "transparent");
+    for (const d of (k.draws || []).filter((d) => d.word_id === w.word_id)) {
+      const stroke = lib.strokes?.[d.stroke];
+      if (!stroke) continue;
+      const svg = wordsStroke(stroke);
+      svg.setAttribute("class", `kinetic-frame-draw ${d.place === "beside" ? "beside" : "under"}`);
+      svg.style.setProperty("--draw-color", st.hero_color || "#B8442A");
+      span.appendChild(svg);
+    }
+    row.appendChild(span);
+  }
+  row.style.setProperty("--kf-width", `${W * 0.86}px`);
+  row.style.setProperty("--kf-gap", `${(st.size || 64) * .32}px`);
+  world.replaceChildren(row, el("span", { class: "kinetic-frame-tag" }, lib.layouts?.[k.layout]?.name || k.layout));
+}
+
+// The same library path is shown in the picker, film roll and rendered video.
+function wordsStroke(stroke) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  svg.setAttribute("viewBox", stroke.view_box); svg.setAttribute("aria-hidden", "true");
+  path.setAttribute("d", stroke.d); path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2"); path.setAttribute("vector-effect", "non-scaling-stroke"); path.setAttribute("stroke-linecap", "round");
+  svg.appendChild(path); return svg;
+}
+
+// Transparent arrows from each lyric line (left) to its film-roll frame (right), in the section's colour.
+function wordsArrows(view) {
+  view.querySelector(":scope > svg.words-arrows")?.remove();
+  const lines = [...view.querySelectorAll(".words-tl > .words-line")], frames = [...view.querySelectorAll(".words-roll > .words-frame")];
+  if (!lines.length || lines.length !== frames.length || !frames[0].offsetParent) return;
+  const box = view.getBoundingClientRect(), svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "words-arrows"); svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", String(view.scrollWidth)); svg.setAttribute("height", String(view.scrollHeight));
+  const at = (r, side) => [r[side] - box.left + view.scrollLeft, r.top + r.height / 2 - box.top + view.scrollTop];
+  lines.forEach((line, i) => {
+    const [x1, y1] = at(line.getBoundingClientRect(), "right"), [x2, y2] = at(frames[i].getBoundingClientRect(), "left");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2 - 6} ${y2} l -10 -6 m 10 6 l -10 6`);
+    path.setAttribute("class", line.classList.contains("active") ? "active" : "");
+    path.setAttribute("data-kind", line.dataset.kind);
+    svg.appendChild(path);
+  });
+  view.appendChild(svg);
 }
 
 // Centre, under the stage: the line's minimal lanes. Timing only; the Studio owns clip length.
@@ -426,7 +493,7 @@ function wordsFollow(t, smooth = false) {
   view.scrollTo({ top: Math.max(0, target), behavior: smooth ? "smooth" : "instant" });
 }
 
-const wordsCard = (on, title, does, onclick) => el("button", { class: "effect", role: "radio", "aria-checked": String(!!on), onclick },
+const wordsCard = (on, title, does, onclick) => el("button", { class: "effect", role: "radio", "aria-checked": String(!!on), title: `${title} · ${does}`, "aria-label": title, onclick },
   el("strong", {}, title), el("span", { class: "muted" }, does));
 
 // What the centre offers for the pick: Look, Move or Draw, for the whole line or one item.
@@ -536,9 +603,9 @@ function wordsRender() {
     el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Lyrics · on the song timeline"), wordsTimeline(animations, end)),
     main,
     el("aside", { class: "words-side" }, el("div", { class: "group-label" }, "Film roll · the whole song"), wordsRoll(animations, end)));
-  wordsWidth(view);
+  wordsViewFitter.observe(view); wordsWidth(view);
   requestAnimationFrame(() => {
-    wordsCanvasDraw(); wordsFitClock(view);
+    wordsCanvasDraw(); wordsFitClock(view); wordsArrows(view);
     // A new pick brings its line level with the stage.
     const pick = `${wordsPanel.selected}/${wordsPanel.line}`;
     if (pick !== wordsPanel.followed && wordsPanel.line && !wordsPanel.playing) { wordsPanel.followed = pick; wordsFollow(wordsLineSpan(anim, wordsPanel.line).start, true); }
@@ -710,7 +777,8 @@ function wordsWidth(view = $("view-design")) {
   view.classList.toggle("narrow", view.clientWidth < 1100);
   view.classList.toggle("tight", view.clientWidth < 600);
 }
-addEventListener("resize", () => { wordsWidth(); wordsFit(); });
+const wordsViewFitter = new ResizeObserver(() => { const view = $("view-design"); if (view?.classList.contains("active")) { wordsWidth(view); wordsFitClock(view); wordsArrows(view); } });
+addEventListener("resize", () => { wordsWidth(); wordsFit(); const view = $("view-design"); if (view) wordsArrows(view); });
 // Leaving the Design view stops the video, so nothing plays behind another view.
 new MutationObserver(() => {
   if ($("view-design")?.classList.contains("active")) return;
@@ -741,10 +809,66 @@ async function wordsShuffle(kinetic = true) {
     wordsPanel.stage = null; await wordsOpen();
   } catch (error) { toast(String(error).replace(/^.*?: /, "")); }
 }
+// Tiny diagrams explain the choice before it is applied; motion plays only on hover/focus.
+function wordsOptionPreview(kind, key) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 160 64"); svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "words-option-preview"); svg.setAttribute("data-kind", kind); svg.setAttribute("data-choice", key);
+  const add = (tag, attrs, text) => {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+    if (text) node.textContent = text; svg.appendChild(node); return node;
+  };
+  if (kind === "layouts") {
+    const places = { karaoke: [[36,35],[68,35],[112,35]], stack: [[60,24],[99,24],[80,44]],
+      cascade: [[28,19],[73,34],[122,49]], scatter: [[32,26,-9],[80,44,7],[126,23,-5]],
+      push: [[36,35],[70,35],[116,35]], giant: [[27,18],[60,18],[87,48]] };
+    (places[key] || places.karaoke).forEach(([x,y,angle], i) => add("text", { x, y, "text-anchor": "middle",
+      class: i === 2 ? "hero" : "", "font-size": key === "giant" && i === 2 ? 29 : 12,
+      transform: `rotate(${angle || 0} ${x} ${y})` }, ["Sing", "your", "song"][i]));
+    if (key === "push") add("path", {d:"M 17 22 V 12 H 30 M 130 12 H 143 V 22 M 17 42 V 52 H 30 M 130 52 H 143 V 42", class:"cue"});
+  } else if (kind === "entrances") {
+    add("text", {x:80,y:40,"text-anchor":"middle","font-size":25,class:"preview-word"}, "Sing");
+    const cues = { "fade-up":"M 80 59 V 47 m -4 4 4 -4 4 4", slide:"M 10 34 H 43 m -5 -4 5 4 -5 4",
+      "drop-in":"M 80 5 V 17 m -4 -4 4 4 4 -4", pop:"M 38 18 l 7 5 M 122 18 l -7 5 M 38 49 l 7 -5 M 122 49 l -7 -5",
+      typewriter:"M 112 20 V 43", "blur-in":"M 37 24 V 40 M 31 27 V 37 M 123 24 V 40 M 129 27 V 37" };
+    add("path", {d:cues[key] || "",class:"cue"});
+  } else {
+    add("path", {d:"M 0 43 Q 20 31 40 43 T 80 43 T 120 43 T 160 43 M 0 54 Q 20 42 40 54 T 80 54 T 120 54 T 160 54",class:"scene"});
+    if (key === "godrays") for (const x of [30,65,100,135]) add("path",{d:`M 20 0 L ${x} 64`,class:"light"});
+    if (key === "lens-flare") for (const [x,y,r] of [[37,18,12],[73,30,7],[112,44,4]]) add("circle",{cx:x,cy:y,r,class:"light"});
+    if (key === "ripples") for (const r of [10,21,32]) add("ellipse",{cx:80,cy:32,rx:r*1.7,ry:r*.5,class:"cue"});
+    if (["snow","starfield","paper-grain","sparkle-lines"].includes(key)) for (let i=0;i<18;i++) {
+      const x=(i*47+13)%160,y=(i*23+9)%60;
+      if (key === "sparkle-lines") add("path",{d:`M ${x-3} ${y} h 6 M ${x} ${y-3} v 6`,class:"cue"});
+      else add("circle",{cx:x,cy:y,r:key === "paper-grain" ? .7 : key === "snow" ? 2 : 1,class:"speck"});
+    }
+  }
+  return svg;
+}
+
 function wordsLayers(anim) {
   const lib = wordsPanel.read.kinetic_library || {}, k = anim.kinetic;
   const row = (label, kind, current, pick) => [el("div", { class: "group-label" }, label), el("div", { class: "words-effects" },
-    ...Object.entries(lib[kind] || {}).map(([key, item]) => wordsCard(current === key, item.name, item.does, () => pick(key))))];
+    ...Object.entries(lib[kind] || {}).map(([key, item]) => {
+      const card = wordsCard(current === key, item.name, item.does, () => pick(key));
+      if (["layouts", "entrances", "overlays"].includes(kind)) card.prepend(wordsOptionPreview(kind, key));
+      if (kind === "letterings") {
+        const sample = el("span", { class: "words-lettering-sample", "aria-hidden": "true" }, "Sing ");
+        const hero = el("span", {}, "out");
+        sample.style.setProperty("--sample-font", `"${item.style.font}", sans-serif`);
+        sample.style.setProperty("--sample-weight", String(item.style.weight || 700));
+        sample.style.setProperty("--sample-color", item.style.color);
+        sample.style.setProperty("--sample-outline", item.style.outline || "transparent");
+        hero.style.setProperty("--hero-font", `"${item.style.hero_font || item.style.font}", sans-serif`);
+        hero.style.setProperty("--hero-weight", String(item.style.hero_weight || 700));
+        hero.style.setProperty("--hero-slant", item.style.hero_italic ? "italic" : "normal");
+        hero.style.setProperty("--hero-color", item.style.hero_color);
+        hero.style.setProperty("--hero-size", `${Math.min(1.7, (item.style.hero_size || 110) / (item.style.size || 64))}em`);
+        sample.appendChild(hero); card.prepend(sample);
+      }
+      return card;
+    }))];
   const picked = wordsPanel.picked.filter((id) => anim.words.some((w) => w.word_id === id));
   const text = (id) => anim.words.find((w) => w.word_id === id)?.text || id;
   const actsFor = (act) => { const acts = { ...k.acts }; for (const id of picked) { if (act) acts[id] = act; else delete acts[id]; } return acts; };
@@ -767,6 +891,18 @@ function wordsLayers(anim) {
       wordsCard(false, "No act", "Arrives like the other words", () => wordsKinetic({ acts: actsFor(null) })),
       ...Object.entries(lib.acts || {}).map(([key, item]) => wordsCard(picked.every((id) => k.acts?.[id] === key), item.name, item.does, () => wordsKinetic({ acts: actsFor(key) }))))
       : el("p", { class: "muted" }, "Click a word in the lyrics on the left to give it an act."),
+    ...row("Lettering", "letterings", Object.entries(lib.letterings || {}).find(([, l]) => Object.entries(l.style).every(([key, value]) => k.style?.[key] === value))?.[0],
+      (key) => wordsKinetic({ style: lib.letterings[key].style })),
+    // Drawings: a stroke anchored to a word, drawn on at its sung time (picked words get the stroke).
+    el("div", { class: "group-label" }, "Drawings · pick words, then a stroke; click a drawing to remove it"),
+    el("div", { class: "words-meaning" }, ...(k.draws || []).map((d, i) => el("button", { class: "chip", title: `Remove ${lib.strokes?.[d.stroke]?.name || d.stroke} from ${text(d.word_id)}`, "aria-label": `Remove drawing from ${text(d.word_id)}`,
+      onclick: () => wordsKinetic({ draws: k.draws.filter((_, j) => j !== i) }) }, `${text(d.word_id)} · ${lib.strokes?.[d.stroke]?.name || d.stroke}`))),
+    picked.length ? el("div", { class: "words-effects" }, ...Object.entries(lib.strokes || {}).map(([key, item]) => {
+      const card = wordsCard(picked.every((id) => k.draws?.some((d) => d.word_id === id && d.stroke === key)), item.name, item.does,
+        () => wordsKinetic({ draws: [...(k.draws || []).filter((d) => !picked.includes(d.word_id)), ...picked.map((word_id) => ({ word_id, stroke: key, place: key === "down" ? "beside" : "under" }))] }));
+      const svg = wordsStroke(item); svg.setAttribute("class", "words-stroke-sample"); card.prepend(svg); return card;
+    }))
+      : null,
     ...row("Overlay · a transparent layer over the scene", "overlays", k.overlay || "none", (overlay) => wordsKinetic({ overlay })));
 }
 

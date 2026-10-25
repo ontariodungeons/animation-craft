@@ -684,7 +684,15 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
         "hero_italic":st["hero_italic"].as_bool().unwrap_or(false),
         "size":st["size"].as_f64().filter(|v| (20.0..=300.0).contains(v)).unwrap_or(64.0),"hero_size":st["hero_size"].as_f64().filter(|v| (20.0..=400.0).contains(v)).unwrap_or(110.0),
         "color":hex(&st["color"]).unwrap_or(json!("#173F49")),"hero_color":hex(&st["hero_color"]).unwrap_or(json!("#B8442A")),"outline":hex(&st["outline"])});
-    Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,
+    // Drawings anchored to words: a stroke from the library, drawn on at its word's sung time.
+    let mut draws = Vec::new();
+    if !k["draws"].is_null() && !k["draws"].is_array() { return Err(invalid("kinetic.draws must be an array")); }
+    for d in k["draws"].as_array().into_iter().flatten() {
+        if !d["place"].is_null() && d["place"] != "beside" && d["place"] != "under" { return Err(invalid("kinetic.draws place must be under or beside")); }
+        if !ids.contains(&&d["word_id"]) { return Err(invalid(format!("kinetic.draws: {} is not a word of this section", d["word_id"]))); }
+        draws.push(json!({"word_id":d["word_id"],"stroke":named("strokes",&d["stroke"])?,"place":if d["place"] == "beside" { "beside" } else { "under" }}));
+    }
+    Ok(json!({"layout":named("layouts",&k["layout"])?,"entrance":named("entrances",&k["entrance"])?,"acts":acts,"draws":draws,
         "overlay":if k["overlay"].is_null() { json!("none") } else { named("overlays",&k["overlay"])? },
         "band":if k["band"] == "bottom" { "bottom" } else { "top" },"seed":k["seed"].as_u64().unwrap_or(1),"style":style}))
 }
@@ -1021,9 +1029,16 @@ mod tests {
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","overlay":"ripples"})).is_ok());
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","overlay":"lava"})).is_err(), "unknown overlay");
         assert!(kinetic_design(&words, &json!({"layout":"melt","entrance":"pop"})).is_err(), "unknown layout");
+        let drawn = kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":[{"word_id":"v1-l1/w1","stroke":"hill"}]})).unwrap();
+        for draws in [json!({}), json!([{"word_id":"foreign","stroke":"hill"}]), json!([{"word_id":"v1-l1/w1","stroke":"hill","place":"over"}])] {
+            assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":draws})).is_err());
+        }
+        assert_eq!((drawn["draws"][0]["stroke"].clone(), drawn["draws"][0]["place"].clone()), (json!("hill"), json!("under")));
+        assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":[{"word_id":"v1-l1/w1","stroke":"scribble"}]})).is_err(), "unknown stroke");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v9-l1/w0":"spin"}})).is_err(), "a word from another section");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
         let lib: Value = serde_json::from_str(KINETIC_LIBRARY).unwrap();
+        assert!(lib["letterings"].as_object().unwrap().len() >= 4 && lib["strokes"]["underline"]["d"].is_string());
         assert!(lib["acts"].as_object().unwrap().len() >= 12 && lib["layouts"].as_object().unwrap().len() >= 4);
     }
 

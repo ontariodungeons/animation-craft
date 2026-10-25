@@ -1001,6 +1001,19 @@ body.at-home .app-footer { display:none; }
 .words-tl > .words-line { left: var(--space-2); right: var(--space-2); height: calc(var(--len-s) * var(--song-s) - var(--space-1)); display: block; line-height: 1.25;
   padding: var(--space-1) var(--space-2); border-left: medium solid transparent; border-radius: var(--radius-sm); background: var(--lettering-paper); overflow: hidden; cursor: pointer; }
 /* A sung word in its own lettering; the line's design sets these through --word-* values. */
+/* Arrows from each lyric line to its film-roll frame: transparent, over the page, never in the way. */
+#view-design.active { position: relative; }
+#view-design > svg.words-arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; }
+#view-design > svg.words-arrows path { fill: none; stroke: var(--tone-transcript); stroke-width: 2; opacity: .16; }
+#view-design > svg.words-arrows path.active { opacity: .4; }
+#view-design > svg.words-arrows path[data-kind="chorus"] { stroke: var(--tone-lyrics); }
+/* A kinetic line on the film roll (video pixels, scaled with the frame). */
+.kinetic-frame-line { position: absolute; left: 7%; top: 8%; width: var(--kf-width); display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 var(--kf-gap); }
+.kinetic-frame-line > span { font-family: var(--kf-font); font-size: var(--kf-size); color: var(--kf-color); font-style: var(--kf-slant); font-weight: var(--kf-weight); line-height: 1.1; position: relative; margin-bottom: .5em; -webkit-text-stroke: .035em var(--kf-outline); paint-order: stroke fill; }
+.kinetic-frame-draw { color: var(--draw-color); position: absolute; overflow: visible; pointer-events: none; }
+.kinetic-frame-draw.under { left: 0; top: 100%; width: 100%; height: .45em; }
+.kinetic-frame-draw.beside { left: 100%; top: 0; width: .5em; height: 1.2em; }
+.kinetic-frame-tag { position: absolute; right: 2%; bottom: 3%; font: 600 calc(var(--h) * .044) sans-serif; color: var(--muted); }
 /* Kinetic layers under the stage: rows of library cards and the section's meaning words. */
 .words-layers { display: flex; flex-direction: column; gap: var(--space-2); }
 .words-layers .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 3.4), 1fr)); gap: var(--space-1); }
@@ -1062,3 +1075,29 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .lyric-item > span { display: inline-block; white-space: pre; transform-origin: 50% 100%; translate: var(--tx, 0) var(--ty, 0); scale: var(--sx, 1) var(--sy, 1); rotate: var(--lr, 0deg); }
 .lyric-item.active { outline: medium dashed var(--accent); outline-offset: var(--space-3); }
 .lyric-draw { position: absolute; left: var(--x); top: var(--y); width: var(--dw); height: var(--dh); overflow: visible; pointer-events: none; }
+
+.words-lettering-sample { display: block; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--lettering-paper); font-family: var(--sample-font); font-weight: var(--sample-weight); color: var(--sample-color); -webkit-text-stroke: .04em var(--sample-outline); paint-order: stroke fill; line-height: 1.7; }
+.words-stroke-sample { display: block; width: 100%; height: calc(var(--space-5) * 1.5); margin-bottom: var(--space-1); color: var(--accent); }
+
+.words-lettering-sample > span { font-family: var(--hero-font); font-weight: var(--hero-weight); font-style: var(--hero-slant); color: var(--hero-color); font-size: var(--hero-size); }
+
+.words-option-preview { display: block; width: 100%; height: calc(var(--space-5) * 2.4); margin-bottom: var(--space-1); border-radius: var(--radius-sm); background: var(--bg); color: var(--muted); overflow: hidden; }
+.words-option-preview text { fill: currentColor; font-family: system-ui, sans-serif; font-weight: 600; }
+.words-option-preview .hero, .words-option-preview .preview-word { fill: var(--accent); }
+.words-option-preview path, .words-option-preview ellipse, .words-option-preview .light { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.words-option-preview .cue { color: var(--accent); opacity: .65; }
+.words-option-preview .scene { opacity: .4; }
+.words-option-preview .light { color: var(--depth-gold); stroke-width: 6; opacity: .35; }
+.words-option-preview .speck { fill: currentColor; }
+.words-layers .effect:focus-visible { outline: medium solid var(--accent); outline-offset: var(--space-1); }
+@media (prefers-reduced-motion: no-preference) {
+  .words-layers .effect:is(:hover, :focus-visible) .preview-word { animation: words-option-arrive var(--slow) var(--ease) both; transform-origin: center; transform-box: fill-box; }
+  .words-option-preview[data-choice="slide"] { --preview-x: -40%; }
+  .words-option-preview[data-choice="drop-in"] { --preview-y: -70%; }
+  .words-option-preview[data-choice="fade-up"] { --preview-y: 45%; }
+  .words-option-preview[data-choice="pop"] { --preview-scale: .5; }
+  .words-option-preview[data-choice="blur-in"] { --preview-blur: .2em; }
+  .words-layers .effect:is(:hover, :focus-visible) [data-choice="typewriter"] .preview-word { animation-name: words-option-type; animation-timing-function: steps(4); }
+}
+@keyframes words-option-arrive { from { opacity: 0; transform: translate(var(--preview-x, 0), var(--preview-y, 0)) scale(var(--preview-scale, 1)); filter: blur(var(--preview-blur, 0)); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes words-option-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }

@@ -4,9 +4,10 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../ui/words.js',import.meta.url),'utf8');
-const el=(tag,attrs={},...kids)=>{const props={};return {tag,...attrs,kids,dataset:{},style:{setProperty:(k,v)=>{props[k]=v},props}}};
+const el=(tag,attrs={},...kids)=>{const props={};return {tag,...attrs,kids,dataset:{},style:{setProperty:(k,v)=>{props[k]=v},props},
+  appendChild(n){this.kids.push(n)},prepend(n){this.kids.unshift(n)},replaceChildren(...nodes){this.kids=nodes},setAttribute(k,v){this[k]=v}}};
 const c=vm.createContext({console,JSON,Map,Set,Math,Number,String,structuredClone,requestAnimationFrame(){},addEventListener(){},ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},
-  window:{addEventListener(){}},document:{body:{},getElementById:()=>null,addEventListener(){},createElement:()=>({getContext:()=>({measureText:()=>({width:0})}),style:{},addEventListener(){}})},state:{},$:()=>null,invoke:async()=>({}),el,ICONS:{}});
+  window:{addEventListener(){}},document:{createElementNS:(_,tag)=>el(tag),body:{},getElementById:()=>null,addEventListener(){},createElement:()=>({getContext:()=>({measureText:()=>({width:0})}),style:{},addEventListener(){}})},state:{},$:()=>null,invoke:async()=>({}),el,ICONS:{}});
 vm.runInContext(source,c);
 let renders=0;c.wordsRender=()=>{renders++};
 vm.runInContext(`
@@ -45,6 +46,24 @@ await drop.onclick();
 const save=saves.find((r)=>r.id==='words.save').params;
 assert.equal(JSON.stringify(save.kinetic.acts),'{"l1/w2":"spin","l1/w0":"drop"}','the picked word gets the act; others keep theirs');
 assert.equal(save.kinetic.layout,'scatter');
+// Lettering and drawings: a lettering card saves its style; a stroke card anchors drawings to the picked words.
+vm.runInContext(`wordsPanel.read.kinetic_library.letterings={poster:{name:'Poster',does:'',style:{font:'Nimbus Sans Narrow',hero_color:'#E4572E'}}};
+  wordsPanel.read.kinetic_library.strokes={hill:{name:'Wave',does:'',view_box:'0 0 410 95',d:'M 7 77 Q 73 72 118 32'}};wordsPanel.picked=['l1/w1'];`,c);
+saves.length=0;
+const panel2=vm.runInContext('wordsLayers(anim)',c);
+await flat(panel2).find((n)=>n.tag==='button'&&words(n).includes('Poster')).onclick();
+assert.equal(saves.find((r)=>r.id==='words.save').params.kinetic.style.font,'Nimbus Sans Narrow','a lettering card sets the section style');
+saves.length=0;
+await flat(panel2).find((n)=>n.tag==='button'&&words(n).includes('Wave')).onclick();
+assert.equal(JSON.stringify(saves.find((r)=>r.id==='words.save').params.kinetic.draws),'[{"word_id":"l1/w1","stroke":"hill","place":"under"}]','a stroke is anchored to the picked word');
+// Film frames use real library strokes and preserve base/hero weights.
+vm.runInContext(`anim.kinetic.style={font:'serif',weight:400,hero_weight:800};
+ anim.kinetic.draws=[{word_id:'l1/w1',stroke:'hill',place:'under'}];`,c);
+const world=el('div'); c.world=world;
+vm.runInContext("wordsDrawKinetic(world,anim,{words:anim.words})",c);
+assert.equal(flat(world).find(n=>n.tag==='path').d,'M 7 77 Q 73 72 118 32','film roll draws the actual library path');
+assert.equal(world.kids[0].kids[0].style.props['--kf-weight'],'400');
+assert.equal(world.kids[0].kids[2].style.props['--kf-weight'],'800');
 // The Design view's own width picks its layout: narrow drops the film roll, tight goes to one column.
 for (const [width, narrow, tight] of [[1400, false, false], [900, true, false], [401, true, true]]) {
   const classes = new Set(); const view = { clientWidth: width, classList: { toggle: (k, on) => on ? classes.add(k) : classes.delete(k) } };
@@ -52,3 +71,26 @@ for (const [width, narrow, tight] of [[1400, false, false], [900, true, false], 
   assert.equal(classes.has('narrow'), narrow, `narrow at ${width}px`); assert.equal(classes.has('tight'), tight, `tight at ${width}px`);
 }
 console.log('PASS words lettering: column words use the line design; Shift-click picks several; text locked; kinetic act cards save the picked words');
+
+// Option diagrams show distinct arrangements and label every choice for keyboard/bridge access.
+const cascade=vm.runInContext("wordsOptionPreview('layouts','cascade')",c);
+assert.equal(cascade.kids[0].y,'19'); assert.equal(cascade.kids[2].y,'49');
+assert.equal(flat(panel2).find(n=>n.tag==='button'&&words(n).includes('Poster'))['aria-label'],'Poster');
+assert.equal(chip(0).style.props['--word-weight'],'400','kinetic lettering also reaches the lyric column');
+// Execute the production composition script: drawing tween must use its own word time.
+const library=JSON.parse(readFileSync(new URL('../../../pipeline/templates/kinetic-library.json',import.meta.url),'utf8'));
+const make=(tag)=>{const n=el(tag);Object.assign(n,{offsetWidth:100,offsetHeight:60,offsetLeft:20,offsetTop:40,getTotalLength:()=>240});
+ n.appendChild=function(child){this.kids.push(child);child.parentElement=this};return n};
+const root=make('div');root.querySelector=(selector)=>flat(root).find(n=>selector.includes(n.dataset?.wordId)&&n.dataset?.wordId);
+const tweens=[];const data={width:1920,height:1080,duration:8,words:[{word_id:'a',line_id:'line',text:'Sing',start:2,end:3}],
+ kinetic:{layout:'karaoke',entrance:'pop',draws:[{word_id:'a',stroke:'hill',place:'under'}]},style:{size:64,hero_size:110,hero_color:'#B8442A'},library};
+const template=readFileSync(new URL('../../../pipeline/templates/words-kinetic.html',import.meta.url),'utf8');
+vm.runInNewContext(template.match(/<script>([\s\S]*?)<\/script>/)[1].replace('__DATA__',JSON.stringify(data)),{
+ document:{querySelector:()=>root,createElement:make,createElementNS:(_,tag)=>make(tag)},CSS:{escape:s=>s},window:{},
+ gsap:{timeline:()=>({fromTo:(target,from,to,time)=>tweens.push({target,from,to,time})})}});
+const drawTween=tweens.find(t=>t.target.tag==='path');
+assert.equal(drawTween.time,2,'stroke begins at the anchored sung word');
+assert.equal(drawTween.from.strokeDashoffset,240);assert.equal(drawTween.to.strokeDashoffset,0);
+assert.equal(drawTween.target.d,library.strokes.hill.d,'export uses the same stroke as the film frame');
+assert.equal(drawTween.target.parentElement.parentElement,root.kids[0],'drawing leaves with its lyric line');
+console.log('PASS kinetic previews and anchored drawing export timing');
