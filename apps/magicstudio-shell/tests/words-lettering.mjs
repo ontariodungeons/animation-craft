@@ -154,3 +154,19 @@ assert.ok(flat(editor).some(n=>n.tag==='button'&&String(n['aria-label']).include
 vm.runInContext(`wordsPanel.mode='motion'`,c);
 assert.ok(vm.runInContext('wordsInnerControls(anim)',c).some(n=>n?.['data-cue-kind']==='overlay'),'Motion shows the cue timing editor too');
 console.log('PASS cue timing: overlay offset/duration, drawing offset/duration/hold, Start/End fields in Timing and Motion');
+
+const actions=vm.runInContext('wordsMotionActions(anim)',c);
+assert.ok(flat(actions).some(n=>n['aria-label']==='Draw cue on scene'));
+assert.ok(flat(actions).some(n=>n['aria-label']==='Add scene effect'));
+vm.runInContext(`wordsPanel.mode='motion';wordsPanel.motionAdd='effect'`,c);
+const effectsOnly=vm.runInContext('wordsLayers(anim)',c);
+assert.ok(words(effectsOnly).includes('Add scene effect'));
+assert.equal(words(effectsOnly).includes('Layout'),false,'adding an effect never exposes text layout choices');
+vm.runInContext(`wordsPanel.motionAdd=null;wordsPanel.read.graphics=[{id:'d',kind:'drawing',index:0,name:'Drawing',animation_id:'verse-1',anchor:1,start:1,end:3,word_ids:['l1/w0']}];wordsPanel.cue='d'`,c);
+const editCue=vm.runInContext('wordsCueEditor(anim)',c);
+assert.ok(flat(editCue).some(n=>n['aria-label']==='Redraw selected cue'));
+assert.ok(flat(editCue).some(n=>n['aria-label']==='Drawing colour'));
+saves.length=0;await flat(editCue).find(n=>n['aria-label']==='Delete selected visual cue').onclick();
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(saves.find(r=>r.id==='words.save').params.kinetic.draws.length,0,'explicit delete removes selected drawing');
+console.log('PASS explicit motion add, edit/redraw and delete controls');

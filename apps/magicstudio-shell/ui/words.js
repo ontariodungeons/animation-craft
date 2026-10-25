@@ -792,6 +792,7 @@ function wordsModeTabs() {
 function wordsSetMode(mode) {
   if(!Object.hasOwn(WORDS_VIEW_ICONS,mode))return;
   if(wordsPanel.editor){wordsAfterEdit(()=>wordsSetMode(mode));return;}
+  if(mode!=="motion"){document.querySelector(".words-sketch")?.remove();document.querySelector(".words-sketch-cancel")?.remove();}
   wordsPanel.mode=mode;
   const view=$("view-design");if(view)view.dataset.wordsMode=mode;
   $("words-view-modes")?.querySelectorAll("[data-words-mode]").forEach(n=>n.setAttribute("aria-selected",String(n.dataset.wordsMode===mode)));
@@ -809,6 +810,65 @@ function wordsLinkControls() {
     toggle("front","Bring connections in front",'<svg viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12"/><path d="M8 4h12v12M11 13l8-8M13 5h6v6"/></svg>'),
     toggle("pulse","Slow connection colour blend",'<svg viewBox="0 0 24 24"><path d="M3 12c3-8 6 8 9 0s6 8 9 0"/></svg>'));
 }
+function wordsMotionActions(anim) {
+  return el("div",{class:"transport","aria-label":"Add visual cue"},
+    el("button",{class:"start","aria-label":"Draw cue on scene",onclick:()=>wordsDrawCue(anim)},"Draw cue"),
+    el("button",{class:"ghost","aria-label":"Add scene effect",onclick:()=>{wordsPanel.motionAdd="effect";wordsRender();}},"Add effect"));
+}
+function wordsDrawingEdit(anim,cue) {
+  if(cue.index==null)return null;
+  const draw=anim.kinetic.draws[cue.index];
+  const change=patch=>wordsKinetic({draws:anim.kinetic.draws.map((d,i)=>i===cue.index?{...d,...patch}:d)});
+  const field=(key,label)=>{const input=el("input",{type:"number",placeholder:"Auto","aria-label":`${label} of drawing`,onchange:e=>{
+    if(e.target.value!==""&&Number.isFinite(Number(e.target.value))){e.target.defaultValue=e.target.value;change({[key]:Number(e.target.value)});}}});
+    input.value=input.defaultValue=draw[key]??"";return el("label",{class:"field-row"},label,input);};
+  const color=el("input",{type:"color","aria-label":"Drawing colour",onchange:e=>{e.target.defaultValue=e.target.value;change({color:e.target.value});}});
+  color.value=color.defaultValue=draw.color||"#e4572e";
+  return el("div",{class:"words-drawing-edit"},field("x","X"),field("y","Y"),field("width","Size"),color,
+    el("button",{class:"ghost","aria-label":"Redraw selected cue",onclick:()=>wordsDrawCue(anim,cue.index)},"Redraw"));
+}
+function wordsDrawCue(anim,replaceIndex=null) {
+  const stage=$("words-preview");if(!stage||stage.querySelector(".words-sketch"))return;
+  const previous=replaceIndex==null?null:anim.kinetic?.draws?.[replaceIndex];
+  const word=anim.words.find(w=>w.word_id===(previous?.word_id||wordsPanel.picked[0]))||wordsLineWords(anim,wordsPanel.line)[0];
+  if(!word)return toast("Select a lyric line to attach the drawing");
+  const project=state.project,size=wordsPanel.size||{width:1920,height:1080};wordsVideo("pause");
+  const overlay=document.createElementNS("http://www.w3.org/2000/svg","svg"),path=document.createElementNS(overlay.namespaceURI,"path");
+  overlay.setAttribute("viewBox",`0 0 ${size.width} ${size.height}`);overlay.setAttribute("class","words-sketch");
+  overlay.setAttribute("tabindex","0");overlay.setAttribute("aria-label","Draw a cue on the scene; Escape cancels");
+  path.setAttribute("fill","none");path.setAttribute("stroke",previous?.color||"#e4572e");path.setAttribute("stroke-width","7");path.setAttribute("stroke-linecap","round");overlay.appendChild(path);
+  const cancel=el("button",{class:"words-sketch-cancel","aria-label":"Cancel drawing",onclick:()=>{overlay.remove();cancel.remove();}},"Cancel drawing");
+  stage.appendChild(overlay);stage.appendChild(cancel);overlay.focus();
+  let points=[],active=false,pending=false,stored=false;
+  const savedIndex=replaceIndex??anim.kinetic?.draws?.length??0;
+  const point=e=>{const r=overlay.getBoundingClientRect();return [Math.round(Math.max(0,Math.min(size.width,(e.clientX-r.left)*size.width/r.width))),Math.round(Math.max(0,Math.min(size.height,(e.clientY-r.top)*size.height/r.height)))];};
+  const paint=()=>path.setAttribute("d",points.map((p,i)=>`${i?"L":"M"}${p[0]} ${p[1]}`).join(" "));
+  overlay.onpointerdown=e=>{if(pending)return;e.preventDefault();overlay.setPointerCapture(e.pointerId);points=[point(e)];active=true;paint();};
+  overlay.onpointermove=e=>{if(!active||points.length>=500)return;const p=point(e),last=points.at(-1);if(Math.hypot(p[0]-last[0],p[1]-last[1])>2){points.push(p);paint();}};
+  const save=async()=>{
+    if(points.length<2)return;
+    if(state.project!==project||wordsPanel.selected!==anim.animation_id)return toast("Selection changed; drawing was not saved");
+    pending=true;
+    const drawing={...previous,word_id:word.word_id,track:"graphics",drawing:{name:"Drawing",view_box:`0 0 ${size.width} ${size.height}`,d:path.getAttribute("d")},
+      x:0,y:0,width:size.width,color:previous?.color||"#e4572e",duration:previous?.duration||1.2,hold:previous?.hold??1};
+    const draws=[...(anim.kinetic?.draws||[])];if(replaceIndex==null)draws.push(drawing);else draws[replaceIndex]=drawing;
+    try {
+      const kinetic={layout:"karaoke",entrance:"fade-up",overlay:"none",...anim.kinetic,draws};
+      if(!stored){
+        const result=await wordsCommand("words.save",{animation_id:anim.animation_id,expected_source_revision:anim.source_revision,kinetic,_expected_project:project});
+        if(result.conflict)throw new Error("This section changed; cancel and reload before drawing again");
+        anim.source_revision=result.animation.source_revision;anim.kinetic=kinetic;stored=true;
+      }
+      if(wordsPanel.read.in_video?.includes(anim.animation_id))await wordsCommand("words.apply",{animation_id:anim.animation_id,_expected_project:project});
+      wordsPanel.cue=`${anim.animation_id}-draw-${savedIndex}`;wordsPanel.stage=null;wordsPanel.motionAdd=null;
+      overlay.remove();cancel.remove();await wordsOpen();
+    }catch(error){pending=false;cancel.textContent="Retry save";cancel.setAttribute("aria-label","Retry drawing save");cancel.onclick=save;toast(String(error));}
+  };
+  overlay.onpointerup=()=>{if(!active)return;active=false;save();};
+  overlay.onpointercancel=()=>{active=false;points=[];paint();};
+  overlay.onkeydown=e=>{if(e.key==="Escape"){overlay.remove();cancel.remove();}};
+}
+
 // The picked cue (drawing or effect): exact Start and End seconds and a replay, in Timing and Motion.
 function wordsCueEditor(anim) {
   const cue=wordsPanel.read.graphics?.find(c=>c.id===wordsPanel.cue&&c.animation_id===anim.animation_id);
@@ -818,6 +878,8 @@ function wordsCueEditor(anim) {
   return el("div",{class:"words-timing-summary","data-cue-kind":cue.kind},el("strong",{},cue.name),
     field("Start",cue.start,v=>wordsRetimeCue(cue,v,v+cue.end-cue.start)),field("End",cue.end,v=>wordsRetimeCue(cue,cue.start,v)),
     el("button",{class:"icon","aria-label":"Replay linked learning moment",title:"Replay the lyric and this cue together",html:ICONS.play,onclick:()=>wordsPreviewCue(cue)}),
+    wordsPanel.mode==="motion" ? wordsDrawingEdit(anim,cue) : null,
+    el("button",{class:"icon","aria-label":"Delete selected visual cue",title:"Delete this cue",onclick:()=>{wordsPanel.cue=null;wordsKinetic(cue.kind==="overlay"?{overlay:"none"}:{draws:anim.kinetic.draws.filter((_,i)=>i!==cue.index)});},html:'<svg viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></svg>'}),
     el("p",{class:"muted"},cue.word?`Linked to “${cue.word}” · drag the left point to choose another word.`:"This effect overlaps the connected lyric lines."));
 }
 function wordsTimingPanel(anim) {
@@ -825,7 +887,7 @@ function wordsTimingPanel(anim) {
 }
 function wordsInnerControls(anim) {
   if(wordsPanel.mode==="timing")return [wordsTimingPanel(anim)];
-  if(anim.kinetic)return wordsPanel.mode==="motion"?[wordsCueEditor(anim),wordsLayers(anim)]:[wordsLayers(anim)];
+  if(anim.kinetic)return wordsPanel.mode==="motion"?[wordsMotionActions(anim),wordsCueEditor(anim),wordsLayers(anim)]:[wordsLayers(anim)];
   wordsPanel.tab=wordsPanel.mode==="motion"?"draw":"look";
   return [wordsLanes(anim),...wordsOptions(anim)];
 }
@@ -1187,6 +1249,7 @@ function wordsLayers(anim) {
       }
       return card;
     }))];
+  if(wordsPanel.mode==="motion" && wordsPanel.motionAdd==="effect")return el("section",{class:"words-layers"},...row("Add scene effect","overlays",k.overlay||"none",overlay=>wordsKinetic({overlay})));
   const picked = wordsPanel.picked.filter((id) => anim.words.some((w) => w.word_id === id));
   const text = (id) => anim.words.find((w) => w.word_id === id)?.text || id;
   const actsFor = (act) => { const acts = { ...k.acts }; for (const id of picked) { if (act) acts[id] = act; else delete acts[id]; } return acts; };
@@ -1212,11 +1275,11 @@ function wordsLayers(anim) {
     ...row("Lettering", "letterings", Object.entries(lib.letterings || {}).find(([, l]) => Object.entries(l.style).every(([key, value]) => k.style?.[key] === value))?.[0],
       (key) => wordsKinetic({ style: lib.letterings[key].style })),
     ] : []),
-    ...(["lyrics","motion"].includes(wordsPanel.mode) ? [
+    ...(["lyrics","motion"].includes(wordsPanel.mode) && wordsPanel.motionAdd!=="effect" ? [
     // Drawings: a stroke anchored to a word, drawn on at its sung time (picked words get the stroke).
-    el("div", { class: "group-label" }, wordsPanel.mode === "lyrics" ? "Letter marks · underline and decorate words" : "Drawings · pick words, then a stroke; click a drawing to remove it"),
-    el("div", { class: "words-meaning" }, ...(k.draws || []).map((d,i)=>({...d,index:i})).filter(d=>(d.track||lib.strokes?.[d.stroke]?.track||"graphics")===(wordsPanel.mode==="lyrics"?"lettering":"graphics")).map((d) => el("button", { class: "chip", title: `Remove ${d.drawing?.name || lib.strokes?.[d.stroke]?.name || d.stroke} from ${text(d.word_id)}`, "aria-label": `Remove drawing from ${text(d.word_id)}`,
-      onclick: () => wordsKinetic({ draws: k.draws.filter((_, j) => j !== d.index) }) }, `${text(d.word_id)} · ${d.drawing?.name || lib.strokes?.[d.stroke]?.name || d.stroke}`))),
+    el("div", { class: "group-label" }, wordsPanel.mode === "lyrics" ? "Letter marks · underline and decorate words" : "Drawings · select a cue to edit it"),
+    el("div", { class: "words-meaning" }, ...(k.draws || []).map((d,i)=>({...d,index:i})).filter(d=>(d.track||lib.strokes?.[d.stroke]?.track||"graphics")===(wordsPanel.mode==="lyrics"?"lettering":"graphics")).map((d) => el("button", { class: "chip", title: `Edit ${d.drawing?.name || lib.strokes?.[d.stroke]?.name || d.stroke} for ${text(d.word_id)}`, "aria-label": `Edit drawing for ${text(d.word_id)}`,
+      onclick: () => {wordsPanel.cue=`${anim.animation_id}-draw-${d.index}`;wordsPanel.picked=[d.word_id];wordsRender();} }, `${text(d.word_id)} · ${d.drawing?.name || lib.strokes?.[d.stroke]?.name || d.stroke}`))),
     picked.length ? el("div", { class: "words-effects" }, ...Object.entries(lib.strokes || {}).filter(([,item])=>(item.track||"graphics")===(wordsPanel.mode==="lyrics"?"lettering":"graphics")).map(([key, item]) => {
       const card = wordsCard(picked.every((id) => k.draws?.some((d) => d.word_id === id && d.stroke === key)), item.name, item.does,
         () => wordsKinetic({ draws: [...(k.draws || []).filter((d) => !(picked.includes(d.word_id)&&d.stroke===key)), ...picked.map((word_id) => ({ word_id, stroke: key, place: key === "down" ? "beside" : "under" }))] }));

@@ -1147,3 +1147,9 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 
 #words-workspace-controls .words-option-preview { height: var(--size-48); width: 100%; }
 #words-workspace-controls .words-effects { grid-template-columns: repeat(3,minmax(0,1fr)); }
+
+.words-sketch { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; cursor: crosshair; touch-action: none; }
+.words-sketch-cancel { position: absolute; top: var(--space-2); right: var(--space-2); z-index: 6; }
+.words-drawing-edit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); flex-basis: 100%; }
+.words-drawing-edit input[type="number"] { width: 5em; }
+.words-drawing-edit input[type="color"] { width: var(--size-30); padding: 0; }
