@@ -760,6 +760,7 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 
 /* Assets: compact two-column tiles (Project catalog and the Animation Assets tab). */
 .magic-assets-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--size-6); }
+#motion-assets .magic-assets-grid { max-height:var(--size-140); overflow-y:auto; scrollbar-width:thin; }
 .magic-asset-tile { display:grid; grid-template-columns:var(--size-32) minmax(0,1fr); grid-template-rows:auto auto; column-gap:var(--size-6); align-items:center; padding:var(--size-5) var(--size-6); border:var(--size-1) solid var(--line); border-radius:var(--size-7); text-align:left; color:var(--muted); }
 .magic-asset-tile img, .magic-asset-tile .magic-asset-placeholder { grid-row:1 / span 2; width:var(--size-32); height:var(--size-28); object-fit:contain; border-radius:var(--size-4); background-image:linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size:var(--size-10) var(--size-10); background-position:0 0,0 var(--size-5),var(--size-5) calc(-1 * var(--size-5)),calc(-1 * var(--size-5)) 0; }
 .magic-asset-tile .magic-asset-name { color:var(--text); font-size:var(--size-11-5); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
