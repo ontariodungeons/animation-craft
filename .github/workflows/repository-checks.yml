@@ -27,6 +27,7 @@ jobs:
           sudo apt-get install --yes \
             build-essential \
             curl \
+            ffmpeg \
             file \
             libasound2-dev \
             libayatana-appindicator3-dev \
@@ -38,6 +39,25 @@ jobs:
             libxkbcommon-dev \
             patchelf \
             wget
+      - name: Install the native storyboard tools
+        env:
+          DECKCRAFT_SHA256: 227b8c9cdd2c06b7866807f995fe5d2d0675523a61208f9bc26cf2760fddcb8f
+          PDFCRAFT_SHA256: cdba2bec4d502d016dd78101a402d07845b708c49d77bc85e0ab640aca65372b
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/craft-tools"
+          mkdir -p "$tools/deckcraft" "$tools/pdfcraft"
+          curl --fail --location --retry 3 https://github.com/storytold/deckcraft/releases/download/v0.8.0/deckcraft-0.8.0-linux-x86_64.tar.gz -o "$tools/deckcraft.tar.gz"
+          curl --fail --location --retry 3 https://github.com/storytold/pdfcraft/releases/download/v0.9.0/pdfcraft-cli-0.9.0-linux-x86_64.tar.gz -o "$tools/pdfcraft.tar.gz"
+          printf '%s  %s\n' "$DECKCRAFT_SHA256" "$tools/deckcraft.tar.gz" "$PDFCRAFT_SHA256" "$tools/pdfcraft.tar.gz" | sha256sum --check --strict
+          tar -xzf "$tools/deckcraft.tar.gz" -C "$tools/deckcraft"
+          tar -xzf "$tools/pdfcraft.tar.gz" -C "$tools/pdfcraft"
+          for app in deckcraft pdfcraft; do
+            binary=$(find "$tools/$app" -type f -name "$app-cli" -print -quit)
+            test -n "$binary"
+            chmod +x "$binary"
+            dirname "$binary" >> "$GITHUB_PATH"
+          done
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with:
