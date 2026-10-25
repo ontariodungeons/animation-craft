@@ -11,7 +11,7 @@ use crate::workshop::{
     files_in, panel_files, project_dir, song_seconds,
     transcript_files, workshop_status,
 };
-use crate::workspace::{has_extension, resolve_workspace_path, run_tool_in};
+use crate::workspace::{resolve_workspace_path, run_tool_in};
 
 /// A scene's packet sections, in the order they print.
 pub(crate) const SCENE_SECTIONS: &[(&str, &str)] = &[

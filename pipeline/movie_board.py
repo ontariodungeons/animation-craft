@@ -257,7 +257,7 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
             placements.append(item)
     for original in previous.get('design',{}).get('placements',[]):
         old_page=previous.get('page_plan',[])[original['page']-1]
-        if old_page['kind']=='scene':continue
+        if old_page['kind']=='scene' or (old_page['kind']=='locations' and metadata.get('backgrounds') is not None):continue
         page=next((i+1 for i,p in enumerate(result['page_plan']) if p['key']==old_page['key']),None)
         if page:placements.append(dict(original,page=page))
     if placements:result['design']=dict(placements=placements,dirty=False)
