@@ -61,7 +61,6 @@ function magicAssetTile(asset, { active = false, candidate = false, prefix='magi
 const FOOTER_STAGES = [['song', 'Song'], ['lyrics', 'Lyrics'], ['transcript', 'Transcript'], ['storyboard', 'Storyboard'], ['animate', 'Animate'], ['studio', 'Studio']];
 
 function footerStageState(id) {
-  if (id === 'storyboard') return state.data?.storyboard?.previews?.length ? 'ok' : 'warn';
   if (id === 'studio') return serverUrl() ? 'ok' : videoProject() ? 'warn' : 'idle';
   const seen = state.data?.monitoring?.prerequisites?.find((p) => p.id === id)?.state;
   return seen === 'ready' ? 'ok' : seen ? 'warn' : 'idle';
@@ -70,7 +69,6 @@ function footerStageState(id) {
 async function footerGo(id) {
   if (id === 'studio') return setView('studio');
   if (state.view !== 'project' && await setView('project') === false) return;
-  if (id === 'storyboard') return;
   state.open = SONG_SECTIONS.includes(id) ? 'song' : id; state.blocksCollapsed = false; $('blocks').classList.remove('collapsed'); renderBlocks();
 }
 
@@ -478,6 +476,18 @@ function renderBlocks() {
        [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
         el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
     songState, audio ? songPlayButton(audio.path) : null));
+
+  const sb = state.data?.storyboard;
+  const content = state.data?.design?.readiness;
+  const missing = content?.missing_fields || [];
+  const openPage = page => showPage(page - 1);
+  box.append(block('storyboard',ICONS.animate,'Storyboard',content?.state==='ready'?'Content filled':'Needs work',ready('storyboard'),[
+    el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
+    el('button',{id:'storyboard-overview',onclick:()=>openPage(1)},'Story & backgrounds'),
+    el('p',{class:'why'},`${sb?.previews?.length || 0} pages · ${(sb?.page_size || []).join(' × ')} · Edit text on the page; drag assets onto it.`),
+    ...missing.map(item=>el('button',{'aria-label':`Edit page ${item.page} ${item.field}`,onclick:()=>openPage(item.page)},`Page ${item.page} · ${item.field}`)),
+    el('button',{id:'storyboard-save',disabled:!state.data?.design?.dirty,'data-commands':'storyboard.save_version',onclick:()=>$('sb-save-version').click()},'Save new version')
+  ],observed('storyboard')?.state || 'unknown'));
 
   const assets=state.data?.assets?.assets||[];
   const assetsState = observed("assets")?.state || "unknown";

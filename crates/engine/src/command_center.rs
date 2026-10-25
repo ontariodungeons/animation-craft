@@ -332,6 +332,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
         item("transcript","Transcription",valid,transcript.is_some(),&transcript_detail),
         item("animate","Animate",animated>0,!s.project_assets.is_empty(),"Registered assets with usable rig parts; optional for static scenes"),
         item("assets","Assets",assets>0,!s.project_assets.is_empty(),"Registered source asset files exist; artistic approval separate"),
+        json!({"id":"storyboard","label":"Storyboard content","state":design["readiness"]["state"],"reason":design["readiness"]["reason"],"missing_fields":design["readiness"]["missing_fields"]}),
         item("deckcraft","Editable storyboard PDF",deck_ready,board["pdf"].is_string()||deck.is_some(),"Saved PDF fields inspected through PDFCraft; source timing/creative approval remain separate"),
     ];
     native["id"]=json!("hyperframes");native["label"]=json!("HyperFrames audio + captions");prerequisites.push(native);
@@ -342,7 +343,7 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_micros()).unwrap_or(0);
     let observation=json!({"id":format!("{}-{now}",std::process::id()),"project_id":s.project_path,"command":"center.status","observed_unix_micros":now,"elapsed_ms":started.elapsed().as_millis(),"source":"shared engine inspection; not inferred from process exit or UI revision"});
     let next_commands=prerequisites.iter().filter(|v|v["state"]!="ready" && (v["id"]!="animate" || assets>0)).map(|v|{
-        let target=match v["id"].as_str(){Some("transcript"|"lyrics")=>"workshop.import_transcript",Some("deckcraft")=>"storyboard.init",Some("hyperframes")=>"video.init",Some("song")=>"workshop.set_audio",_=>"project.add_asset"};
+        let target=match v["id"].as_str(){Some("transcript"|"lyrics")=>"workshop.import_transcript",Some("deckcraft")=>"storyboard.init",Some("storyboard")=>"storyboard.edit",Some("hyperframes")=>"video.init",Some("song")=>"workshop.set_audio",_=>"project.add_asset"};
         let label=if v["id"]=="assets"{"See asset import arguments".into()}else{format!("See {} arguments",target)};
         let reason=if v["id"]=="assets" && s.project_assets.is_empty(){json!("No reference art is registered; inspect the import command before choosing an asset.")}else{v["reason"].clone()};
         json!({"label":label,"command":"command.list","params":{"filter":target},"subject_command":target,"operation":"exec","reason":reason})
