@@ -29,7 +29,9 @@ def main():
     if not executable:
         parser.error(f'executable not found: {command[0]}')
     command[0] = os.path.abspath(executable)
-    shell = f'cd -- {shlex.quote(str(Path.cwd()))} && exec {shlex.join(command)}'
+    context = [f'{key}={os.environ[key]}' for key in ('HERDR_WORKSPACE_ID', 'HERDR_TAB_ID', 'HERDR_PANE_ID') if os.environ.get(key)]
+    launch = ['env', *context, *command] if context else command
+    shell = f'cd -- {shlex.quote(str(Path.cwd()))} && exec {shlex.join(launch)}'
     # Lua long strings preserve shell quoting without interpreting escapes or embedded delimiters.
     equals = '='
     while f']{equals}]' in shell:

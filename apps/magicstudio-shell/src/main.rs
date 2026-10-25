@@ -29,7 +29,7 @@ fn launch_options() -> Value {
 #[derive(Default)]
 struct ControlPort(std::sync::Mutex<Option<u16>>);
 pub fn studio_identity(app: &tauri::AppHandle) -> Value {
-    json!({"application":"Magic Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("MAGICSTUDIO_BUILD_ID"),"branch":env!("MAGICSTUDIO_BUILD_BRANCH"),"control_port":app.state::<ControlPort>().0.lock().ok().and_then(|v|*v)})
+    json!({"application":"Magic Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("MAGICSTUDIO_BUILD_ID"),"branch":env!("MAGICSTUDIO_BUILD_BRANCH"),"agent_pane":std::env::var("HERDR_PANE_ID").ok(),"control_port":app.state::<ControlPort>().0.lock().ok().and_then(|v|*v)})
 }
 #[tauri::command]
 fn startup(app:tauri::AppHandle) -> Value {

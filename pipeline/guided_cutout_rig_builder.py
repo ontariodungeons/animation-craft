@@ -41,17 +41,49 @@ def _circle_polygon(cx: float, cy: float, r: float, n: int = 16) -> List[List[in
     return pts
 
 
+def _detect_face_landmarks_photocraft(rgba_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Uses `photocraft-cli` 0.10.0 `image.detectFaces` to locate the character's face
+    bounding box and eye/nose/mouth landmarks (`leftEye`, `rightEye`, `nose`,
+    `mouthLeft`, `mouthRight`) so head, ear, and neck joints align to actual facial anatomy.
+    """
+    pc_bin = shutil.which("photocraft-cli") or "/home/jesse/.local/bin/photocraft-cli"
+    if not os.path.isfile(pc_bin):
+        return None
+    try:
+        proc = subprocess.run(
+            [pc_bin, "run", str(rgba_path), "--cmd", "image.detectFaces"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            return None
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                data = json.loads(line)
+                faces = data.get("result", {}).get("faces", [])
+                if faces:
+                    return max(faces, key=lambda f: float(f.get("score", 0.0)))
+    except Exception:
+        return None
+    return None
+
+
 def _discover_silhouette_contour_polygons(
     alpha: np.ndarray,
     x0: int,
     y0: int,
     x1: int,
     y1: int,
+    face_hint: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Dynamically discovers anatomical joints (neck pinch, shoulder sockets, hip split,
     independent left/right ankles, and upper head/ear lobes) directly from the foreground
-    alpha silhouette of any arbitrary 2D character image.
+    alpha silhouette of any arbitrary 2D character image, refined by `photocraft-cli`
+    `image.detectFaces` landmarks when available.
     """
     bw = max(1, x1 - x0)
     bh = max(1, y1 - y0)
@@ -66,9 +98,17 @@ def _discover_silhouette_contour_polygons(
             row_x1[y] = int(xs_row.max())
             row_w[y] = int(xs_row.max() - xs_row.min() + 1)
 
-    # 1. Discover neck pinch row in upper-middle band [25% .. 48%] of character height
+    # 1. Discover neck pinch row in upper-middle band [25% .. 48%] of character height,
+    #    anchored below `face_hint` chin when `image.detectFaces` found a face!
     neck_band_y0 = max(y0 + 4, int(round(y0 + 0.25 * bh)))
     neck_band_y1 = min(y1 - 4, int(round(y0 + 0.48 * bh)))
+    if face_hint and isinstance(face_hint.get("rect"), list) and len(face_hint["rect"]) == 4:
+        fx, fy, fw, fh = [float(v) for v in face_hint["rect"]]
+        chin_y = int(round(fy + fh))
+        if y0 + int(0.15 * bh) <= chin_y <= y0 + int(0.55 * bh):
+            neck_band_y0 = max(y0 + 4, chin_y - int(0.04 * bh))
+            neck_band_y1 = min(y1 - 4, max(neck_band_y0 + 6, chin_y + int(0.08 * bh)))
+
     valid_neck_rows = [y for y in range(neck_band_y0, neck_band_y1 + 1) if row_w[y] > 8]
     if valid_neck_rows:
         neck_y = min(valid_neck_rows, key=lambda r: row_w[r])
@@ -76,8 +116,12 @@ def _discover_silhouette_contour_polygons(
         neck_y = int(round(y0 + 0.38 * bh))
     neck_x = int(round(0.5 * (row_x0[neck_y] + row_x1[neck_y])))
 
-    # 2. Discover upper head / ear / hat band [0% .. 22%]
+    # 2. Discover upper head / ear / hat band [0% .. 22%], anchored above detected eyes if present
     ear_base_y = max(y0 + 4, int(round(y0 + 0.22 * (neck_y - y0) / 0.42)))
+    if face_hint and isinstance(face_hint.get("rect"), list) and len(face_hint["rect"]) == 4:
+        fy = int(round(float(face_hint["rect"][1])))
+        if y0 + 4 < fy < neck_y - 6:
+            ear_base_y = fy
     ear_base_y = min(neck_y - 6, max(y0 + 4, ear_base_y))
     head_mid_x = neck_x
     ear_l_pivot = [int(round(row_x0[ear_base_y] + 0.30 * max(12, row_w[ear_base_y]))), ear_base_y]
@@ -322,11 +366,13 @@ def discover_character_joints_and_polygons(
 
     is_hopper = character_id.lower().strip() == "hopper"
     if not is_hopper:
-        parts_spec = _discover_silhouette_contour_polygons(alpha, x0, y0, x1, y1)
+        face_hint = _detect_face_landmarks_photocraft(rgba_path)
+        parts_spec = _discover_silhouette_contour_polygons(alpha, x0, y0, x1, y1, face_hint=face_hint)
         return {
             "canvas_size": [w, h],
             "character_bbox": [x0, y0, x1, y1],
             "discovery_mode": "silhouette_contour_adaptive",
+            "face_landmarks": face_hint,
             "selected_parts": selected_parts or [p["id"] for p in parts_spec],
             "parts_spec": parts_spec,
         }
@@ -882,6 +928,76 @@ def mask_and_export_layers_with_photocraft(
     }
 
 
+def trace_part_layers_with_vectorcraft(
+    rig_plan_path: Path,
+    preset: str = "16 Colors",
+) -> Dict[str, Any]:
+    """
+    Uses `vectorcraft-cli` 0.13.1 (`select.all` -> `imageTrace.makeAndExpand`) to trace
+    each character cutout part PNG into a scalable multi-color Bezier `.svg` file
+    alongside its `.png` layer, updating the rig plan JSON with `svg_path` and `svg_file`.
+    """
+    vc_bin = shutil.which("vectorcraft-cli") or "/home/jesse/.local/bin/vectorcraft-cli"
+    if not os.path.isfile(vc_bin):
+        raise FileNotFoundError("vectorcraft-cli binary not found in PATH or ~/.local/bin/vectorcraft-cli")
+
+    plan = json.loads(rig_plan_path.read_text(encoding="utf-8"))
+    base_dir = rig_plan_path.parent
+    traced_parts: List[Dict[str, Any]] = []
+
+    for part in plan.get("parts", []):
+        pid = part.get("id") or part.get("part") or "part"
+        crop_rel = part.get("cropped_path") or part.get("cropped_file") or part.get("file", "")
+        crop_path = Path(crop_rel) if Path(crop_rel).is_absolute() else (base_dir / crop_rel)
+        if not crop_path.is_file():
+            continue
+        svg_path = crop_path.with_suffix(".svg")
+        trace_params = json.dumps({
+            "preset": preset,
+            "enhanced": True,
+            "params": {"ignoreWhite": True},
+        })
+        proc = subprocess.run(
+            [
+                vc_bin,
+                "run",
+                "--in",
+                str(crop_path),
+                "--cmd",
+                "select.all",
+                "--cmd",
+                "imageTrace.makeAndExpand",
+                "--params",
+                trace_params,
+                "--export",
+                str(svg_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and svg_path.is_file():
+            part["svg_path"] = str(svg_path)
+            try:
+                part["svg_file"] = str(svg_path.relative_to(base_dir))
+            except ValueError:
+                part["svg_file"] = svg_path.name
+            traced_parts.append({
+                "part": pid,
+                "svg_path": str(svg_path),
+                "bytes": svg_path.stat().st_size,
+            })
+
+    rig_plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    return {
+        "ok": len(traced_parts) > 0,
+        "rig_plan": str(rig_plan_path),
+        "preset": preset,
+        "traced_count": len(traced_parts),
+        "traced_parts": traced_parts,
+    }
+
+
 def build_pose_library(character_id: str) -> Dict[str, Any]:
     """
     Produces a `pose-library-design` compliant library with timed sequences:
@@ -1243,6 +1359,7 @@ def _build_serializable_rig_spec(
                 "rotationLimitsDeg": [float(p["rotation"][0]), float(p["rotation"][1])],
                 "fullLayerPath": p["full_layer_path"],
                 "croppedLayerPath": p.get("cropped_path", p["full_layer_path"]),
+                "svgLayerPath": p.get("svg_path") or p.get("svg_file"),
                 "cropBbox": p.get("crop_bbox", [0, 0, int(w), int(h)]),
             }
             for p in parts_sorted
@@ -2269,6 +2386,20 @@ def build_guided_cutout_rig(
     )
     rig_plan["effectcraft"] = ec_res
 
+    rig_plan_path = target_dir / f"{character_id}_cutout_rig_plan.json"
+    pose_lib_path = target_dir / f"{character_id}_pose_library.json"
+    rig_plan_path.write_text(json.dumps(rig_plan, indent=2), encoding="utf-8")
+
+    # Automatically bridge through vectorcraft-cli so each cutout part also has a traced .svg
+    # before generating Three.js and React Motion / Remotion components
+    try:
+        vc_res = trace_part_layers_with_vectorcraft(rig_plan_path)
+        if vc_res.get("ok"):
+            rig_plan = json.loads(rig_plan_path.read_text(encoding="utf-8"))
+            rig_plan["vectorcraft"] = vc_res
+    except Exception as exc:
+        rig_plan["vectorcraft"] = {"ok": False, "error": str(exc)}
+
     threejs_path = target_dir / f"{character_id}_threejs_puppet.js"
     react_motion_path = target_dir / f"{character_id}_react_motion.tsx"
     blender_py_path = target_dir / f"{character_id}_blender_rig.py"
@@ -2282,8 +2413,6 @@ def build_guided_cutout_rig(
         "effectcraft_jsx_path": ec_res.get("jsx_path"),
     }
 
-    rig_plan_path = target_dir / f"{character_id}_cutout_rig_plan.json"
-    pose_lib_path = target_dir / f"{character_id}_pose_library.json"
     rig_plan_path.write_text(json.dumps(rig_plan, indent=2), encoding="utf-8")
     pose_lib_path.write_text(json.dumps(pose_lib, indent=2), encoding="utf-8")
 
@@ -2320,6 +2449,8 @@ if __name__ == "__main__":
     parser.add_argument("--threejs-only", action="store_true", help="Generate Three.js module (.js) from an existing cutout_rig_plan.json")
     parser.add_argument("--react-motion-only", action="store_true", help="Generate React Motion / Remotion component (.tsx) from an existing cutout_rig_plan.json")
     parser.add_argument("--blender-py-only", action="store_true", help="Generate Blender 5.3 Python rig script (.py) from an existing cutout_rig_plan.json")
+    parser.add_argument("--trace-svg-only", action="store_true", help="Trace cutout part PNGs into scalable multi-color SVGs via vectorcraft-cli")
+    parser.add_argument("--trace-preset", default="16 Colors", help="VectorCraft imageTrace preset name (default: '16 Colors')")
     parser.add_argument("--out-mp4", default=None, help="Explicit output MP4 path")
     parser.add_argument("--out-jsx", default=None, help="Explicit output JSX path")
     parser.add_argument("--out-threejs", default=None, help="Explicit output Three.js module (.js) path")
@@ -2341,11 +2472,16 @@ if __name__ == "__main__":
         or args.threejs_only
         or args.react_motion_only
         or args.blender_py_only
+        or args.trace_svg_only
     )
     if export_only:
         if not args.rig_plan:
             raise SystemExit("Export-only flags require --rig-plan <path>")
         plan_path = Path(args.rig_plan).resolve()
+        if args.trace_svg_only:
+            trace_res = trace_part_layers_with_vectorcraft(plan_path, preset=args.trace_preset)
+            print(json.dumps(trace_res, indent=2))
+            raise SystemExit(0)
         rig_plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
         cid_val = rig_plan_data.get("character_id", args.character)
         pose_lib_data = rig_plan_data.get("pose_library") or build_pose_library(cid_val)

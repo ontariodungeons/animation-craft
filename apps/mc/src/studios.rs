@@ -7,21 +7,67 @@ use std::path::{Path, PathBuf};
 /// The pinned endpoint for later calls, or None. Runtime dir only: a pin must not outlive the session.
 pub fn pinned_path() -> Option<PathBuf> {
     let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
-    Some(PathBuf::from(runtime).join("magicstudio").join("active-studio"))
+    pin_path(Path::new(&runtime), std::env::var("HERDR_PANE_ID").ok().as_deref())
+}
+
+fn pin_path(runtime: &Path, pane: Option<&str>) -> Option<PathBuf> {
+    let base = runtime.join("magicstudio");
+    match pane {
+        Some(pane) if !pane.is_empty() && pane.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:".contains(&b)) =>
+            Some(base.join("agent-studios").join(pane).join("active-studio")),
+        Some(_) => None,
+        None => Some(base.join("active-studio")),
+    }
+}
+
+fn read_pin(path: &Path) -> Option<String> {
+    let value = std::fs::read_to_string(path).ok()?;
+    let value = value.trim();
+    value.starts_with("unix:").then(|| value.to_string())
 }
 
 pub fn pinned_endpoint() -> Option<String> {
-    let value = std::fs::read_to_string(pinned_path()?).ok()?;
-    let value = value.trim();
-    value.starts_with("unix:").then(|| value.to_string())
+    read_pin(&pinned_path()?)
 }
 
 pub fn pin(endpoint: &str) -> Result<PathBuf, String> {
     let path = pinned_path().ok_or("XDG_RUNTIME_DIR is unavailable; cannot pin a Studio")?;
     std::fs::create_dir_all(path.parent().ok_or("Pin directory unavailable")?)
         .map_err(|e| format!("Cannot create pin directory: {e}"))?;
-    std::fs::write(&path, format!("{endpoint}\n")).map_err(|e| format!("Cannot write pin: {e}"))?;
+    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
+    std::fs::write(&temp, format!("{endpoint}\n")).map_err(|e| format!("Cannot write pin: {e}"))?;
+    std::fs::rename(&temp, &path).map_err(|e| format!("Cannot install pin: {e}"))?;
     Ok(path)
+}
+
+/// Join an explicit pane assignment to live feedback; never infer ownership from a name or folder.
+pub fn assignment(pane: &str, discovery: &Value) -> Value {
+    let pin = std::env::var_os("XDG_RUNTIME_DIR").and_then(|runtime|
+        pin_path(Path::new(&runtime), Some(pane)).and_then(|path| read_pin(&path)));
+    assignment_from(pane, pin.as_deref(), discovery["sessions"].as_array().map(Vec::as_slice).unwrap_or(&[]))
+}
+
+pub fn annotate_agents(agents: &mut Value, discovery: &Value) {
+    for agent in agents.as_array_mut().into_iter().flatten() {
+        if let Some(pane) = agent["pane_id"].as_str() {
+            agent["studio"] = assignment(pane, discovery);
+        }
+    }
+}
+
+fn assignment_from(pane: &str, pin: Option<&str>, sessions: &[Value]) -> Value {
+    let matches: Vec<_> = sessions.iter().filter(|s| match pin {
+        Some(endpoint) => s["endpoint"].as_str() == Some(endpoint),
+        None => s["identity"]["agent_pane"].as_str() == Some(pane),
+    }).collect();
+    match matches.as_slice() {
+        [s] => json!({"state":"connected", "pane":pane, "endpoint":s["endpoint"],
+            "port":s["identity"]["control_port"], "pid":s["identity"]["pid"],
+            "project":s["active_project"], "build":s["identity"]["build_id"],
+            "branch":s["identity"]["branch"], "writer_owner":s["writer_owner"]}),
+        [] => json!({"state":if pin.is_some(){"closed"}else{"unassigned"}, "pane":pane, "endpoint":pin}),
+        _ => json!({"state":"ambiguous", "pane":pane, "ports":matches.iter().map(|s|s["identity"]["control_port"].clone()).collect::<Vec<_>>()}),
+    }
 }
 
 pub fn unpin() -> bool {
@@ -53,6 +99,8 @@ pub fn rows() -> (Vec<Value>, Vec<Value>) {
                 "ready": s["ui_ready"],
                 "unsaved": s["unsaved_state"],
                 "build": s["identity"]["build_id"],
+                "branch": s["identity"]["branch"],
+                "agent_pane": s["identity"]["agent_pane"],
             })
         })
         .collect();
@@ -153,5 +201,31 @@ pub fn verify() -> i32 {
             else { println!("running but not UI-ready: {} — {}; read ui.feedback first", rows.len(), rows.iter().map(check).collect::<Vec<_>>().join(", ")); }
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod assignment_tests {
+    use super::*;
+    #[test]
+    fn pins_are_isolated_by_pane_and_do_not_inherit_the_human_pin() {
+        let runtime = Path::new("/runtime");
+        let first = pin_path(runtime, Some("wG:p1")).unwrap();
+        let second = pin_path(runtime, Some("wG:p2")).unwrap();
+        assert_ne!(first, second);
+        assert_ne!(first, pin_path(runtime, None).unwrap());
+        assert!(pin_path(runtime, Some("../other")).is_none());
+    }
+    #[test]
+    fn ownership_uses_live_endpoints_and_reports_closed_or_multiple_windows() {
+        let a = json!({"endpoint":"unix:/a.sock","active_project":"/a.magic","identity":{"agent_pane":"p1","control_port":9001,"pid":1,"build_id":"a"},"writer_owner":true});
+        let b = json!({"endpoint":"unix:/b.sock","active_project":"/b.magic","identity":{"agent_pane":"p2","control_port":9002,"pid":2,"build_id":"b"},"writer_owner":false});
+        let sessions = vec![a.clone(),b.clone()];
+        assert_eq!(assignment_from("p1",None,&sessions)["port"],9001);
+        assert_eq!(assignment_from("p2",None,&sessions)["project"],"/b.magic");
+        assert_eq!(assignment_from("p1",Some("unix:/b.sock"),&sessions)["writer_owner"],false);
+        assert_eq!(assignment_from("p1",Some("unix:/closed.sock"),&sessions)["state"],"closed");
+        assert_eq!(assignment_from("unassigned",None,&sessions)["state"],"unassigned");
+        assert_eq!(assignment_from("p1",None,&[a.clone(),a])["state"],"ambiguous");
     }
 }
