@@ -19,7 +19,7 @@ class AgentWindowTests(unittest.TestCase):
             stub.chmod(0o700)
             return subprocess.run([sys.executable, str(LAUNCHER), '--workspace', str(workspace),
                                    '--', sys.executable, *args], capture_output=True, text=True,
-                                  env={**os.environ, 'PATH': root + os.pathsep + os.environ['PATH']})
+                                  env={**os.environ, 'HERDR_PANE_ID': 'wTest:p1', 'HERDR_TAB_ID': 'wTest:t1', 'HERDR_WORKSPACE_ID': 'wTest', 'PATH': root + os.pathsep + os.environ['PATH']})
 
     def test_reserved_workspaces_never_dispatch(self):
         for workspace in ['1', '2', '0', '-1', '3 silent; bad', '2147483648']:
@@ -46,7 +46,7 @@ class AgentWindowTests(unittest.TestCase):
         match = re.search(r'exec_cmd\(\[(=*)\[(.*)\]\1\],', dispatched[1], re.S)
         self.assertIsNotNone(match)
         shell = match[2].split(' && exec ', 1)[1]
-        self.assertEqual(shlex.split(shell), [sys.executable, literal])
+        self.assertEqual(shlex.split(shell), ['env', 'HERDR_WORKSPACE_ID=wTest', 'HERDR_TAB_ID=wTest:t1', 'HERDR_PANE_ID=wTest:p1', sys.executable, literal])
         self.assertEqual(value['workspace'], 3)
 
     def test_dispatch_failure_never_launches_a_fallback(self):
