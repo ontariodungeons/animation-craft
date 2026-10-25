@@ -41,7 +41,8 @@
     "panel-body": [
       "scroll",
       "composer",
-      "form"
+      "form",
+      "settings"
     ]
   },
   "densities": [
@@ -1122,8 +1123,15 @@
     "image-settings": {
       "component": "panel-body",
       "label": "Artwork settings",
-      "look": "composer",
+      "look": "settings",
       "indicator": "hidden"
+    },
+    "anim-agent-settings": {
+      "component": "panel-body",
+      "look": "settings",
+      "label": "Agent settings",
+      "indicator": "hidden",
+      "target": "magic-chat-pane"
     }
   },
   "rails": {

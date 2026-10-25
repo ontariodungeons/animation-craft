@@ -729,12 +729,12 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 .agent-head-actions { align-items:center; }
 .agent-head-actions .ghost { padding:var(--size-4) var(--size-9); font-size:var(--size-11); }
 #agent-config-toggle[aria-expanded="true"] { border-color:var(--accent); color:var(--text); }
-.agent-config .agent-runtime { color:var(--muted); font-size:var(--size-11); overflow-wrap:anywhere; }
-.agent-config { display:grid; gap:var(--size-7); padding:var(--size-8) var(--size-9); border-bottom:var(--size-1) solid var(--line); flex:none; max-height:45%; overflow-y:auto; font-size:var(--size-11); color:var(--muted); }
-.agent-config[hidden] { display:none; }
-.agent-config label { display:grid; gap:var(--size-3); }
-.agent-config input, .agent-config select { width:100%; min-width:0; box-sizing:border-box; }
-.agent-config .start { margin-top:var(--size-2); width:100%; }
+.panel-body[data-look="settings"] .agent-runtime { color:var(--muted); font-size:var(--size-11); overflow-wrap:anywhere; }
+.panel-body[data-look="settings"] { display:grid; gap:var(--size-7); padding:var(--size-8) var(--size-9); border-bottom:var(--size-1) solid var(--line); flex:none; max-height:45%; overflow-y:auto; font-size:var(--size-11); color:var(--muted); }
+.panel-body[data-look="settings"][hidden] { display:none; }
+.panel-body[data-look="settings"] label { display:grid; gap:var(--size-3); }
+.panel-body[data-look="settings"] input, .panel-body[data-look="settings"] select { width:100%; min-width:0; box-sizing:border-box; }
+.panel-body[data-look="settings"] .start { margin-top:var(--size-2); width:100%; }
 
 /* Parts & Assets drawer: Compare | All parts. */
 /* Parts & Assets drawer tabs now use the shared .segmented component. */
@@ -822,7 +822,7 @@ body.at-home .app-footer { display:none; }
 .companion-artwork-home > button { flex:1; min-width:0; }
 #ambient-companions { width:auto; margin-right:var(--size-6); }
 
-.agent-config .companion-setting { display:flex; align-items:center; gap:var(--size-6); }
+.panel-body[data-look="settings"] .companion-setting { display:flex; align-items:center; gap:var(--size-6); }
 /* Rendering is supplemental: the authoring inspector, canvas and timeline remain mounted. */
 .blender-render-dialog { width:min(var(--size-900),calc(100vw - var(--size-32))); max-height:calc(100vh - var(--size-64)); margin:auto; padding:var(--size-12); color:var(--text); background:var(--surface); border:var(--size-1) solid var(--line); border-radius:var(--size-12); }
 .blender-render-dialog::backdrop { background:var(--alpha-09); backdrop-filter:blur(var(--size-4)); }
