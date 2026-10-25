@@ -1136,7 +1136,7 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 
 /* Lyrics centre: no box and no opaque fill over the connectors; the scene is a flush 16:9 drawing surface
    (1920x1080) sized from the height it may take, and the transport sits right on its lower edge. */
-#view-design.active > #words-main { background: none; border: 0; box-shadow: none; padding: 0; gap: var(--space-2); }
+#view-design.active > #words-main { height: var(--words-available); background: none; border: 0; box-shadow: none; padding: 0; gap: var(--space-2); }
 #words-main .words-preview { gap: 0; }
 #words-main .words-preview > #words-preview { max-height: none; width: min(100%, calc(var(--words-available) * .46 * 16 / 9)); aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
 #words-main .words-preview > .transport { margin-top: 0; border-top: 0; }
