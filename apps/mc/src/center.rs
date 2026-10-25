@@ -1541,7 +1541,7 @@ fn mops_agents(c:&Center)->Vec<MopsAgent>{
   let session=g.map(|g|&g["agent_session"]);
   let studio=g.map(|g|g["studio"].clone()).unwrap_or(Value::Null);
   MopsAgent{index,pane:g.and_then(|g|g["pane_id"].as_str()).map(str::to_owned),name:name.clone(),icon:moppet_icon(name),identity:*identity,provider:provider.clone().unwrap_or_else(||if g.is_none(){"in-app".into()}else{"?".into()}),
-   word,state:*state,mcp,task:field("terminal_title_stripped").unwrap_or_else(||if g.is_none(){"the app's own agent".into()}else{String::new()}),
+   word,state:*state,mcp,task:field("title").or(field("terminal_title_stripped")).unwrap_or_else(||if g.is_none(){"the app's own agent".into()}else{String::new()}),
    folder:field("cwd").or(field("foreground_cwd")).unwrap_or_default(),
    session:session.and_then(|s|text(&s["value"])).map(|v|v.chars().take(8).collect()),
    harness:session.and_then(|s|text(&s["source"])).map(|v|v.trim_start_matches("herdr:").to_owned()),tokens,studio}
@@ -2333,13 +2333,13 @@ mod feedback_tests {
     #[test]
     fn mops_shows_live_port_project_and_build_with_one_selection_target_per_agent() {
         let mut c=fixture();c.muppets_view=true;
-        c.agent_gang=json!([{"name":"beaker","pane_id":"ownership-fixture","agent_status":"working"}]);
+        c.agent_gang=json!([{"name":"beaker","pane_id":"ownership-fixture","agent_status":"working","title":"Main integration","terminal_title_stripped":"old task"}]);
         c.state["agent_gang"]=c.agent_gang.clone();
         c.studios=json!({"sessions":[{"endpoint":"unix:/owned.sock","active_project":"/songs/A.magic","writer_owner":true,
             "identity":{"agent_pane":"ownership-fixture","control_port":19971,"pid":123,"build_id":"build-proof","branch":"main"}}]});
         crate::studios::annotate_agents(&mut c.agent_gang,&c.studios);c.state["agent_gang"]=c.agent_gang.clone();
         let agents=mops_agents(&c);let facts=mops_facts(&c,&agents[0]);
-        for(label,value)in[("Port","19971"),("Project","A.magic"),("Build","main · build-proof"),("Access","project writer")]{
+        for(label,value)in[("Task","Main integration"),("Port","19971"),("Project","A.magic"),("Build","main · build-proof"),("Access","project writer")]{
             assert!(facts.iter().any(|f|f.0==label&&f.1==value),"{label}: {facts:?}");
         }
         for width in [60,100,140] {
