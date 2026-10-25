@@ -1142,3 +1142,5 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 #words-main .words-preview > .transport { margin-top: 0; border-top: 0; }
 #words-main .words-timing-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 #words-main .words-timing-summary input[type="number"] { width: 6em; }
+/* The shared settings body is non-shrinking; this inspector must use only the space below the surface. */
+#words-main > #words-workspace-controls { flex: 1 1 0; max-height: none; min-height: 0; }
