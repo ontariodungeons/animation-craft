@@ -91,7 +91,7 @@ fn pdf_previews(s:&Session,pdf:&Path,folder:&Path,count:usize)->Result<Vec<std::
  for page in 1..=count{let path=folder.join(format!("slide-{page:03}.png"));crate::workspace::run_tool_in(&crate::workshop::project_dir(s)?,"pdfcraft-cli",&["render".into(),pdf.to_string_lossy().into_owned(),"--page".into(),page.to_string(),"--dpi".into(),"72".into(),"--out".into(),path.to_string_lossy().into_owned()])?;paths.push(path);}
  Ok(paths)
 }
-fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
+pub(crate) fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
  let dir=crate::workshop::project_dir(s)?;let mut baseline=base(&board);let original=baseline["pdf"].as_str().ok_or_else(||invalid("Storyboard PDF is missing"))?;
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
  let pdf=out.join("movie-board.pdf");let text_base=out.join("text-base.pdf");
@@ -109,7 +109,7 @@ fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
  steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":pdf}}));pdf_run(s,json!(steps))?;
  let count=board["previews"].as_array().map_or(0,Vec::len);let previews=pdf_previews(s,&pdf,&out.join("pages"),count)?;
  baseline["previews"]=json!(pdf_previews(s,&text_base,&out.join("text-pages"),count)?);
- board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
+ board["manifest"]=json!(out.join("manifest.json"));board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
  write(&out.join("manifest.json"),&board)?;write(&dir.join("storyboard/movie-board.json"),&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
  Ok(json!({"ok":true,"pdf":pdf,"dirty":false,"placements":design["placements"],"editable_pdf":true}))
 }

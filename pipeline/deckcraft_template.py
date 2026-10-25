@@ -307,6 +307,8 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
             reference=dict(panels=panels,original=record['file'])
             fill('state.scene.reference','')
         else:reference=place_scene_picture(d,slide,record,page['group']['id'])
+    for field in c.get('page_content',{}).get(page['key'],[]):
+        fill_text(d,slide,field['role'],field['value'],field.get('font_size'),fit=True)
     meta=dict(sb_generator=VERSION,page_key=page['key'],kind=kind,status='needs review',group=page.get('group'),source_transcript=c['transcript'],source_captions=c.get('captions'),sheet=page.get('sheet'))
     if kind=='scene':meta['source_packet']=c.get('scene_content',{}).get(page['group']['id'],{});meta['asset_links']=c.get('asset_links',[]);meta['official_lyrics_source']=c.get('official_lyrics_source')
     if reference:meta['reference_image']=reference

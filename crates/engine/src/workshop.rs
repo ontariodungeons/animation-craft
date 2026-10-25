@@ -24,7 +24,7 @@ use crate::workspace::{
 // Re-export storyboard and video target command handlers so `crate::workshop::*` callers continue to work.
 pub use crate::storyboard::{
     cmd_storyboard_approve, cmd_storyboard_edit, cmd_storyboard_import_openmontage,
-    cmd_storyboard_init, cmd_storyboard_read, cmd_storyboard_search,
+    cmd_storyboard_init, cmd_storyboard_read,
     cmd_storyboard_toc, cmd_workshop_build_storyboard, cmd_workshop_storyboard,
 };
 pub use crate::video_target::{
@@ -629,7 +629,7 @@ pub fn cmd_project_search(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or_else(|| json!([]));
 
     let storyboard_hits = if !q.is_empty() {
-        cmd_storyboard_search(s, &json!({"query": q}))
+        crate::storyboard_crud::search(s, q)
             .ok()
             .and_then(|v| v.get("hits").cloned())
             .unwrap_or_else(|| json!([]))

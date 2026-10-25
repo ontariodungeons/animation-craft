@@ -171,11 +171,11 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
     words=words_doc if isinstance(words_doc,list) else words_doc['words']
     words=[dict(w,id=w.get('id',f'w{i}')) for i,w in enumerate(words)]
     source_root=Path(source) if source else Path(metadata['project']).parent if metadata.get('project') else None
-    alignment=align_imported_sections(packets,words,source_root)
+    alignment=[]  # Project creation owns timing; storyboard edits never realign recorded words.
     groups=[]
     for packet in packets:
         selected=[w for w in words if packet['start_seconds']-0.001<=w['start']<packet['end_seconds']-0.001]
-        group=dict(id=packet['id'],word_ids=[w['id'] for w in selected],span_start=packet['start_seconds'],span_end=packet['end_seconds'],kind=packet.get('kind','provisional scene'),word_assignment='source-start timestamp; canonical scene cuts preserved',status=packet.get('status','needs review'),reason='Canonical CLI scene span; review grouping without forced verse taxonomy.')
+        group=dict(id=packet['id'],word_ids=[w['id'] for w in selected],span_start=packet['start_seconds'],span_end=packet['end_seconds'],kind=packet.get('kind','provisional scene'),word_assignment='source-start timestamp; canonical scene cuts preserved',status=packet.get('status','needs review'),notes=packet.get('notes') or [],reason='Canonical CLI scene span; review grouping without forced verse taxonomy.')
         group['section_label']=packet.get('section_label')
         group['lyric_lines']=source_line_breaks(selected,packet.get('source_lines',[]))
         if panels==packet['id'] or packet.get('panels'):
@@ -199,10 +199,18 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
     if official and official.is_file():config['official_lyrics_source']=str(official)
     mapping['timing_conflicts']=[dict(scene=g['id'],word=w['id'],text=w['text'],start=w['start'],end=w['end'],scene_end=g['span_end'],resolution='Source timing preserved; word occurrence assigned by its original start') for g in groups for w in words if w['id'] in g['word_ids'] and w['end']>g['span_end']+.001]
     config['asset_links']=metadata.get('assets',[])
+    previous=metadata.get('previous_board') or {}
+    content=metadata.get('page_content') or []
+    config['page_content']={page['key']:[f for f in content if f.get('page')==i+1 and f.get('role','').startswith('user.')]
+                            for i,page in enumerate(previous.get('page_plan',[])) if page['kind']!='scene'}
     references=[a for a in config['asset_links'] if a.get('path') and 'approved' in Path(a['path']).parent.name and Path(a['path']).is_file()]
     if references:config['assets']=[dict(id=a['id'],name=a.get('name',a['id']),file=a['path']) for a in references]
     locations=sorted((source_root/'assets/backgrounds').glob('*.png')) if source_root else []
     if locations:config['locations']=[dict(id=p.stem,name=p.stem,file=str(p)) for p in locations]
+    # Keep authored inventory pages; a scene edit must not replace them with a new asset search.
+    for kind,key in [('assets','assets'),('locations','locations')]:
+        retained=[record for page in previous.get('page_plan',[]) if page['kind']==kind for record in page.get('sheet',[])]
+        if retained:config[key]=retained
     overrun=max(w['end'] for w in words)-float(metadata['duration_sec'])
     if overrun>.001:
         config['timing_warning']=f"Source word end {max(w['end'] for w in words):.6f}s exceeds measured audio {metadata['duration_sec']:.6f}s by {overrun:.6f}s. Raw words/timestamps retained; timing is not validated."
@@ -242,6 +250,11 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
                 target=fit_rect(SCENE_ART_REGION[2],SCENE_ART_REGION[3],panel_region(3));scale=target[2]/SCENE_ART_REGION[2];r=item['rect']
                 item['rect']=[target[0]+(r[0]-60)*scale,target[1]+(r[1]-220)*scale,r[2]*scale,r[3]*scale]
             placements.append(item)
+    for original in previous.get('design',{}).get('placements',[]):
+        old_page=previous.get('page_plan',[])[original['page']-1]
+        if old_page['kind']=='scene':continue
+        page=next((i+1 for i,p in enumerate(result['page_plan']) if p['key']==old_page['key']),None)
+        if page:placements.append(dict(original,page=page))
     if placements:result['design']=dict(placements=placements,dirty=False)
     (out/'manifest.json').write_text(json.dumps(result,indent=2));return result
 

@@ -327,7 +327,9 @@
       "priority": 70
     },
     "block-storyboard": {
-      "component": "panel-status",
+      "component": "panel-head",
+      "look": "control",
+      "density": "normal",
       "label": "Storyboard",
       "indicator": "icon",
       "target": "storyboard"
@@ -1153,6 +1155,66 @@
       "look": "settings",
       "label": "Selected Lyrics view controls",
       "indicator": "hidden"
+    },
+    "storyboard-overview": {
+      "component": "ghost",
+      "label": "Story & backgrounds",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-save": {
+      "component": "ghost",
+      "label": "Save new version",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-add": {
+      "component": "ghost",
+      "label": "Split before word",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-trim-start": {
+      "component": "ghost",
+      "label": "Start scene at word",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-trim-end": {
+      "component": "ghost",
+      "label": "End scene at word",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-delete": {
+      "component": "ghost",
+      "label": "Combine with previous",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-delete-next": {
+      "component": "ghost",
+      "label": "Combine with next",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-undo": {
+      "component": "ghost",
+      "label": "Undo scene change",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-scene": {
+      "component": "field",
+      "label": "Storyboard scene",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-word": {
+      "component": "field",
+      "label": "Recorded word at the scene cut",
+      "target": "storyboard",
+      "indicator": "hidden"
     }
   },
   "rails": {
@@ -1240,6 +1302,10 @@
     "motion-assets": {
       "accept": "yes",
       "priority": 10
+    },
+    "storyboard": {
+      "accept": "yes",
+      "priority": 70
     }
   },
   "slots": {
@@ -1327,6 +1393,10 @@
     "motion-assets": {
       "target": "motion-assets",
       "priority": 10
+    },
+    "storyboard": {
+      "target": "storyboard",
+      "priority": 70
     }
   },
   "signals": {
