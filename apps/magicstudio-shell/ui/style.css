@@ -621,8 +621,6 @@ body.at-home .tabs, body.at-home .target { visibility: hidden; }
 .sb-link:hover,.sb-link:focus-visible { background:color-mix(in srgb,var(--accent) 9%,transparent); border-color:var(--accent); outline:none; }
 .panel-head .agent-title { margin-right:auto; }
 
-body.movie-document:not(.project-details-open) #blocks { display:none; }
-#project-details { flex-shrink:0; }
 
 .sb-sheet.drop-target { outline:var(--size-2) dashed var(--accent); outline-offset:var(--size-4); }
 .sb-sheet .design-placement { position:absolute; max-width:none; object-fit:contain; border-radius:0; box-shadow:none; cursor:grab; touch-action:none; z-index:3; }

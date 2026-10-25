@@ -784,7 +784,6 @@ window.addEventListener("resize", placeInk);
 placeInk();
 load().catch(e=>{toast(String(e));acFeedback.errors.push({message:String(e).slice(0,300)});acFeedback.report('error');});
 
-$("project-details").addEventListener("click",()=>{document.body.classList.toggle("project-details-open");$("project-details").setAttribute("aria-pressed",String(document.body.classList.contains("project-details-open")));});
 
 function renderStoryboardText(){
  document.querySelectorAll('.sb-text').forEach(node=>node.remove());
