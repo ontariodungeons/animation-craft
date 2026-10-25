@@ -182,8 +182,7 @@ function animationControls(){
    el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${name}`,onclick:()=>selected.file&&openPath(selected.file)},'Original'),
    el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${name}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy path')));
  }
- const partsSlot=$('magic-parts-slot');
- if(partsSlot)partsSlot.replaceChildren(partsDrawer(compare));else authoring.layers.append(layers);box.append(section);
+ authoring.layers.append(layers);box.append(section,motionSection('Part artwork',el('div',{id:'magic-parts-slot'},partsDrawer(compare)),false,'magic-parts-pane'));
  const controls=meta.controls?.joints||[];
  box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
  box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));

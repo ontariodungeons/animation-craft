@@ -116,10 +116,11 @@
     },
     "magic-parts-pane": {
       "component": "panel",
-      "label": "Parts",
+      "label": "Part artwork",
       "indicator": "hidden",
       "look": "assets",
-      "rail": "magic-parts-pane"
+      "rail": "magic-parts-pane",
+      "icon": "layers"
     },
     "agent": {
       "component": "workspace",
@@ -234,14 +235,6 @@
       "label": "Gaffer artwork",
       "indicator": "hidden",
       "target": "magic-image-pane"
-    },
-    "magic-parts-head": {
-      "component": "panel-head",
-      "look": "heading",
-      "density": "normal",
-      "label": "Parts and assets",
-      "indicator": "hidden",
-      "target": "magic-parts-pane"
     },
     "view-design": {
       "component": "workspace",
@@ -389,12 +382,7 @@
     },
     "magic-workstation": {
       "component": "workspace",
-      "label": "AI workstation",
-      "indicator": "hidden"
-    },
-    "magic-workstation-toggle": {
-      "component": "control",
-      "label": "Show AI workstation",
+      "label": "Top assistant drawers",
       "indicator": "hidden"
     },
     "point-overlay": {
@@ -1106,6 +1094,36 @@
     "cast-saved-file": {
       "component": "panel",
       "label": "Saved AGENTS.md"
+    },
+    "agent-toggle": {
+      "component": "ghost",
+      "label": "Sproket chat",
+      "target": "magic-chat-pane",
+      "indicator": "icon"
+    },
+    "gaffer-toggle": {
+      "component": "ghost",
+      "label": "Gaffer artwork",
+      "target": "magic-image-pane",
+      "indicator": "icon"
+    },
+    "gaffer-close": {
+      "component": "icon",
+      "label": "Close Gaffer artwork",
+      "indicator": "hidden",
+      "target": "magic-image-pane"
+    },
+    "gaffer-config-toggle": {
+      "component": "icon",
+      "label": "Artwork settings",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "image-settings": {
+      "component": "panel-body",
+      "label": "Artwork settings",
+      "look": "composer",
+      "indicator": "hidden"
     }
   },
   "rails": {
@@ -1319,7 +1337,8 @@
     "Quality checks": "motion-quality",
     "Export & integrations": "motion-export-section",
     "Canvas": "motion-canvas-settings",
-    "Assets": "motion-assets"
+    "Assets": "motion-assets",
+    "Part artwork": "magic-parts-pane"
   },
   "contract_target": "magic-chat-pane",
   "timeline_tones": {

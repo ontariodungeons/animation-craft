@@ -6,7 +6,7 @@
 // OpenCode uses its existing installed API/session route; no image settings are changed here.
 const agent = {
   open: false, turns: [], config: null, sending: false, attachments: [], loaded: false,
-  newChat: true, models: [], timer: null, floating: false, renderedReply: null,
+  newChat: true, models: [], timer: null, renderedReply: null,
 };
 
 const status = (text) => { $("agent-status").textContent = text; $("agent-status").title = text; };
@@ -280,7 +280,7 @@ function pick(x, y) {
 function pointStart() {
   const overlay = $("point-overlay"), box = $("point-box");
   overlay.classList.add("on");
-  $("agent").classList.remove("open");
+  const previousDrawer=workshopDrawers.active;workshopDrawers.close(false);
   let target = null;
   const move = (e) => {
     target = pick(e.clientX, e.clientY);
@@ -288,19 +288,19 @@ function pointStart() {
     const r = target.getBoundingClientRect();
     for (const [key,value] of Object.entries({left:r.left-3,top:r.top-3,width:r.width+6,height:r.height+6})) box.style.setProperty(`--point-${key}`,`${value}px`);
   };
-  const stop = () => {
+  const stop = (resume=true) => {
     overlay.classList.remove("on");
     overlay.removeEventListener("mousemove", move);
     overlay.removeEventListener("click", click);
     document.removeEventListener("keydown", esc, true);
     box.style.setProperty("--point-width", "0px");
-    $("agent").classList.add("open");
+    if(resume&&previousDrawer)workshopDrawers.open(previousDrawer);
   };
   const click = async (e) => {
     e.preventDefault();
     const node = target || pick(e.clientX, e.clientY);
-    stop();
-    if (!node) return;
+    stop(false);
+    if (!node) {if(previousDrawer)workshopDrawers.open(previousDrawer);return;}
     const r = node.getBoundingClientRect(), pad = 12;
     const rect = [Math.max(0, r.left - pad), Math.max(0, r.top - pad),
       Math.min(innerWidth, r.right + pad) - Math.max(0, r.left - pad), Math.min(innerHeight, r.bottom + pad) - Math.max(0, r.top - pad)];
@@ -314,6 +314,7 @@ function pointStart() {
       status("Picture attached.");
       $("agent-input").focus();
     } catch (err) { status(String(err)); }
+    finally{if(previousDrawer)workshopDrawers.open(previousDrawer);}
   };
   const esc = (e) => { if (e.key === "Escape") { e.stopPropagation(); stop(); } };
   overlay.addEventListener("mousemove", move);
@@ -321,81 +322,27 @@ function pointStart() {
   document.addEventListener("keydown", esc, true);
 }
 
-function agentToggle(open = !agent.open) {
-  if (!state.project) return toast("Open a project first");
-  agent.open = open;
-  document.body.classList.toggle("workstation-collapsed", !open);
-  if (open && !agent.floating) {
-    document.body.classList.add("agent-docked");
-    const dockNode = typeof $("magic-workstation")?.getBoundingClientRect === "function" ? $("magic-workstation") : $("agent");
-    invoke("agent_dock", { width: dockNode.getBoundingClientRect().width }).catch((e) => status(String(e)));
-  } else if (!open) {
-    document.body.classList.remove("agent-docked");
-    invoke("agent_dock", { width: 0 }).catch((e) => status(String(e)));
-  }
-  $("agent").classList.toggle("open", open);
-  $("agent").setAttribute("aria-hidden", String(!open));
-  $("agent-toggle").classList.toggle("on", open);
-  $("agent-toggle").setAttribute("aria-pressed", String(open));
-  $("agent-toggle-label").textContent = open ? "Hide panel ▸" : "◂ Show panel";
-  window.magicCompanions?.sync();
-  clearInterval(agent.timer);
-  if (!open) return;
-  if (agent.loaded) agentReloadLog();
-  else agentLoad();
-  agent.timer=setInterval(()=>{if(!agent.sending)agentReloadLog();},1500);
-  $("agent-input").focus();
+const workshopDrawers=createTopDrawers({
+  canOpen:()=>{if(state.project)return true;toast("Open a project first");return false;},
+  onLayout:height=>invoke("drawer_layout",{height}).catch(e=>status(String(e))),
+  onSettings:id=>{if(id==='anim-agent-settings')refreshModels();},
+  onChange:name=>{
+    agent.open=name==='sproket';
+    $("agent").setAttribute("aria-hidden",String(!agent.open));
+    window.magicCompanions?.sync();clearInterval(agent.timer);
+    if(agent.open){
+      if(agent.loaded)agentReloadLog();else agentLoad();
+      agent.timer=setInterval(()=>{if(!agent.sending)agentReloadLog();},1500);
+    }
+    if(name==='sproket'||name==='gaffer')$(name==='sproket'?'agent-input':'image-prompt')?.focus();
+  },
+});
+window.workshopDrawers=workshopDrawers;
+function agentToggle(open=!agent.open){
+  if(open)workshopDrawers.open('sproket');
+  else if(workshopDrawers.active==='sproket')workshopDrawers.close();
 }
 
-function toggleAgentFloat() {
-  agent.floating = !agent.floating;
-  if (agent.floating) {
-    document.body.classList.remove("agent-docked");
-    invoke("agent_dock", { width: 0 }).catch((e) => status(String(e)));
-    $("agent").classList.add("agent-floating");
-    setupAgentDrag();
-  } else {
-    document.body.classList.add("agent-docked");
-    invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch((e) => status(String(e)));
-    $("agent").classList.remove("agent-floating");
-    teardownAgentDrag();
-  }
-  $("agent-float").setAttribute("aria-pressed", String(agent.floating));
-}
-
-let agentDrag = null;
-function setupAgentDrag() {
-  const head = $("agent-head");
-  head.dataset.draggable = "true";
-  head.addEventListener("pointerdown", onAgentDragStart);
-}
-function teardownAgentDrag() {
-  const head = $("agent-head");
-  delete head.dataset.draggable;
-  head.removeEventListener("pointerdown", onAgentDragStart);
-  if (agentDrag) { window.removeEventListener("pointermove", agentDrag.move); window.removeEventListener("pointerup", agentDrag.up); agentDrag = null; }
-}
-function onAgentDragStart(e) {
-  if (e.button !== 0 || e.target.closest("button,input,select,textarea,a")) return;
-  const agentEl = $("agent");
-  const r = agentEl.getBoundingClientRect();
-  agentDrag = {
-    move: (ev) => {
-      agentEl.style.setProperty("--float-y", `${Math.max(48, ev.clientY - r.height / 2)}px`);
-      agentEl.style.setProperty("--float-x", `${Math.max(0, ev.clientX - r.width / 2)}px`);
-      agentEl.style.setProperty("--float-width", `${r.width}px`);
-    },
-    up: () => {
-      teardownAgentDrag();
-      setupAgentDrag();
-    },
-  };
-  window.addEventListener("pointermove", agentDrag.move);
-  window.addEventListener("pointerup", agentDrag.up, { once: true });
-  agentDrag.move(e);
-}
-
-// Pictures pasted (Ctrl+V) or dropped onto the drawer attach like pointed ones.
 async function attachFiles(files) {
   for (const file of files) {
     if (!file.type.startsWith("image/")) { status(`Only pictures attach (${file.name || file.type} skipped).`); continue; }
@@ -421,18 +368,8 @@ $("agent").addEventListener("drop", (e) => {
   $("agent").classList.remove("drop");
   attachFiles([...(e.dataTransfer?.files || [])]);
 });
-$("agent-toggle").addEventListener("click", () => agentToggle());
-$("magic-workstation-toggle").addEventListener("click", () => agentToggle(true));
-$("agent-float").addEventListener("click", toggleAgentFloat);
-$("agent-close").addEventListener("click", () => agentToggle(false));
 $("agent-send").addEventListener("click", agentSend);
 $("agent-point").addEventListener("click", pointStart);
-$("agent-config-toggle").addEventListener("click", () => {
-  const settings = $("anim-agent-settings");
-  settings.hidden = !settings.hidden;
-  $("agent-config-toggle").setAttribute("aria-expanded", String(!settings.hidden));
-  if (!settings.hidden) refreshModels();
-});
 $("agent-catalog-refresh").addEventListener("click", refreshModels);
 $("agent-command").addEventListener("change", refreshModels);
 $("agent-provider").addEventListener("input", renderModelOptions);
@@ -447,7 +384,5 @@ $("agent-input").addEventListener("keydown", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if ((e.key === "/" || e.key === "\\") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
-  if (e.key === "Escape" && agent.open && !$("point-overlay").classList.contains("on")) agentToggle(false);
 });
 
-window.addEventListener("resize", () => { if (agent.open) invoke("agent_dock", { width: $("agent").getBoundingClientRect().width }).catch(() => {}); });

@@ -469,11 +469,11 @@ fn place_webview(view: &tauri::Webview, top: i32, right: i32, bottom: i32, is_st
 }
 
 #[derive(Default)]
-struct AgentDock(std::sync::Mutex<f64>);
+struct DrawerHeight(std::sync::Mutex<f64>);
 
 #[tauri::command]
-fn agent_dock(app: tauri::AppHandle, width: f64) -> Result<(), String> {
-    *app.state::<AgentDock>().0.lock().map_err(|e|e.to_string())?=width.clamp(0.0,600.0);
+fn drawer_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    *app.state::<DrawerHeight>().0.lock().map_err(|e|e.to_string())?=height.max(0.0);
     layout(&app);
     Ok(())
 }
@@ -483,15 +483,15 @@ fn layout(app: &tauri::AppHandle) {
     let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
     let size = physical.to_logical::<f64>(scale);
     let (view, _) = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or(("project".into(),0.5));
-    let dock = app.state::<AgentDock>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.width-240.0).max(0.0));
+    let top=BAR+app.state::<DrawerHeight>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.height-BAR-FOOTER).max(0.0));
     place_webview(&project,0,0,0,false);
     #[cfg(not(target_os="linux"))]
     { let _=project.set_position(LogicalPosition::new(0.0,0.0)); let _=project.set_size(size); }
     if let Some(studio)=app.get_webview("studio") {
         if view=="studio" || view=="split" {
-            place_webview(&studio,BAR as i32,dock.round() as i32,FOOTER as i32,true);
+            place_webview(&studio,top.round() as i32,0,FOOTER as i32,true);
             #[cfg(not(target_os="linux"))]
-            { let _=studio.set_position(LogicalPosition::new(0.0,BAR)); let _=studio.set_size(LogicalSize::new(size.width-dock,size.height-BAR-FOOTER)); }
+            { let _=studio.set_position(LogicalPosition::new(0.0,top)); let _=studio.set_size(LogicalSize::new(size.width,(size.height-top-FOOTER).max(0.0))); }
             let _=studio.show();
         } else { let _=studio.hide(); }
     }
@@ -551,12 +551,12 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(View::default())
-        .manage(AgentDock::default())
+        .manage(DrawerHeight::default())
         .manage(Engine::default())
         .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
         .setup(|app| {
             let window = WindowBuilder::new(app, "main").title("Magic Studio").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);

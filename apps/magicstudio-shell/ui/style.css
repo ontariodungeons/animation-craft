@@ -290,7 +290,9 @@ svg { width: var(--size-18); height: var(--size-18); fill: none; stroke: current
 .start:hover { transform: translateY(calc(-1 * var(--size-1))); filter: brightness(1.08); }
 
 /* Views */
-main { flex: 1; min-height: 0; position: relative; }
+body > main { flex: 1; min-height: 0; position: relative; }
+input:not([type="range"]):not([type="checkbox"]),textarea,select { box-sizing:border-box; min-width:0; background:var(--bg); color:var(--text); border:thin solid var(--line); border-radius:var(--radius); padding:var(--space-2); font:inherit; }
+input:focus-visible,textarea:focus-visible,select:focus-visible { outline:thin solid var(--accent); outline-offset:var(--space-1); }
 .view { position: absolute; inset: 0; display: none; }
 .view.active { display: flex; animation: fade var(--slow) var(--ease); }
 @keyframes fade { from { transform: translateY(var(--size-4)); } }
@@ -390,30 +392,13 @@ summary.panel-head::-webkit-details-marker { display: none; }
 @media (max-width: 62.5em) {
   .blocks { width: var(--size-220); }
   .panel-head.control .meta, .target span:last-child { display: none; }
-  .agent { width: min(var(--size-320), 95vw); }
-  body.agent-docked main { margin-right: min(var(--size-320), 95vw); }
 }
 @media (max-width: 40em) {
   .sb-title-cards { max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
-/* Agent rail: docked right panel (not a slide-over drawer) */
-.agent-toggle { margin-left: auto; padding: var(--size-5) var(--size-11); font-size: var(--size-12); font-weight: 600; color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
-.agent-toggle.on { color: var(--accent); background: var(--surface-2); }
-.agent-toggle:not(.on) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-/* While the right panel is hidden, an edge tab brings it back from any tab. */
-.magic-workstation-reopen { display: none; position: fixed; z-index: 14; right: 0; top: var(--size-60); padding: var(--size-8) var(--size-12) var(--size-8) var(--size-14); border-radius: var(--size-10) 0 0 var(--size-10); background: var(--accent); color: var(--accent-ink); font-size: var(--size-12); font-weight: 700; box-shadow: 0 var(--size-6) var(--size-20) var(--alpha-08); }
-.magic-workstation-reopen:hover { padding-right: var(--size-16); }
-body.workstation-collapsed:not(.at-home) .magic-workstation-reopen { display: block; }
 .target { margin-left: 0; }
-.agent { position: fixed; top: var(--size-48); right: 0; bottom: 0; width: min(var(--size-400), 92vw); display: flex; flex-direction: column; gap: 0; padding: 0;
-  background: var(--surface); border-left: var(--size-1) solid var(--line);
-  box-shadow: calc(-1 * var(--size-16)) 0 var(--size-40) var(--alpha-06); transform: translateX(102%); transition: transform var(--slow) var(--ease); z-index: 20; }
-.agent.open { transform: none; }
-body.agent-docked .agent { transform: none; z-index: 10; }
-body.agent-docked main { margin-right: min(var(--size-400), 92vw); }
-.agent.agent-floating { top:var(--float-y,var(--space-5)); left:var(--float-x,0); width:var(--float-width,var(--magic-workstation-width)); right:auto; bottom:auto; transform: none !important; position: fixed !important; z-index: 25 !important; box-shadow: calc(-1 * var(--size-24)) 0 var(--size-60) var(--alpha-08); }
 .agent-head-actions { display: flex; gap: var(--size-6); }
 .agent-title { font-weight: 600; font-size: var(--size-13); }
 .agent select { width: 100%; background: var(--surface-2); color: var(--text); border: var(--size-1) solid var(--line); border-radius: var(--size-8); padding: var(--size-6) var(--size-8); font: inherit; }
@@ -445,32 +430,13 @@ body.agent-docked main { margin-right: min(var(--size-400), 92vw); }
 /* Pointing: dim the app, ring what is under the mouse. */
 .point-overlay { position: fixed; inset: 0; z-index: 50; display: none; cursor: crosshair; background: var(--alpha-05); }
 .point-overlay.picking { pointer-events:none; }
-.panel-head[data-draggable="true"] { cursor:move; }
 .point-overlay.on { display: block; }
 .point-box { left:var(--point-left,0); top:var(--point-top,0); width:var(--point-width,0); height:var(--point-height,0); position: fixed; border: var(--size-2) solid var(--accent); border-radius: var(--size-8); box-shadow: 0 0 0 var(--size-4) color-mix(in srgb, var(--accent) 19%, transparent); pointer-events: none; transition: all 90ms var(--ease); }
 .point-hint { position: fixed; top: var(--size-58); left: 50%; transform: translateX(-50%); background: var(--surface-2); border: var(--size-1) solid var(--line); padding: var(--size-6) var(--size-12); border-radius: var(--size-999); }
 .agent.drop { box-shadow: calc(-1 * var(--size-24)) 0 var(--size-60) var(--alpha-07), inset 0 0 0 var(--size-2) var(--accent); }
 
-/* Magic Studio keeps chat, generation, and fish parts in one resizable right workstation. */
-:root { --magic-workstation-width: clamp(var(--size-290), 27vw, var(--size-380)); --footer-h: var(--size-30); }
-main { margin-right: var(--magic-workstation-width); transition: margin-right var(--slow) var(--ease); }
-.magic-workstation { position: absolute; z-index: 12; top: var(--size-48); right: 0; bottom: var(--footer-h, var(--size-30)); width: var(--magic-workstation-width);
-  display: grid; grid-template-rows: max(var(--size-230),min(var(--magic-chat-h,var(--size-320)),36vh)) var(--size-8) max(var(--size-170),min(var(--magic-image-h,var(--size-270)),30vh)) var(--size-8) minmax(var(--size-100),1fr);
-  min-height: 0; overflow: hidden; background: var(--surface); border-left: var(--size-1) solid var(--line); }
+:root { --footer-h: var(--size-30); }
 .magic-target { display: block; padding: var(--space-1) var(--size-10); overflow: hidden; color: var(--muted); font-size: var(--size-11); font-weight: 500; text-transform: none; letter-spacing: 0; white-space: nowrap; text-overflow: ellipsis; }
-.magic-chat-pane > .magic-target { flex: none; border-bottom: var(--size-1) solid var(--line); }
-.magic-splitter { position: relative; touch-action: none; cursor: ns-resize; background: var(--bg); border-top: var(--size-1) solid var(--line); border-bottom: var(--size-1) solid var(--line); }
-.magic-splitter::after { content: ""; position: absolute; top: var(--size-3); left: calc(50% - var(--size-18)); width: var(--size-36); height: var(--size-2); border-radius: var(--size-2); background: var(--faint); }
-.magic-splitter:hover, .magic-splitter:focus-visible { background: var(--surface-2); outline: none; }
-.magic-splitter:hover::after, .magic-splitter:focus-visible::after { background: var(--accent); }
-.magic-chat-pane .agent { position: static; inset: auto; width: 100%; height: auto; min-height: 0; flex: 1 1 0; transform: none; box-shadow: none; border: 0; overflow: hidden; }
-.magic-chat-pane .agent.open { transform: none; }
-.magic-chat-pane .agent-attachments { padding: var(--size-5) var(--size-9); max-height: var(--size-52); overflow-y: auto; }
-.magic-chat-pane .agent-attachments:empty { display: none; }
-.magic-chat-pane .agent-compose textarea { min-height: var(--size-48); max-height: var(--size-90); }
-.magic-chat-pane #agent-float { display: none; }
-.magic-image-tools { flex: 1; min-height: 0; overflow: auto; }
-.magic-image-tools .start { margin-top: var(--size-4); width: 100%; }
 .magic-image-tools .image-result { display: block; width: 100%; max-height: var(--size-130); object-fit: contain; margin-top: var(--size-8); border: var(--size-1) solid var(--line); border-radius: var(--size-7); background-color: var(--bg); background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: var(--size-16) var(--size-16); background-position: 0 0,0 var(--size-8),var(--size-8) calc(-1 * var(--size-8)),calc(-1 * var(--size-8)) 0; }
 [hidden] { display:none !important; }
 .magic-parts-slot { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
@@ -488,24 +454,16 @@ main { margin-right: var(--magic-workstation-width); transition: margin-right va
 .magic-part-thumb img { width: var(--size-42); height: var(--size-34); object-fit: contain; background-image: linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size: var(--size-12) var(--size-12); background-position: 0 0,0 var(--size-6),var(--size-6) calc(-1 * var(--size-6)),calc(-1 * var(--size-6)) 0; border-radius: var(--size-4); }
 .magic-part-thumb span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .magic-part-thumb:hover, .magic-part-thumb.active { border-color: var(--accent); color: var(--text); background: var(--surface-2); }
-body.at-home .magic-workstation, body.workstation-collapsed .magic-workstation { display: none; }
-body.at-home main, body.workstation-collapsed main { margin-right: 0; }
 @media (max-width: 62.5em) {
-  :root { --magic-workstation-width: clamp(var(--size-290), 34vw, var(--size-340)); }
-  body.agent-docked main { margin-right: var(--magic-workstation-width); }
-  .magic-chat-pane .agent-head-actions .ghost span { display: none; }
-  .magic-chat-pane .agent-head-actions #agent-new { padding: var(--size-5); }
 }
 @media (max-width: 43.75em) {
-  :root { --magic-workstation-width: var(--size-286); }
-  .magic-workstation { grid-template-rows: max(var(--size-210),min(var(--magic-chat-h,var(--size-320)),36vh)) var(--size-8) max(var(--size-150),min(var(--magic-image-h,var(--size-270)),27vh)) var(--size-8) minmax(var(--size-80),1fr); }
   .motion-inspector { width: var(--size-170); }
 }
 
 /* Home: no project open. New, Open, and recent projects as cards. */
 .brand[role="button"] { cursor: pointer; border-radius: var(--size-8); padding: var(--size-4) var(--size-6); margin-left: calc(-1 * var(--size-6)); transition: background var(--fast) var(--ease); }
 .brand[role="button"]:hover { background: var(--surface-2); }
-body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibility: hidden; }
+body.at-home .tabs, body.at-home .target { visibility: hidden; }
 #view-home { overflow-y: auto; justify-content: center; background: radial-gradient(var(--size-1200) var(--size-700) at 50% -10%, var(--surface), var(--bg)); }
 .home { width: min(var(--size-980), 100%); padding: var(--size-56) var(--size-24) var(--size-40); display: flex; flex-direction: column; gap: var(--size-14); }
 .home-hero { display: flex; align-items: center; gap: var(--size-18); margin-bottom: var(--size-26); flex-wrap: wrap; }
@@ -778,14 +736,6 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 .agent-config input, .agent-config select { width:100%; min-width:0; box-sizing:border-box; }
 .agent-config .start { margin-top:var(--size-2); width:100%; }
 
-/* Generate folds to its header. */
-.magic-pane-toggle { width:100%; text-align:left; cursor:pointer; }
-.magic-pane-toggle:hover { color:var(--text); }
-.magic-pane-toggle::after { content:""; flex:none; width:var(--size-6); height:var(--size-6); border-right:var(--size-1-5) solid currentColor; border-bottom:var(--size-1-5) solid currentColor; transform:rotate(45deg); transition:transform var(--fast) var(--ease); }
-.magic-pane-toggle[aria-expanded="false"]::after { transform:rotate(-45deg); }
-.magic-workstation.generate-collapsed { grid-template-rows: max(var(--size-230),min(var(--magic-chat-h,var(--size-320)),36vh)) var(--size-8) min-content var(--size-8) minmax(var(--size-100),1fr); }
-.magic-workstation.generate-collapsed .magic-image-tools { display:none; }
-
 /* Parts & Assets drawer: Compare | All parts. */
 /* Parts & Assets drawer tabs now use the shared .segmented component. */
 .magic-part-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--size-6); }
@@ -846,9 +796,6 @@ body.at-home .app-footer { display:none; }
 
 /* Workflow blocks: each stage keeps its own tone as a left bar and title colour. */
 
-/* Right panel: Sproket, Generate and Parts & assets are separate cards on the page background. */
-.magic-workstation { background: var(--bg); padding: var(--size-8) var(--size-8) var(--size-8) 0; border-left: 0; }
-.magic-splitter, .magic-splitter:hover, .magic-splitter:focus-visible { background: transparent; border: 0; }
 .magic-target { color: var(--accent); }
 
 /* Home: recent projects carry a tone bar in workflow order. */
@@ -912,7 +859,7 @@ body.at-home .app-footer { display:none; }
 .song-details summary { color: var(--faint); font-size: var(--size-12); cursor: pointer; }
 .song-details[open] { display: flex; flex-direction: column; gap: var(--size-6); }
 /* Read-only transcript reader layered over the workstation panes. */
-.panel[data-look="reader"] { --panel-tone: var(--tone-lyrics); position: absolute; inset: var(--space-2) var(--space-2) var(--space-2) 0; z-index: 3; }
+.panel[data-look="reader"] { --panel-tone: var(--tone-lyrics); }
 .reader-body { overflow: auto; padding: var(--size-4) var(--size-14) var(--size-14); line-height: 1.7; }
 .reader-line { margin: 0 0 var(--size-6); }
 .reader-time { color: var(--faint); font: var(--text-sm) ui-monospace, monospace; margin-right: var(--space-2); background: none; border: 0; cursor: pointer; }

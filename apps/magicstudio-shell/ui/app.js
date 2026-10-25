@@ -31,77 +31,14 @@ const ICONS = {
 
 let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
 
-function setupMagicSplitters() {
-  const workstation = $('magic-workstation');
-  if (!workstation || workstation.dataset.splittersReady) return;
-  workstation.dataset.splittersReady = 'true';
-  const sizes = { chat: 320, image: 270 };
-  for (const key of Object.keys(sizes)) {
-    const saved = Number(localStorage.getItem(`magic.${key}-height`));
-    if (Number.isFinite(saved) && saved >= 120 && saved <= 700) sizes[key] = saved;
-  }
-  const apply = () => {
-    workstation.style.setProperty('--magic-chat-h', `${sizes.chat}px`);
-    workstation.style.setProperty('--magic-image-h', `${sizes.image}px`);
-  };
-  apply();
-  for (const splitter of workstation.querySelectorAll('.magic-splitter')) {
-    const key = splitter.dataset.splitter;
-    const change = (delta) => {
-      sizes[key] = Math.max(key === 'chat' ? 230 : 170, Math.min(700, sizes[key] + delta));
-      apply();
-      localStorage.setItem(`magic.${key}-height`, String(sizes[key]));
-    };
-    splitter.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      splitter.setPointerCapture(event.pointerId);
-      let last = event.clientY;
-      const move = (next) => { change(next.clientY - last); last = next.clientY; };
-      const done = () => {
-        splitter.removeEventListener('pointermove', move);
-        splitter.removeEventListener('pointerup', done);
-        splitter.removeEventListener('pointercancel', done);
-      };
-      splitter.addEventListener('pointermove', move);
-      splitter.addEventListener('pointerup', done);
-      splitter.addEventListener('pointercancel', done);
-    });
-    splitter.addEventListener('keydown', (event) => {
-      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-      event.preventDefault();
-      change(event.key === 'ArrowDown' ? 12 : -12);
-    });
-  }
-}
-setupMagicSplitters();
-
-// The Generate card folds to its header (folded by default so Parts & assets gets the room).
-function setupGenerateToggle() {
-  const toggle = $('magic-image-toggle');
-  if (!toggle) return;
-  const apply = (open) => {
-    $('magic-workstation').classList.toggle('generate-collapsed', !open);
-    toggle.setAttribute('aria-expanded', String(open));
-    localStorage.setItem('magic.generate-open', String(open));
-  };
-  apply(localStorage.getItem('magic.generate-open') === 'true');
-  toggle.addEventListener('click', () => apply(toggle.getAttribute('aria-expanded') !== 'true'));
-}
-setupGenerateToggle();
-
 function updateMagicSelection() {
   const layer = motion?.meta?.layers?.find((part) => part.id === motion.selected);
   const text = layer ? `${layer.label || layer.id} · ${layer.id}` : 'No part selected';
   updateAppFooter();
-  for (const id of ['magic-target-image', 'magic-target-parts']) {
+  for (const id of ['magic-target-image']) {
     const node = $(id);
     if (node) { node.textContent = text; node.title = layer ? `Selected part ${layer.label || layer.id} (${layer.id}) on ${motion.character}` : 'Select a part to target image generation'; }
   }
-}
-
-function renderMagicAssetCatalog() {
-  const pane=$('magic-parts-pane');if(pane)pane.hidden=state.view!=='animation';
-  if(state.view!=='animation')$('magic-parts-slot')?.replaceChildren();
 }
 
 function projectAssetGrid(assets,{active=null,prefix='magic-asset'}={}) {
@@ -411,7 +348,6 @@ function lyricsBody(lyrics, doc, liner, songPath) {
 const lyricReader = { words: [] };
 
 function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
-  if (typeof agentToggle === "function" && !document.body.classList.contains("agent-docked")) agentToggle(true);
   const model = lyricModel(lyrics, doc, asHeard);
   const seek = (t) => { if (songPath && t != null) songAudio(songPath).currentTime = t; };
   const words = [];
@@ -423,18 +359,19 @@ function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
         ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
         : [el("span", {}, line.text)]))))));
   const title = model.canonical ? "Lyrics" : "Transcript";
-  const pane = el("section", { id: "magic-reader", "aria-label": `${title}, read only` },
+  const pane = el("section", { id: "magic-reader", "data-drawer":"reader", "aria-label": `${title}, read only` },
     el("div", { id: "magic-reader-head" }, el("span", {}, title),
       el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
       el("button", { id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
     body);
   $("magic-reader")?.remove();
   $("magic-workstation")?.append(pane);
+  window.workshopDrawers?.open("reader");
   lyricReader.words = words;
   readerFollow();
 }
 
-function transcriptReaderClose() { $("magic-reader")?.remove(); lyricReader.words = []; }
+function transcriptReaderClose() { if(window.workshopDrawers?.active==="reader")window.workshopDrawers.close(); $("magic-reader")?.remove(); lyricReader.words = []; }
 
 function readerFollow() {
   const pane = $("magic-reader");
@@ -552,7 +489,6 @@ function renderBlocks() {
   box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),
     el('p',{class:'why'},'Choose an asset above to animate it.'),observed('animate')?.state||'unknown'));
   if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
-  renderMagicAssetCatalog();
   if (state.view === 'design' && typeof wordsStatusRefresh === 'function') wordsStatusRefresh();
 }
 
@@ -678,7 +614,6 @@ async function setView(view, action) {
   if (typeof animationPause === "function") animationPause();
   if (view !== 'animation' && typeof blenderDispose === 'function') blenderDispose();
   state.view = view;
-  renderMagicAssetCatalog();
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.view === view;
     t.classList.toggle("active", on);
@@ -790,7 +725,7 @@ async function applyOpenedProject(opened, start = {}) {
   renderBlocks();
   renderStoryboard();
   await setView(start.view || "project");
-  agentToggle(true);
+  window.workshopDrawers?.close(false);
   await acFeedback.acknowledge(state.data?._ui_engine_revision, path);
 }
 

@@ -6,6 +6,7 @@
   <title>Magic Studio</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="cast.css" />
+  <link rel="stylesheet" href="drawers.css" />
 </head>
 <body>
   <header id="app-bar" class="bar">
@@ -24,9 +25,10 @@
       <button class="tab" id="tab-skills" data-view="skills" role="tab" aria-selected="false" title="Knowledge skills and tech tools discovered for this project">Learning</button>
       <span class="tab-ink" aria-hidden="true"></span>
     </nav>
-    <button class="ghost agent-toggle" id="agent-toggle" aria-controls="magic-workstation" aria-pressed="false" title="Show or hide the right panel: Sproket, Gaffer, Parts &amp; assets (Ctrl+\)">
-      <span id="agent-toggle-label">◂ Show panel</span>
-    </button>
+    <div class="drawer-toggles" aria-label="Studio assistants">
+      <button class="ghost" id="agent-toggle" data-drawer-toggle="sproket" aria-controls="magic-chat-pane" aria-expanded="false" aria-pressed="false" title="Sproket chat (Ctrl+\)" aria-label="Sproket chat"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4z"/></svg><span class="drawer-label">Sproket</span></button>
+      <button class="ghost" id="gaffer-toggle" data-drawer-toggle="gaffer" aria-controls="magic-image-pane" aria-expanded="false" aria-pressed="false" title="Gaffer artwork" aria-label="Gaffer artwork"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m3 16 6-6 12 10"/><circle cx="16" cy="8" r="2"/></svg><span class="drawer-label">Gaffer</span></button>
+    </div>
     <button class="target" id="target" aria-label="Studio server: click to start or stop" title="Studio server · click to start or stop">
       <span class="dot off" id="server-dot"></span><span id="target-name">—</span>
     </button>
@@ -119,20 +121,19 @@
       <button class="footer-item" id="footer-server" title="Studio server · click to start or stop"></button>
     </div>
   </footer>
-      <!-- The existing agent, image composer, and project parts share one right workstation. -->
-      <aside class="magic-workstation" id="magic-workstation" aria-label="Magic Studio workstation">
-        <section class="magic-pane magic-chat-pane" id="magic-chat-pane" aria-label="Sproket chat">
+      <!-- Shared top drawers preserve each assistant’s contents and drafts. -->
+      <aside class="workshop-drawers" id="magic-workstation" aria-label="Studio assistants" hidden>
+        <section id="magic-chat-pane" data-drawer="sproket" aria-label="Sproket chat" hidden>
       <aside class="agent" id="agent" aria-label="Agent" aria-hidden="true">
         <div class="panel-head" id="agent-head">
           <span class="agent-title panel-title">Sproket <span class="agent-connection" id="agent-connection">· not configured</span></span>
           <div class="agent-head-actions">
-            <button class="icon" id="agent-float" aria-label="Float / dock the agent panel" title="Float · drag anywhere · dock back to the rail"><svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
             <button class="icon" id="agent-new" aria-label="New chat" title="Start a fresh chat · preserve previous history"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-            <button class="icon" id="agent-config-toggle" aria-label="Agent settings" aria-controls="anim-agent-settings" aria-expanded="false" title="Agent settings: agent, model, thinking"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button>
-            <button class="icon" id="agent-close" aria-label="Hide the agent panel" title="Hide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+            <button class="icon" id="agent-config-toggle" data-drawer-settings="anim-agent-settings" aria-label="Agent settings" aria-controls="anim-agent-settings" aria-expanded="false" title="Agent settings: agent, model, thinking"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button>
+            <button class="icon" id="agent-close" data-drawer-close aria-label="Close Sproket chat" title="Hide"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           </div>
         </div>
-        <div class="agent-config" id="anim-agent-settings" hidden>
+        <div id="anim-agent-settings" hidden>
           <span class="agent-runtime" id="agent-runtime" title="The agent this app runs"></span>
           <label>Agent<select id="agent-command" title="The system agent this app runs for each message"></select></label>
           <label>Provider<input id="agent-provider" list="agent-providers" placeholder="CLI default" title="Exact provider ID; choose from the installed catalog" /><datalist id="agent-providers"></datalist></label>
@@ -162,18 +163,11 @@
         </div>
       </aside>
         </section>
-        <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Sproket and Gaffer artwork sections" data-splitter="chat"></div>
-        <section class="magic-pane magic-image-pane" id="magic-image-pane" aria-label="Gaffer artwork generation">
-          <div class="companion-artwork-home"><button class="panel-head magic-pane-toggle" id="magic-image-toggle" aria-controls="magic-image-tools" aria-expanded="true" title="Show or hide Gaffer artwork"><span class="panel-title">Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span></button></div>
+        <section id="magic-image-pane" data-drawer="gaffer" aria-label="Gaffer artwork" hidden>
+          <div class="panel-head" id="magic-image-toggle"><span class="panel-title">Gaffer · Artwork</span><span id="magic-target-image" class="magic-target">No part selected</span><button class="icon" id="gaffer-config-toggle" data-drawer-settings="image-settings" aria-label="Artwork settings" aria-controls="image-settings" aria-expanded="false" title="Artwork settings"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button><button class="icon" id="gaffer-close" data-drawer-close aria-label="Close Gaffer artwork" title="Close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
           <div id="magic-image-tools" class="magic-image-tools"></div>
         </section>
-        <div class="magic-splitter" role="separator" tabindex="0" aria-label="Resize Gaffer artwork and parts sections" data-splitter="image"></div>
-        <section class="magic-pane magic-parts-pane" id="magic-parts-pane" aria-label="Parts">
-          <div class="panel-head" id="magic-parts-head"><span class="panel-title">Parts</span><span id="magic-target-parts" class="magic-target">No part selected</span></div>
-          <div id="magic-parts-slot" class="magic-parts-slot"></div>
-        </section>
       </aside>
-  <button class="magic-workstation-reopen" id="magic-workstation-toggle" aria-controls="magic-workstation" title="Show the right panel (Ctrl+\)">◂ Parts &amp; Assets</button>
   <div class="point-overlay" id="point-overlay"><div class="point-box" id="point-box"></div><div class="point-hint">Click what you mean · Esc cancels</div></div>
   <div class="toast" id="toast" role="status"></div>
   <script src="feedback.js"></script>
@@ -191,6 +185,7 @@
 <script src="animation-native.js"></script>
 <script src="blender.js"></script>
   <script src="sequence.js"></script>
+  <script src="drawers.js"></script>
   <script src="agent.js"></script>
   <script src="home.js"></script>
   <link rel="stylesheet" href="vendor/learning/learning-editor.css">

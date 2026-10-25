@@ -9,7 +9,7 @@ async function showHome() {
   if (typeof theatreCanLeave === "function" && !theatreCanLeave()) return;
   if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
   animationReset();
-  if (agent.open) agentToggle(false);
+  window.workshopDrawers?.close(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
   state.project = null;
   window.magicCompanions?.sync();

@@ -14,6 +14,7 @@ let rejectSend = false;
 const config = { agent: "opencode", provider: "opencode", model: "synthetic-free", agents: [{ name: "opencode", installed: true, headless: true }] };
 const context = vm.createContext({
   console, JSON, Promise, Set, $: node,
+  createTopDrawers:()=>({open(){},close(){},active:null}),
   requestAnimationFrame: (callback) => callback(),
   acFeedback: { acknowledge: async (revision, project) => calls.push({id:"render_revision",revision,project}), report: async (phase, ack, event) => calls.push({id:"render_receipt",event}) },
   el: (tag, attrs, text) => ({ tag, ...attrs, text }),
@@ -153,7 +154,7 @@ for (const file of ['companion-boxes.js', 'animation.js', 'blender-placement.js'
 }
 const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
 // Use the production shared-label and block renderers without booting the desktop app.
-for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction objectsFrom(']]) {
+for (const [start, end] of [['function updateMagicSelection()', '\nfunction projectAssetGrid'], ['function block(', '\nfunction objectsFrom(']]) {
   vm.runInContext(appSource.slice(appSource.indexOf(start), appSource.indexOf(end)), artworkContext);
 }
 vm.runInContext(`
@@ -174,7 +175,6 @@ await vm.runInContext(`motionModeSwitch().children.find(n=>n.id==='motion-mode-b
 assert.equal(vm.runInContext('motion.selected', artworkContext), 'left-piece', 'rendering must preserve the authoring part ID');
 assert.equal(artworkNodes.get('blender-render-dialog').open,true,'actual render dialog must open');
 assert.equal(artworkNodes.get('magic-target-image').textContent, 'Left piece · left-piece');
-assert.equal(artworkNodes.get('magic-target-parts').textContent, 'Left piece · left-piece');
 assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
 assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 2, 'lightweight render metadata must not replace authoring layers');
 assert.ok(artworkCalls.some(c=>c.id==='blender.actions'),'fixture must reach the real render metadata query');
