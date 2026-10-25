@@ -1090,3 +1090,9 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-cue-preview .speck { fill: var(--muted); }
 .words-roll > .words-graphics-empty { position: sticky; top: var(--space-5); margin: var(--space-4); color: var(--muted); font-size: var(--text-sm); }
 .words-layers .words-effects { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.words-line[contenteditable="true"] { outline: thin solid var(--accent); outline-offset: calc(var(--space-1) * -1); cursor: text; caret-color: var(--lettering-ink); }
+.words-line[contenteditable="true"] > span.word { cursor: text; user-select: text; }
+.words-line[aria-invalid="true"] { outline-color: var(--amber); }
+.words-backdrop { display: flex; align-items: center; gap: var(--space-2); }
+.words-backdrop select { flex: 1; min-width: 0; }
