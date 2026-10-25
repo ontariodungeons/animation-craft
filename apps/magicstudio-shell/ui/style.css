@@ -985,11 +985,11 @@ body.at-home .app-footer { display:none; }
 /* The stage keeps its room at any width the Design view gets (the agent panel takes part of the window).
    words.js sets these from the view's own width: narrow, the film roll steps aside; tight, one column
    with the stage and its layers first. Element selectors: the columns' classes come from the component config. */
-#view-design.active.narrow { grid-template-columns: minmax(0, 34%) minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2); }
-#view-design.active.narrow > aside:last-child { display: none; }
-#view-design.active.tight { grid-template-columns: minmax(0, 1fr); }
-#view-design.active.tight > aside:first-child { order: 2; }
-#view-design.active.tight > section { position: static; }
+#view-design.active.narrow { grid-template-columns: minmax(0, 24%) minmax(0, 1fr) minmax(0, 23%); gap: var(--space-2); padding: var(--space-2); }
+
+#view-design.active.tight { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#view-design.active.tight > aside { grid-row: 2; }
+#view-design.active.tight > section { position: static; grid-column: 1 / -1; grid-row: 1; }
 .words-crumb > strong { color: var(--accent); }
 .words-tl { position: relative; height: calc(var(--len-s) * var(--song-s)); }
 .words-tl > * { position: absolute; left: 0; right: 0; top: calc(var(--at-s) * var(--song-s)); }
@@ -1003,17 +1003,10 @@ body.at-home .app-footer { display:none; }
 /* A sung word in its own lettering; the line's design sets these through --word-* values. */
 /* Arrows from each lyric line to its film-roll frame: transparent, over the page, never in the way. */
 #view-design.active { position: relative; }
-#view-design > svg.words-arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; }
+#view-design > svg.words-arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; width: var(--arrows-width); height: var(--arrows-height); }
 #view-design > svg.words-arrows path { fill: none; stroke: var(--tone-transcript); stroke-width: 2; opacity: .16; }
 #view-design > svg.words-arrows path.active { opacity: .4; }
 #view-design > svg.words-arrows path[data-kind="chorus"] { stroke: var(--tone-lyrics); }
-/* A kinetic line on the film roll (video pixels, scaled with the frame). */
-.kinetic-frame-line { position: absolute; left: 7%; top: 8%; width: var(--kf-width); display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 var(--kf-gap); }
-.kinetic-frame-line > span { font-family: var(--kf-font); font-size: var(--kf-size); color: var(--kf-color); font-style: var(--kf-slant); font-weight: var(--kf-weight); line-height: 1.1; position: relative; margin-bottom: .5em; -webkit-text-stroke: .035em var(--kf-outline); paint-order: stroke fill; }
-.kinetic-frame-draw { color: var(--draw-color); position: absolute; overflow: visible; pointer-events: none; }
-.kinetic-frame-draw.under { left: 0; top: 100%; width: 100%; height: .45em; }
-.kinetic-frame-draw.beside { left: 100%; top: 0; width: .5em; height: 1.2em; }
-.kinetic-frame-tag { position: absolute; right: 2%; bottom: 3%; font: 600 calc(var(--h) * .044) sans-serif; color: var(--muted); }
 /* Kinetic layers under the stage: rows of library cards and the section's meaning words. */
 .words-layers { display: flex; flex-direction: column; gap: var(--space-2); }
 .words-layers .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 3.4), 1fr)); gap: var(--space-1); }
@@ -1101,3 +1094,15 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 }
 @keyframes words-option-arrive { from { opacity: 0; transform: translate(var(--preview-x, 0), var(--preview-y, 0)) scale(var(--preview-scale, 1)); filter: blur(var(--preview-blur, 0)); } to { opacity: 1; transform: none; filter: none; } }
 @keyframes words-option-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+
+.words-roll > .words-graphic { left: calc(var(--space-4) + (100% - var(--space-4) * 2) * var(--cue-lane) / var(--cue-lanes)); right: auto; width: calc((100% - var(--space-4) * 2) / var(--cue-lanes) - var(--space-1)); height: calc(var(--len-s) * var(--song-s)); padding: var(--space-1); border: thin solid var(--line); border-left: medium solid var(--cue-ink); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); overflow: hidden; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); text-align: left; }
+.words-graphic::after { content: ""; position: absolute; left: 0; top: 0; width: var(--space-1); height: var(--draw-share, 0%); background: var(--cue-ink); opacity: .6; }
+.words-graphic > strong { font-size: var(--text-xs); overflow-wrap: anywhere; }
+.words-graphic:hover, .words-graphic:focus-visible { border-color: var(--accent); background: var(--surface-2); }
+.words-graphic > svg.words-cue-preview { width: 100%; height: calc(var(--space-5) * 2); flex-shrink: 0; color: var(--cue-ink); }
+.words-cue-preview .scene { fill: none; stroke: var(--muted); }
+.words-cue-preview .light { fill: none; stroke: var(--depth-gold); stroke-width: 6; opacity: .4; }
+.words-cue-preview .cue { fill: none; stroke: var(--accent); }
+.words-cue-preview .speck { fill: var(--muted); }
+.words-roll > .words-graphics-empty { position: sticky; top: var(--space-5); margin: var(--space-4); color: var(--muted); font-size: var(--text-sm); }
+.words-layers .words-effects { grid-template-columns: repeat(3, minmax(0, 1fr)); }

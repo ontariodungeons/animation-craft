@@ -469,6 +469,62 @@ pub fn cmd_words_captions(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"ok":true,"path":out,"cues":cues.len(),"words":heard.len()}))
 }
 
+/// Visual teaching cues have their own intervals; they are not copies of lyric lines.
+fn graphic_cues(doc: &Value, lib: &Value, times: &std::collections::HashMap<String, (f64, f64)>) -> Vec<Value> {
+    let mut cues = Vec::new();
+    for source in doc["animations"].as_array().into_iter().flatten() {
+        let mut anim = source.clone();
+        for w in anim["words"].as_array_mut().into_iter().flatten() {
+            if let Some((a,b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); }
+        }
+        fill_untimed(&mut anim); timing(&mut anim);
+        let words = anim["words"].as_array().cloned().unwrap_or_default();
+        let anchor = anim["song_anchor"].as_f64().unwrap_or(0.0);
+        let section_end = anchor + anim["authored_duration"].as_f64().unwrap_or(0.0);
+        let k = &anim["kinetic"];
+        for (i,d) in k["draws"].as_array().into_iter().flatten().enumerate() {
+            let Some(word) = words.iter().find(|w| w["word_id"] == d["word_id"]) else { continue };
+            let Some(start) = word["start"].as_f64() else { continue };
+            let Some(stroke) = d["stroke"].as_str().and_then(|key| lib["strokes"].get(key)) else { continue };
+            let line: Vec<_> = words.iter().filter(|w| w["line_id"] == word["line_id"]).collect();
+            let last = line.last().and_then(|w| w["end"].as_f64()).unwrap_or(start) + 1.0;
+            let next = words.iter().find(|w| w["line_id"] != word["line_id"] && w["start"].as_f64().is_some_and(|t| t > start))
+                .and_then(|w| w["start"].as_f64()).unwrap_or(section_end);
+            let end = last.min(next).min(section_end);
+            if end <= start { continue; }
+            cues.push(json!({"id":format!("{}-draw-{i}",anim["animation_id"].as_str().unwrap_or("words")),"kind":"drawing",
+                "animation_id":anim["animation_id"],"line_id":word["line_id"],"word_ids":[word["word_id"]],"word":word["text"],
+                "name":stroke["name"],"stroke":stroke,"color":k["style"]["hero_color"],"start":start,"end":end,
+                "draw_end":(start + stroke["draw"].as_f64().unwrap_or(0.0)).min(end)}));
+        }
+        if k.is_object() {
+            if let Some(key) = k["overlay"].as_str().filter(|key| *key != "none") {
+                if let Some(overlay) = lib["overlays"].get(key) {
+                    cues.push(json!({"id":format!("{}-overlay",anim["animation_id"].as_str().unwrap_or("words")),"kind":"overlay",
+                        "animation_id":anim["animation_id"],"name":overlay["name"],"overlay":key,"start":anchor,"end":section_end,"word_ids":[]}));
+                }
+            }
+        } else {
+            for (line_id,design) in anim["design"].as_object().into_iter().flatten() {
+                let line: Vec<_> = words.iter().filter(|w| w["line_id"] == *line_id).collect();
+                let Some(start) = line.first().and_then(|w| w["start"].as_f64()) else { continue };
+                let end = words.iter().find(|w| w["line_id"] != *line_id && w["start"].as_f64().is_some_and(|t| t > start))
+                    .and_then(|w| w["start"].as_f64()).unwrap_or(section_end);
+                for (i,d) in design["draws"].as_array().into_iter().flatten().enumerate() {
+                    let from = d["paths"].as_array().into_iter().flatten().filter_map(|p| p["from"].as_f64()).reduce(f64::min).unwrap_or(0.0);
+                    let to = d["paths"].as_array().into_iter().flatten().filter_map(|p| p["to"].as_f64()).reduce(f64::max).unwrap_or(from);
+                    cues.push(json!({"id":format!("{}-{line_id}-draw-{i}",anim["animation_id"].as_str().unwrap_or("words")),"kind":"drawing",
+                        "animation_id":anim["animation_id"],"line_id":line_id,"word_ids":line.iter().map(|w| w["word_id"].clone()).collect::<Vec<_>>(),
+                        "name":d["name"],"stroke":{"view_box":d["view_box"],"d":d["paths"].as_array().into_iter().flatten().filter_map(|p|p["d"].as_str()).collect::<Vec<_>>().join(" ")},
+                        "start":start+from,"end":end,"draw_end":(start+to).min(end)}));
+                }
+            }
+        }
+    }
+    cues.sort_by(|a,b| a["start"].as_f64().partial_cmp(&b["start"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    cues
+}
+
 /// `words.read`: the saved Words document, or the unsaved default built from the artist's sheet.
 /// Reports when the hidden reference changed since the document was saved.
 pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
@@ -484,7 +540,8 @@ pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
     let video = fs::read_to_string(dir.join("hyperframes/index.html")).unwrap_or_default();
     let in_video: Vec<&str> = video.split("data-magicstudio-words=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
     let kinetic_library: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
-    Ok(json!({"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video),
+    let graphics = graphic_cues(&doc, &kinetic_library, &studio_times(s));
+    Ok(json!({"graphics":graphics,"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video),
         "kinetic_library":kinetic_library}))
 }
 
@@ -1018,6 +1075,23 @@ mod tests {
         let style = stage_only_style(html);
         assert!(style.contains("#ship") && style.contains("#crab"), "the cast is hidden: {style}");
         assert!(!style.contains("#bg-a") && !style.contains("#bg-b"), "backdrops stay");
+    }
+
+    #[test]
+    fn graphics_have_word_anchored_intervals_instead_of_one_frame_per_line() {
+        let lib: Value = serde_json::from_str(KINETIC_LIBRARY).unwrap();
+        let doc = json!({"animations":[{"animation_id":"verse","words":[
+            {"word_id":"a","line_id":"line1","start":1.0,"end":2.0},
+            {"word_id":"b","line_id":"line1","start":3.0,"end":4.0},
+            {"word_id":"c","line_id":"line2","start":6.0,"end":7.0}],
+            "kinetic":{"draws":[{"word_id":"b","stroke":"hill"}],"overlay":"none","style":{"hero_color":"#112233"}}}]});
+        let cues = graphic_cues(&doc, &lib, &std::collections::HashMap::new());
+        assert_eq!(cues.len(), 1, "two lyric lines yield one independently anchored visual cue");
+        assert_eq!((cues[0]["start"].clone(),cues[0]["end"].clone()),(json!(3.0),json!(5.0)));
+        assert_eq!(cues[0]["word_ids"],json!(["b"]));
+        let changed = graphic_cues(&doc, &lib, &std::collections::HashMap::from([("b".into(),(3.5,4.0))]));
+        assert_eq!(changed[0]["start"],json!(3.5),"follows the Studio's saved word timing");
+        assert!(graphic_cues(&json!({"animations":[]}), &lib, &std::collections::HashMap::new()).is_empty());
     }
 
     #[test]

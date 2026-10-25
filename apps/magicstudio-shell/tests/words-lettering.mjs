@@ -56,15 +56,19 @@ assert.equal(saves.find((r)=>r.id==='words.save').params.kinetic.style.font,'Nim
 saves.length=0;
 await flat(panel2).find((n)=>n.tag==='button'&&words(n).includes('Wave')).onclick();
 assert.equal(JSON.stringify(saves.find((r)=>r.id==='words.save').params.kinetic.draws),'[{"word_id":"l1/w1","stroke":"hill","place":"under"}]','a stroke is anchored to the picked word');
-// Film frames use real library strokes and preserve base/hero weights.
-vm.runInContext(`anim.kinetic.style={font:'serif',weight:400,hero_weight:800};
- anim.kinetic.draws=[{word_id:'l1/w1',stroke:'hill',place:'under'}];`,c);
-const world=el('div'); c.world=world;
-vm.runInContext("wordsDrawKinetic(world,anim,{words:anim.words})",c);
-assert.equal(flat(world).find(n=>n.tag==='path').d,'M 7 77 Q 73 72 118 32','film roll draws the actual library path');
-assert.equal(world.kids[0].kids[0].style.props['--kf-weight'],'400');
-assert.equal(world.kids[0].kids[2].style.props['--kf-weight'],'800');
-// The Design view's own width picks its layout: narrow drops the film roll, tight goes to one column.
+// Independent graphic intervals connect only to intersecting, anchored lyric words.
+vm.runInContext(`anim.kinetic.style={font:'serif',weight:400,hero_weight:800};`,c);
+const intersects=vm.runInContext('wordsCueIntersects',c);
+const cue={animation_id:'verse-1',start:1.3,end:3,word_ids:['l1/w1']};
+assert.equal(intersects(cue,'verse-1',0,4,['l1/w1']),true);
+assert.equal(intersects(cue,'verse-1',0,1.3,['l1/w1']),false,'touching boundaries do not intersect');
+assert.equal(intersects(cue,'verse-1',3,4,['l1/w1']),false);
+assert.equal(intersects(cue,'verse-2',0,4,['l1/w1']),false,'another section does not inherit the connection');
+assert.equal(intersects(cue,'verse-1',0,4,['l1/w0']),false,'another word does not inherit the drawing');
+assert.equal(intersects({...cue,word_ids:[]},'verse-1',0,4,['l1/w0']),true,'section overlays intersect every overlapping line');
+const wave=vm.runInContext("wordsStroke(wordsPanel.read.kinetic_library.strokes.hill)",c);
+assert.equal(wave.kids[0].d,'M 7 77 Q 73 72 118 32','visual cue uses the actual library path');
+// The Design view's own width picks its layout: narrow retains both tracks; tight puts the stage above the two tracks.
 for (const [width, narrow, tight] of [[1400, false, false], [900, true, false], [401, true, true]]) {
   const classes = new Set(); const view = { clientWidth: width, classList: { toggle: (k, on) => on ? classes.add(k) : classes.delete(k) } };
   vm.runInContext('wordsWidth', c)(view);
