@@ -18,6 +18,7 @@ use ratatui::{
 use serde_json::{Value, json};
 use std::{
     io::{self, IsTerminal},
+    path::Path,
     time::Duration,
 };
 const LABELS: [&str; 8] = [
@@ -1520,7 +1521,7 @@ fn ago(at:u64)->String{
 }
 /// One agent as MOPS shows it: the same facts feed the roster row and the detail panel.
 struct MopsAgent{index:usize,pane:Option<String>,name:String,icon:&'static str,identity:Color,provider:String,word:&'static str,state:Color,
- mcp:Option<(String,Color)>,task:String,folder:String,session:Option<String>,harness:Option<String>,tokens:Option<String>,skills:Vec<(String,String,Color)>}
+ mcp:Option<(String,Color)>,task:String,folder:String,session:Option<String>,harness:Option<String>,tokens:Option<String>,studio:Value}
 
 fn mops_agents(c:&Center)->Vec<MopsAgent>{
  let tiles=gang_tiles(c);
@@ -1537,20 +1538,12 @@ fn mops_agents(c:&Center)->Vec<MopsAgent>{
    Some(format!("{:.1}M today · {} sessions · provider total",u["todayTotalTokens"].as_u64()? as f64/1_000_000.0,u["todaySessions"].as_u64().unwrap_or(0)))
   });
   let session=g.map(|g|&g["agent_session"]);
-  let skills:Vec<(String,String,Color)>=c.skills.iter().filter_map(|s|{
-   let id=s.get("id").and_then(Value::as_str).unwrap_or("skill").to_owned();
-   let name=s.get("name").and_then(Value::as_str).unwrap_or(&id).to_owned();
-   let status=s.get("status").and_then(Value::as_str).unwrap_or("researching");
-   let colour=match status{
-    "implemented"=>GREEN,"not_implemented"=>RED,_=>AMBER
-   };
-   Some((format!("{id} . {name}"),format!("{status}"),colour))
-  }).collect();
+  let studio=field("pane_id").map(|pane|crate::studios::assignment(&pane,&c.studios)).unwrap_or(Value::Null);
   MopsAgent{index,pane:g.and_then(|g|g["pane_id"].as_str()).map(str::to_owned),name:name.clone(),icon:moppet_icon(name),identity:*identity,provider:provider.clone().unwrap_or_else(||if g.is_none(){"in-app".into()}else{"?".into()}),
    word,state:*state,mcp,task:field("terminal_title_stripped").unwrap_or_else(||if g.is_none(){"the app's own agent".into()}else{String::new()}),
    folder:field("cwd").or(field("foreground_cwd")).unwrap_or_default(),
    session:session.and_then(|s|text(&s["value"])).map(|v|v.chars().take(8).collect()),
-   harness:session.and_then(|s|text(&s["source"])).map(|v|v.trim_start_matches("herdr:").to_owned()),tokens,skills}
+   harness:session.and_then(|s|text(&s["source"])).map(|v|v.trim_start_matches("herdr:").to_owned()),tokens,studio}
  }).collect()
 }
 
@@ -1577,20 +1570,21 @@ fn mops_facts<'a>(c:&'a Center,a:&'a MopsAgent)->Vec<(&'a str,String,Color)>{
  let (mcp,mcp_colour)=a.mcp.clone().map(|(t,c)|(t,c)).unwrap_or(("not reported".into(),DIM));
  let (harness,hc)=known(&a.harness);let (session,sc)=known(&a.session);let (tokens,tc)=known(&a.tokens);
  let activity=if a.index==c.gang_selected.min(c.state["agent_gang"].as_array().map_or(0,Vec::len)){c.spy.as_deref().and_then(latest_activity)}else{None};
- let mut facts = vec![
+ let facts = vec![
+  ("Task",if a.task.is_empty(){"not reported".into()}else{a.task.clone()},if a.task.is_empty(){DIM}else{DESK_FG}),
+  ("Studio",a.studio["state"].as_str().unwrap_or("unassigned").to_owned(),if a.studio["state"]=="connected"{TEAL}else{AMBER}),
+  ("Port",a.studio["port"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"not assigned".into()),TEAL),
+  ("Project",a.studio["project"].as_str().and_then(|p|Path::new(p).file_name()).and_then(|p|p.to_str()).unwrap_or("not assigned").into(),DESK_FG),
+  ("Build",a.studio["build"].as_str().map(|v|format!("{} · {v}",a.studio["branch"].as_str().unwrap_or("branch unknown"))).unwrap_or_else(||"not reported".into()),DESK_FG),
+  ("Access",match a.studio["writer_owner"].as_bool(){Some(true)=>"project writer",Some(false)=>"review attachment",None=>"ownership unknown"}.into(),MUTED),
   ("Provider",a.provider.clone(),a.identity),("Harness",harness,hc),("Session",session,sc),("MCP",mcp,mcp_colour),
   ("Model","not reported".into(),DIM),("Tokens",tokens,tc),
-  ("Task",if a.task.is_empty(){"not reported".into()}else{a.task.clone()},if a.task.is_empty(){DIM}else{DESK_FG}),
   ("Folder",if a.folder.is_empty(){"not reported".into()}else{a.folder.clone()},if a.folder.is_empty(){DIM}else{DESK_FG}),
-  ("Tasks","not reported".into(),DIM),("Folders","not reported".into(),DIM),
   ("Activity",activity.clone().unwrap_or_else(||"waiting for output".into()),if activity.is_some(){DESK_FG}else{DIM}),
   ("Last touch",match last_touch(c,a){Some((what,at))=>(format!("{what} · {}",ago(at)),TEAL),None=>("nothing seen from this pane".into(),DIM)}.0,
    if last_touch(c,a).is_some(){TEAL}else{DIM}),
  ];
- // Skills as traffic-light facts: green = implemented, amber = researching, red = not implemented.
- for (label,status,colour) in &a.skills{
-  facts.push((label.as_str(),status.clone(),*colour));
- }
+
  facts
 }
 
@@ -1598,11 +1592,11 @@ fn mops_facts<'a>(c:&'a Center,a:&'a MopsAgent)->Vec<(&'a str,String,Color)>{
 fn mops_roster_lines(agents:&[MopsAgent],selected:usize,width:usize,rows:usize)->Vec<Line<'static>>{
  let wide=width>=118;let mid=width>=84;let tasks=width>=70;
  let name_w=13;let state_w=10;let provider_w=if mid{10}else{0};let mcp_w=if wide{28}else{0};
- let fixed=3+name_w+state_w+provider_w+mcp_w+(if mid{1}else{0})*3;
+ let fixed=3+name_w+state_w+8+provider_w+mcp_w+(if mid{1}else{0})*3;
  let rest=width.saturating_sub(fixed);
  let folder_w=if wide{rest*2/5}else{0};let task_w=if tasks{rest.saturating_sub(folder_w)}else{0};
  let head=|text:&str,w:usize|Span::styled(cell(text,w),Style::default().fg(DIM));
- let mut lines=vec![Line::from(vec![head("",3),head("AGENT",name_w),head("STATE",state_w),head(if mid{"PROVIDER "}else{""},provider_w+usize::from(mid)),head(if wide{"MCP "}else{""},mcp_w+usize::from(wide)),head(if tasks{"TASK"}else{""},task_w),head(if wide{"FOLDER"}else{""},folder_w)])];
+ let mut lines=vec![Line::from(vec![head("",3),head("AGENT",name_w),head("STATE",state_w),head(if mid{"PROVIDER "}else{""},provider_w+usize::from(mid)),head("PORT",8),head(if wide{"MCP "}else{""},mcp_w+usize::from(wide)),head(if tasks{"TASK"}else{""},task_w),head(if wide{"FOLDER"}else{""},folder_w)])];
  let shown=rows.saturating_sub(1).min(agents.len());
  if shown==0{return lines;}
  let start=selected.saturating_sub(shown-1).min(agents.len()-shown);
@@ -1616,6 +1610,8 @@ fn mops_roster_lines(agents:&[MopsAgent],selected:usize,width:usize,rows:usize)-
    Span::styled(cell(&format!("{} {}",agent_glyph(a.word),a.word.to_lowercase()),state_w),on(a.state)),
   ];
   if mid{spans.push(Span::styled(cell(&a.provider,provider_w+1),on(MUTED)));}
+  let port=a.studio["port"].as_u64().map(|v|v.to_string()).unwrap_or_else(||match a.studio["state"].as_str(){Some("closed")=>"closed",Some("ambiguous")=>"multiple",_=>"—"}.into());
+  spans.push(Span::styled(cell(&port,8),on(if a.studio["state"]=="connected"{TEAL}else{AMBER})));
   if wide{let (t,col)=a.mcp.clone().unwrap_or(("—".into(),DIM));spans.push(Span::styled(cell(&t,mcp_w+1),on(col)));}
   if tasks{spans.push(Span::styled(cell(&a.task,task_w.saturating_sub(1)),on(DESK_FG)));spans.push(Span::styled(" ",on(DESK_FG)));}
   if wide{spans.push(Span::styled(cell(&folder,folder_w),on(MUTED)));}
@@ -1669,7 +1665,7 @@ fn render_desk(f:&mut Frame,c:&Center,control:bool){
  // Narrow panes keep one status line (glyph per agent) rather than losing the band; MOPS draws its own.
  let agents=c.state["agent_gang"].as_array().map_or(0,Vec::len)+1;
  let tall_narrow=narrow&&!c.muppets_view&&area.height>=34;
- let gang_rows=if tall_narrow{((agents+2) as u16).min(area.height/3).max(4)}else if narrow{if c.muppets_view{0}else{1}}else{3};
+ let gang_rows=if c.muppets_view{0}else if tall_narrow{((agents+2) as u16).min(area.height/3).max(4)}else if narrow{1}else{3};
  let chunks=Layout::vertical([Constraint::Length(1),Constraint::Length(1),Constraint::Min(1),Constraint::Length(gang_rows),Constraint::Length(1)]).split(area);
   f.render_widget(Paragraph::new(top_bar(c,area.width as usize,control)),chunks[0]);
   render_tabs(f,c,chunks[1]);
@@ -2321,7 +2317,8 @@ mod feedback_tests {
         assert!(get("Tokens").1.starts_with("2.5M today"));
         assert!(get("MCP").1.contains("OUT OF DATE")&&get("MCP").2==RED);
         assert_eq!(get("Activity").1,"▸ Editing center.rs");
-        for k in ["Model","Tasks","Folders"]{assert_eq!((get(k).1.as_str(),get(k).2),("not reported",DIM),"{k}");}
+        assert_eq!((get("Model").1.as_str(),get("Model").2),("not reported",DIM));
+        assert!(!facts.iter().any(|f|matches!(f.0,"Tasks"|"Folders")),"plural placeholders duplicate the actual Task and Folder facts");
         c.touches=vec![
          json!({"client":"herdr:p1","command":"ui.click","control":"sb-next","at":0}),
          json!({"client":"herdr:p2","command":"project.save","control":null,"at":0})];
@@ -2332,6 +2329,27 @@ mod feedback_tests {
         let codex=mops_facts(&c,&agents[1]);
         assert!(codex.iter().any(|f|f.0=="Tokens"&&f.1=="not reported")&&codex.iter().any(|f|f.0=="Activity"&&f.1=="waiting for output"),"only the selected agent has output: {codex:?}");
     }
+    #[test]
+    fn mops_shows_live_port_project_and_build_with_one_selection_target_per_agent() {
+        let mut c=fixture();c.muppets_view=true;
+        c.agent_gang=json!([{"name":"beaker","pane_id":"ownership-fixture","agent_status":"working"}]);
+        c.state["agent_gang"]=c.agent_gang.clone();
+        c.studios=json!({"sessions":[{"endpoint":"unix:/owned.sock","active_project":"/songs/A.magic","writer_owner":true,
+            "identity":{"agent_pane":"ownership-fixture","control_port":19971,"pid":123,"build_id":"build-proof","branch":"main"}}]});
+        let agents=mops_agents(&c);let facts=mops_facts(&c,&agents[0]);
+        for(label,value)in[("Port","19971"),("Project","A.magic"),("Build","main · build-proof"),("Access","project writer")]{
+            assert!(facts.iter().any(|f|f.0==label&&f.1==value),"{label}: {facts:?}");
+        }
+        for width in [60,100,140] {
+            let mut terminal=ratatui::Terminal::new(ratatui::backend::TestBackend::new(width,38)).unwrap();
+            terminal.draw(|f|render(f,&c)).unwrap();
+            let hits=c.hits.borrow();
+            assert_eq!(hits.iter().filter(|h|h.action=="agent"&&h.params["pane"]=="ownership-fixture").count(),1,"duplicate roster/strip target at {width}");
+            let look=control::look(&c,terminal.backend().buffer(),0,"fixture");
+            assert_eq!(look["agents"][0]["studio"]["port"],19971);
+        }
+    }
+
     #[test]
     fn mcp_panel_shows_warnings_first_and_cuts_families_not_warnings_when_short(){
         let sv=|pid:u32,host:u32,name:&str,family:&str,exe:&str|crate::mcp_watch::Server{pid,host_pid:host,host:name.into(),family:family.into(),exe:exe.into(),write_root:None,age_secs:1,rss_kb:1};
