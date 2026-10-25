@@ -102,3 +102,12 @@ console.log('PASS kinetic previews and anchored drawing export timing');
 const previewRange=vm.runInContext('wordsCueWindow',c)({...cue,start:4,end:6},{start:1,end:3});
 assert.deepEqual(JSON.parse(JSON.stringify(previewRange)),{start:.75,end:6.25},'replay includes both the lyric and its delayed drawing');
 assert.equal(intersects({...cue,word_ids:[]},'verse-1',3,4,['l1/w1']),false,'unanchored effects still use interval intersections');
+
+const editLine=vm.runInContext('wordsPresentationEdits',c);
+const anchors=[{word_id:'a',text:'Three'},{word_id:'b',text:'times'},{word_id:'c',text:'around'}];
+assert.equal(JSON.stringify(editLine(anchors,'Three happy times around')),'[{"word_id":"a","display_text":"Three happy"},{"word_id":"b","display_text":"times"},{"word_id":"c","display_text":"around"}]','inserted text preserves the original timed IDs');
+assert.equal(JSON.stringify(editLine(anchors,'Three around')),'[{"word_id":"a","display_text":"Three"},{"word_id":"b","display_text":""},{"word_id":"c","display_text":"around"}]','deletion keeps timing anchors available');
+assert.equal(editLine(anchors,'Two times around')[0].display_text,'Two');
+assert.equal(anchors[0].text,'Three','presentation editing never mutates the source lyric');
+assert.throws(()=>editLine(anchors,'x '.repeat(300)),/256 words/);
+console.log('PASS inline presentation edits preserve audio and word anchors');

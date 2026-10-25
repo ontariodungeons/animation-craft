@@ -216,6 +216,38 @@ const SCENE_ONLY_STYLE: &str = r#"<style data-magicstudio="scene-only">
 .lyric-word-clip, .lyric-word-clip *, .lyric-design-clip, .lyric-design-clip *, .lyric-drawing-clip, .lyric-drawing-clip * { visibility: hidden !important; }
 </style>"#;
 
+fn without_video_media(html: &str) -> String {
+    let mut out = html.to_owned();
+    while let Some(start) = out.find("<video") {
+        let end = out[start..].find("</video>").map(|i|start+i+8)
+            .or_else(||out[start..].find('>').map(|i|start+i+1)).unwrap_or(out.len());
+        out.replace_range(start..end, "");
+    }
+    while let Some(start) = out.find("<img") {
+        let end = out[start..].find('>').map(|i|start+i+1).unwrap_or(out.len());
+        out.replace_range(start..end, "");
+    }
+    out
+}
+
+fn still_stage(s: &mut Session, html: &str, id: &str) -> Result<String> {
+    let dir = crate::workshop::project_dir(s)?;
+    let read = cmd_words_read(s, &json!({"animation_id":id}))?;
+    let asset_id = read["document"]["animations"][0]["background_asset"].as_str().ok_or_else(||invalid("Choose this verse's scene image"))?;
+    let asset = s.project_assets.iter().find(|a|a.id==asset_id && a.kind=="image")
+        .and_then(|a|a.path.as_ref()).ok_or_else(||invalid("The scene image is no longer in this project"))?;
+    let bytes = fs::read(asset)?;
+    let name = format!("{:x}.{}",Sha256::digest(&bytes),asset.extension().and_then(|e|e.to_str()).unwrap_or("png"));
+    let path = dir.join("hyperframes/compositions/words/backdrops").join(&name);
+    fs::create_dir_all(path.parent().unwrap())?;
+    if !path.is_file() { fs::write(&path,bytes)?; }
+    let mut out = without_video_media(html);
+    let root = out.find("data-composition-id=\"main\"").or_else(||out.find("id=\"root\""))
+        .and_then(|i|out[i..].find('>').map(|j|i+j+1)).ok_or_else(||invalid("The video has no main composition root"))?;
+    out.insert_str(root,&format!("<img data-lyrics-backdrop src=\"compositions/words/backdrops/{name}\" style=\"position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0\">"));
+    Ok(out)
+}
+
 /// `words.lyrics_view`: a derived copy of the video for the Design stage: only its lyric word clips
 /// (`show: "lyrics"`, the default) or only its scene (`show: "scene"`). Written beside the Words
 /// compositions and rewritten only when the video changes; the video itself is never touched.
@@ -223,14 +255,16 @@ pub fn cmd_words_lyrics_view(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = crate::workshop::project_dir(s)?;
     let hf = dir.join("hyperframes");
     let html = fs::read_to_string(hf.join("index.html")).map_err(|_| invalid("This project has no HyperFrames video yet; run video.init first"))?;
+    let html = if p["show"] == "still" { still_stage(s,&html,p["animation_id"].as_str().ok_or_else(||invalid("still needs animation_id"))?)? } else { html };
     let stage_style;
     let (style, name) = match p["show"].as_str().unwrap_or("lyrics") {
+        "still" => ("", "still-stage"),
         "lyrics" => (LYRICS_ONLY_STYLE, "lyrics-only"),
         "scene" => (SCENE_ONLY_STYLE, "scene-only"),
         "stage" => { stage_style = stage_only_style(&html); (stage_style.as_str(), "stage") }
         other => return Err(invalid(format!("show must be stage, lyrics or scene, not {other}"))),
     };
-    if name != "stage" && !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
+    if name != "stage" && name != "still-stage" && !html.contains("lyric-word-clip") { return Err(invalid("The video has no lyric word clips (class lyric-word-clip) to show on their own")); }
     let head = html.find("</head>").ok_or_else(|| invalid("The video's index.html has no </head>; nothing written"))?;
     let derived = format!("{}{style}\n{}", &html[..head], &html[head..]);
     let src = format!("compositions/words/{name}.html");
@@ -535,11 +569,17 @@ pub fn cmd_words_read(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| invalid(format!("No Words animation {id}")))?;
         doc["animations"] = json!([anim]);
     }
+    for a in doc["animations"].as_array_mut().into_iter().flatten() {
+        for w in a["words"].as_array_mut().into_iter().flatten() {
+            if let Some(text) = w["display_text"].as_str().map(str::to_owned) { w["source_text"]=w["text"].clone(); w["text"]=json!(text); }
+        }
+    }
     let video = fs::read_to_string(dir.join("hyperframes/index.html")).unwrap_or_default();
     let in_video: Vec<&str> = video.split("data-magicstudio-words=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
     let kinetic_library: Value = serde_json::from_str(KINETIC_LIBRARY).map_err(|e| invalid(e.to_string()))?;
     let graphics = graphic_cues(&doc, &kinetic_library, &studio_times(s));
-    Ok(json!({"graphics":graphics,"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video),
+    let images: Vec<Value> = s.project_assets.iter().filter(|a|a.kind=="image").map(|a|json!({"id":a.id,"name":a.name,"path":a.path})).collect();
+    Ok(json!({"images":images,"graphics":graphics,"ok":true,"saved":saved,"reference_changed":stale,"path":document_path(&dir),"document":doc,"in_video":in_video,"fonts":video_fonts(&dir.join("hyperframes"), &video),
         "kinetic_library":kinetic_library}))
 }
 
@@ -574,6 +614,11 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"ok":false,"conflict":true,"animation_id":id,"source_revision":current,"expected_source_revision":expected,
             "reason":"The animation changed since you read it; reload and reapply your edit"}));
     }
+    if let Some(background) = p.get("background_asset") {
+        let asset_id = background.as_str().ok_or_else(||invalid("background_asset must be a project image id"))?;
+        if !s.project_assets.iter().any(|a|a.id==asset_id && a.kind=="image" && a.path.as_ref().is_some_and(|p|p.is_file())) { return Err(invalid("Choose an existing project image for this verse")); }
+        anim["background_asset"]=json!(asset_id);
+    }
     if let Some(style) = p.get("style").filter(|v| !v.is_null()) {
         let map = style.as_object().ok_or_else(|| invalid("style must be an object"))?;
         for (key, value) in map {
@@ -592,6 +637,7 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
         for (key, value) in edit.as_object().into_iter().flatten() {
             let checked = match key.as_str() {
                 "word_id" => continue,
+                "display_text" => value.as_str().filter(|t| t.len()<=4096 && !t.chars().any(|c|c.is_control())).map(|t|json!(t)).ok_or_else(||invalid("display_text must be at most 4096 bytes of plain text"))?,
                 "emphasis" => value.as_bool().map(|b| json!(b)).ok_or_else(|| invalid("emphasis must be true or false"))?,
                 "action" => one_of(value, ACTIONS, "action")?,
                 "entrance" => one_of(value, ENTRANCES, "entrance")?,
@@ -833,6 +879,7 @@ fn design_composition(anim: &Value, composition_id: &str, width: u64, height: u6
             let accent = it["accent"].as_str().and_then(|id| words.iter().find(|w| w["word_id"] == json!(id))).map_or(start, |w| start_of(w));
             let mut it = it.clone();
             it["accent"] = json!(accent);
+            it["text"] = json!(it["word_ids"].as_array().into_iter().flatten().filter_map(|id|words.iter().find(|w|w["word_id"]==*id).and_then(|w|w["text"].as_str())).collect::<Vec<_>>().join(" "));
             it
         }).collect();
         out.push(json!({"start":start,"end":end,"items":items,"draws":design["draws"]}));
@@ -1101,6 +1148,37 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn still_stage_uses_one_saved_image_and_keeps_audio_without_video_decoders() {
+        let (dir,mut s)=project("still-stage");
+        let image=dir.join("scene.png"); image::RgbImage::new(2,2).save(&image).unwrap();
+        s.project_assets.push(serde_json::from_value(json!({"id":"scene","kind":"image","name":"Scene","path":image,"preset":null})).unwrap());
+        cmd_words_save(&mut s,&json!({"animation_id":"words-chorus-1","expected_source_revision":0,"background_asset":"scene"})).unwrap();
+        let html=r#"<html><head></head><body><div id="root" data-composition-id="main"><video src="movie.webm"></video><img src="cast.png"><audio id="song" src="song.wav"></audio></div></body></html>"#;
+        let result=still_stage(&mut s,html,"words-chorus-1").unwrap();
+        assert!(!result.contains("<video") && !result.contains("cast.png"));
+        assert_eq!(result.matches("<img").count(),1);
+        assert!(result.contains("data-lyrics-backdrop") && result.contains("song.wav"));
+        let files:Vec<_>=fs::read_dir(dir.join("hyperframes/compositions/words/backdrops")).unwrap().collect();
+        assert_eq!(files.len(),1);
+        assert_eq!(fs::read(files[0].as_ref().unwrap().path()).unwrap(),fs::read(image).unwrap());
+    }
+
+    #[test]
+    fn inline_display_text_roundtrips_without_rewriting_source_or_timing() {
+        let (dir,mut s)=project("inline-text");
+        let before=cmd_words_read(&mut s,&json!({"animation_id":"words-chorus-1"})).unwrap();
+        cmd_words_save(&mut s,&json!({"animation_id":"words-chorus-1","expected_source_revision":0,"words":[{"word_id":"ch-l1/w0","display_text":"Hello"}]})).unwrap();
+        let read=cmd_words_read(&mut s,&json!({"animation_id":"words-chorus-1"})).unwrap();
+        let word=&read["document"]["animations"][0]["words"][0];
+        assert_eq!(word["text"],json!("Hello"));assert_eq!(word["source_text"],json!("Hey"));
+        assert_eq!(word["start"],before["document"]["animations"][0]["words"][0]["start"]);
+        let raw=load(&dir).unwrap().unwrap();
+        let stored=raw["animations"].as_array().unwrap().iter().find(|a|a["animation_id"]=="words-chorus-1").unwrap();
+        assert_eq!(stored["words"][0]["text"],json!("Hey"));
+        assert!(cmd_words_save(&mut s,&json!({"animation_id":"words-chorus-1","expected_source_revision":1,"words":[{"word_id":"ch-l1/w0","display_text":"bad\ntext"}]})).is_err());
+    }
 
     #[test]
     fn the_stage_keeps_the_backdrop_and_hides_the_cast() {

@@ -5,7 +5,7 @@
 // film roll of the designed lines (right) run down the page on the song clock; the stage, the
 // line's lanes and the options for what is picked stay pinned in the centre. The Video view plays
 // the finished HyperFrames video through its preview player.
-const wordsPanel = { cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "stage", offset: 0, timeLabel: null, effects: null };
+const wordsPanel = { editor: null, cue: null, cueDrag: null, previewRange: null, autoPlay: false, read: null, align: null, studio: null, selected: null, line: null, item: null, picked: [], designs: new Map(), styleEdits: {}, stage: null, time: 0, playing: false, size: null, lanes: null, view: "design", tab: "look", scene: true, sceneAt: null, followed: null, canvas: null, audio: null, drag: null, server: null, player: null, show: "still", offset: 0, timeLabel: null, effects: null };
 // How a designed lyric item moves on its accent word (the engine's MOVES), and what each does.
 const WORDS_MOVES = [["quiet", "Quiet", "Fades in and holds"], ["sleep", "Sleep", "Letters sink one by one"], ["settle", "Settle", "Drops and squashes into place"],
   ["fall", "Fall", "Drops down"], ["pop", "Pop", "A quick swell on the beat"], ["rise", "Rise", "Arcs up and away"], ["east", "East", "Slides right"],
@@ -39,6 +39,7 @@ function wordsLabel(anim) {
 }
 
 async function wordsOpen() {
+  if(wordsPanel.editor?.dirty) return;
   const view = $("view-design");
   if (!view) return;
   view.replaceChildren(el("p", { class: "panel-empty inline" }, "Loading the words…"));
@@ -325,11 +326,13 @@ function wordsChip(anim, w) {
     title: `${w.text} · ${wordsClock(wordsAt(w))}${move ? ` · ${move}` : ""} · Shift-click adds words`,
     onclick: (event) => {
       event.stopPropagation();
+      if(wordsPanel.editor){wordsAfterEdit(()=>wordsChip(wordsCurrent(),w).onclick(event));return;}
       if (anim.animation_id !== wordsPanel.selected) wordsSelect(anim.animation_id);
       if (anim.animation_id !== wordsPanel.selected) return;
       const same = wordsPanel.line === w.line_id && event.shiftKey;
       wordsPanel.picked = same ? (wordsPanel.picked.includes(w.word_id) ? wordsPanel.picked.filter((id) => id !== w.word_id) : [...wordsPanel.picked, w.word_id]) : [w.word_id];
       wordsPanel.line = w.line_id; wordsPanel.item = index; wordsPanel.time = wordsLineSpan(anim, w.line_id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange();
+      if(!event.shiftKey)requestAnimationFrame(()=>wordsBeginEdit(wordsCurrent(),w.line_id,event));
     } }, w.text);
   if (it) {
     chip.style.setProperty("--word-font", it.font === "song" || !it.font ? wordsSongFont(anim) : it.font);
@@ -349,6 +352,73 @@ function wordsChip(anim, w) {
   if (wordsPanel.designs.has(w.line_id)) chip.dataset.changed = "";
   return chip;
 }
+// Keep every original word ID and audio anchor. Inserted wording shares the nearest existing beat.
+function wordsPresentationEdits(words, text) {
+  const old = words.flatMap((w, slot) => w.text.split(/\s+/).filter(Boolean).map((text) => ({ text, slot })));
+  const next = text.trim().split(/\s+/).filter(Boolean);
+  if (next.length > 256 || text.length > 4096) throw new Error("Keep a lyric line under 256 words");
+  const dp = Array.from({ length: old.length+1 }, () => Array(next.length+1).fill(0));
+  for (let i=old.length; i>=0; i--) for (let j=next.length; j>=0; j--) {
+    if (i === old.length) dp[i][j] = next.length-j;
+    else if (j === next.length) dp[i][j] = old.length-i;
+    else dp[i][j] = Math.min((old[i].text === next[j] ? 0 : 1)+dp[i+1][j+1], 1+dp[i+1][j], 1+dp[i][j+1]);
+  }
+  const slots = words.map(() => []); let i=0, j=0;
+  while (i<old.length || j<next.length) {
+    if (i<old.length && j<next.length && dp[i][j] === (old[i].text === next[j] ? 0 : 1)+dp[i+1][j+1]) { slots[old[i].slot].push(next[j]); i++; j++; }
+    else if (i<old.length && dp[i][j] === 1+dp[i+1][j]) i++;
+    else { slots[old[Math.max(0,i-1)]?.slot || 0].push(next[j]); j++; }
+  }
+  return words.map((w, slot) => ({ word_id:w.word_id, display_text:slots[slot].join(" ") }));
+}
+function wordsBeginEdit(anim, lineId, event) {
+  if (wordsPanel.editor) return;
+  const node = [...$("view-design").querySelectorAll(".words-line")].find((n) => n.dataset.animationId === anim.animation_id && n.dataset.lineId === lineId);
+  if (!node) return;
+  const words = wordsLineWords(anim,lineId), original = words.map(w=>w.text).join(" ");
+  const spans = [...node.querySelectorAll(".word")].map((chip) => {
+    const span = el("span", { class:"word lettered" }, `${chip.textContent} `);
+    for (let i=0;i<chip.style.length;i++) { const key=chip.style[i]; if(key.startsWith("--word-"))span.style.setProperty(key,chip.style.getPropertyValue(key)); }
+    return span;
+  });
+  node.replaceChildren(...spans); node.setAttribute("contenteditable","true"); node.setAttribute("role","textbox");
+  node.setAttribute("aria-label","Edit lyric line"); node.setAttribute("spellcheck","true");
+  const editor = wordsPanel.editor = { node, animation:anim.animation_id, lineId, words, original, text:original, revision:anim.source_revision, project:state.project, dirty:false };
+  node.oninput = () => { editor.text=node.innerText.trim().replace(/\s+/g," "); editor.dirty=editor.text!==original; wordsPanel.autoPlay=false; wordsVideo("pause"); };
+  node.onpaste = (e) => { e.preventDefault(); document.execCommand("insertText",false,e.clipboardData.getData("text/plain").replace(/\s+/g," ")); };
+  node.onkeydown = (e) => {
+    if (e.isComposing) return;
+    if(e.key === "Escape") { e.preventDefault(); e.stopPropagation(); wordsPanel.editor=null; wordsRender(); }
+    else if(e.key === "Enter") { e.preventDefault(); e.stopPropagation(); wordsCommitEdit(editor); }
+  };
+  node.onblur = () => wordsCommitEdit(editor);
+  node.focus();
+  const selection = getSelection(), range = event && document.caretRangeFromPoint?.(event.clientX,event.clientY);
+  if(range && node.contains(range.startContainer)){selection.removeAllRanges();selection.addRange(range);}
+  else {const end=document.createRange();end.selectNodeContents(node);end.collapse(false);selection.removeAllRanges();selection.addRange(end);}
+}
+async function wordsCommitEdit(editor) {
+  if (editor.promise) return editor.promise;
+  if (wordsPanel.editor !== editor) return true;
+  if (!editor.dirty) { wordsPanel.editor=null; editor.node.removeAttribute("contenteditable"); return true; }
+  editor.promise = (async () => {
+    try {
+      const result=await wordsCommand("words.save",{animation_id:editor.animation,expected_source_revision:editor.revision,words:wordsPresentationEdits(editor.words,editor.text),origin:"lyrics-inline",_expected_project:editor.project});
+      if(result.conflict) throw new Error("This line changed elsewhere. Your text is still here; copy it before reloading.");
+      if(wordsPanel.read.in_video?.includes(editor.animation)) await wordsCommand("words.apply",{animation_id:editor.animation,_expected_project:editor.project});
+      if(wordsPanel.editor===editor) wordsPanel.editor=null;
+      if(state.project===editor.project){wordsPanel.stage=null;await wordsOpen();}
+      return true;
+    } catch(error) {editor.promise=null;editor.node.setAttribute("aria-invalid","true");toast(String(error).replace(/^.*?: /,""));return false;}
+  })();
+  return editor.promise;
+}
+function wordsAfterEdit(action) {
+  const editor=wordsPanel.editor;
+  if(!editor){action();return;}
+  wordsCommitEdit(editor).then((saved)=>{if(saved)action();});
+}
+
 // The design items the picked words belong to (or the one clicked item).
 function wordsPickedItems(design) {
   const picked = design.items.flatMap((it, i) => it.word_ids.some((id) => wordsPanel.picked.includes(id)) ? [i] : []);
@@ -369,10 +439,13 @@ function wordsTimeline(animations, end) {
   return wordsPlace(el("div", { class: "words-tl", "aria-label": "Lyrics on the song timeline" }, ...wordsGaps(animations),
     ...animations.map((a) => wordsBand(a, "button", { "data-section": a.animation_id, onclick: () => a.animation_id === wordsPanel.selected || wordsSelect(a.animation_id) })),
     ...wordsRows(animations).map(([a, j, line, at, len]) => wordsPlace(el("div", { class: `words-line${j ? "" : " first"}${wordsPanel.line === line.id ? " active" : ""}`,
-      "data-kind": a.scope?.section === "chorus" ? "chorus" : "verse", "data-animation-id": a.animation_id,
+      "data-kind": a.scope?.section === "chorus" ? "chorus" : "verse", "data-animation-id": a.animation_id, "data-line-id":line.id, tabindex:"0",
+      ondblclick:(event)=>{event.preventDefault();wordsBeginEdit(wordsCurrent(),line.id,event);},
+      onkeydown:(event)=>{if(event.target.isContentEditable)return;if(event.key==="Enter" || (event.key.length===1&&!event.ctrlKey&&!event.metaKey)){event.preventDefault();wordsBeginEdit(wordsCurrent(),line.id);if(event.key!=="Enter")document.execCommand("insertText",false,event.key);}},
       title: "Click around the words to design the whole line",
-      onclick: () => { if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
-        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsLineSpan(a, line.id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange(); } },
+      onclick: (event) => { if(event.currentTarget.isContentEditable)return; if(wordsPanel.editor){const target=event.currentTarget;wordsAfterEdit(()=>target.click());return;} if (a.animation_id !== wordsPanel.selected) wordsSelect(a.animation_id); if (a.animation_id !== wordsPanel.selected) return;
+        wordsPanel.line = line.id; wordsPanel.item = null; wordsPanel.picked = []; wordsPanel.time = wordsLineSpan(a, line.id).start; wordsPanel.previewRange = null; wordsPanel.autoPlay = true; wordsRender(); wordsVideoRange();
+        requestAnimationFrame(()=>wordsBeginEdit(wordsCurrent(),line.id,event)); } },
       ...line.words.map((w) => wordsChip(a, w))), at, len)),
     el("span", { class: "words-tl-head" })), 0, end);
 }
@@ -631,6 +704,7 @@ function wordsOptions(anim) {
 }
 
 function wordsRender() {
+  if(wordsPanel.editor?.dirty) return;
   const view = $("view-design");
   const anim = wordsCurrent();
   const animations = wordsPanel.read?.document?.animations || [];
@@ -737,6 +811,16 @@ function wordsStyleFields(anim) {
     field("outline_color", "Outline", "color", "#173b43"), field("background", "Background", "text", "")];
 }
 
+function wordsBackdropPicker(anim) {
+  const select=el("select",{"aria-label":"Scene image for this verse",onchange:async(event)=>{
+    try {const result=await wordsCommand("words.save",{animation_id:anim.animation_id,expected_source_revision:anim.source_revision,background_asset:event.target.value,_expected_project:state.project});
+      if(result.conflict){toast("This verse changed elsewhere; reloaded");} wordsPanel.stage=null;await wordsOpen();
+    }catch(error){toast(String(error));}
+  }},el("option",{value:""},"Choose this verse’s scene image…"),...(wordsPanel.read.images||[]).map(a=>el("option",{value:a.id},a.name)));
+  select.value=select.defaultValue=anim.background_asset||"";
+  return el("label",{class:"words-backdrop"},el("span",{class:"meta"},"Scene image"),select);
+}
+
 // The stage is the finished video, kept across re-renders so editing never reloads it.
 function wordsStage(anim) {
   const section = wordsStudioSection(anim);
@@ -755,12 +839,13 @@ function wordsStage(anim) {
   const server = new URL(url);
   const project = server.hash.split("/")[1] || "hyperframes";
   wordsPanel.player = `${server.origin}/api/projects/${project}/preview`;
-  const frame = el("iframe", { id: "words-video-frame", title: "The finished video", allow: "autoplay" });
+  const frame = el("iframe", { id: "words-video-frame", title: "Lyric and drawing preview", allow: "autoplay" });
   frame.addEventListener("load", wordsVideoRange);
   const view = (show, label) => el("button", { role: "tab", "data-show": show, "aria-selected": String(wordsPanel.show === show), onclick: () => wordsShow(show) }, label);
   wordsPanel.stage = el("div", { class: "words-preview", "data-animation": anim.animation_id },
     el("div", { class: "segmented", role: "tablist", "aria-label": "What the stage shows" },
-      view("stage", "Stage"), view("full", "Full video"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
+      view("still", "Scene image"), view("full", "Full video"), anim.effects?.text ? view("edited", `Edited · ${anim.effects.text.name}`) : null),
+    wordsBackdropPicker(anim),
     el("div", { class: "stage", id: "words-preview" }, frame),
     el("div", { class: "transport" },
       wordsPanel.playButton = el("button", { class: "icon", "aria-label": "Play this section", title: "Play this section of the video", onclick: () => wordsVideo(wordsPanel.playing ? "pause" : "play"), html: ICONS.play }),
@@ -782,9 +867,12 @@ async function wordsShow(show, frame = $("words-video-frame")) {
   let src = wordsPanel.player;
   wordsPanel.offset = show === "edited" ? anim.song_anchor || 0 : 0;
   try {
-    if (show === "lyrics" || show === "stage") src = `${wordsPanel.player}/comp/${(await wordsCommand("words.lyrics_view", { show })).src}`;
+    if (["lyrics", "stage", "still"].includes(show)) {
+      if(show === "still" && !anim.background_asset) { frame.removeAttribute("src"); return; }
+      src = `${wordsPanel.player}/comp/${(await wordsCommand("words.lyrics_view", { show, animation_id:anim.animation_id })).src}`;
+    }
     if (show === "edited") src = `${wordsPanel.player}/comp/${(await wordsCommand("words.compose", { animation_id: anim.animation_id })).src}`;
-  } catch (error) { toast(String(error).replace(/^.*?: /, "")); return wordsShow("full", frame); }
+  } catch (error) { toast(String(error).replace(/^.*?: /, "")); return; }
   if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
   else wordsVideoRange();
 }
@@ -840,7 +928,7 @@ addEventListener("message", (event) => {
     wordsPanel.time = song; wordsPanel.playing = !!data.isPlaying;
     if (data.isPlaying) wordsPanel.autoPlay = false;
     const scrub = $("words-scrub");
-    if (scrub) scrub.value = scrub.defaultValue = String(song);
+    if (scrub) { scrub.value = String(song); scrub.defaultValue = scrub.value; }
     if (wordsPanel.timeLabel) wordsPanel.timeLabel.textContent = wordsClock(song);
     wordsNow(song);
     wordsPanel.playButton?.setAttribute("aria-label", data.isPlaying ? "Pause this section" : "Play this section");
@@ -852,7 +940,12 @@ function wordsWidth(view = $("view-design")) {
   view.classList.toggle("narrow", view.clientWidth < 1100);
   view.classList.toggle("tight", view.clientWidth < 600);
 }
-const wordsViewFitter = new ResizeObserver(() => { const view = $("view-design"); if (view?.classList.contains("active")) { wordsWidth(view); wordsFitClock(view); wordsArrows(view); } });
+let wordsObservedWidth = -1;
+const wordsViewFitter = new ResizeObserver((entries) => {
+  const width=entries[0]?.contentRect.width;
+  if(width===wordsObservedWidth)return; wordsObservedWidth=width;
+  requestAnimationFrame(()=>{const view=$("view-design");if(view?.classList.contains("active")){wordsWidth(view);wordsFitClock(view);wordsArrows(view);}});
+});
 addEventListener("resize", () => { wordsWidth(); wordsFit(); const view = $("view-design"); if (view) wordsArrows(view); });
 // Leaving the Design view stops the video, so nothing plays behind another view.
 new MutationObserver(() => {
@@ -865,6 +958,7 @@ new MutationObserver(() => {
 // Kinetic sections: the layers under the stage, each a row of library cards. A pick saves the section and,
 // when it is in the video, composes it again so the stage shows the change.
 async function wordsKinetic(change) {
+  if(wordsPanel.editor){const saved=await wordsCommitEdit(wordsPanel.editor);if(!saved)return;}
   const anim = wordsCurrent();
   if (!anim?.kinetic) return;
   const kinetic = { ...anim.kinetic, ...change };
