@@ -74,5 +74,9 @@ blender-skills/
 .mcp.json.bak-*
 
 # Agent advisor config and stray media in the checkout root.
+/crew/.cast.lock
 WATCHDOG.yml
 /*.mp4
+
+# Generated from pinned Learning editor sources by the shell build.
+/apps/magicstudio-shell/ui/vendor/learning/

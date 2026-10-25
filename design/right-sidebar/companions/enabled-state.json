@@ -1,0 +1,42 @@
+{
+  "agent_open": true,
+  "animation": {
+    "character": null,
+    "playing": false,
+    "rest": true,
+    "selected_layer": null,
+    "time": 0,
+    "track": ""
+  },
+  "companions": {
+    "animating": false,
+    "dedupe": 0,
+    "enabled": true,
+    "gaffer": {
+      "command": null,
+      "destination": "artwork",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": null,
+      "destination": "chat",
+      "key": null,
+      "reason": "Home",
+      "request": null,
+      "status": "home"
+    }
+  },
+  "open_block": "song",
+  "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+  "storyboard_page": 1,
+  "studio": null,
+  "toast": null,
+  "view": "project"
+}

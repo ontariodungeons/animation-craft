@@ -1,0 +1,315 @@
+{
+  "commit": "24e62387e68f821c3edc60341e19b73c944e1940",
+  "project_kind": "Disposable acceptance fixture; idle states injected after actual pending metadata work completed",
+  "poses": [
+    {
+      "height": 150,
+      "src": "media/companions/gaffer-cat-rest.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/gaffer-cat-work.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/gaffer-cat-sniff.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/gaffer-cat-alert.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/gaffer-cat-asleep.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/sproket-dog-rest.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/sproket-dog-work.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/sproket-dog-sniff.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/sproket-dog-alert.svg",
+      "width": 150
+    },
+    {
+      "height": 150,
+      "src": "media/companions/sproket-dog-asleep.svg",
+      "width": 150
+    }
+  ],
+  "cases": {
+    "attention": {
+      "sproket": {
+        "box": "magic-image-pane",
+        "lastBurstAt": 1792833314439,
+        "placement_error": null,
+        "pose": "work",
+        "signal": 2,
+        "slot": "magic-image-pane",
+        "step": 3,
+        "timer": null
+      },
+      "gaffer": {
+        "box": "magic-image-pane",
+        "lastBurstAt": 1792833314439,
+        "placement_error": null,
+        "pose": "work",
+        "signal": 2,
+        "slot": "magic-image-pane",
+        "step": 3,
+        "timer": null
+      }
+    },
+    "last_chat_action": {
+      "sproket": {
+        "box": "song",
+        "lastBurstAt": 1792833316569,
+        "placement_error": null,
+        "pose": "work",
+        "signal": 2,
+        "slot": "song",
+        "step": 0,
+        "timer": 36
+      },
+      "gaffer": {
+        "box": "magic-chat-pane",
+        "lastBurstAt": 1792833314439,
+        "placement_error": null,
+        "pose": "rest",
+        "signal": 1,
+        "slot": "magic-chat-pane",
+        "step": 3,
+        "timer": null
+      }
+    },
+    "idle_fixture": {
+      "sproket": {
+        "box": null,
+        "lastBurstAt": 1792833316569,
+        "placement_error": null,
+        "pose": "rest",
+        "signal": 0,
+        "slot": "magic-chat-pane",
+        "step": 0,
+        "timer": null
+      },
+      "gaffer": {
+        "box": null,
+        "lastBurstAt": 1792833316583,
+        "placement_error": null,
+        "pose": "asleep",
+        "signal": 0,
+        "slot": "magic-image-pane",
+        "step": 0,
+        "timer": null
+      }
+    },
+    "actual_failure": {
+      "error": "unknown command `ui_contract_missing_command`",
+      "sproket": {
+        "box": "magic-chat-pane",
+        "lastBurstAt": 1792833314439,
+        "placement_error": null,
+        "pose": "alert",
+        "signal": 3,
+        "slot": "magic-chat-pane",
+        "step": 3,
+        "timer": null
+      },
+      "gaffer": {
+        "box": "magic-chat-pane",
+        "lastBurstAt": 1792833314439,
+        "placement_error": null,
+        "pose": "work",
+        "signal": 3,
+        "slot": "magic-chat-pane",
+        "step": 3,
+        "timer": null
+      }
+    },
+    "missing_registration": {
+      "diagnostics": [
+        {
+          "container": "magic-chat-pane",
+          "id": "contract-proof-missing",
+          "index": 420,
+          "label": "Contract test fixture",
+          "reason": "untracked",
+          "rect": [
+            923.53125,
+            351.15625,
+            328.46875,
+            23.84375
+          ],
+          "tag": "button"
+        }
+      ],
+      "sproket": {
+        "box": "magic-chat-pane",
+        "lastBurstAt": 1792833316569,
+        "placement_error": null,
+        "pose": "alert",
+        "signal": 3,
+        "slot": "magic-chat-pane",
+        "step": 0,
+        "timer": 36
+      },
+      "gaffer": {
+        "box": "magic-chat-pane",
+        "lastBurstAt": 1792833316583,
+        "placement_error": null,
+        "pose": "work",
+        "signal": 3,
+        "slot": "magic-chat-pane",
+        "step": 0,
+        "timer": 43
+      }
+    }
+  },
+  "geometry": [
+    {
+      "image_loaded": true,
+      "index": "166",
+      "inside": true,
+      "name": "sproket",
+      "slot": "magic-chat-pane",
+      "visible": true
+    },
+    {
+      "image_loaded": true,
+      "index": "167",
+      "inside": true,
+      "name": "gaffer",
+      "slot": "magic-image-pane",
+      "visible": true
+    }
+  ],
+  "disable_and_reenable": true,
+  "layouts": [
+    {
+      "errors": [],
+      "pets": [
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "sproket",
+          "visible": true
+        },
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "gaffer",
+          "visible": true
+        }
+      ],
+      "width": 700
+    },
+    {
+      "errors": [],
+      "pets": [
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "sproket",
+          "visible": true
+        },
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "gaffer",
+          "visible": true
+        }
+      ],
+      "width": 941
+    },
+    {
+      "errors": [],
+      "pets": [
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "sproket",
+          "visible": true
+        },
+        {
+          "box": "magic-image-pane",
+          "error": null,
+          "inside": true,
+          "name": "gaffer",
+          "visible": true
+        }
+      ],
+      "width": 1261
+    }
+  ],
+  "components": {
+    "total": 295,
+    "instance": "1792832510514-l276vdqee7",
+    "revision": 1,
+    "all_indices_unique": true,
+    "all_positions_finite": true,
+    "right_panels_share_component": true
+  },
+  "checks": {
+    "normal_commit_hooks": "passed",
+    "cargo_check_workspace_offline": "passed",
+    "mc_panels_check_exit": 0
+  },
+  "source_size": {
+    "css_lines": 1042,
+    "css_original_target": 911,
+    "js_lines": 4529,
+    "js_original_target": 4227,
+    "selectors": 666,
+    "selector_target": 673,
+    "pixel_literals_outside_root": 0,
+    "hex_literals_outside_root": 0,
+    "inline_visual_writes": 0
+  },
+  "scope": "Shared component/telemetry/panel/pet refactor. Preserve Claude page design; no intake or animation engine rewrite.",
+  "identity": {
+    "application": "Magic Studio",
+    "build_id": "24e62387-1792833226",
+    "executable": "/run/media/jesse/Speedy/Work/omhas-animation/.worktrees/panel-unification/target/debug/magicstudio-shell",
+    "frontend": "Tauri",
+    "pid": 3965016,
+    "version": "0.1.0"
+  },
+  "project_isolation": {
+    "attention": "Review this project",
+    "errors": [],
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/.worktrees/panel-unification/docs/architecture/evidence/Attention-other.magic",
+    "receipt": null,
+    "request": null,
+    "signal": 2,
+    "state": "idle"
+  },
+  "review": {
+    "first_findings": 2,
+    "resolved": true,
+    "stale_poll_start_followup": "resolved",
+    "reviewer": "final_refactor_review",
+    "hook_checks": "passed"
+  }
+}

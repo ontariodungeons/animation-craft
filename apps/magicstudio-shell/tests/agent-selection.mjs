@@ -14,6 +14,7 @@ let rejectSend = false;
 const config = { agent: "opencode", provider: "opencode", model: "synthetic-free", agents: [{ name: "opencode", installed: true, headless: true }] };
 const context = vm.createContext({
   console, JSON, Promise, Set, $: node,
+  createTopDrawers:()=>({open(){},close(){},active:null}),
   requestAnimationFrame: (callback) => callback(),
   acFeedback: { acknowledge: async (revision, project) => calls.push({id:"render_revision",revision,project}), report: async (phase, ack, event) => calls.push({id:"render_receipt",event}) },
   el: (tag, attrs, text) => ({ tag, ...attrs, text }),
@@ -24,7 +25,7 @@ const context = vm.createContext({
     calls.push({ id, params });
     if (id === "agent.log") return [];
     if (id === "agent.models") return { available: true, models: [{ providerID: "opencode", id: "synthetic-free", enabled: true }] };
-    if (id === "agent.new_chat") return { ok: true, session: "ses_fresh", turns: [] };
+    if (id === "agent.new_chat") return { ok: true, session: "ses_fresh", turns: [], _ui_engine_revision: 2 };
     if (id === "agent.send") {
       if (rejectSend) throw Error("Synthetic authentication rejected");
       return { ok: true, session: "ses_fresh", provider: "opencode", model: "synthetic-free", text: "Synthetic answer", turns: [] };
@@ -46,6 +47,7 @@ assert.equal(saved.patch.provider, "opencode");
 assert.equal(saved.patch.model, "synthetic-free");
 assert.ok(!("image_model" in saved.patch), "chat save must not overwrite image preferences");
 await vm.runInContext("agentNewChat()", context);
+assert.ok(calls.some(c => c.id === "render_revision" && c.revision === 2 && c.project === "/synthetic/Test.magic"), "New Chat acknowledges its applied UI revision");
 node("agent-input").value = "Synthetic first message";
 await vm.runInContext("agentSend()", context);
 let sends = calls.filter((c) => c.id === "agent.send");
@@ -70,7 +72,7 @@ assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"other project ca
 await vm.runInContext(`agent.turns=[{role:"assistant",text:"Not rendered",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,0,"unrendered text cannot acknowledge");
 await vm.runInContext(`agent.turns=[{role:"assistant",text:"Visible reply",project:state.project,request_id:"r1",session:"A"}]; acknowledgeAgentReply(10)`,context);
-assert.equal(calls.filter(c=>c.id==="render_revision").length,1);
+assert.equal(calls.filter(c=>c.id==="render_revision" && c.revision===10).length,1);
 assert.equal(calls.find(c=>c.id==="render_receipt").event.request_id,"r1");
 await vm.runInContext("acknowledgeAgentReply()",context);
 assert.equal(calls.filter(c=>c.id==="render_receipt").length,1,"polling must not duplicate receipt");
@@ -133,7 +135,7 @@ const artworkContext = vm.createContext({
   localStorage: { getItem: () => null, setItem() {} },
   state: { project: '/fixture/Artwork.magic', view: 'animation', open: 'image' },
   $: id => artworkNodes.get(id) || null, el: artworkElement, ICONS: { chev: '' }, convertFileSrc: p => p,
-  document: { querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
+  document: { querySelectorAll: () => [], querySelector: () => null, body:{append(){}}, createElement: tag => artworkElement(tag) }, window: { addEventListener() {} },
   magicTheatre: { exports: new Map() }, theatreRequireSaved() {}, theatreCanLeave: () => true,
   updateAppFooter() {}, renderBlocks() {}, acFeedback: { report: async () => {} },
   invoke: async (id, args) => {
@@ -152,7 +154,7 @@ for (const file of ['companion-boxes.js', 'animation.js', 'blender-placement.js'
 }
 const appSource = readFileSync(new URL('../ui/app.js', import.meta.url), 'utf8');
 // Use the production shared-label and block renderers without booting the desktop app.
-for (const [start, end] of [['function updateMagicSelection()', '\nfunction renderMagicAssetCatalog()'], ['function block(', '\nfunction objectsFrom(']]) {
+for (const [start, end] of [['function updateMagicSelection()', '\nfunction projectAssetGrid'], ['function block(', '\nfunction objectsFrom(']]) {
   vm.runInContext(appSource.slice(appSource.indexOf(start), appSource.indexOf(end)), artworkContext);
 }
 vm.runInContext(`
@@ -173,7 +175,6 @@ await vm.runInContext(`motionModeSwitch().children.find(n=>n.id==='motion-mode-b
 assert.equal(vm.runInContext('motion.selected', artworkContext), 'left-piece', 'rendering must preserve the authoring part ID');
 assert.equal(artworkNodes.get('blender-render-dialog').open,true,'actual render dialog must open');
 assert.equal(artworkNodes.get('magic-target-image').textContent, 'Left piece · left-piece');
-assert.equal(artworkNodes.get('magic-target-parts').textContent, 'Left piece · left-piece');
 assert.equal(vm.runInContext('selectedPartTarget().partId', artworkContext), 'left-piece');
 assert.equal(vm.runInContext('motion.meta.layers.length', artworkContext), 2, 'lightweight render metadata must not replace authoring layers');
 assert.ok(artworkCalls.some(c=>c.id==='blender.actions'),'fixture must reach the real render metadata query');

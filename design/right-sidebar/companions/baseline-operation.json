@@ -1,0 +1,18 @@
+{
+  "label": "baseline-operation",
+  "seconds": 2.0546566330012865,
+  "process_tree_cpu_seconds": 0.02,
+  "one_core_cpu_percent": 0.9733986535154303,
+  "pids": [
+    878888,
+    878922,
+    878907
+  ],
+  "dom": {
+    "companions": null,
+    "mutations": {
+      "all": 26,
+      "companions": 0
+    }
+  }
+}

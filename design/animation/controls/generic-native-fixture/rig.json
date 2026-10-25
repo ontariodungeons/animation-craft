@@ -1,0 +1,27 @@
+{
+  "canvas": [
+    64,
+    64
+  ],
+  "fps": 24,
+  "layers": [
+    {
+      "file": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/paper.png",
+      "id": "paper",
+      "label": "Paper shape",
+      "pivot": [
+        24,
+        28
+      ]
+    }
+  ],
+  "tracks": [
+    {
+      "duration": 2,
+      "id": "wave",
+      "label": "Paper wave",
+      "loop": false,
+      "motion": {}
+    }
+  ]
+}

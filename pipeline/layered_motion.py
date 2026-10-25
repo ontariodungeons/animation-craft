@@ -12,6 +12,8 @@ Motion is built from a few generic terms that add together per property:
 Optional spec fields: `margin` [left, top, right, bottom] enlarges the clip beyond the layer canvas (room for
 artwork that touches the edge or moves outside it; the layers keep their place, offset by left/top), `reference` an image of the expected look and track `loop` true, both used by the validation
 that runs on every rendered clip.
+`alternates` declares mutually exclusive layer pairs, e.g. [["eyes_open", "eyes_closed"]].
+Use [] when overlapping layers depict separate objects. Omit it to infer alternates from overlap.
 
 Every term is an offset from the resting state: position in pixels from the pivot, rotation in degrees,
 scale in percentage points added to 100, opacity in percentage points added to 100 (so -100 hides).
@@ -457,7 +459,8 @@ def opacity_series(track, lid, fps):
 def layer_checks(spec):
     """Checks the rendered clip cannot make: which layers are on screen together.
 
-    Two layers are alternates (open and closed eyes, two mouth shapes) when neither is the other's ancestor,
+    Explicit alternate pairs take precedence over inference: two separate objects may intentionally overlap.
+    Without a declaration, layers are inferred as alternates when neither is the other's ancestor,
     they are of similar scale, and most of the smaller one lies on the larger one at rest; showing two at once
     draws one over the other. Also reports layers a track lists but never shows, and layers no track uses."""
     cw, ch = spec['canvas']
@@ -480,8 +483,20 @@ def layer_checks(spec):
         return out
 
     alternates = []
+    declared = spec.get('alternates')
+    if declared is not None:
+        if not isinstance(declared, list) or any(
+                not isinstance(pair, list) or len(pair) != 2 or pair[0] == pair[1]
+                or any(not isinstance(lid, str) or lid not in masks for lid in pair) for pair in declared):
+            raise ValueError('alternates must be pairs of distinct, existing layer ids')
+        for a, b in declared:
+            small = min(int(masks[a].sum()), int(masks[b].sum()))
+            shared = float(np.logical_and(masks[a], masks[b]).sum() / small) if small else 0.0
+            alternates.append((a, b, round(shared, 3)))
     for i, a in enumerate(ids):
         for b in ids[i + 1:]:
+            if declared is not None:
+                continue
             if a in ancestors(b) or b in ancestors(a):
                 continue
             small, large = sorted((int(masks[a].sum()), int(masks[b].sum())))

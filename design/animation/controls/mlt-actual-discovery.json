@@ -1,0 +1,24 @@
+{
+  "available": true,
+  "backend": "mlt",
+  "configured": true,
+  "executable": "/usr/bin/melt-7",
+  "ffmpeg": "/usr/bin/ffmpeg",
+  "ffprobe": "/usr/bin/ffprobe",
+  "input": "generic timeline JSON",
+  "output": "editable .mlt + opaque H264/AAC MP4",
+  "render_capable": null,
+  "render_reason": "Native avformat/codec capability is checked in the bounded job",
+  "supported": [
+    "ordered frame-exact cuts at matching FPS",
+    "embedded clip audio or explicit replacement audio bed",
+    "frozen local media receipts"
+  ],
+  "unsupported": [
+    "arbitrary MLT XML import",
+    "multi-layer film composition",
+    "transitions/effects/captions",
+    "alpha output",
+    "implicit frame-rate conversion"
+  ]
+}

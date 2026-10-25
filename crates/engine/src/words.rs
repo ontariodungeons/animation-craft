@@ -699,6 +699,49 @@ pub fn cmd_words_save(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"ok":true,"conflict":false,"path":path,"animation":saved}))
 }
 
+/// Move the semantic word attachment while preserving the drawing's absolute song time.
+pub fn cmd_words_link(s: &mut Session, p: &Value) -> Result<Value> {
+    let dir=crate::workshop::project_dir(s)?;
+    let mut doc=load(&dir)?.ok_or_else(||invalid("Save this lyric design first"))?;
+    let source=p["animation_id"].as_str().ok_or_else(||invalid("animation_id is required"))?;
+    let target=p["target_animation_id"].as_str().unwrap_or(source);
+    let word=p["word_id"].as_str().ok_or_else(||invalid("word_id is required"))?;
+    let index=p["index"].as_u64().ok_or_else(||invalid("drawing index is required"))? as usize;
+    let list=doc["animations"].as_array().ok_or_else(||invalid("No lyric sections"))?;
+    let si=list.iter().position(|a|a["animation_id"]==source).ok_or_else(||invalid("No source section"))?;
+    let ti=list.iter().position(|a|a["animation_id"]==target).ok_or_else(||invalid("No target section"))?;
+    let expected=p["expected_source_revision"].as_u64().ok_or_else(||invalid("expected_source_revision is required"))?;
+    let target_expected=if si==ti {expected}else{p["expected_target_revision"].as_u64().ok_or_else(||invalid("expected_target_revision is required"))?};
+    if list[si]["source_revision"].as_u64()!=Some(expected) || list[ti]["source_revision"].as_u64()!=Some(target_expected) {
+        return Ok(json!({"ok":false,"conflict":true,"reason":"A section changed; nothing relinked"}));
+    }
+    let lib:Value=serde_json::from_str(KINETIC_LIBRARY).map_err(|e|invalid(e.to_string()))?;
+    let times=studio_times(s);
+    let cues=graphic_cues(&doc,&lib,&times);
+    let cue=cues.iter().find(|c|c["animation_id"]==source && c["index"].as_u64()==Some(index as u64)).ok_or_else(||invalid("Select a drawing clip to relink"))?;
+    let w=list[ti]["words"].as_array().into_iter().flatten().find(|w|w["word_id"]==word).ok_or_else(||invalid("The target word is not in this section"))?;
+    let at=times.get(&word_time_key(&list[ti]["scope"],word)).map(|t|t.0).or_else(||w["start"].as_f64()).ok_or_else(||invalid("The target word has no known timing"))?;
+    if !list[ti]["kinetic"].is_object(){return Err(invalid("Choose a word in a kinetic lyric section"));}
+    let mut drawing=list[si]["kinetic"]["draws"].as_array().and_then(|d|d.get(index)).cloned().ok_or_else(||invalid("Drawing index is stale"))?;
+    drawing["word_id"]=json!(word);drawing["offset"]=json!(cue["start"].as_f64().unwrap_or(at)-at);
+    if drawing["color"].is_null(){drawing["color"]=list[si]["kinetic"]["style"]["hero_color"].clone();}
+    let target_index;
+    if si==ti {
+        doc["animations"][si]["kinetic"]["draws"][index]=drawing;target_index=index;
+    }else{
+        doc["animations"][si]["kinetic"]["draws"].as_array_mut().unwrap().remove(index);
+        if !doc["animations"][ti]["kinetic"]["draws"].is_array(){doc["animations"][ti]["kinetic"]["draws"]=json!([]);}
+        let draws=doc["animations"][ti]["kinetic"]["draws"].as_array_mut().unwrap();target_index=draws.len();draws.push(drawing);
+    }
+    for i in if si==ti {vec![si]}else{vec![si,ti]} {
+        let a=&mut doc["animations"][i];a["kinetic"]=kinetic_design(&a["words"],&a["kinetic"])?;
+        a["source_revision"]=json!(a["source_revision"].as_u64().unwrap_or(0)+1);
+    }
+    let path=document_path(&dir);let tmp=path.with_extension("tmp");
+    fs::write(&tmp,serde_json::to_vec_pretty(&doc).map_err(|e|invalid(e.to_string()))?)?;fs::rename(tmp,path)?;
+    Ok(json!({"ok":true,"conflict":false,"animation_id":target,"index":target_index,"word_id":word,"start":cue["start"],"changed_sections":if si==ti {vec![source]}else{vec![source,target]}}))
+}
+
 /// Check one line's design. Items group the line's own words, all of them, in sung order; each
 /// item's text is joined from those words, so lyrics never change here. Strokes are SVG path data.
 fn line_design(words: &[Value], design: &Value) -> Result<Value> {
@@ -826,7 +869,7 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
         } else { Value::Null };
         let mut draw = json!({"word_id":d["word_id"],"stroke":if custom.is_null() { named("strokes",&d["stroke"])? } else { Value::Null },
             "drawing":custom,"place":if d["place"] == "beside" { "beside" } else { "under" }});
-        for (key,lo,hi) in [("offset",-30.0,30.0),("duration",0.05,30.0),("hold",0.0,30.0),("x",-2000.0,6000.0),("y",-2000.0,6000.0),("width",1.0,6000.0)] {
+        for (key,lo,hi) in [("offset",-600.0,600.0),("duration",0.05,30.0),("hold",0.0,30.0),("x",-2000.0,6000.0),("y",-2000.0,6000.0),("width",1.0,6000.0)] {
             if let Some(v) = d.get(key) { let n=v.as_f64().filter(|n|n.is_finite() && *n>=lo && *n<=hi).ok_or_else(||invalid(format!("drawing.{key} must be between {lo} and {hi}")))?; draw[key]=json!(n); }
         }
         if d.get("color").is_some() { draw["color"]=hex(&d["color"]).ok_or_else(||invalid("drawing.color must be a hex colour"))?; }
@@ -1254,6 +1297,12 @@ mod tests {
             assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":draws})).is_err());
         }
         assert_eq!((drawn["draws"][0]["stroke"].clone(), drawn["draws"][0]["place"].clone()), (json!("hill"), json!("under")));
+        let mut retimed = drawn.clone();
+        retimed["draws"][0]["offset"] = json!(0.1);
+        retimed["draws"][0]["duration"] = json!(1.2);
+        let saved_again = kinetic_design(&words, &retimed).unwrap();
+        assert_eq!(saved_again["draws"][0]["stroke"], json!("hill"));
+        assert_eq!(saved_again["draws"][0]["offset"], json!(0.1), "saved library strokes can be moved and trimmed");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","draws":[{"word_id":"v1-l1/w1","stroke":"scribble"}]})).is_err(), "unknown stroke");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v9-l1/w0":"spin"}})).is_err(), "a word from another section");
         assert!(kinetic_design(&words, &json!({"layout":"stack","entrance":"pop","acts":{"v1-l1/w1":"explode"}})).is_err(), "unknown act");
@@ -1458,6 +1507,26 @@ mod tests {
         let cleared = cmd_words_save(&mut s, &json!({"animation_id":"words-chorus-1","expected_source_revision":1,"effects":{"text":null}})).unwrap();
         assert!(cleared["animation"]["effects"]["text"].is_null());
         assert!(fs::read_to_string(cmd_words_compose(&mut s, &json!({"animation_id":"words-chorus-1"})).unwrap()["file"].as_str().unwrap()).unwrap().contains("__DATA__") == false);
+    }
+
+    #[test]
+    fn relink_drawing_preserves_absolute_time_and_refuses_stale_changes() {
+        let (dir,mut s)=project("relink");
+        for (id,draws) in [("words-verse-1-1",json!([{"word_id":"v1-l1/w0","stroke":"down","offset":0.5}])),("words-chorus-1",json!([]))] {
+            cmd_words_save(&mut s,&json!({"animation_id":id,"expected_source_revision":0,"kinetic":{"layout":"karaoke","entrance":"pop","draws":draws}})).unwrap();
+        }
+        let params=json!({"animation_id":"words-verse-1-1","index":0,"target_animation_id":"words-chorus-1","word_id":"ch-l1/w0","expected_source_revision":1,"expected_target_revision":1});
+        let result=cmd_words_link(&mut s,&params).unwrap();assert_eq!(result["start"],json!(1.5));
+        let doc=load(&dir).unwrap().unwrap();assert_eq!(doc["animations"][0]["kinetic"]["draws"],json!([]));
+        assert_eq!(doc["animations"][1]["kinetic"]["draws"][0]["offset"],json!(-2.5));
+        let before=fs::read(document_path(&dir)).unwrap();assert_eq!(cmd_words_link(&mut s,&params).unwrap()["conflict"],true);
+        assert_eq!(fs::read(document_path(&dir)).unwrap(),before);
+        let same=json!({"animation_id":"words-chorus-1","index":0,"word_id":"ch-l1/w1","expected_source_revision":2});
+        assert_eq!(cmd_words_link(&mut s,&same).unwrap()["start"],json!(1.5));
+        let before=fs::read(document_path(&dir)).unwrap();
+        assert!(cmd_words_link(&mut s,&json!({"animation_id":"words-chorus-1","index":0,"word_id":"unknown","expected_source_revision":3})).is_err());
+        assert_eq!(fs::read(document_path(&dir)).unwrap(),before);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

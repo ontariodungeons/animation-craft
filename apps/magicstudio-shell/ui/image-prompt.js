@@ -42,7 +42,6 @@ async function imagePromptCompleted(project, draft, result, captured) {
     if (state.view === 'animation') await animationRefresh();
     if (state.project !== project) return;
     renderBlocks();
-    window.magicCompanions?.event({project,view:state.view,command:'image.generate',request:result._request_id||`image-${result.asset_id}`,phase:'success',params:{},result});
     await acFeedback.report(null, null, { stage: 'image_block_rendered', command: 'image.generate', asset_id: result.asset_id, receipt: result.receipt, captured_part: captured?.partId || null });
   } catch (error) { draft.refreshError = `Artwork created; view refresh failed: ${String(error)}`; }
 }
@@ -59,8 +58,10 @@ function imagePromptBlock() {
   model.addEventListener('input', () => {
     draft.model = model.value; updateCommand();
     if (!draft.busy && !draft.result && !draft.error) {
-      section.querySelector('.meta').textContent = draft.model;
-      section.querySelector('.panel-head.control').title = `Gaffer · Artwork · ${draft.model}`;
+      if (typeof document !== 'undefined' && typeof document.getElementById === 'function') {
+        const _hdr = document.getElementById('magic-image-toggle');
+        if (_hdr) _hdr.title = `Gaffer · Artwork · ${draft.model}`;
+      }
     }
   });
   const command = el('code', { id: 'image-command' });
@@ -72,16 +73,17 @@ function imagePromptBlock() {
   updateCommand();
   const elapsed = () => Math.max(0, Math.floor((performance.now() - draft.startedAt) / 1000));
   const targetLabel = draft.target ? `${draft.target.name} · ${draft.target.partId}` : '';
-  const status = el('p', { id: 'image-status', role: 'status', 'aria-live': 'polite', class: draft.error ? 'image-error' : 'why' });
+  const status = el('p', { id: 'image-status', role: 'status', 'aria-live': 'polite', class: 'why' });
   function updateStatus() {
-    status.className = draft.error ? 'image-error' : draft.result ? 'why magic-image-review' : 'why';
-    if (draft.busy) status.textContent = `image.generate request running · ${elapsed()}s elapsed${targetLabel ? ` · target ${targetLabel}` : ''}`;
+    status.dataset.signal = draft.error ? '3' : draft.result ? '2' : '0';
+    if (draft.busy) status.textContent = `Creating artwork · ${elapsed()}s${targetLabel ? ` · ${targetLabel}` : ''}`;
     else if (draft.error) status.textContent = draft.error;
-    else if (draft.result) status.textContent = `✓ Completed in ${draft.completedElapsed ?? 0}s · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · candidate needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}${draft.refreshError ? ` · ${draft.refreshError}` : ''}`;
-    else status.textContent = 'Native Codex image tool · current login · quality and dimensions are tool-controlled.';
+    else if (draft.result) status.textContent = `Ready · ${draft.result.width} × ${draft.result.height} · Review candidate${draft.candidateTarget ? ` · ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}${draft.refreshError ? ` · ${draft.refreshError}` : ''}`;
+    else status.textContent = 'Describe the artwork you want to create.';
+    status.title=draft.result?`Completed in ${draft.completedElapsed??0}s · ${draft.result.native_tool_receipt_verified?'native receipt verified':'receipt unavailable'}`:status.textContent;
   }
   updateStatus();
-  const generate = el('button', { id: 'image-generate', class: 'start', 'data-commands': 'image.generate', 'aria-label': 'Gaffer: generate artwork candidate', onclick: async () => {
+  const generate = el('button', { id: 'image-generate', 'data-commands': 'image.generate', 'aria-label': 'Gaffer: generate artwork candidate', onclick: async () => {
     if (!draft.prompt.trim()) { prompt.focus(); return; }
     if (draft.busy) return;
     // Freeze the target and reference at invocation time; later selection changes cannot retarget this job.
@@ -113,24 +115,12 @@ function imagePromptBlock() {
     try { await navigator.clipboard.writeText(command.textContent); toast('Image command copied · nothing executed'); }
     catch { toast('Clipboard unavailable · select the command text'); }
   } }, 'Copy command');
-  const body = [el('label', { for: 'image-prompt' }, 'Prompt'), prompt,
-    el('label', { for: 'image-model' }, 'Codex model'), model, models, status, generate,
-    el('details', {}, el('summary', {}, 'CLI command'), command, copy)];
+  const settings=el('div',{id:'image-settings'},el('label',{for:'image-model'},'Model'),model,models,
+    el('details', {}, el('summary', {}, 'CLI command'), command, copy));
+  settings.hidden=$('gaffer-config-toggle')?.getAttribute('aria-expanded')!=='true';
+  const body = [el('label', { for: 'image-prompt' }, 'Prompt'), prompt,status,generate,settings];
   if (draft.result?.image) body.push(el('img', { class: 'image-result', src: convertFileSrc(draft.result.image), alt: 'Generated candidate artwork · needs visual review' }),
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
-  const section = block('image', '🐈', 'Gaffer · Artwork', draft.busy ? `${Math.floor(elapsed())}s` : draft.result ? 'Candidate' : draft.model, false, body, draft.error ? 'needs' : 'empty');
-  section.classList.add('image-prompt-block');
-  section.dataset.imageStatus = draft.busy ? 'working' : draft.error ? 'failed' : draft.result ? 'completed' : 'not-started';
-  const indicator = section.querySelector('.panel-head.control .dot');
-  if (indicator) {
-    if (draft.result) {
-      const success = el('span', { class: 'magic-image-ok', role: 'img', 'aria-label': 'Generation completed successfully', title: 'Completed successfully' }, '✓');
-      indicator.replaceWith(success);
-    } else {
-      const next = window.companionBoxes.dot(draft.error ? 'failed' : draft.busy ? 'working' : 'idle');
-      next.title = draft.error ? 'Failed' : draft.busy ? 'Working' : 'Not started';
-      indicator.replaceWith(next);
-    }
-  }
-  return section;
+  window.uiRegistry.fact({ id: 'magic-image-pane', project: state.project, state: draft.error ? 'failed' : draft.busy ? 'working' : draft.result ? 'ready' : 'idle', reason: draft.error || null, source: 'artwork result' });
+  return el('div', { id: 'image-tools-body' }, ...body);
 }

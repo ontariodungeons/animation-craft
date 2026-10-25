@@ -1,0 +1,24 @@
+/* Both assistants use one top drawer, leaving the creative surface at full width. */
+:root{--assistant-width:36rem;--assistant-height:min(36rem,65vh)}
+.drawer-toggles{display:flex;gap:var(--space-2);margin-left:auto;flex:none}
+.drawer-toggles [aria-expanded=true]{border-color:var(--accent);color:var(--accent);background:var(--surface-2)}
+.workshop-drawers{position:fixed;z-index:24;top:var(--size-48);right:var(--space-3);width:min(var(--assistant-width),calc(100vw - var(--space-3)*2));height:var(--assistant-height);max-height:calc(100dvh - var(--size-48) - var(--footer-h) - var(--space-3));min-height:0;overflow:hidden;background:var(--surface);border:thin solid var(--line);border-radius:0 0 var(--radius) var(--radius);box-shadow:0 var(--space-4) var(--space-5) var(--alpha-08)}
+[data-drawer]{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+[data-drawer] .agent{position:static;width:100%;height:100%;min-height:0;display:flex;flex-direction:column;background:transparent}
+[data-drawer] .panel-head{flex:none}
+[data-drawer] .panel-title{min-width:0;white-space:nowrap}
+[data-drawer] .magic-target{flex:1;text-align:right}
+[data-drawer] .agent-compose{padding:var(--space-3)}
+[data-drawer] .agent-compose textarea{min-height:var(--size-80);max-height:12rem}
+[data-drawer] .agent-attachments:empty{display:none}
+[data-drawer] .agent-attachments{max-height:var(--size-80);overflow:auto}
+.magic-image-tools{flex:1;min-height:0;overflow:auto;padding:var(--space-4)}
+.magic-image-tools>div{display:grid;gap:var(--space-3)}
+.magic-image-tools label{font-size:var(--text-sm);color:var(--muted)}
+.magic-image-tools textarea,.magic-image-tools input{width:100%;min-width:0}
+.magic-image-tools textarea{min-height:var(--size-100);resize:vertical}
+.magic-image-tools .start{width:100%}
+[data-drawer] .reader-body{flex:1;min-height:0}
+body.at-home .drawer-toggles{visibility:hidden}
+@media(max-width:62.5em){.drawer-label{display:none}.bar .tabs{min-width:0;overflow-x:auto;flex-shrink:1}.bar .target{max-width:var(--size-36);overflow:hidden;flex:none}}
+@media(max-width:47.5em){.bar .brand-word{display:none}.bar .project-chip{max-width:var(--size-100)}.bar{gap:var(--space-2)}}

@@ -1,0 +1,36 @@
+{
+  "depth": "1",
+  "edit": {
+    "character": "cards",
+    "command": "motion.layers.set",
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/Generic.magic",
+    "result": {
+      "_ui_engine_revision": 2,
+      "character": "cards",
+      "layer_order": [
+        "child-card",
+        "parent-card"
+      ],
+      "ok": true,
+      "order_semantics": "back_to_front_zero_based",
+      "project_saved": false,
+      "rig_saved": true,
+      "rig_sha256": "622751823682259c1561bdf6c671403086a14518b70d95fe635002a8dd7a3cd0",
+      "spec": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/rig.json",
+      "undo": "1792788894142844401",
+      "undo_receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-order-fixture/.motion-authoring/0a93866dee7d32cd79daf136d86c504958fe6697615ac35eb50772b3ecfaa430/1792788894142844401.json"
+    },
+    "track": "hold"
+  },
+  "order": [
+    "child-card",
+    "parent-card"
+  ],
+  "parent": "parent-card",
+  "sampleIDs": [
+    "child-card",
+    "parent-card"
+  ],
+  "selected": "parent-card",
+  "status": "Rig saved · undo receipt available · project Save remains explicit."
+}

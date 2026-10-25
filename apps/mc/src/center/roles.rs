@@ -22,7 +22,7 @@ pub(super) fn controls(c:&Center)->Vec<Value>{
   if c.scope.is_none(){return true;}
   let name=action.split_whitespace().next().unwrap_or("");
   !name.starts_with("project")&&!name.starts_with("intake")&&name!="input"&&name!="booth.prepare"&&name!="doctor"&&!(name=="chat.send"&&c.scope.as_ref().is_some_and(|s|!s.permits("agent.send")))
- }).map(|(action,description)|json!({"action":if c.scope.is_some()&&action.starts_with("view "){"view name=booth|mops|animal"}else if c.scope.as_ref().is_some_and(|s|!s.permits("agent.send"))&&action.starts_with("chat ["){"chat"}else{action},"description":if c.scope.is_some()&&action.starts_with("view "){"F2 Booth · F3 MOPS · F4 ANIMAL"}else if c.scope.is_some()&&action.starts_with("key "){"Project Booth keys; Workshop and project switching are unavailable"}else{description}})).chain(if c.scope.is_some(){vec![json!({"action":"details | refresh","description":"D project details · F8 refresh"})]}else{vec![]}).collect()
+ }).map(|(action,description)|json!({"action":if c.scope.is_some()&&action.starts_with("view "){"view name=booth|mops|animal"}else if c.scope.as_ref().is_some_and(|s|!s.permits("agent.send"))&&action.starts_with("chat ["){"chat"}else{action},"description":if c.scope.is_some()&&action.starts_with("view "){"F2 Booth · F3 MOPS · F4 MAYHEM"}else if c.scope.is_some()&&action.starts_with("key "){"Project Booth keys; Workshop and project switching are unavailable"}else{description}})).chain(if c.scope.is_some(){vec![json!({"action":"details | refresh","description":"D project details · F8 refresh"})]}else{vec![]}).collect()
 }
 pub(super) fn prepare(c:&mut Center,params:&Value)->Result<(),String>{
  if c.scope.is_some(){return Err("Restricted: only the master Workshop prepares Booths".into());}
@@ -32,7 +32,7 @@ pub(super) fn prepare(c:&mut Center,params:&Value)->Result<(),String>{
 pub(super) fn render_onboarding(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let Some(value)=&c.onboarding else{return;};
  let name=value["project"].as_str().and_then(|p|std::path::Path::new(p).file_stem()).and_then(|v|v.to_str()).unwrap_or("Project");
- let mut lines=vec![styled(format!("{name} · BOOTH / MOPS / ANIMAL"),TEAL),styled("Jesse + Gonzo keep Workshop and master controls.",MUTED),Line::raw(""),styled("START THE PROJECT BOOTH · C copies",DESK_FG),styled(value["launch"].as_str().unwrap_or(""),BLUE),Line::raw(""),styled("Give the agent this assignment environment for its CLI and MCP too.",MUTED),styled("Unlisted teammates and unrelated terminal history are excluded.",MUTED)];
+ let mut lines=vec![styled(format!("{name} · BOOTH / MOPS / MAYHEM"),TEAL),styled("Jesse + Gonzo keep Workshop and master controls.",MUTED),Line::raw(""),styled("START THE PROJECT BOOTH · C copies",DESK_FG),styled(value["launch"].as_str().unwrap_or(""),BLUE),Line::raw(""),styled("Give the agent this assignment environment for its CLI and MCP too.",MUTED),styled("Unlisted teammates and unrelated terminal history are excluded.",MUTED)];
  let members=value["members"].as_array().map_or(0,Vec::len);
  lines.push(styled(format!("{members} assigned project members · no agent launched or messaged"),AMBER));
  for member in value["members"].as_array().into_iter().flatten(){lines.push(styled(format!("{} · {}",member["name"].as_str().unwrap_or("agent"),member["task"].as_str().unwrap_or("")),DESK_FG));}
@@ -46,7 +46,7 @@ pub(super) fn activity(c:&Center,pane:&str)->String{
 }
 pub(super) fn render_animal(f:&mut Frame,c:&Center,area:ratatui::layout::Rect){
  let parts=Layout::vertical([Constraint::Length(3),Constraint::Length(10.min(area.height.saturating_sub(3))),Constraint::Min(1)]).split(area);
- f.render_widget(Paragraph::new(activity_wave(c)).block(booth::panel("🥁 ANIMAL · PROJECT BEAT",false)),parts[0]);
+ f.render_widget(Paragraph::new(activity_wave(c)).block(booth::panel("🥁 MAYHEM · PROJECT BEAT",false)),parts[0]);
  if let Some(worker)=worker_observation(c){render_worker(f,worker,parts[1]);}else{f.render_widget(Paragraph::new("No render observed for this project.").block(booth::panel("THE KIT · project worker",false)),parts[1]);}
  let mut lines=vec![styled("Project worker only · D details · host processes stay in Workshop",MUTED)];
  if let Some(worker)=worker_observation(c){
@@ -66,7 +66,7 @@ mod tests{
  }
  #[test]
  fn project_tabs_and_actions_never_offer_workshop_or_project_switching(){
-  let mut c=fixture();let strip=tab_strip(&c,140).to_string();assert!(!strip.contains("WORKSHOP"));for label in ["BOOTH","MOPS","ANIMAL"]{assert!(strip.contains(label));}
+  let mut c=fixture();let strip=tab_strip(&c,140).to_string();assert!(!strip.contains("WORKSHOP"));for label in ["BOOTH","MOPS","MAYHEM"]{assert!(strip.contains(label));}
   for (name,params) in [("view",json!({"name":"workshop"})),("project",json!({"index":0})),("input",json!({"field":"project","value":"other"})),("booth.prepare",json!({})),("key",json!({"key":"F1"})),("key",json!({"key":"F6"}))]{assert!(control::action(&mut c,name,&params).is_err(),"{name}");}
   assert_eq!(c.view_name(),"booth");assert!(!c.show_form);
  }
@@ -75,7 +75,7 @@ mod tests{
   let mut c=fixture();c.telemetry_view=true;
   for width in [40,90,140]{
    let mut terminal=ratatui::Terminal::new(ratatui::backend::TestBackend::new(width,38)).unwrap();terminal.draw(|f|super::super::render(f,&c)).unwrap();
-   let look=control::look(&c,terminal.backend().buffer(),0,"test");let text=look.to_string();assert_eq!(look["access"]["role"],"project");assert_eq!(look["projects"].as_array().unwrap().len(),1);assert!(text.contains("ANIMAL"));assert!(!text.contains("DRUM KIT · HOST"));assert!(look["telemetry"]["host"].is_null());
+   let look=control::look(&c,terminal.backend().buffer(),0,"test");let text=look.to_string();assert_eq!(look["access"]["role"],"project");assert_eq!(look["projects"].as_array().unwrap().len(),1);assert!(text.contains("MAYHEM"));assert!(!text.contains("DRUM KIT · HOST"));assert!(look["telemetry"]["host"].is_null());
    assert!(c.hits.borrow().iter().all(|h|h.id!="view-workshop"));
   }
   control::action(&mut c,"click",&json!({"id":"view-mops"})).unwrap();assert_eq!(c.view_name(),"mops");

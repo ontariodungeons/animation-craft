@@ -148,6 +148,39 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => problems.push(format!("material {v}: {e}")),
         }
     }
+
+    // Register knowledge skills for this project: each becomes an info block in the
+    // Skills view (researching / implemented / not_implemented) with where it plugs in.
+    if let Some(skill_list) = p["skills"].as_array() {
+        for skill in skill_list.iter().filter_map(Value::as_object) {
+            let id = skill.get("id").and_then(Value::as_str).filter(|v|!v.trim().is_empty());
+            let name = skill.get("name").and_then(Value::as_str).filter(|v|!v.trim().is_empty());
+            match (id, name) {
+                (Some(id), Some(name)) => {
+                    let params = json!({
+                        "id": id,
+                        "name": name,
+                        "description": skill.get("description").and_then(Value::as_str).unwrap_or(""),
+                        "status": skill.get("status").and_then(Value::as_str).unwrap_or("researching"),
+                        "source": skill.get("source").and_then(Value::as_str).unwrap_or(""),
+                        "implemented_at": skill.get("implemented_at").cloned().unwrap_or(json!([])),
+                        "implemented_in": skill.get("implemented_in").cloned().unwrap_or(json!([])),
+                        "integration_notes": skill.get("integration_notes").and_then(Value::as_str).unwrap_or(""),
+                    });
+                    match s.execute("skills.add", params) {
+                        Ok(_) => steps.push(json!({"command":"skills.add","id":id,"status":"registered"})),
+                        Err(e) => {
+                            let error = e.to_string();
+                            steps.push(json!({"command":"skills.add","id":id,"status":"failed","error":error}));
+                            problems.push(format!("skill {id}: {error}"));
+                        }
+                    }
+                }
+                _ => problems.push("skills[] entry missing id or name".to_string()),
+            }
+        }
+    }
+
     let valid_transcript = || crate::workshop::transcript_files(dir).iter().any(|f| {
         fs::read(f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .is_some_and(|v| crate::workshop::transcript_problems(&v).is_empty())

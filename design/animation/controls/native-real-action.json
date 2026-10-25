@@ -1,0 +1,74 @@
+{
+  "edit": {
+    "character": "puppet",
+    "command": "motion.action.set",
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+    "result": {
+      "_ui_engine_revision": 6,
+      "character": "puppet",
+      "ok": true,
+      "project_saved": false,
+      "rig_saved": true,
+      "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+      "spec": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+      "undo": "1792786243849387439",
+      "undo_receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/.motion-authoring/e1503d834dbe9343bcef0ef2aba7d4df5c5a9088e7937d10a09eef6dea0cd310/1792786243849387439.json"
+    },
+    "track": "wave"
+  },
+  "label": "Paper wave",
+  "selection": {
+    "amount": 100,
+    "backend": "subject",
+    "character": "puppet",
+    "duration": 2,
+    "last_edit": {
+      "character": "puppet",
+      "command": "motion.action.set",
+      "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/Generic.magic",
+      "result": {
+        "_ui_engine_revision": 6,
+        "character": "puppet",
+        "ok": true,
+        "project_saved": false,
+        "rig_saved": true,
+        "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+        "spec": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/rig.json",
+        "undo": "1792786243849387439",
+        "undo_receipt": "/run/media/jesse/Speedy/Work/omhas-animation/design/animation/controls/generic-native-fixture/.motion-authoring/e1503d834dbe9343bcef0ef2aba7d4df5c5a9088e7937d10a09eef6dea0cd310/1792786243849387439.json"
+      },
+      "track": "wave"
+    },
+    "last_pose": null,
+    "loop": false,
+    "open_sections": {
+      "Action": true,
+      "Expression & pose": true,
+      "Layers": true
+    },
+    "playing": false,
+    "refresh_error": "Error: Could not refresh paper",
+    "rest": false,
+    "rig_sha256": "22a99bf2d9ace47544732d39ca52e77f4bb20bff1a0b6152556984fa8515b76e",
+    "selected_layer": "paper",
+    "speed": 1,
+    "time": 2,
+    "track": "wave"
+  },
+  "theatre": {
+    "availability": "error",
+    "error": "invalid parameters: state must be the native Theatre createContentOfSaveFile JSON object",
+    "live_edits": "no_observed_interaction",
+    "native_playing": false,
+    "native_selected_part": "paper",
+    "package_version": "0.7.0",
+    "persistence": "not_loaded",
+    "saved_snapshot_unix_ms": null,
+    "selected_objects": [],
+    "sequence_playing": null,
+    "sequence_position_seconds": 2,
+    "value_update": null,
+    "visual_quality": "not_assessed"
+  },
+  "track": "wave"
+}

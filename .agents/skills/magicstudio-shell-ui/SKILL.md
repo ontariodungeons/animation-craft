@@ -84,8 +84,9 @@ Type: system-ui 13px/1.45. Titles are 600 weight. Section labels use `.group-lab
 - **Sheet** (`.sheet-backdrop` + `.sheet`): a modal for short forms, with a blurred backdrop and the sheet
   rising 8px. Labels sit above inputs. "Choose…" pickers use the system dialog (`tauri-plugin-dialog`).
   Actions sit at the bottom right: Cancel (ghost), then the primary.
-- **Drawer** (`.agent`): slides in from the right over any view (`translateX(102%)` → 0) with a blurred
-  surface.
+- **Assistant drawer** (`.workshop-drawers`): Sproket and Gaffer open below their top-bar buttons.
+  One shared controller preserves both contents and drafts; one drawer opens at a time. The main
+  surface keeps its full width. Part artwork stays in the left Animation inspector.
 - **Toast** (`.toast`): bottom center, one line, 2.4 s.
 - **Overlay** (`.point-overlay`): dims the app with `#0005` and rings the target with a teal 2px border
   and a 4px glow.
@@ -182,7 +183,7 @@ Craft processing runs headlessly by default; show previews/results inside this a
 ## Native Studio and project transitions
 
 User removed the Split tab: top-level views are Project, Animation, Studio. Studio fills the content
-area below the 48px bar; the open agent reserves its own right column. On Linux use the shared GTK
+area below the 48px bar; an open drawer moves Studio below its measured height. On Linux use the shared GTK
 allocation, not vertically packed webviews. `ui.look` must include Studio's native webview as well as
 the shell, otherwise an agent sees a blank canvas while the user sees Studio. Verify with the drawer
 open and closed. Clear storyboard image sources and animation selection when switching projects.

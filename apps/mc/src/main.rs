@@ -19,10 +19,18 @@ mod center;
 mod dials;
 mod find;
 mod logo;
+mod mcp_presence;
+mod mcp_watch;
+mod panels;
 mod local_ui;
 mod snapshot;
 mod studios;
 mod telemetry;
+mod touch;
+mod github_health;
+mod mayhem;
+mod settings;
+mod theme;
 mod tui;
 mod scope;
 mod worker;
@@ -86,8 +94,13 @@ OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `magicstudio-shell --control <port>` GUI window
 
 SUBCOMMANDS
+  panels [--json|--check]              shared UI configuration and live panel telemetry
   tui look [instance=<pid>]            actual live TUI frame, state and all controls as JSON
   tui read [instance=<pid>]            the actual rendered terminal text
+  tui watch [notify=<agent>] [count=<n>]
+                                      stream only the selected TUI's new typed events; notify
+                                      prompts that agent once per distinct new failure, never
+                                      retried, and nothing already on screen is replayed
   tui instances                       list controllable TUIs; multiple instances require selection
   tui controls                        discover named actions and equivalent keys
   tui view name=booth|workshop|mops|telemetry
@@ -129,6 +142,8 @@ SUBCOMMANDS
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
+  <project> image add <file> [name=...] [background=... | character=...]
+                                      register an image; outside files are copied into project assets
   <project> <subcommand | command id> [ARGS]
                                       run against one project: an .magic, or a folder with exactly
                                       one (a song's hyperframes/ or remotion/ folder finds its song);
@@ -186,7 +201,18 @@ fn bridge_timeout(id: &str) -> std::time::Duration {
     std::time::Duration::from_secs(if long { 3600 } else { 30 })
 }
 
+/// Names the caller on a command: the herdr pane it runs in. Every UI action goes through the
+/// CLI, so the journal can say which agent touched which element. Unverified, never overwritten.
+fn with_client(mut params: Value) -> Value {
+    if let (true, Ok(pane)) = (params.is_object() && params["_client"].is_null(), std::env::var("HERDR_PANE_ID")) {
+        params["_client"] = json!(format!("herdr:{pane}"));
+    }
+    params
+}
+
 fn bridge_call(addr: &str, id: &str, params: Value) -> Result<Value, String> {
+    let params = with_client(params);
+    touch::record(id, &params);
     if let Some(scope)=scope::current()?{
         let params=scope.params(id,params)?;
         if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
@@ -413,6 +439,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
     use std::io::BufRead;
     let stdin = std::io::stdin();
     let mut session = Session::user_session();
+    let _presence = mcp_presence::announce(bridge.as_deref());
     let mut stop_after_reply = false;
     for line in stdin.lock().lines().map_while(Result::ok) {
         let trimmed = line.trim();
@@ -438,7 +465,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         "name": "mc",
                         "version": env!("CARGO_PKG_VERSION")
                     },
-                    "instructions": if scope::current().ok().flatten().is_some(){"Project-assigned Booth. Only the granted project tools are available. Project identity is fixed; Workshop and global controls belong to Jesse and Gonzo."}else{MCP_INSTRUCTIONS}
+                    "instructions": format!("{}{}",if scope::current().ok().flatten().is_some(){"Project-assigned Booth. Only the granted project tools are available. Project identity is fixed; Workshop and global controls belong to Jesse and Gonzo."}else{MCP_INSTRUCTIONS},mcp_presence::orientation(bridge.as_deref()))
                 }
             }),
             "tools/list" => {
@@ -478,7 +505,7 @@ fn run_mcp_stdio(bridge: Option<String>) {
                         stop_after_reply = true;
                     }
                     out
-                } else if cmd_id=="ui.feedback"||cmd_id=="ui.components" {bridge_call(bridge.as_deref().unwrap_or("auto"),cmd_id,args)
+                } else if matches!(cmd_id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention") {bridge_call(bridge.as_deref().unwrap_or("auto"),cmd_id,args)
                 } else if let Some(addr) = &bridge {
                     bridge_call(addr, cmd_id, args)
                 } else {
@@ -700,6 +727,8 @@ fn base64(bytes: &[u8]) -> String {
 
 /// Quit the live window behind `bridge`, or explain why a headless MCP session cannot.
 pub(crate) fn dispatch(session:&mut Session,id:&str,params:Value)->Result<Value,String>{
+ let params=with_client(params);
+ touch::record(id,&params);
  if let Some(scope)=scope::current()?{
   let params=scope.params(id,params)?;
   if id=="command.list"{return Ok(scope.commands(params["filter"].as_str().unwrap_or("")));}
@@ -771,12 +800,12 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "panels", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips", "image"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
     static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    ARGS.get_or_init(|| project_argument(std::env::args().collect()).unwrap_or_else(|e| usage(e)))
+    ARGS.get_or_init(|| project_argument(std::env::args().collect()).and_then(image_add_argument).unwrap_or_else(|e| usage(e)))
 }
 
 /// `mc <project> <subcommand | command id> ...`: a leading project path becomes
@@ -798,6 +827,26 @@ fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
     }
     raw.push(format!("project={}", project.display()));
     raw.push(format!("_expected_project={}", project.display()));
+    Ok(raw)
+}
+
+/// Friendly spelling; all persistence, ownership and copying stay in project.add_asset.
+fn image_add_argument(mut raw: Vec<String>) -> Result<Vec<String>,String> {
+    let mut i=1;
+    while i<raw.len() && raw[i].starts_with('-') && !SUBCOMMANDS.contains(&raw[i].as_str()) { i+=if raw[i]=="--bridge"{2}else{1}; }
+    if raw.get(i).map(String::as_str)!=Some("image"){return Ok(raw);}
+    if raw.get(i+1).map(String::as_str)!=Some("add") || raw.get(i+2).is_none(){return Err("image add <file> [name=<label>] [background=<name> | character=<name>]".into());}
+    if raw[i+3..].iter().any(|v|!v.contains('=')){return Err("image add takes one file; options use key=value".into());}
+    let path=std::fs::canonicalize(&raw[i+2]).map_err(|e|format!("{}: {e}",raw[i+2]))?;
+    if !path.is_file(){return Err("image add needs an image file".into());}
+    if !path.extension().and_then(|e|e.to_str()).is_some_and(|e|["png","jpg","jpeg","webp","svg","gif","bmp","tif","tiff","exr"].contains(&e.to_ascii_lowercase().as_str())){return Err("Unsupported image extension".into());}
+    if raw[i+3..].iter().any(|v|v.starts_with("path=")||v.starts_with("kind=")||v.starts_with("preset=")||v.starts_with("save=")){return Err("image add fixes path and kind=image; use project.add_asset for other asset types".into());}
+    let destination=raw[i+3..].iter().any(|v|["background=","character=","image="].iter().any(|key|v.starts_with(key)));
+    raw.splice(i..i+3,["exec".into(),"project.add_asset".into(),format!("path={}",path.display()),"kind=image".into(),"save=true".into()]);
+    if !destination {
+        let folder:String=path.file_stem().and_then(|v|v.to_str()).unwrap_or("image").chars().map(|c|if c.is_alphanumeric()||c=='-'||c=='_'{c}else{'-'}).collect();
+        raw.push(format!("image={folder}"));
+    }
     Ok(raw)
 }
 
@@ -835,7 +884,7 @@ fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String>
 fn main() {
     let a = args::Args::parse(cli_args().iter().cloned().skip(1));
     let assignment=scope::current().unwrap_or_else(|e|fail(e));
-    if assignment.is_some()&&a.help{outln!("Project Booth: mc booth | tui | commands | exec <granted command> | run | mcp. Views: BOOTH / MOPS / ANIMAL. Workshop and global controls belong to Jesse and Gonzo.");return;}
+    if assignment.is_some()&&a.help{outln!("Project Booth: mc booth | tui | commands | exec <granted command> | run | mcp. Views: BOOTH / MOPS / MAYHEM. Workshop and global controls belong to Jesse and Gonzo.");return;}
     if a.help {
         outln!("{HELP}");
         return;
@@ -856,6 +905,14 @@ fn main() {
         "tui"=>{
             let action=a.pos(1).unwrap_or("look");
             let params=a.params_from(2).unwrap_or_else(|e|usage(e));
+            // A watch streams new events as they are observed; every other action is one reply.
+            if action=="watch"{
+                match tui::watch(&params,&mut |value|outln!("{}",value)){
+                    Ok(summary)=>outln!("{}",summary),
+                    Err(error)=>{outln!("{}",json!({"ok":false,"error":error}));std::process::exit(1);}
+                }
+                return;
+            }
             let value=tui::call(if action=="read"{"look"}else{action},&params).unwrap_or_else(|error|{outln!("{}",json!({"ok":false,"error":error}));std::process::exit(1)});
             if action=="read"||params["format"]=="text"{
                 for line in value["screen"]["lines"].as_array().into_iter().flatten(){outln!("{}",line.as_str().unwrap_or(""));}
@@ -960,6 +1017,10 @@ fn main() {
             for spec in specs {
                 outln!("  {} — {}", spec.id, spec.label);
             }
+        }
+        "panels" => {
+            let raw = cli_args();
+            std::process::exit(panels::run(a.bridge_addr().as_deref(), raw.iter().any(|v| v == "--json"), raw.iter().any(|v| v == "--check")));
         }
         "studios" | "windows" => {
             // skip the program and this subcommand, so the first free argument is the studio to pin
@@ -1092,7 +1153,7 @@ fn main() {
                 return;
             }
             let res = if id=="ui.read" {ui_read(a.bridge_addr().as_deref().unwrap_or("auto"),params)
-            }else if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
+            }else if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
             }else if let Some(addr) = a.bridge_addr() {
                 bridge_call(&addr, id, params)
             } else {
@@ -1137,7 +1198,7 @@ fn main() {
                     .unwrap_or_else(|| usage(format!("line {}: missing \"id\"", n + 1)));
                 let mut params = v.get("params").cloned().unwrap_or(json!({}));
                 params["_origin"]=json!("CLI JSONL");
-                let res = if id=="ui.feedback"||id=="ui.components"||id=="app.quit" {bridge_call(bridge.as_deref().unwrap_or("auto"),id,params)
+                let res = if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(bridge.as_deref().unwrap_or("auto"),id,params)
                 }else if let Some(addr) = &bridge {
                     bridge_call(addr, id, params)
                 } else {
@@ -1193,6 +1254,114 @@ fn main() {
                 if let Some(obj) = params.as_object_mut() {
                     obj.insert("clean".to_string(), Value::Bool(true));
                 }
+            }
+            if a.flag_health {
+                // Comprehensive health view: all magicstudio apps, MCP connections, TUI instances
+                let (rows, errors) = studios::rows();
+                let tui_instances = tui::call("instances", &json!({})).ok();
+                let mcp_procs: Vec<Value> = std::process::Command::new("pgrep")
+                    .args(["-af", "mc.*mcp"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| s.lines().map(|l| json!(l)).collect())
+                    .unwrap_or_default();
+                let health = json!({
+                    "ok": true,
+                    "studios": rows,
+                    "studio_errors": errors,
+                    "tui_instances": tui_instances,
+                    "mcp_bridge_count": mcp_procs.len(),
+                    "mcp_bridges": mcp_procs,
+                    "guidance": "Use --stop to kill all MCP bridges. Use --clean to remove stale endpoints."
+                });
+                outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+                return;
+            }
+            if a.flag_github {
+                // GITHUB HEALTH: what an agent did to the repository's GitHub state.
+                let repo = github_health::repo_root(&std::env::current_dir().unwrap_or_default());
+                let health = github_health::inspect(&repo);
+                outln!("{}", serde_json::to_string_pretty(&health).unwrap_or_default());
+                return;
+            }
+            if a.flag_report {
+                // MAYHEM report: a focused summary plus the expanded lists behind it,
+                // and the measured trend since the first recorded sample.
+                let servers = mcp_watch::scan();
+                let (by, findings) = mcp_watch::analyze(&servers);
+                let (rows, errors) = studios::rows();
+                let sample = mayhem::Sample::capture(&servers, rows.len(), errors.len());
+                mayhem::record(&sample);
+                let mut families: Vec<_> = by.iter().collect();
+                families.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
+                let hosts: std::collections::BTreeSet<u32> = servers.iter().map(|s| s.host_pid).collect();
+                let report = json!({
+                    "ok": true,
+                    "summary": {
+                        "mcp_servers": servers.len(),
+                        "mcp_agents": hosts.len(),
+                        "mcp_rss_kb": servers.iter().map(|s| s.rss_kb).sum::<u64>(),
+                        "collisions": findings.len(),
+                        "studios": rows.len(),
+                        "stale_studios": errors.len(),
+                        "host_mem_used_kb": sample.host_mem_used_kb,
+                        "host_mem_total_kb": sample.host_mem_total_kb,
+                    },
+                    "trend": mayhem::trend().map(|t| json!({
+                        "samples": t.samples,
+                        "span_seconds": t.span_ms / 1000,
+                        "mcp_servers": mayhem::delta_text(t.servers_delta, "servers"),
+                        "mcp_agents": mayhem::delta_text(t.agents_delta, "agents"),
+                        "mcp_memory": mayhem::delta_text(t.rss_delta_kb, "MiB"),
+                        "collisions": mayhem::delta_text(t.collisions_delta, "collisions"),
+                        "stale_studios": mayhem::delta_text(t.stale_delta, "stale"),
+                        "host_memory": mayhem::delta_text(t.host_mem_delta_kb, "MiB"),
+                        "improving": mayhem::improved(t.servers_delta) || mayhem::improved(t.rss_delta_kb),
+                    })),
+                    "findings": findings.iter().map(|f| json!({"family": f.family, "problem": f.text})).collect::<Vec<_>>(),
+                    "families": families.iter().map(|(family, group)| {
+                        let mut who: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::<&str, usize>::new();
+                        for s in group.iter() { *who.entry(s.host.as_str()).or_default() += 1; }
+                        json!({
+                            "family": family,
+                            "count": group.len(),
+                            "agents": who,
+                            "rss_kb": group.iter().map(|s| s.rss_kb).sum::<u64>(),
+                            "servers": group.iter().map(|s| json!({"pid": s.pid, "host": s.host, "age_seconds": s.age_secs, "rss_kb": s.rss_kb, "write_root": s.write_root})).collect::<Vec<_>>(),
+                        })
+                    }).collect::<Vec<_>>(),
+                    "studios": rows,
+                    "stale_studios": errors,
+                    "next_step": if findings.is_empty() {
+                        "No collisions. Keep the sample cadence running; the trend shows whether the footprint shrinks."
+                    } else {
+                        "Close the colliding agents for the families listed, then run this report again: fewer servers and less memory is the goal."
+                    },
+                });
+                outln!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+                return;
+            }
+            if a.flag_stop {
+                // Stop all MCP bridge processes
+                let output = std::process::Command::new("pkill")
+                    .args(["-f", "mc.*mcp"])
+                    .output();
+                let killed = output.as_ref().map(|o| o.status.success()).unwrap_or(false);
+                let remaining = std::process::Command::new("pgrep")
+                    .args(["-c", "-f", "mc.*mcp"])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                outln!("{}", serde_json::to_string_pretty(&json!({
+                    "ok": true,
+                    "stopped": killed,
+                    "remaining_mcp_bridges": remaining,
+                    "message": if killed { "MCP bridges stopped" } else { "No MCP bridges found or kill failed" }
+                })).unwrap_or_default());
+                return;
             }
             let mut s = Session::user_session();
             match s.execute("app.doctor", params) {
@@ -1301,6 +1470,15 @@ mod tests {
 
 #[cfg(test)]
 mod project_argument_tests {
+    #[test]
+    fn a_call_names_its_herdr_pane_without_overwriting_a_supplied_label() {
+        // HERDR_PANE_ID is set by herdr for every pane; with it unset nothing is invented.
+        let pane = std::env::var("HERDR_PANE_ID").ok();
+        let stamped = with_client(json!({"a": 1}));
+        assert_eq!(stamped["_client"].as_str().map(str::to_owned), pane.map(|p| format!("herdr:{p}")));
+        assert_eq!(with_client(json!({"_client": "me"}))["_client"], "me");
+        assert_eq!(with_client(json!("not an object")), json!("not an object"));
+    }
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     fn temp(name: &str) -> std::path::PathBuf {
@@ -1310,6 +1488,25 @@ mod project_argument_tests {
         dir
     }
     fn args(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn image_add_keeps_project_pin_and_imports_files_with_spaces() {
+        let dir=temp("image-add");
+        let project=dir.join("Song.magic");let image=dir.join("Sea scene.svg");
+        std::fs::write(&project,"{}").unwrap();std::fs::write(&image,"<svg/>").unwrap();
+        let input=args(&["mc","--bridge","19971",project.to_str().unwrap(),"image","add",image.to_str().unwrap(),"name=Sea scene"]);
+        let got=image_add_argument(project_argument(input).unwrap()).unwrap();
+        assert_eq!(&got[3..5], &["exec","project.add_asset"]);
+        for value in [format!("path={}",image.display()),"kind=image".into(),"image=Sea-scene".into(),"name=Sea scene".into(),format!("_expected_project={}",project.display())] {assert!(got.contains(&value),"{got:?}");}
+        let got=image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),"background=sea"])).unwrap();
+        assert!(got.contains(&"background=sea".into()));assert!(!got.iter().any(|v|v.starts_with("image=")));
+        for tail in ["kind=video","path=elsewhere","preset=cat","second-file"] {
+            assert!(image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),tail])).is_err());
+        }
+        assert!(image_add_argument(args(&["mc","image","add",dir.to_str().unwrap()])).is_err());
+        assert!(image_add_argument(args(&["mc","image","add","/no/such/image.png"])).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn file_folder_and_video_target_folder_resolve_to_the_one_project() {

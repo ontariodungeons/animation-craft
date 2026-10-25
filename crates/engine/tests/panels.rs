@@ -62,3 +62,60 @@ fn config_loads_the_shell_components_file() {
         }
     }
 }
+
+#[test]
+fn invalid_config_is_reported_and_hidden_indicators_remain_configured() {
+    let mut config: Config = serde_json::from_value(json!({"elements":{"quiet":{"component":"workspace","indicator":"hidden"}}})).unwrap();
+    assert!(config.validate().is_ok());
+    config.elements.get_mut("quiet").unwrap().look = Some("missing".into());
+    assert!(config.validate().unwrap_err().contains("quiet"));
+}
+
+#[test]
+fn report_identity_changes_even_when_revision_does_not() {
+    let mut input = contract_example();
+    input["project"] = json!("/p/A.magic"); input["identity"] = json!({"pid": 1});
+    let first = PanelReport::from_feedback(&input);
+    input["project"] = json!("/p/B.magic");
+    assert_ne!(first, PanelReport::from_feedback(&input));
+    input["project"] = json!("/p/A.magic"); input["identity"] = json!({"pid": 2});
+    assert_ne!(first, PanelReport::from_feedback(&input));
+}
+
+#[test]
+fn aliases_share_canonical_state_and_stale_observations_are_unavailable() {
+    let config: Config = serde_json::from_value(json!({"elements":{
+        "block-song":{"component":"panel"},
+        "song-button":{"component":"button","target":"block-song"}
+    }})).unwrap();
+    let mut input = contract_example();
+    let report = PanelReport::from_feedback(&input);
+    assert_eq!(report.component(&config, "song-button"), report.component(&config, "block-song"));
+    input["frontend_report_age_ms"] = json!(5001);
+    let stale = PanelReport::from_feedback(&input);
+    assert!(!stale.available);
+    assert!(stale.component(&config, "song-button").is_none());
+    assert!(stale.error.is_some());
+}
+
+#[test]
+fn malformed_and_incomplete_observations_cannot_report_healthy() {
+    let mut input = contract_example();
+    input["panels"]["items"] = json!("broken");
+    let broken = PanelReport::from_feedback(&input);
+    assert!(!broken.available); assert!(broken.error.unwrap().contains("Invalid"));
+    let mut input = contract_example(); input["panels"]["total_items"] = json!(99);
+    assert!(PanelReport::from_feedback(&input).truncated);
+}
+
+#[test]
+fn config_load_validates_instead_of_returning_invalid_configuration() {
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("magic-panel-config-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("components.json");
+    std::fs::write(&path, r#"{"elements":{"bad":{"component":"panel","indicator":"maybe"}}}"#).unwrap();
+    let result = Config::load(&path);
+    std::fs::remove_file(&path).unwrap(); std::fs::remove_dir(&dir).unwrap();
+    assert!(result.unwrap_err().contains("indicator"));
+}

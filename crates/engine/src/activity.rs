@@ -53,8 +53,19 @@ const HISTORY_LIMIT: usize = 512;
 fn notable(event: &Value) -> bool {
     let stage = event["stage"].as_str().unwrap_or_default();
     matches!(stage, "saved_state" | "engine_error" | "handler_error" | "selection_changed" | "clip_switched" | "theatre_selection" | "theatre_saved" | "theatre_error" | "clip_sheet_started" | "clip_sheet_converted" | "clip_sheet_failed" | "theatre_keyframes")
-        || (matches!(event["command"].as_str(), Some("image.generate" | "motion.path" | "motion.undo_path"))
-            && matches!(stage, "dispatch_running" | "engine_success" | "engine_needs_work"))
+        || (matches!(event["command"].as_str(), Some("image.generate" | "motion.path" | "motion.undo_path" | "motion.recipe" | "export.layered_motion" | "video.place_track"))
+            && matches!(stage, "dispatch_running" | "command_result" | "engine_success" | "engine_needs_work"))
+}
+
+#[cfg(test)]
+#[test]
+fn animation_jobs_reach_the_tui_history_with_their_results() {
+    for command in ["motion.recipe", "export.layered_motion", "video.place_track"] {
+        for stage in ["dispatch_running", "command_result", "engine_success", "engine_error"] {
+            assert!(notable(&json!({"command":command,"stage":stage})));
+        }
+    }
+    assert!(!notable(&json!({"command":"ui.state","stage":"command_result"})));
 }
 /// Page selection reports would each become a root action; they live only in the history.
 fn history_only(event: &Value) -> bool {

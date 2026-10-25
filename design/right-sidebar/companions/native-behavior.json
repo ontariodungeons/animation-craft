@@ -1,0 +1,132 @@
+{
+  "cli_identity_match": "studio-906994-1792779743629-2",
+  "actual_error": {
+    "animating": true,
+    "dedupe": 3,
+    "enabled": true,
+    "gaffer": {
+      "command": "project.add_asset",
+      "destination": "animation",
+      "key": "[\"project.add_asset\",null,null,null,null,null,null,null,\"/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png\"]",
+      "reason": "failed: project.add_asset",
+      "request": "ambient-1792779836369-87",
+      "status": "failed"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": "project.add_asset",
+      "destination": "animation",
+      "key": "[\"project.add_asset\",null,null,null,null,null,null,null,\"/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png\"]",
+      "reason": "invalid parameters: asset path does not exist: /run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png",
+      "request": "ambient-1792779836369-87",
+      "status": "failed"
+    }
+  },
+  "after_real_reads": {
+    "animating": true,
+    "dedupe": 3,
+    "enabled": true,
+    "gaffer": {
+      "command": "project.add_asset",
+      "destination": "animation",
+      "key": "[\"project.add_asset\",null,null,null,null,null,null,null,\"/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png\"]",
+      "reason": "failed: project.add_asset",
+      "request": "ambient-1792779836369-87",
+      "status": "failed"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": "project.add_asset",
+      "destination": "animation",
+      "key": "[\"project.add_asset\",null,null,null,null,null,null,null,\"/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png\"]",
+      "reason": "invalid parameters: asset path does not exist: /run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png",
+      "request": "ambient-1792779836369-87",
+      "status": "failed"
+    }
+  },
+  "matching_retry": {
+    "animating": true,
+    "dedupe": 5,
+    "enabled": true,
+    "gaffer": {
+      "command": "project.add_asset",
+      "destination": "animation",
+      "key": "[\"project.add_asset\",null,null,null,null,null,null,null,\"/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/retry-artwork.png\"]",
+      "reason": "completed: project.add_asset",
+      "request": "ambient-1792779836438-98",
+      "status": "completed"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": "project.add_asset",
+      "destination": "chat",
+      "key": null,
+      "reason": "Resolved: project.add_asset",
+      "request": "ambient-1792779836438-98",
+      "status": "resolved"
+    }
+  },
+  "existing_asset_completion": {
+    "animating": true,
+    "dedupe": 6,
+    "enabled": true,
+    "gaffer": {
+      "command": "image.generate",
+      "destination": "artwork",
+      "key": "[\"image.generate\",null,null,null,null,null,null,null,null]",
+      "reason": "completed: image.generate",
+      "request": "image-retry_artwork",
+      "status": "completed"
+    },
+    "hidden": false,
+    "jobs": 0,
+    "project": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/companions/study/study.magic",
+    "reducedMotion": false,
+    "sproket": {
+      "command": "project.add_asset",
+      "destination": "chat",
+      "key": null,
+      "reason": "Resolved: project.add_asset",
+      "request": "ambient-1792779836438-98",
+      "status": "resolved"
+    }
+  },
+  "ui_state_feedback_match": true,
+  "noninteractive": [
+    {
+      "buttonAncestor": false,
+      "id": "companion-sproket",
+      "onclick": false,
+      "pointerEvents": "none",
+      "rect": [
+        1061.625,
+        69,
+        34,
+        18
+      ],
+      "tabindex": null
+    },
+    {
+      "buttonAncestor": false,
+      "id": "companion-gaffer",
+      "onclick": false,
+      "pointerEvents": "none",
+      "rect": [
+        1215,
+        321.34375,
+        34,
+        18
+      ],
+      "tabindex": null
+    }
+  ]
+}

@@ -9,7 +9,7 @@ async function showHome() {
   if (typeof theatreCanLeave === "function" && !theatreCanLeave()) return;
   if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
   animationReset();
-  if (agent.open) agentToggle(false);
+  window.workshopDrawers?.close(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
   state.project = null;
   window.magicCompanions?.sync();
@@ -33,7 +33,7 @@ async function renderRecent() {
   }
   $("recent").replaceChildren(...list.map((p) => {
     const thumb = el("div", { class: "thumb", html: p.thumb ? "" : FILM });
-    if (p.thumb) thumb.style.backgroundImage = `url("${convertFileSrc(p.thumb)}")`;
+    if (p.thumb) thumb.style.setProperty("--thumbnail-image", `url("${convertFileSrc(p.thumb)}")`);
     const forget = el("span", { class: "forget", role: "button", tabindex: "0", "aria-label": `Remove ${p.name} from Recent`,
       title: "Remove from Recent (the files stay)", html: CROSS });
     forget.addEventListener("click", async (e) => {

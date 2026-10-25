@@ -6,7 +6,8 @@
       "bar",
       "ruler",
       "inline",
-      "item"
+      "item",
+      "heading"
     ],
     "panel-empty": [
       "card",
@@ -21,7 +22,28 @@
       "word"
     ],
     "lane": [],
-    "effect": []
+    "effect": [],
+    "panel": [
+      "song",
+      "lyrics",
+      "transcript",
+      "animation",
+      "assets",
+      "chat",
+      "artwork",
+      "motion",
+      "depth",
+      "pose",
+      "check",
+      "export",
+      "reader"
+    ],
+    "panel-body": [
+      "scroll",
+      "composer",
+      "form",
+      "settings"
+    ]
   },
   "densities": [
     "normal",
@@ -30,165 +52,1328 @@
   "elements": {
     "view-home": {
       "component": "workspace",
-      "label": "Home"
+      "label": "Home",
+      "indicator": "hidden"
     },
     "view-project": {
       "component": "workspace",
-      "label": "Project"
+      "label": "Project",
+      "indicator": "hidden"
     },
     "view-animation": {
       "component": "workspace",
-      "label": "Animation"
+      "label": "Animation",
+      "indicator": "hidden"
     },
     "view-studio": {
       "component": "workspace",
-      "label": "Studio"
+      "label": "Studio",
+      "indicator": "hidden"
+    },
+    "view-skills": {
+      "component": "workspace",
+      "label": "Learning production manual"
     },
     "blocks": {
       "component": "workspace",
-      "label": "Song workflow"
+      "label": "Song workflow",
+      "indicator": "hidden"
     },
     "sb-chips": {
       "component": "chips",
-      "label": "Storyboard pages"
+      "label": "Storyboard pages",
+      "indicator": "hidden"
     },
     "sb-cards": {
       "component": "storyboard",
-      "label": "Storyboard cards"
+      "label": "Storyboard cards",
+      "indicator": "hidden"
     },
     "studio-empty": {
       "component": "panel-empty",
       "look": "overlay",
-      "label": "Studio not running"
+      "label": "Studio not running",
+      "indicator": "hidden"
     },
     "sb-empty": {
       "component": "panel-empty",
       "look": "card",
-      "label": "No storyboard yet"
+      "label": "No storyboard yet",
+      "indicator": "hidden"
     },
     "magic-chat-pane": {
-      "component": "workspace",
-      "label": "Sprocket chat"
+      "component": "panel",
+      "label": "Sproket chat",
+      "indicator": "hidden",
+      "look": "chat",
+      "rail": "magic-chat-pane"
     },
     "magic-image-pane": {
-      "component": "workspace",
-      "label": "Gaffer artwork"
+      "component": "panel",
+      "label": "Gaffer artwork",
+      "indicator": "hidden",
+      "look": "artwork",
+      "rail": "magic-image-pane"
     },
     "magic-parts-pane": {
-      "component": "workspace",
-      "label": "Parts and assets"
+      "component": "panel",
+      "label": "Part artwork",
+      "indicator": "hidden",
+      "look": "assets",
+      "rail": "magic-parts-pane",
+      "icon": "layers"
     },
     "agent": {
       "component": "workspace",
-      "label": "Agent"
+      "label": "Agent",
+      "indicator": "hidden",
+      "target": "magic-chat-pane"
     },
     "agent-status": {
       "component": "panel-status",
-      "label": "Agent status"
+      "label": "Agent status",
+      "indicator": "icon"
     },
     "footer-status": {
       "component": "panel-status",
-      "label": "Footer status"
+      "label": "Footer status",
+      "indicator": "icon"
     },
     "block-song": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Song"
+      "label": "Song",
+      "indicator": "icon",
+      "target": "song"
     },
     "block-animate": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Animate"
+      "label": "Animate",
+      "indicator": "icon",
+      "target": "animate"
     },
     "block-assets": {
       "component": "panel-head",
       "look": "control",
       "density": "normal",
-      "label": "Assets"
+      "label": "Assets",
+      "indicator": "icon",
+      "target": "assets"
     },
     "theatre-ruler": {
       "component": "panel-head",
       "look": "ruler",
       "density": "normal",
-      "label": "Timeline"
+      "label": "Timeline",
+      "indicator": "hidden"
     },
     "motion-inspector": {
       "component": "workspace",
-      "label": "Inspector"
+      "label": "Inspector",
+      "indicator": "hidden"
     },
     "motion-stagebar": {
       "component": "workspace",
-      "label": "Stage"
+      "label": "Stage",
+      "indicator": "hidden"
     },
     "motion-canvas": {
       "component": "workspace",
-      "label": "Canvas"
+      "label": "Canvas",
+      "indicator": "hidden"
     },
     "magic-image-tools": {
-      "component": "workspace",
-      "label": "Artwork tools"
+      "component": "panel-body",
+      "label": "Artwork tools",
+      "indicator": "hidden",
+      "look": "scroll"
     },
     "magic-parts-slot": {
-      "component": "workspace",
-      "label": "Parts"
+      "component": "panel-body",
+      "label": "Parts",
+      "indicator": "hidden",
+      "look": "scroll"
     },
     "app-footer": {
       "component": "workspace",
-      "label": "Footer"
+      "label": "Footer",
+      "indicator": "hidden"
     },
     "agent-log": {
-      "component": "workspace",
-      "label": "Agent log"
+      "component": "panel-body",
+      "label": "Agent log",
+      "indicator": "hidden",
+      "look": "scroll"
     },
     "agent-compose": {
-      "component": "workspace",
-      "label": "Agent compose"
+      "component": "panel-body",
+      "label": "Agent compose",
+      "indicator": "hidden",
+      "look": "composer"
     },
     "agent-head": {
       "component": "panel-head",
-      "look": "bar",
-      "density": "compact",
-      "label": "Agent"
+      "look": "heading",
+      "density": "normal",
+      "label": "Agent",
+      "indicator": "hidden",
+      "target": "magic-chat-pane"
     },
     "magic-chat-head": {
       "component": "panel-head",
       "look": "bar",
       "density": "compact",
-      "label": "Sprocket chat"
+      "label": "Sprocket chat",
+      "indicator": "hidden"
     },
     "magic-image-toggle": {
       "component": "panel-head",
-      "look": "bar",
+      "look": "heading",
       "density": "normal",
-      "label": "Gaffer artwork"
-    },
-    "magic-parts-head": {
-      "component": "panel-head",
-      "look": "bar",
-      "density": "normal",
-      "label": "Parts and assets"
+      "label": "Gaffer artwork",
+      "indicator": "hidden",
+      "target": "magic-image-pane"
     },
     "view-design": {
       "component": "workspace",
-      "label": "Design"
+      "label": "Lyrics & Motion Graphics",
+      "indicator": "hidden"
     },
     "theatre-timeline": {
       "component": "workspace",
-      "label": "Theatre timeline"
+      "label": "Theatre timeline",
+      "indicator": "hidden"
     },
     "motion-scrub": {
       "component": "transport",
-      "label": "Animation scrubber"
+      "label": "Animation scrubber",
+      "indicator": "hidden"
     },
     "words-scrub": {
       "component": "transport",
-      "label": "Video time"
+      "label": "Video time",
+      "indicator": "hidden"
     },
     "words-video-frame": {
       "component": "stage",
-      "label": "The finished video"
+      "label": "The finished video",
+      "indicator": "hidden"
+    },
+    "tab-skills": {
+      "component": "workspace",
+      "label": "Learning tab"
+    },
+    "song": {
+      "component": "panel",
+      "label": "Song",
+      "indicator": "icon",
+      "priority": 100,
+      "look": "song",
+      "rail": "song"
+    },
+    "footer-stage-song": {
+      "component": "panel-status",
+      "label": "Song",
+      "indicator": "icon",
+      "target": "song"
+    },
+    "lyrics": {
+      "component": "panel",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "priority": 90,
+      "look": "lyrics",
+      "rail": "lyrics"
+    },
+    "block-lyrics": {
+      "component": "panel-status",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "target": "lyrics"
+    },
+    "footer-stage-lyrics": {
+      "component": "panel-status",
+      "label": "Lyrics",
+      "indicator": "icon",
+      "target": "lyrics"
+    },
+    "transcript": {
+      "component": "panel",
+      "label": "Transcript",
+      "indicator": "icon",
+      "priority": 80,
+      "look": "transcript",
+      "rail": "transcript"
+    },
+    "block-transcript": {
+      "component": "panel-status",
+      "label": "Transcript",
+      "indicator": "icon",
+      "target": "transcript"
+    },
+    "footer-stage-transcript": {
+      "component": "panel-status",
+      "label": "Transcript",
+      "indicator": "icon",
+      "target": "transcript"
+    },
+    "storyboard": {
+      "component": "workspace",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "priority": 70
+    },
+    "block-storyboard": {
+      "component": "panel-status",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "target": "storyboard"
+    },
+    "footer-stage-storyboard": {
+      "component": "panel-status",
+      "label": "Storyboard",
+      "indicator": "icon",
+      "target": "storyboard"
+    },
+    "animate": {
+      "component": "panel",
+      "label": "Animate",
+      "indicator": "icon",
+      "priority": 60,
+      "look": "animation",
+      "rail": "animate"
+    },
+    "footer-stage-animate": {
+      "component": "panel-status",
+      "label": "Animate",
+      "indicator": "icon",
+      "target": "animate"
+    },
+    "assets": {
+      "component": "panel",
+      "label": "Assets",
+      "indicator": "icon",
+      "priority": 50,
+      "look": "assets",
+      "rail": "assets"
+    },
+    "footer-stage-assets": {
+      "component": "panel-status",
+      "label": "Assets",
+      "indicator": "icon",
+      "target": "assets"
+    },
+    "image": {
+      "component": "workspace",
+      "indicator": "hidden",
+      "target": "magic-image-pane"
+    },
+    "image-tools-body": {
+      "component": "workspace",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "app-bar": {
+      "component": "workspace",
+      "label": "Application toolbar",
+      "indicator": "hidden"
+    },
+    "magic-workstation": {
+      "component": "workspace",
+      "label": "Top assistant drawers",
+      "indicator": "hidden"
+    },
+    "point-overlay": {
+      "component": "overlay",
+      "label": "Point at a component",
+      "indicator": "hidden"
+    },
+    "toast": {
+      "component": "panel-status",
+      "label": "Notification",
+      "indicator": "hidden"
+    },
+    "motion-action": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Action",
+      "indicator": "hidden",
+      "rail": "motion-action",
+      "icon": "play"
+    },
+    "motion-action-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Action",
+      "indicator": "hidden",
+      "target": "motion-action"
+    },
+    "motion-path-section": {
+      "component": "panel",
+      "look": "depth",
+      "label": "Path & depth",
+      "indicator": "hidden",
+      "rail": "motion-path-section",
+      "icon": "pen"
+    },
+    "motion-path-section-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Path & depth",
+      "indicator": "hidden",
+      "target": "motion-path-section"
+    },
+    "motion-timing": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Motion & timing",
+      "indicator": "hidden",
+      "rail": "motion-timing",
+      "icon": "step"
+    },
+    "motion-timing-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Motion & timing",
+      "indicator": "hidden",
+      "target": "motion-timing"
+    },
+    "motion-layers": {
+      "component": "panel",
+      "look": "assets",
+      "label": "Layers",
+      "indicator": "hidden",
+      "rail": "motion-layers",
+      "icon": "layers"
+    },
+    "motion-layers-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Layers",
+      "indicator": "hidden",
+      "target": "motion-layers"
+    },
+    "motion-pose": {
+      "component": "panel",
+      "look": "pose",
+      "label": "Expression & pose",
+      "indicator": "hidden",
+      "rail": "motion-pose",
+      "icon": "eye"
+    },
+    "motion-pose-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Expression & pose",
+      "indicator": "hidden",
+      "target": "motion-pose"
+    },
+    "motion-quality": {
+      "component": "panel",
+      "look": "check",
+      "label": "Quality checks",
+      "indicator": "hidden",
+      "rail": "motion-quality",
+      "icon": "fit"
+    },
+    "motion-quality-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Quality checks",
+      "indicator": "hidden",
+      "target": "motion-quality"
+    },
+    "motion-export-section": {
+      "component": "panel",
+      "look": "export",
+      "label": "Export & integrations",
+      "indicator": "hidden",
+      "rail": "motion-export-section",
+      "icon": "export"
+    },
+    "motion-export-section-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Export & integrations",
+      "indicator": "hidden",
+      "target": "motion-export-section"
+    },
+    "blender-placement": {
+      "component": "panel",
+      "look": "depth",
+      "label": "Place in scene",
+      "indicator": "hidden",
+      "rail": "blender-placement"
+    },
+    "blender-placement-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-placement-body": {
+      "component": "panel-body",
+      "look": "form",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-id": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-start": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-duration": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-rate": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-x": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-y": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-width": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-height": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-scene": {
+      "component": "field",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-command": {
+      "component": "animation-readback",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-result": {
+      "component": "animation-readback",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-coordinates": {
+      "component": "motion-coordinate-row",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "song-attach-original": {
+      "component": "ghost",
+      "indicator": "hidden"
+    },
+    "project-intake-problems": {
+      "component": "why",
+      "indicator": "hidden"
+    },
+    "asset-import-animate": {
+      "component": "start",
+      "indicator": "hidden"
+    },
+    "asset-import": {
+      "component": "start",
+      "indicator": "hidden"
+    },
+    "motion-stage": {
+      "component": "motion-stage",
+      "indicator": "hidden"
+    },
+    "motion-caption": {
+      "component": "muted",
+      "indicator": "hidden"
+    },
+    "motion-time": {
+      "component": "motion-time",
+      "indicator": "hidden"
+    },
+    "motion-part-bar": {
+      "component": "motion-part-bar",
+      "indicator": "hidden"
+    },
+    "magic-part-compare": {
+      "component": "magic-part-compare",
+      "indicator": "hidden"
+    },
+    "part-image-replace": {
+      "component": "start",
+      "indicator": "hidden"
+    },
+    "part-image-undo": {
+      "component": "ghost",
+      "indicator": "hidden"
+    },
+    "part-open-photocraft": {
+      "component": "ghost",
+      "indicator": "hidden"
+    },
+    "part-inspect-original": {
+      "component": "ghost",
+      "indicator": "hidden"
+    },
+    "part-copy-path": {
+      "component": "ghost",
+      "indicator": "hidden"
+    },
+    "anim-selected-part-inspector": {
+      "component": "anim-part-inspector",
+      "indicator": "hidden"
+    },
+    "motion-source-context": {
+      "component": "motion-source-context",
+      "indicator": "hidden"
+    },
+    "motion-export-status": {
+      "component": "why",
+      "indicator": "hidden"
+    },
+    "motion-path-apply": {
+      "component": "start",
+      "indicator": "hidden"
+    },
+    "motion-path-point": {
+      "component": "field",
+      "indicator": "hidden"
+    },
+    "motion-path-x": {
+      "component": "field",
+      "indicator": "hidden"
+    },
+    "motion-path-y": {
+      "component": "field",
+      "indicator": "hidden"
+    },
+    "image-prompt": {
+      "component": "field",
+      "indicator": "hidden"
+    },
+    "image-model": {
+      "component": "field",
+      "indicator": "hidden"
+    },
+    "image-model-options": {
+      "component": "workspace",
+      "indicator": "hidden"
+    },
+    "image-command": {
+      "component": "animation-readback",
+      "indicator": "hidden"
+    },
+    "magic-reader": {
+      "component": "panel",
+      "look": "reader",
+      "label": "Lyrics reader",
+      "rail": "magic-reader",
+      "indicator": "hidden"
+    },
+    "magic-reader-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "magic-reader",
+      "indicator": "hidden"
+    },
+    "motion-canvas-settings": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Canvas",
+      "icon": "fit",
+      "rail": "motion-canvas-settings",
+      "indicator": "hidden"
+    },
+    "motion-canvas-settings-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "motion-canvas-settings",
+      "indicator": "hidden"
+    },
+    "motion-selected-layer": {
+      "component": "panel",
+      "look": "motion",
+      "label": "Selected layer",
+      "icon": "layers",
+      "rail": "motion-selected-layer",
+      "indicator": "hidden"
+    },
+    "motion-selected-layer-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "motion-selected-layer",
+      "indicator": "hidden"
+    },
+    "blender-preview": {
+      "component": "media-preview",
+      "label": "Rendered Blender animation",
+      "indicator": "hidden"
+    },
+    "words-preview": {
+      "component": "stage",
+      "label": "Lyrics video preview",
+      "indicator": "hidden"
+    },
+    "image-generate": {
+      "component": "start",
+      "label": "Generate artwork candidate",
+      "indicator": "hidden"
+    },
+    "motion-actual": {
+      "component": "icon",
+      "label": "Actual size",
+      "indicator": "hidden"
+    },
+    "words-main": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Lyrics and motion",
+      "rail": "words-main",
+      "indicator": "hidden"
+    },
+    "words-main-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-main",
+      "indicator": "hidden"
+    },
+    "words-lyrics": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Lyrics timeline",
+      "rail": "words-lyrics",
+      "indicator": "hidden"
+    },
+    "words-lyrics-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-lyrics",
+      "indicator": "hidden"
+    },
+    "words-film": {
+      "component": "panel",
+      "look": "lyrics",
+      "label": "Visual cues",
+      "rail": "words-film",
+      "indicator": "hidden"
+    },
+    "words-film-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "target": "words-film",
+      "indicator": "hidden"
+    },
+    "song-open-original": {
+      "component": "ghost",
+      "label": "Open original lyrics",
+      "indicator": "hidden"
+    },
+    "song-read-along": {
+      "component": "ghost",
+      "label": "Read along",
+      "indicator": "hidden"
+    },
+    "magic-reader-close": {
+      "component": "ghost",
+      "label": "Close lyrics reader",
+      "indicator": "hidden"
+    },
+    "song-open-transcript": {
+      "component": "ghost",
+      "label": "Open transcript",
+      "indicator": "hidden"
+    },
+    "companion-stage": {
+      "component": "companion-stage",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-sproket": {
+      "component": "ambient-companion",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-sproket-sprite": {
+      "component": "companion-sprite",
+      "target": "magic-chat-pane",
+      "indicator": "hidden"
+    },
+    "companion-gaffer": {
+      "component": "ambient-companion",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "companion-gaffer-sprite": {
+      "component": "companion-sprite",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "words-save": {
+      "component": "start",
+      "target": "words-main",
+      "label": "Save lyric changes",
+      "indicator": "hidden"
+    },
+    "words-style-font": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Font",
+      "indicator": "hidden"
+    },
+    "words-style-color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Colour",
+      "indicator": "hidden"
+    },
+    "words-style-emphasis_color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Emphasis colour",
+      "indicator": "hidden"
+    },
+    "words-style-outline_color": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Outline colour",
+      "indicator": "hidden"
+    },
+    "words-style-background": {
+      "component": "field",
+      "target": "words-main",
+      "label": "Background",
+      "indicator": "hidden"
+    },
+    "motion-assets": {
+      "component": "panel",
+      "look": "assets",
+      "label": "Assets",
+      "indicator": "hidden",
+      "rail": "motion-assets",
+      "icon": "layers"
+    },
+    "motion-assets-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Assets",
+      "indicator": "hidden",
+      "target": "motion-assets"
+    },
+    "authoring-action-apply": {
+      "component": "ghost",
+      "label": "action apply",
+      "indicator": "hidden",
+      "command": "motion.action.set"
+    },
+    "authoring-command": {
+      "component": "animation-readback",
+      "label": "command",
+      "indicator": "hidden"
+    },
+    "authoring-duration": {
+      "component": "control",
+      "label": "duration",
+      "indicator": "hidden"
+    },
+    "authoring-edit-result": {
+      "component": "animation-readback",
+      "label": "edit result",
+      "indicator": "hidden"
+    },
+    "authoring-edit-status": {
+      "component": "muted",
+      "label": "edit status",
+      "indicator": "hidden"
+    },
+    "authoring-label": {
+      "component": "control",
+      "label": "label",
+      "indicator": "hidden"
+    },
+    "authoring-layer-apply": {
+      "component": "ghost",
+      "label": "layer apply",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-back": {
+      "component": "ghost",
+      "label": "layer back",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-depth": {
+      "component": "control",
+      "label": "layer depth",
+      "indicator": "hidden"
+    },
+    "authoring-layer-front": {
+      "component": "ghost",
+      "label": "layer front",
+      "indicator": "hidden",
+      "command": "motion.layers.set"
+    },
+    "authoring-layer-picker": {
+      "component": "control",
+      "label": "layer picker",
+      "indicator": "hidden"
+    },
+    "authoring-layer-reason": {
+      "component": "muted",
+      "label": "layer reason",
+      "indicator": "hidden"
+    },
+    "authoring-layer-undo": {
+      "component": "ghost",
+      "label": "layer undo",
+      "indicator": "hidden",
+      "command": "motion.edit.undo"
+    },
+    "authoring-loop": {
+      "component": "control",
+      "label": "loop",
+      "indicator": "hidden"
+    },
+    "authoring-part-apply": {
+      "component": "start",
+      "label": "part apply",
+      "indicator": "hidden",
+      "command": "motion.part.set"
+    },
+    "authoring-part-reset": {
+      "component": "ghost",
+      "label": "part reset",
+      "indicator": "hidden",
+      "command": "motion.part.reset"
+    },
+    "authoring-pivot-0": {
+      "component": "control",
+      "label": "pivot 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-pivot-1": {
+      "component": "control",
+      "label": "pivot 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-pose-export": {
+      "component": "ghost",
+      "label": "pose export",
+      "indicator": "hidden"
+    },
+    "authoring-pose-place": {
+      "component": "ghost",
+      "label": "pose place",
+      "indicator": "hidden",
+      "command": "storyboard.place_asset"
+    },
+    "authoring-pose-preview": {
+      "component": "animation-pose-preview",
+      "label": "pose preview",
+      "indicator": "hidden"
+    },
+    "authoring-pose-result": {
+      "component": "animation-readback",
+      "label": "pose result",
+      "indicator": "hidden"
+    },
+    "authoring-pose-scene": {
+      "component": "control",
+      "label": "pose scene",
+      "indicator": "hidden"
+    },
+    "authoring-pose-scenes": {
+      "component": "ghost",
+      "label": "pose scenes",
+      "indicator": "hidden",
+      "command": "storyboard.toc"
+    },
+    "authoring-pose-status": {
+      "component": "muted",
+      "label": "pose status",
+      "indicator": "hidden"
+    },
+    "authoring-pose-width": {
+      "component": "control",
+      "label": "pose width",
+      "indicator": "hidden"
+    },
+    "authoring-pose-x": {
+      "component": "control",
+      "label": "pose x",
+      "indicator": "hidden"
+    },
+    "authoring-pose-y": {
+      "component": "control",
+      "label": "pose y",
+      "indicator": "hidden"
+    },
+    "authoring-position-0": {
+      "component": "control",
+      "label": "position 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-position-1": {
+      "component": "control",
+      "label": "position 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-reference": {
+      "component": "control",
+      "label": "reference",
+      "indicator": "hidden"
+    },
+    "authoring-rotation": {
+      "component": "control",
+      "label": "rotation",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-scale-0": {
+      "component": "control",
+      "label": "scale 0",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-scale-1": {
+      "component": "control",
+      "label": "scale 1",
+      "indicator": "hidden",
+      "value_source": "motion.tracks: selected action and part"
+    },
+    "authoring-undo": {
+      "component": "ghost",
+      "label": "undo",
+      "indicator": "hidden",
+      "command": "motion.edit.undo"
+    },
+    "learning-cast": {
+      "component": "ghost",
+      "label": "MOPPETS cast"
+    },
+    "cast-page": {
+      "component": "panel",
+      "label": "Magic Studio cast"
+    },
+    "cast-lead": {
+      "component": "field-row",
+      "label": "Department lead"
+    },
+    "cast-search": {
+      "component": "field-row",
+      "label": "Find a candidate"
+    },
+    "cast-filter": {
+      "component": "field-row",
+      "label": "Casting filter"
+    },
+    "cast-candidates": {
+      "component": "panel",
+      "label": "Cast candidates"
+    },
+    "cast-saved-file": {
+      "component": "panel",
+      "label": "Saved AGENTS.md"
+    },
+    "agent-toggle": {
+      "component": "ghost",
+      "label": "Sproket chat",
+      "target": "magic-chat-pane",
+      "indicator": "icon"
+    },
+    "gaffer-toggle": {
+      "component": "ghost",
+      "label": "Gaffer artwork",
+      "target": "magic-image-pane",
+      "indicator": "icon"
+    },
+    "gaffer-close": {
+      "component": "icon",
+      "label": "Close Gaffer artwork",
+      "indicator": "hidden",
+      "target": "magic-image-pane"
+    },
+    "gaffer-config-toggle": {
+      "component": "icon",
+      "label": "Artwork settings",
+      "target": "magic-image-pane",
+      "indicator": "hidden"
+    },
+    "image-settings": {
+      "component": "panel-body",
+      "label": "Artwork settings",
+      "look": "settings",
+      "indicator": "hidden"
+    },
+    "anim-agent-settings": {
+      "component": "panel-body",
+      "look": "settings",
+      "label": "Agent settings",
+      "indicator": "hidden",
+      "target": "magic-chat-pane"
+    },
+    "footer-instance": {
+      "component": "control",
+      "label": "Studio port and build",
+      "indicator": "hidden"
+    },
+    "words-view-modes": {
+      "component": "segmented",
+      "label": "Lyrics view modes",
+      "indicator": "hidden"
+    },
+    "words-link-controls": {
+      "component": "transport",
+      "label": "Lyric and drawing connections",
+      "indicator": "hidden"
+    },
+    "words-workspace-controls": {
+      "component": "panel-body",
+      "look": "settings",
+      "label": "Selected Lyrics view controls",
+      "indicator": "hidden"
     }
+  },
+  "rails": {
+    "song": {
+      "accept": "yes",
+      "priority": 100
+    },
+    "lyrics": {
+      "accept": "yes",
+      "priority": 90
+    },
+    "transcript": {
+      "accept": "yes",
+      "priority": 80
+    },
+    "animate": {
+      "accept": "yes",
+      "priority": 60
+    },
+    "assets": {
+      "accept": "yes",
+      "priority": 50
+    },
+    "magic-chat-pane": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "magic-image-pane": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "magic-parts-pane": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-action": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-path-section": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-timing": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-layers": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-pose": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-quality": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "motion-export-section": {
+      "accept": "yes",
+      "priority": 10
+    },
+    "blender-placement": {
+      "accept": "yes"
+    },
+    "magic-reader": {
+      "accept": "yes"
+    },
+    "motion-canvas-settings": {
+      "accept": "yes"
+    },
+    "motion-selected-layer": {
+      "accept": "yes"
+    },
+    "words-main": {
+      "accept": "yes"
+    },
+    "words-lyrics": {
+      "accept": "yes"
+    },
+    "words-film": {
+      "accept": "yes"
+    },
+    "motion-assets": {
+      "accept": "yes",
+      "priority": 10
+    }
+  },
+  "slots": {
+    "song": {
+      "target": "song",
+      "priority": 100
+    },
+    "lyrics": {
+      "target": "lyrics",
+      "priority": 90
+    },
+    "transcript": {
+      "target": "transcript",
+      "priority": 80
+    },
+    "animate": {
+      "target": "animate",
+      "priority": 60
+    },
+    "assets": {
+      "target": "assets",
+      "priority": 50
+    },
+    "magic-chat-pane": {
+      "target": "magic-chat-pane",
+      "priority": 10
+    },
+    "magic-image-pane": {
+      "target": "magic-image-pane",
+      "priority": 10
+    },
+    "magic-parts-pane": {
+      "target": "magic-parts-pane",
+      "priority": 10
+    },
+    "motion-action": {
+      "target": "motion-action",
+      "priority": 10
+    },
+    "motion-path-section": {
+      "target": "motion-path-section",
+      "priority": 10
+    },
+    "motion-timing": {
+      "target": "motion-timing",
+      "priority": 10
+    },
+    "motion-layers": {
+      "target": "motion-layers",
+      "priority": 10
+    },
+    "motion-pose": {
+      "target": "motion-pose",
+      "priority": 10
+    },
+    "motion-quality": {
+      "target": "motion-quality",
+      "priority": 10
+    },
+    "motion-export-section": {
+      "target": "motion-export-section",
+      "priority": 10
+    },
+    "blender-placement": {
+      "target": "blender-placement"
+    },
+    "magic-reader": {
+      "target": "magic-reader"
+    },
+    "motion-canvas-settings": {
+      "target": "motion-canvas-settings"
+    },
+    "motion-selected-layer": {
+      "target": "motion-selected-layer"
+    },
+    "words-main": {
+      "target": "words-main"
+    },
+    "words-lyrics": {
+      "target": "words-lyrics"
+    },
+    "words-film": {
+      "target": "words-film"
+    },
+    "motion-assets": {
+      "target": "motion-assets",
+      "priority": 10
+    }
+  },
+  "signals": {
+    "0": {
+      "label": "Idle",
+      "icon": "\ud83d\udca4"
+    },
+    "1": {
+      "label": "Active / ready",
+      "icon": "\ud83d\udfe2"
+    },
+    "2": {
+      "label": "Needs attention",
+      "icon": "\ud83d\udfe1"
+    },
+    "3": {
+      "label": "Error",
+      "icon": "\ud83d\udd34"
+    }
+  },
+  "companions": {
+    "sproket": {
+      "home": "magic-chat-pane",
+      "role": "issue/chat"
+    },
+    "gaffer": {
+      "home": "magic-image-pane",
+      "role": "artwork"
+    }
+  },
+  "sections": {
+    "Action": "motion-action",
+    "Path & depth": "motion-path-section",
+    "Motion & timing": "motion-timing",
+    "Layers": "motion-layers",
+    "Expression & pose": "motion-pose",
+    "Quality checks": "motion-quality",
+    "Export & integrations": "motion-export-section",
+    "Canvas": "motion-canvas-settings",
+    "Assets": "motion-assets",
+    "Part artwork": "magic-parts-pane"
+  },
+  "contract_target": "magic-chat-pane",
+  "timeline_tones": {
+    "opacity": "--pose-purple",
+    "position": "--depth-gold",
+    "scale": "--motion-blue",
+    "rotation": "--accent"
   }
 }

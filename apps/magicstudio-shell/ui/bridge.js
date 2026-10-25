@@ -28,9 +28,10 @@ function idOf(node) {
   return node.id || node.getAttribute("aria-label") || (node.innerText || node.value || node.placeholder || "").trim().split("\n")[0].slice(0, 60);
 }
 
-function find(target) {
+function find(target, instance = null) {
+  if (/^@[0-9]+$/.test(target) && instance !== window.uiRegistry.instance) throw new Error("Indexed targets require their component instance; inspect again");
   if (!target) throw new Error("which element? pass its id");
-  const byId = document.getElementById(target);
+  const byId = /^@[0-9]+$/.test(target) ? document.querySelector(`[data-ui-index="${target.slice(1)}"]`) : document.getElementById(target);
   if (byId) return byId;
   const nodes = [...document.querySelectorAll(CLICKABLE)].filter(visible);
   const hit = nodes.find((n) => idOf(n) === target) || nodes.find((n) => idOf(n).toLowerCase().includes(String(target).toLowerCase()));
@@ -40,25 +41,27 @@ function find(target) {
 }
 
 window.magicBridge = {
+  controls(params = {}) {
+    return window.uiRegistry.inspect({ ...params, root: regionNode(params.region) });
+  },
+  attention(params = {}) {
+    if (params.project !== state.project) throw new Error("Attention project does not match this Studio");
+    window.companionBoxes.attention(params.id, params.clear ? null : params.reason);
+    return { ok: true, project: state.project, panels: window.companionBoxes.panels() };
+  },
   state() {
     return {
+      identity: state.identity||null,
       companions: window.magicCompanions?.snapshot() || null,
       animation: typeof animationFeedback === "function" ? animationFeedback() : null,
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
-      storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
+      storyboard_page: state.page + 1, drawer: window.workshopDrawers?.active||null, agent_open: agent.open, agent_session: agent.session,
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
     };
   },
-  components(params={}) {
-    const root=regionNode(params.region||'#view-project');if(!root)throw new Error('Unknown component region');
-    const nodes=[root,...root.querySelectorAll('[id],button,[role],h1,h2,h3,label')].filter(n=>!n.closest('#agent-log,#agent-messages'));
-    const limit=Math.min(80,Math.max(1,Number(params.limit)||30));
-    const entries=nodes.filter(n=>!params.filter||idOf(n).toLowerCase().includes(String(params.filter).toLowerCase())).slice(0,limit).map((n,i)=>{
-      const r=n.getBoundingClientRect(),style=getComputedStyle(n);const input=n.matches('input,textarea,[contenteditable=true]');
-      const result={id:n.id||`${root.id||'region'}/${n.tagName.toLowerCase()}-${i}`,tag:n.tagName.toLowerCase(),text:input?null:(n.matches('button,h1,h2,h3,label,[role=tab],#project-name,#sb-empty p,#sb-empty strong')?n.textContent.trim().slice(0,160):null),rect:[r.x,r.y,r.width,r.height],visible:visible(n),enabled:!n.disabled,selected:n.getAttribute('aria-selected')||n.getAttribute('aria-pressed')||n.classList.contains('active'),commands:(n.dataset.commands||'').split(' ').filter(Boolean),mapping:n.dataset.commands?'verified handler annotation':'unknown',style:{}};
-      for(const k of ['display','visibility','opacity','color','backgroundColor','fontSize','fontWeight','overflow','position'])result.style[k]=style[k];
-      return result;
-    });return {ok:true,region:params.region||'#view-project',viewport:[innerWidth,innerHeight],components:entries,truncated:nodes.length>limit,phase:acFeedback.phase,visual_correctness:'requires screenshot review'};
+  components(params = {}) {
+    const report = this.controls(params);
+    return { ...report, components: report.items, viewport: [innerWidth, innerHeight], phase: acFeedback.phase };
   },
   elements(region) {
     const root = regionNode(region);
@@ -87,29 +90,37 @@ window.magicBridge = {
     const rows = [];
     const nodes = [...document.querySelectorAll(`${CLICKABLE}, [id]`)];
     nodes.forEach((node, i) => {
-      const reason = !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
+      const ownState = node.getAttribute('data-box-id') || (entries[node.id] ? node.id : null);
+      const reason = node.dataset.contractError ? "missing-panel-header" : (ownState && !registry?.get(ownState)) || !tracked(node) ? "untracked" : visualInlineStyle(node) ? "unstyled" : null;
       if (!reason) return;
       const tag = node.tagName.toLowerCase();
       const label = (node.title || node.getAttribute("aria-label") || node.textContent || "").trim().slice(0, 80);
-      rows.push({ id: node.id || `${tag}-${i + 1}`, tag, label: label || null, reason });
+      const rect = node.getBoundingClientRect(), container = entries[node.id]?.rail || node.closest('[data-companion-rail]')?.getAttribute('data-companion-rail') || null;
+      rows.push({ id: node.id || `${tag}-${i + 1}`, index: registry?.registerElement(node)?.index ?? null, tag, label: label || null, reason, container, rect: [rect.x,rect.y,rect.width,rect.height] });
     });
-    return rows.slice(0, 64);
+    return rows;
   },
-  click(target) {
-    const node = find(target);
+  click(target, instance = null) {
+    const node = find(target, instance);
+    if (!visible(node) || node.disabled) throw new Error("Control is hidden or disabled");
     node.scrollIntoView({ block: "nearest" });
     node.click();
     return { clicked: idOf(node) };
   },
-  set(target, value) {
-    const node = find(target);
-    node.value = value;
+  set(target, value, instance = null) {
+    const node = find(target, instance);
+    if (!visible(node) || node.disabled || node.readOnly) throw new Error("Control is not editable");
+    if (node.type === 'checkbox' || node.type === 'radio') {
+      if (typeof value !== 'boolean') throw new Error("Toggle value must be boolean");
+      node.checked = value;
+    } else if (node.isContentEditable) node.textContent = String(value);
+    else node.value = value;
     node.dispatchEvent(new Event("input", { bubbles: true }));
     node.dispatchEvent(new Event("change", { bubbles: true }));
-    return { set: idOf(node), value };
+    return { set: idOf(node) };
   },
-  key(key, target) {
-    const node = target ? find(target) : document.activeElement || document.body;
+  key(key, target, instance = null) {
+    const node = target ? find(target, instance) : document.activeElement || document.body;
     const [mods, k] = [key.split("+").slice(0, -1).map((m) => m.toLowerCase()), key.split("+").pop()];
     node.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ctrlKey: mods.includes("ctrl"), shiftKey: mods.includes("shift"), altKey: mods.includes("alt") }));
     return { key };
@@ -125,7 +136,7 @@ window.magicBridge = {
   },
   // After an engine command from the CLI/MCP: follow a newly opened project, else reload its state.
   async refresh(id, project, revision, result = {}, request_id = null, params = {}) {
-    if(project===state.project)window.magicCompanions?.event({command:id,project,view:state.view,request:request_id||result._request_id||`cli-revision-${revision}`,phase:'success',params,result});
+    if(project===state.project)window.uiRegistry?.event({command:id,project,view:state.view,request:request_id||result._request_id||`cli-revision-${revision}`,phase:'success',params,result});
     try {
     if (id === "agent.new_chat") {
       await agentLoad(); agent.newChat = !result.session;

@@ -1,0 +1,11 @@
+{
+  "backend": "opentoonz",
+  "command": "opentoonz.start",
+  "errors": [],
+  "placementMounted": true,
+  "reason": "invalid parameters: OpenToonz tcomposer is not installed or not on PATH. Set OPENTOONZ_TCOMPOSER to its absolute path; no installation was attempted · invalid parameters: OpenToonz tcomposer is not installed or not on PATH. Set OPENTOONZ_TCOMPOSER to its absolute path; no installation was attempted · Requires tcomposer and stuff resources (OPENTOONZ_TCOMPOSER / OPENTOONZ_STUFF). Capability discovery is not native render verification.",
+  "startDisabled": true,
+  "synfigVisible": false,
+  "timelineMounted": true,
+  "toonzVisible": true
+}

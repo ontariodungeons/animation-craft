@@ -1,0 +1,35 @@
+name: Minimal CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One active CI job for this repository, across every branch and PR.
+concurrency:
+  group: magic-studio-minimal-ci
+  cancel-in-progress: true
+
+jobs:
+  sanity:
+    name: Syntax and UI sanity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Lightweight checks only
+        run: |
+          set -euo pipefail
+          node --version
+          git diff --check HEAD^ HEAD
+          for source in apps/magicstudio-shell/ui/*.js; do node --check "$source"; done
+          node apps/magicstudio-shell/tests/agent-selection.mjs
+          node apps/magicstudio-shell/tests/panels.mjs
+          node apps/magicstudio-shell/tests/cast.mjs
+          node apps/magicstudio-shell/tests/drawers.mjs
+          node apps/magicstudio-shell/tests/words-lettering.mjs
+          node apps/magicstudio-shell/tests/ui-lint.mjs --report

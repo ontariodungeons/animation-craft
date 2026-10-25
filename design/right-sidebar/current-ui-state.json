@@ -1,0 +1,572 @@
+{
+  "elements": [
+    {
+      "id": "brand",
+      "kind": "button",
+      "label": "Home · all projects",
+      "rect": [
+        8,
+        5,
+        152,
+        37
+      ]
+    },
+    {
+      "id": "Project",
+      "kind": "tab",
+      "label": "",
+      "rect": [
+        340,
+        7,
+        68,
+        33
+      ]
+    },
+    {
+      "id": "Animation",
+      "kind": "tab",
+      "label": "Animate objects and polish their motion",
+      "rect": [
+        410,
+        7,
+        92,
+        33
+      ]
+    },
+    {
+      "id": "Studio",
+      "kind": "tab",
+      "label": "",
+      "rect": [
+        504,
+        7,
+        65,
+        33
+      ]
+    },
+    {
+      "id": "agent-toggle",
+      "kind": "button",
+      "label": "Show or hide the right panel: Sproket, Gaffer, Parts & assets (Ctrl+\\)",
+      "rect": [
+        998,
+        8,
+        93,
+        31
+      ]
+    },
+    {
+      "id": "target",
+      "kind": "button",
+      "label": "Studio off · click to start\nNo video project yet · starting the studio creates it",
+      "rect": [
+        1109,
+        8,
+        138,
+        31
+      ]
+    },
+    {
+      "id": "blender-object",
+      "kind": "select",
+      "label": "Little Fish",
+      "rect": [
+        12,
+        60,
+        245,
+        39
+      ]
+    },
+    {
+      "id": "blender-track",
+      "kind": "select",
+      "label": "swim-cruise",
+      "rect": [
+        12,
+        135,
+        245,
+        39
+      ]
+    },
+    {
+      "id": "blender-source",
+      "kind": "select",
+      "label": "Saved Blender scene",
+      "rect": [
+        12,
+        209,
+        245,
+        39
+      ]
+    },
+    {
+      "id": "blender-range",
+      "kind": "select",
+      "label": "Preview · 90 frames max",
+      "rect": [
+        12,
+        284,
+        245,
+        39
+      ]
+    },
+    {
+      "id": "blender-resolution",
+      "kind": "select",
+      "label": "50% resolution",
+      "rect": [
+        12,
+        359,
+        245,
+        39
+      ]
+    },
+    {
+      "id": "blender-render",
+      "kind": "button",
+      "label": "",
+      "rect": [
+        12,
+        420,
+        245,
+        35
+      ]
+    },
+    {
+      "id": "blender-cancel",
+      "kind": "button",
+      "label": "",
+      "rect": [
+        12,
+        466,
+        245,
+        33
+      ]
+    },
+    {
+      "id": "motion-mode-blender",
+      "kind": "tab",
+      "label": "Blender animation and rendered previews",
+      "rect": [
+        285,
+        61,
+        61,
+        25
+      ]
+    },
+    {
+      "id": "motion-mode-subject",
+      "kind": "tab",
+      "label": "Legacy rig and Theatre editor",
+      "rect": [
+        348,
+        61,
+        59,
+        25
+      ]
+    },
+    {
+      "id": "motion-mode-composite",
+      "kind": "tab",
+      "label": "Images arranged in time",
+      "rect": [
+        409,
+        61,
+        77,
+        25
+      ]
+    },
+    {
+      "id": "footer-stage-song",
+      "kind": "button",
+      "label": "Song · needs work",
+      "rect": [
+        10,
+        1357,
+        51,
+        20
+      ]
+    },
+    {
+      "id": "footer-stage-lyrics",
+      "kind": "button",
+      "label": "Lyrics · needs work",
+      "rect": [
+        63,
+        1357,
+        53,
+        20
+      ]
+    },
+    {
+      "id": "footer-stage-transcript",
+      "kind": "button",
+      "label": "Transcript · needs work",
+      "rect": [
+        118,
+        1357,
+        74,
+        20
+      ]
+    },
+    {
+      "id": "footer-stage-storyboard",
+      "kind": "button",
+      "label": "Storyboard · needs work",
+      "rect": [
+        194,
+        1357,
+        79,
+        20
+      ]
+    },
+    {
+      "id": "footer-stage-animate",
+      "kind": "button",
+      "label": "Animate · needs work",
+      "rect": [
+        274,
+        1357,
+        65,
+        20
+      ]
+    },
+    {
+      "id": "footer-stage-studio",
+      "kind": "button",
+      "label": "Studio · not started",
+      "rect": [
+        342,
+        1357,
+        56,
+        20
+      ]
+    },
+    {
+      "id": "footer-server",
+      "kind": "button",
+      "label": "Studio server · click to start or stop",
+      "rect": [
+        1180,
+        1357,
+        71,
+        20
+      ]
+    },
+    {
+      "id": "agent-new",
+      "kind": "button",
+      "label": "Start a fresh chat · preserve previous history",
+      "rect": [
+        1099,
+        63,
+        30,
+        30
+      ]
+    },
+    {
+      "id": "agent-config-toggle",
+      "kind": "button",
+      "label": "Agent settings: agent, model, thinking",
+      "rect": [
+        1135,
+        65,
+        60,
+        26
+      ]
+    },
+    {
+      "id": "agent-close",
+      "kind": "button",
+      "label": "Hide",
+      "rect": [
+        1200,
+        65,
+        43,
+        26
+      ]
+    },
+    {
+      "id": "agent-input",
+      "kind": "textarea",
+      "label": "Enter to send · Shift+Enter for a new line · Ctrl+Enter also sends",
+      "rect": [
+        931,
+        255,
+        312,
+        77
+      ]
+    },
+    {
+      "id": "agent-point",
+      "kind": "button",
+      "label": "Point: click anything in the app to attach a picture of it",
+      "rect": [
+        931,
+        336,
+        73,
+        33
+      ]
+    },
+    {
+      "id": "agent-send",
+      "kind": "button",
+      "label": "",
+      "rect": [
+        1183,
+        337,
+        60,
+        31
+      ]
+    },
+    {
+      "id": "magic-image-toggle",
+      "kind": "button",
+      "label": "Show or hide Gaffer artwork",
+      "rect": [
+        922,
+        385,
+        330,
+        39
+      ]
+    },
+    {
+      "id": "Gaffer · Artwork",
+      "kind": "button",
+      "label": "Gaffer · Artwork · gpt-6-luna",
+      "rect": [
+        935,
+        433,
+        306,
+        29
+      ]
+    },
+    {
+      "id": "image-prompt",
+      "kind": "textarea",
+      "label": "Gaffer artwork prompt",
+      "rect": [
+        935,
+        487,
+        306,
+        88
+      ]
+    },
+    {
+      "id": "image-model",
+      "kind": "input",
+      "label": "Selected Codex model; pixel dimensions are determined by its native image tool",
+      "rect": [
+        935,
+        606,
+        306,
+        37
+      ]
+    },
+    {
+      "id": "image-generate",
+      "kind": "button",
+      "label": "Gaffer: generate artwork candidate",
+      "rect": [
+        935,
+        722,
+        306,
+        35
+      ]
+    },
+    {
+      "id": "image-copy-command",
+      "kind": "button",
+      "label": "Copy the exact image command without executing it",
+      "rect": [
+        935,
+        877,
+        113,
+        33
+      ]
+    },
+    {
+      "id": "magic-parts-tab-parts",
+      "kind": "tab",
+      "label": "",
+      "rect": [
+        932,
+        710,
+        101,
+        31
+      ]
+    },
+    {
+      "id": "magic-parts-tab-compare",
+      "kind": "tab",
+      "label": "",
+      "rect": [
+        1036,
+        710,
+        101,
+        31
+      ]
+    },
+    {
+      "id": "magic-parts-tab-assets",
+      "kind": "tab",
+      "label": "",
+      "rect": [
+        1141,
+        710,
+        101,
+        31
+      ]
+    },
+    {
+      "id": "magic-thumb-fin_dorsal",
+      "kind": "button",
+      "label": "Select fin_dorsal (fin_dorsal)",
+      "rect": [
+        941,
+        759,
+        54,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-fin_anal",
+      "kind": "button",
+      "label": "Select fin_anal (fin_anal)",
+      "rect": [
+        1001,
+        759,
+        54,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-tail",
+      "kind": "button",
+      "label": "Select tail (tail)",
+      "rect": [
+        1061,
+        759,
+        54,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-body",
+      "kind": "button",
+      "label": "Select body (body)",
+      "rect": [
+        1121,
+        759,
+        54,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-scale_row_01",
+      "kind": "button",
+      "label": "Select scale_row_01 (scale_row_01)",
+      "rect": [
+        1181,
+        759,
+        69,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-scale_row_02",
+      "kind": "button",
+      "label": "Select scale_row_02 (scale_row_02)",
+      "rect": [
+        1255,
+        759,
+        69,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-scale_row_03",
+      "kind": "button",
+      "label": "Select scale_row_03 (scale_row_03)",
+      "rect": [
+        1330,
+        759,
+        69,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-scale_row_04",
+      "kind": "button",
+      "label": "Select scale_row_04 (scale_row_04)",
+      "rect": [
+        1404,
+        759,
+        69,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-scale_row_05",
+      "kind": "button",
+      "label": "Select scale_row_05 (scale_row_05)",
+      "rect": [
+        1479,
+        759,
+        69,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-pearl_fibres",
+      "kind": "button",
+      "label": "Select pearl_fibres (pearl_fibres)",
+      "rect": [
+        1554,
+        759,
+        60,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-eye",
+      "kind": "button",
+      "label": "Select eye (eye)",
+      "rect": [
+        1619,
+        759,
+        54,
+        61
+      ]
+    },
+    {
+      "id": "magic-thumb-fin_pectoral_near",
+      "kind": "button",
+      "label": "Select fin_pectoral_near (fin_pectoral_near)",
+      "rect": [
+        1679,
+        759,
+        83,
+        61
+      ]
+    }
+  ],
+  "output": "/run/media/jesse/Speedy/Work/omhas-animation/design/right-sidebar/current-ui.png",
+  "state": {
+    "agent_open": true,
+    "animation": {
+      "character": "little_fish_layered",
+      "playing": false,
+      "rest": false,
+      "selected_layer": "fin_dorsal",
+      "time": 5.788000000000072,
+      "track": "swim-cruise"
+    },
+    "open_block": "song",
+    "project": "/run/media/jesse/Speedy/media/animation-studies/fozzie-frontend-live/Frontend Review.magic",
+    "storyboard_page": 1,
+    "studio": null,
+    "toast": null,
+    "view": "animation"
+  }
+}

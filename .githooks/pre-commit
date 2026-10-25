@@ -1,33 +1,133 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Block accidental staging of local agent configs or generated media
-FORBIDDEN_STAGED=$(git diff --cached --name-only | grep -E '^(\.claude/|\.commandcode/|\.hermes/|\.mcp\.json$|exports/[^t])' || true)
-if [ -n "$FORBIDDEN_STAGED" ]; then
-    echo "ERROR: Refusing to commit local agent config or generated exports:" >&2
-    echo "$FORBIDDEN_STAGED" >&2
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$SCRIPT_DIR"
+
+# One compiler/test job keeps local commits and CI within the same resource budget.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+
+CHECK_ALL=${MAGICSTUDIO_CHECK_ALL:-0}
+if [[ "$CHECK_ALL" != 0 && "$CHECK_ALL" != 1 ]]; then
+    echo "MAGICSTUDIO_CHECK_ALL must be 0 or 1" >&2
+    exit 2
+fi
+
+STATUS_PID=$BASHPID
+BRANCH=$(git branch --show-current)
+if [[ -z "$BRANCH" ]]; then BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-detached}}; fi
+HEAD_BEFORE=$(git rev-parse HEAD)
+STATUS_START=$(node scripts/commit_status.mjs start "$STATUS_PID" "$BRANCH" "$HEAD_BEFORE")
+CURRENT_STEP="hook setup"
+FINISHED=0
+
+record_status() {
+    node scripts/commit_status.mjs update "$STATUS_PID" "$STATUS_START" "$1" "$2" "$3"
+}
+
+on_exit() {
+    local code=$?
+    if (( FINISHED == 0 )); then
+        if (( code == 0 )); then code=1; fi
+        printf '[hook] %s: FAILED (exit %s)\n' "$CURRENT_STEP" "$code" >&2
+        record_status failed "$CURRENT_STEP" "$code" >/dev/null 2>&1 || true
+    fi
+}
+
+on_signal() {
+    local code=$1
+    trap - INT TERM HUP
+    printf '[hook] %s: FAILED (interrupted, exit %s)\n' "$CURRENT_STEP" "$code" >&2
+    record_status failed "$CURRENT_STEP" "$code" >/dev/null 2>&1 || true
+    FINISHED=1
+    exit "$code"
+}
+trap on_exit EXIT
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+
+run_step() {
+    local label=$1 rc
+    shift
+    CURRENT_STEP=$label
+    if ! record_status running "$label" -; then
+        printf '[hook] %s: FAILED (could not persist running status)\n' "$label" >&2
+        exit 1
+    fi
+    printf '[hook] %s: RUNNING\n' "$label"
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if (( rc == 0 )); then
+        printf '[hook] %s: PASSED (exit 0)\n' "$label"
+        if ! record_status passed "$label" 0; then
+            printf '[hook] %s: FAILED (could not persist passed status)\n' "$label" >&2
+            exit 1
+        fi
+        return 0
+    fi
+    printf '[hook] %s: FAILED (exit %s)\n' "$label" "$rc" >&2
+    record_status failed "$label" "$rc" >/dev/null 2>&1 || true
+    return "$rc"
+}
+
+check_staged_paths() {
+    local forbidden
+    forbidden=$(git diff --cached --name-only | grep -E '^(\.claude/|\.commandcode/|\.hermes/|\.mcp\.json$|exports/[^t])' || true)
+    if [[ -n "$forbidden" ]]; then
+        echo "ERROR: Refusing to commit local agent config or generated exports:" >&2
+        echo "$forbidden" >&2
+        return 1
+    fi
+}
+
+run_step "staged-file policy" check_staged_paths || exit $?
+run_step "staged whitespace" git diff --cached --check || exit $?
+
+RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
+FULL_CHECKS=$CHECK_ALL
+if [[ -n "$RUST_STAGED" ]]; then FULL_CHECKS=1; fi
+
+if (( FULL_CHECKS == 1 )); then
+    run_step "workspace compile and tests" cargo test --workspace --all-targets --quiet || exit $?
+else
+    # Keep the focused credential-free guard on non-Rust local commits. The full workspace
+    # run includes it, so Rust commits and CI never compile/test the same crate twice.
+    run_step "agent selection security regression" cargo test --offline -p magicstudio-engine --test agent_security --quiet -- --test-threads=1 || exit $?
+fi
+
+run_step "agent selection UI regression" node apps/magicstudio-shell/tests/agent-selection.mjs || exit $?
+run_step "shared panels regression" node apps/magicstudio-shell/tests/panels.mjs || exit $?
+run_step "companions regression" node apps/magicstudio-shell/tests/companions.mjs || exit $?
+run_step "cast draft/save regression" node apps/magicstudio-shell/tests/cast.mjs || exit $?
+run_step "top drawer regression" node apps/magicstudio-shell/tests/drawers.mjs || exit $?
+run_step "Lyrics lettering and graphics regression" node apps/magicstudio-shell/tests/words-lettering.mjs || exit $?
+run_step "UI lint ratchet" node apps/magicstudio-shell/tests/ui-lint.mjs --ratchet --report || exit $?
+
+STAGED_FILES=$(git diff --cached --name-only)
+if (( CHECK_ALL == 1 )); then
+    run_step "motion recipe regression" python scripts/test_render_motion_recipe.py || exit $?
+    run_step "layered motion regression" python pipeline/test_layer_alternates.py || exit $?
+    run_step "motion spec regression" python scripts/test_compile_motion_specs.py || exit $?
+else
+    if grep -qE '^scripts/(test_)?render_motion_recipe\.py$' <<<"$STAGED_FILES"; then
+        run_step "motion recipe regression" python scripts/test_render_motion_recipe.py || exit $?
+    fi
+    if grep -qE '^pipeline/(layered_motion|test_layer_alternates)\.py$' <<<"$STAGED_FILES"; then
+        run_step "layered motion regression" python pipeline/test_layer_alternates.py || exit $?
+    fi
+    if grep -qE '^scripts/(test_)?compile_motion_specs\.py$' <<<"$STAGED_FILES"; then
+        run_step "motion spec regression" python scripts/test_compile_motion_specs.py || exit $?
+    fi
+fi
+
+CURRENT_STEP="all required checks"
+if ! record_status passed "$CURRENT_STEP" 0; then
+    echo "[hook] $CURRENT_STEP: FAILED (could not persist passed status)" >&2
     exit 1
 fi
-
-# Constrain parallel rustc/linker jobs and test threads so pre-commit never
-# spikes the Hyprland terminal scope memory and triggers systemd-oomd.
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
-export RUST_TEST_THREADS="${RUST_TEST_THREADS:-4}"
-
-# Offline authentication/selection security regression tests run on every commit.
-# Dummy process fixtures only: no login, live credentials, provider calls or network.
-cargo test --offline -p magicstudio-engine --test agent_security --quiet -- --test-threads=1
-node apps/magicstudio-shell/tests/agent-selection.mjs
-node apps/magicstudio-shell/tests/panels.mjs
-node apps/magicstudio-shell/tests/words-lettering.mjs
-python3 -m unittest -q tests.test_rig_from_sheet tests.test_lyrics_layout
-node apps/magicstudio-shell/tests/companions.mjs
-node apps/magicstudio-shell/tests/ui-lint.mjs --ratchet --report --append-report
-
-# 2. If Rust files are staged, run workspace compile check + test suite on commit
-RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
-if [ -n "$RUST_STAGED" ]; then
-    echo "[pre-commit] Rust changes staged — running cargo check & cargo test (jobs=$CARGO_BUILD_JOBS)..."
-    cargo check --workspace --all-targets --quiet
-    cargo test --workspace --quiet
-fi
+FINISHED=1
+printf '[hook] %s: PASSED (exit 0)\n' "$CURRENT_STEP"

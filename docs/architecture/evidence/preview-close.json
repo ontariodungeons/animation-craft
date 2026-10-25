@@ -1,0 +1,14 @@
+{
+  "port": 19963,
+  "workspace": 17,
+  "pid": 3965016,
+  "unsaved_state": "no_detected_unsaved_changes",
+  "quit_reply": {
+    "exited": false,
+    "ok": true,
+    "status": "close_requested",
+    "verification": "Check endpoint/process exit after this response; no force kill or silent discard."
+  },
+  "port_closed": true,
+  "window_closed": true
+}

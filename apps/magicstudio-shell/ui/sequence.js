@@ -70,7 +70,7 @@ function seqOffsets(layer, t) {
 function sequenceAttach(view) {
   animationShell();
   const stage = $("motion-stage");
-  $("motion-canvas").style.display = "none";
+  $("motion-canvas").hidden = true;
   stage.append(el("div", { class: "seq-canvas", id: "seq-canvas" }));
   document.querySelector(".motion-tools")?.prepend(motionButton("seq-add", "Add images to the sequence", "layers", seqAdd));
   const scrub = $("motion-scrub");
@@ -118,7 +118,7 @@ function seqRenderInspector() {
         const scrub = $("motion-scrub");
         if (scrub) scrub.max = String(v);
       }),
-    ], true, "motion"),
+    ], true, "motion-canvas-settings"),
     motionSection("Layers", (() => {
       const list = el("div", { class: "motion-layers", id: "seq-layers" });
       for (const l of [...seq.layers].reverse()) {
@@ -132,7 +132,7 @@ function seqRenderInspector() {
       if (!seq.layers.length) list.append(el("p", { class: "muted" }, "Add images to compose them in time."));
       seqCaption();
       return list;
-    })(), true, "layers"),
+    })(), true, "motion-layers"),
     layer ? motionSection(layer.name, [
       motionRange(`seq-scale-${layer.id}`, "Scale", 10, 300, 1, layer.scale, "%", (v) => { layer.scale = v; seqDraw(); }),
       ...["entry", "exit"].map((side) => {
@@ -144,19 +144,19 @@ function seqRenderInspector() {
           motionRange(`seq-${side}-delay-${layer.id}`, "Delay", 0, 20, 0.05, spec.delay, "s", (v) => { spec.delay = v; seqDraw(); }),
           seqSelect("Ease", SEQ_EASES, spec.ease, (v) => { spec.ease = v; seqDraw(); }));
       }),
-    ], true, "motion") : null,
+    ], true, "motion-selected-layer") : null,
     motionSection("Export & integrations", [
       el("button", { class: "start", id: "seq-export", title: "Render the sequence with EffectCraft", onclick: seqExport }, "Render"),
       el("div", { class: "why", id: "seq-status" }, seq.busy ? "Rendering…" : seq.result?.ok ? "Rendered" : ""),
       seq.result?.ok ? fileButton({ path: seq.result.file, name: seq.result.file.split("/").pop() }) : null,
-    ], true, "export"),
+    ], true, "motion-export-section"),
   );
 }
 
 function seqFit() {
   const canvas = $("seq-canvas");
   if (!canvas) return;
-  canvas.style.backgroundColor = seq.background || "transparent";
+  canvas.style.setProperty("--seq-background", seq.background || "transparent");
 }
 
 function seqDraw() {
@@ -173,11 +173,11 @@ function seqDraw() {
     if (node.getAttribute("src") !== convertFileSrc(layer.file)) node.src = convertFileSrc(layer.file);
     const off = seqOffsets(layer, seq.time);
     const scale = Math.max(0, (layer.scale + off.scale[0]) / 100);
-    node.style.left = `${((layer.center[0] + off.position[0]) / w) * 100}%`;
-    node.style.top = `${((layer.center[1] + off.position[1]) / h) * 100}%`;
-    node.style.width = `${((layer.natural[0] * scale) / w) * 100}%`;
-    node.style.opacity = String(Math.max(0, Math.min(1, (100 + off.opacity) / 100)));
-    node.style.transform = `translate(-50%, -50%) rotate(${off.rotation}deg)`;
+    node.style.setProperty("--seq-x", `${((layer.center[0] + off.position[0]) / w) * 100}%`);
+    node.style.setProperty("--seq-y", `${((layer.center[1] + off.position[1]) / h) * 100}%`);
+    node.style.setProperty("--seq-width", `${((layer.natural[0] * scale) / w) * 100}%`);
+    node.style.setProperty("--seq-opacity", String(Math.max(0, Math.min(1, (100 + off.opacity) / 100))));
+    node.style.setProperty("--seq-rotation", `${off.rotation}deg`);
     node.classList.toggle("selected", layer.id === seq.selected);
   }
   for (const node of [...canvas.children]) if (!seq.layers.some((l) => l.id === node.dataset.layer)) node.remove();

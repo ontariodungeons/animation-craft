@@ -1,5 +1,7 @@
 # Magic Studio
 
+Canonical repository: [ontariodungeons/magic-studio](https://github.com/ontariodungeons/magic-studio). Jesse reviews the app built from `main`.
+
 The application is the Tauri shell in `apps/magicstudio-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
 
 ## Run and discover
