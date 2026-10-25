@@ -135,7 +135,8 @@ SUBCOMMANDS
                                       (activity history: last 512, UI clicks never evict them)
   login [provider]                    native OpenCode authentication in your terminal (no --bridge)
   info                                print engine info and available commands
-  commands [filter]                   list commands (id, label, shortcut, params)
+  commands [filter] [--group]         list commands (id, label, shortcut, params);
+                                      --group by menu, read-only commands last
   find [words] [project=<file>] [--json]  ranked commands, project objects and visible controls; no words suggests likely reads
   doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
   storyboard --doctor                read-only section-boundary task list for the selected Studio project
@@ -1044,13 +1045,14 @@ fn main() {
         }
         "commands" => {
             let f = a.pos(1).map(str::to_ascii_lowercase).unwrap_or_default();
+            let grouped = cli_args().iter().any(|arg| arg == "--group");
             let specs = magicstudio_engine::command_specs();
             let hit = |spec: &&magicstudio_engine::CommandSpec| {
                 let id = spec.id.to_ascii_lowercase();
                 let label = spec.label.to_ascii_lowercase();
                 f.is_empty() || id.contains(&f) || label.contains(&f)
             };
-            for spec in specs.iter().filter(hit) {
+            let print = |spec: &magicstudio_engine::CommandSpec| {
                 outln!(
                     "{:<36} {:<24} {:<14} {}",
                     spec.id,
@@ -1058,6 +1060,22 @@ fn main() {
                     spec.shortcut.unwrap_or("-"),
                     spec.params
                 );
+            };
+            let selected: Vec<&magicstudio_engine::CommandSpec> = specs.iter().filter(hit).collect();
+            if grouped {
+                for (index, (name, list)) in grouped_commands(selected).into_iter().enumerate() {
+                    if index > 0 {
+                        outln!();
+                    }
+                    outln!("{} ({})", name, list.len());
+                    for spec in list {
+                        print(spec);
+                    }
+                }
+            } else {
+                for spec in selected {
+                    print(spec);
+                }
             }
         }
         "find" => {
@@ -1393,6 +1411,26 @@ fn main() {
     }
 }
 
+/// Group command specs by their first menu entry. Commands without a menu are
+/// read-only queries and are kept last so the actionable groups lead.
+fn grouped_commands<'a>(
+    specs: Vec<&'a magicstudio_engine::CommandSpec>,
+) -> Vec<(String, Vec<&'a magicstudio_engine::CommandSpec>)> {
+    let mut groups: Vec<(String, Vec<&'a magicstudio_engine::CommandSpec>)> = Vec::new();
+    for spec in specs {
+        let name = spec.menu.first().copied().unwrap_or("Read-only").to_string();
+        match groups.iter_mut().find(|(group, _)| group.as_str() == name.as_str()) {
+            Some((_, list)) => list.push(spec),
+            None => groups.push((name, vec![spec])),
+        }
+    }
+    groups.sort_by(|a, b| {
+        let (a_read, b_read) = (a.0 == "Read-only", b.0 == "Read-only");
+        a_read.cmp(&b_read).then_with(|| a.0.cmp(&b.0))
+    });
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::args::parse_value;
@@ -1411,6 +1449,26 @@ mod tests {
             parse_value("{\"key\":\"val\"}"),
             serde_json::json!({"key": "val"})
         );
+    }
+
+    #[test]
+    fn grouped_commands_cover_every_spec_once_and_keep_read_only_last() {
+        let specs: Vec<_> = magicstudio_engine::command_specs().iter().collect();
+        let grouped = grouped_commands(specs.clone());
+        let total: usize = grouped.iter().map(|(_, list)| list.len()).sum();
+        assert_eq!(total, specs.len(), "every command appears exactly once");
+        assert_eq!(
+            grouped.last().map(|(name, _)| name.as_str()),
+            Some("Read-only"),
+            "commands without a menu must be the final group"
+        );
+        assert!(grouped.iter().any(|(name, _)| name == "Animation"));
+        for (name, list) in &grouped {
+            for spec in list {
+                let expected = spec.menu.first().copied().unwrap_or("Read-only");
+                assert_eq!(name.as_str(), expected, "{} landed in the wrong group", spec.id);
+            }
+        }
     }
 
     #[test]
