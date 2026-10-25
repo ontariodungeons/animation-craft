@@ -93,6 +93,13 @@ USAGE
 OPTIONS
   --bridge <port|host:port|auto|unix:path>  send commands to a running `magicstudio-shell --control <port>` GUI window
 
+QUICK START
+  mc tui instances                     find a running TUI
+  mc tui look                          read its frame and state
+  mc --bridge auto exec ui.state       read the live Studio state
+  mc commands --group                  list commands by menu
+  mc find <words>                      find commands, projects and controls
+
 SUBCOMMANDS
   panels [--json|--check]              shared UI configuration and live panel telemetry
   tui look [instance=<pid>]            actual live TUI frame, state and all controls as JSON
@@ -164,6 +171,8 @@ SUBCOMMANDS
   agent say \"<text>\" [wait=300] [project=<dir>]
                                       talk to the app-selected chat agent (fresh by default; prints its reply);
                                       also: agent read [last=10], agent session (not an MCP tool)
+  sprocket [--status|--log|--models|--use <provider/id>|<message...>]
+                                      Sprocket session, transcript, model catalog/selection or a message
 
 LIVE UI CONTROL COMMANDS (run with `--bridge auto exec <command>`, or the Studio's unix:<socket>)
   ui.state                            project, view, animation (subject, track, time, selected part)
