@@ -487,7 +487,7 @@ function renderBlocks() {
   const scenePicker = el('select',{id:'storyboard-scene','aria-label':'Storyboard scene',onchange:event=>{state.storyboardScene=event.target.value; const selected=scenes.find(s=>s.target===state.storyboardScene); if(selected)showPage(selected.page-1); renderBlocks();}},
     ...scenes.map(s=>el('option',{value:s.target,selected:s.target===scene?.target},`${s.scene} · ${s.title}`)));
   const wordPicker = el('select',{id:'storyboard-word','aria-label':'Recorded word at the scene cut'},
-    ...scenes.flatMap(s=>s.words || []).map(w=>el('option',{value:w.id,selected:w.id===scene?.words?.[1]?.id},`${Number(w.start).toFixed(2)} · ${w.text}`)));
+    ...scenes.filter(s=>Math.abs(s.scene-(scene?.scene || 1))<=1).flatMap(s=>s.words || []).map(w=>el('option',{value:w.id,selected:w.id===scene?.words?.[1]?.id},`${Number(w.start).toFixed(2)} · ${w.text}`)));
   const sceneAction = (id,label,command,params,disabled=false) => el('button',{id,disabled:disabled || !scene,'data-commands':command,onclick:async()=>{
     try{const result=await designCommand(command,{scene:scene.target,expected_revision:contents.revision,...params(),word:wordPicker.value});
       if(result.previous_version)state.storyboardUndo=result.previous_version;

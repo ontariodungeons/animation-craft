@@ -9,7 +9,7 @@ use crate::{EngineError, Result, Session};
 use crate::workshop::{
     ASSETS_DIR, IMAGE_EXTENSIONS, STORYBOARD_DIR, STORYBOARD_PDF,
     files_in, panel_files, project_dir, song_seconds,
-    transcript_files, workshop_status,
+    transcript_files,
 };
 use crate::workspace::{resolve_workspace_path, run_tool_in};
 
