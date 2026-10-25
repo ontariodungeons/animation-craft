@@ -153,7 +153,7 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
         let mut text = String::new();
         let mut in_tag = false;
         for c in inner.chars() { match c { '<' => in_tag = true, '>' => in_tag = false, c if !in_tag => text.push(c), _ => {} } }
-        clips.push((id.to_owned(), text.trim().to_owned(), start, duration));
+        clips.push((id.to_owned(), text.trim().to_owned(), start, duration, tag_attr(tag,"data-section").map(str::to_owned), tag_attr(tag,"data-occurrence").and_then(|v|v.parse::<u64>().ok())));
     }
     let lyrics = crate::lyrics::cmd_song_lyrics(s, &json!({}))?;
     let mut used = vec![false; clips.len()];
@@ -163,10 +163,18 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
         for line in section["lines"].as_array().into_iter().flatten() {
             let sung = line["sung_id"].as_str().or(line["id"].as_str()).unwrap_or_default();
             if sung.is_empty() { continue; }
-            for (i, (id, text, start, duration)) in clips.iter().enumerate() {
-                let Some(n) = id.rsplit_once('-').filter(|(head, _)| *head == sung || head.ends_with(&format!("-{sung}")))
-                    .and_then(|(_, n)| n.parse::<usize>().ok()) else { continue };
-                used[i] = true;
+            let mut by_word: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
+            for (i,(id,_,_,_,scope,occurrence)) in clips.iter().enumerate() {
+                let Some(n)=id.rsplit_once('-').filter(|(head,_)|*head==sung || head.ends_with(&format!("-{sung}"))).and_then(|(_,n)|n.parse::<usize>().ok()) else {continue};
+                if scope.as_deref().is_some_and(|v|Some(v)!=section["section"].as_str()) || occurrence.is_some_and(|v|Some(v)!=section["occurrence"].as_u64()) {continue;}
+                by_word.entry(n).or_default().push(i);
+            }
+            for (n,mut candidates) in by_word {
+                candidates.sort_by(|a,b|clips[*a].2.total_cmp(&clips[*b].2));
+                let repeat=section["occurrence"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
+                let pick=if candidates.len()==1 || clips[candidates[0]].5.is_some(){0}else{repeat};
+                let Some(&i)=candidates.get(pick) else {continue};
+                let (id,text,start,duration,_,_)=&clips[i];used[i]=true;
                 found.push(json!({"clip_id":id,"word_id":format!("{sung}/w{n}"),"line_id":line["id"],"text":text,"start":start,"duration":duration}));
             }
         }
@@ -175,6 +183,19 @@ pub fn cmd_words_studio_track(s: &mut Session, _: &Value) -> Result<Value> {
         let start = found.iter().filter_map(|c| c["start"].as_f64()).fold(f64::INFINITY, f64::min);
         let end = found.iter().filter_map(|c| Some(c["start"].as_f64()? + c["duration"].as_f64()?)).fold(0.0, f64::max);
         sections.push(json!({"section":section["section"],"label":section["label"],"occurrence":section["occurrence"],"start":start,"end":end,"clips":found}));
+    }
+    let legacy_repeats=clips.iter().enumerate().any(|(i,c)|c.5.is_none() && clips[..i].iter().any(|old|old.0==c.0));
+    if legacy_repeats {
+        for i in 0..sections.len() {
+            let next=sections.get(i+1).and_then(|sec|sec["start"].as_f64()).unwrap_or(f64::INFINITY);
+            let snapshot=sections[i]["clips"].as_array().cloned().unwrap_or_default();
+            for clip in sections[i]["clips"].as_array_mut().into_iter().flatten() {
+                let start=clip["start"].as_f64().unwrap_or(0.0);
+                let boundary=snapshot.iter().filter(|c|c["line_id"]!=clip["line_id"]).filter_map(|c|c["start"].as_f64()).filter(|t|*t>start).fold(next,f64::min);
+                clip["duration"]=json!(clip["duration"].as_f64().unwrap_or(0.0).min((boundary-start).max(0.0)));
+            }
+            sections[i]["end"]=json!(sections[i]["clips"].as_array().into_iter().flatten().filter_map(|c|Some(c["start"].as_f64()?+c["duration"].as_f64()?)).fold(0.0,f64::max));
+        }
     }
     let unmatched: Vec<&str> = clips.iter().zip(&used).filter(|(_, u)| !**u).map(|((id, ..), _)| id.as_str()).collect();
     Ok(json!({"source":path,"clip_count":clips.len(),"sections":sections,"unmatched":unmatched}))
@@ -343,10 +364,13 @@ fn default_document(report: &Value) -> Value {
 /// `authored_duration = (last_end + hold) - (first_start - lead_in)`. Never moves the audio.
 /// Each word's time in the video's own lyric track (`words.studio_track`), by word id. Empty when
 /// the project has no video or no lyric clips; then the reference timing stands.
+fn word_time_key(scope: &Value, id: &str) -> String {
+    format!("{}#{}:{id}",scope["section"].as_str().unwrap_or(""),scope["occurrence"].as_u64().unwrap_or(1))
+}
 fn studio_times(s: &mut Session) -> std::collections::HashMap<String, (f64, f64)> {
     let track = cmd_words_studio_track(s, &json!({})).unwrap_or(Value::Null);
-    track["sections"].as_array().into_iter().flatten().flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default())
-        .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), (c["start"].as_f64()?, c["start"].as_f64()? + c["duration"].as_f64()?)))).collect()
+    track["sections"].as_array().into_iter().flatten().flat_map(|sec| sec["clips"].as_array().into_iter().flatten().filter_map(move |c|
+        Some((word_time_key(sec,c["word_id"].as_str()?), (c["start"].as_f64()?,c["start"].as_f64()?+c["duration"].as_f64()?))))).collect()
 }
 
 /// Printed words the singer didn't sing as written have no time. Each run of them is spread evenly
@@ -409,7 +433,7 @@ fn load(dir: &Path) -> Result<Option<Value>> {
 /// neighbours; heard words outside the printed lines are not shown.
 fn printed_caption_words(aligned: &Value) -> (Vec<Value>, Vec<[usize; 2]>) {
     let src: Vec<&Value> = aligned["words"].as_array().into_iter().flatten().collect();
-    let mut words: Vec<Value> = src.iter().map(|w| json!({"text": w["text"], "start": w["start"], "end": w["end"], "word_id": w["word_id"], "line": w["sung_id"]})).collect();
+    let mut words: Vec<Value> = src.iter().map(|w| json!({"text": w["text"], "start": w["start"], "end": w["end"], "word_id": w["word_id"], "line": w["sung_id"], "section":w["section"], "occurrence":w["occurrence"]})).collect();
     let mut i = 0;
     while i < words.len() {
         if words[i]["start"].is_f64() { i += 1; continue; }
@@ -508,8 +532,9 @@ fn graphic_cues(doc: &Value, lib: &Value, times: &std::collections::HashMap<Stri
     let mut cues = Vec::new();
     for source in doc["animations"].as_array().into_iter().flatten() {
         let mut anim = source.clone();
+        let scope=anim["scope"].clone();
         for w in anim["words"].as_array_mut().into_iter().flatten() {
-            if let Some((a,b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); }
+            if let Some((a,b)) = w["word_id"].as_str().and_then(|id| times.get(&word_time_key(&scope,id))) { w["start"] = json!(a); w["end"] = json!(b); }
         }
         fill_untimed(&mut anim); timing(&mut anim);
         let words = anim["words"].as_array().cloned().unwrap_or_default();
@@ -791,7 +816,7 @@ fn kinetic_design(words: &Value, k: &Value) -> Result<Value> {
     for d in k["draws"].as_array().into_iter().flatten() {
         if !d["place"].is_null() && d["place"] != "beside" && d["place"] != "under" { return Err(invalid("kinetic.draws place must be under or beside")); }
         if !ids.contains(&&d["word_id"]) { return Err(invalid(format!("kinetic.draws: {} is not a word of this section", d["word_id"]))); }
-        let custom = if let Some(shape) = d.get("drawing") {
+        let custom = if let Some(shape) = d.get("drawing").filter(|shape| !shape.is_null()) {
             let path = shape["d"].as_str().filter(|v| !v.is_empty() && v.len() <= 16000 && v.chars().all(|c| c.is_ascii_digit() || " ,.-eMmLlHhVvCcSsQqTtAaZz".contains(c)))
                 .ok_or_else(|| invalid("drawing.d must be SVG path data"))?;
             let vb = shape["view_box"].as_str().unwrap_or("");
@@ -919,12 +944,10 @@ pub fn cmd_words_design(s: &mut Session, p: &Value) -> Result<Value> {
     let recipe = p["recipe"].as_str().map(PathBuf::from).unwrap_or_else(|| dir.join("lyrics-design.json"));
     if !recipe.is_file() { return Err(invalid(format!("No lyric recipe at {}; write one (see pipeline/lyrics_layout.py)", recipe.display()))); }
     let doc = cmd_words_read(s, &json!({}))?["document"].clone();
-    let times: std::collections::HashMap<String, Value> = cmd_words_studio_track(s, &json!({}))?["sections"].as_array().into_iter().flatten()
-        .flat_map(|sec| sec["clips"].as_array().cloned().unwrap_or_default())
-        .filter_map(|c| Some((c["word_id"].as_str()?.to_owned(), c["start"].clone()))).collect();
+    let times=studio_times(s);
     let animations: Vec<Value> = doc["animations"].as_array().into_iter().flatten().map(|a| json!({"animation_id":a["animation_id"],"section":a["scope"]["section"],
         "words":a["words"].as_array().into_iter().flatten().map(|w| { let mut w = w.clone();
-            if let Some(t) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = t.clone(); } w }).collect::<Vec<_>>()})).collect();
+            if let Some(t) = w["word_id"].as_str().and_then(|id| times.get(&word_time_key(&a["scope"],id))) { w["start"] = json!(t.0); } w }).collect::<Vec<_>>()})).collect();
     let input = dir.join(".agent/words-design-input.json");
     if let Some(parent) = input.parent() { fs::create_dir_all(parent)?; }
     fs::write(&input, serde_json::to_vec(&json!({"animations":animations})).map_err(|e| invalid(e.to_string()))?)?;
@@ -978,18 +1001,26 @@ pub fn cmd_words_track(s: &mut Session, _: &Value) -> Result<Value> {
     let (words, _) = printed_caption_words(&aligned(s)?);
     if words.is_empty() { return Err(invalid("No printed words with timing; check words.align")); }
     let mut line_end: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for w in &words { let e = line_end.entry(w["line"].as_str().unwrap_or_default().to_owned()).or_insert(0.0); *e = e.max(w["end"].as_f64().unwrap_or(0.0)); }
+    for w in &words { let e = line_end.entry(word_time_key(w,w["line"].as_str().unwrap_or_default())).or_insert(0.0); *e = e.max(w["end"].as_f64().unwrap_or(0.0)); }
     let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
     let mut clips = String::new();
     for (i, w) in words.iter().enumerate() {
         let (id, text) = (w["word_id"].as_str().unwrap_or_default(), w["text"].as_str().unwrap_or_default());
         let start = w["start"].as_f64().unwrap_or(0.0);
-        let end = line_end[w["line"].as_str().unwrap_or_default()] + HOLD;
-        clips.push_str(&format!("<div id=\"kinetic-{}\" class=\"clip lyric-word-clip\" data-start=\"{start:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-word-id=\"{}\" aria-label=\"Sung word: {}\" style=\"opacity:0\">{}</div>\n",
-            esc(&id.replace("/w", "-")), (end - start).max(0.1), 200 + i, esc(id), esc(text), esc(text)));
+        let end = line_end[&word_time_key(w,w["line"].as_str().unwrap_or_default())] + HOLD;
+        clips.push_str(&format!("<div id=\"kinetic-r{}-{}\" class=\"clip lyric-word-clip\" data-section=\"{}\" data-occurrence=\"{}\" data-start=\"{start:.6}\" data-duration=\"{:.6}\" data-track-index=\"{}\" data-word-id=\"{}\" aria-label=\"Sung word: {}\" style=\"opacity:0\">{}</div>\n",
+            w["occurrence"].as_u64().unwrap_or(1),esc(&id.replace("/w", "-")),esc(w["section"].as_str().unwrap_or("")),w["occurrence"].as_u64().unwrap_or(1), (end - start).max(0.1), 200 + i, esc(id), esc(text), esc(text)));
     }
-    let kept: Vec<&str> = html.lines().filter(|l| !l.contains("class=\"clip lyric-word-clip\"")).collect();
-    let mut out = kept.join("\n") + "\n";
+    let mut out = html.clone();
+    let mut scan = 0;
+    while let Some(start) = out[scan..].find("<div").map(|i|scan+i) {
+        let Some(tag_end)=out[start..].find('>').map(|i|start+i+1) else {break};
+        let tag=&out[start..tag_end];
+        if tag_attr(tag,"class").is_some_and(|v|v.split_whitespace().any(|c|c=="lyric-word-clip")) {
+            let Some(end)=out[tag_end..].find("</div>").map(|i|tag_end+i+6) else {return Err(invalid("Unclosed lyric anchor; nothing written"))};
+            out.replace_range(start..end,"");scan=start;
+        } else {scan=tag_end;}
+    }
     let at = out.find("<audio").or_else(|| out.rfind("</div>")).ok_or_else(|| invalid("The video has no root composition to hold the lyric line"))?;
     let at = out[..at].rfind('\n').map_or(at, |n| n + 1);
     out.insert_str(at, &clips);
@@ -1086,8 +1117,9 @@ pub fn cmd_words_compose(s: &mut Session, p: &Value) -> Result<Value> {
     let mut synced = read["document"]["animations"][0].clone();
     let times = studio_times(s);
     if !times.is_empty() {
+        let scope=synced["scope"].clone();
         for w in synced["words"].as_array_mut().into_iter().flatten() {
-            if let Some((a, b)) = w["word_id"].as_str().and_then(|id| times.get(id)) { w["start"] = json!(a); w["end"] = json!(b); w["timing_source"] = json!("studio"); }
+            if let Some((a, b)) = w["word_id"].as_str().and_then(|id| times.get(&word_time_key(&scope,id))) { w["start"] = json!(a); w["end"] = json!(b); w["timing_source"] = json!("studio"); }
         }
     }
     fill_untimed(&mut synced);
@@ -1203,7 +1235,7 @@ mod tests {
         assert_eq!(cues.len(), 1, "two lyric lines yield one independently anchored visual cue");
         assert_eq!((cues[0]["start"].clone(),cues[0]["end"].clone()),(json!(3.0),json!(5.6)));
         assert_eq!(cues[0]["word_ids"],json!(["b"]));
-        let changed = graphic_cues(&doc, &lib, &std::collections::HashMap::from([("b".into(),(3.5,4.0))]));
+        let changed = graphic_cues(&doc, &lib, &std::collections::HashMap::from([("#1:b".into(),(3.5,4.0))]));
         assert_eq!(changed[0]["start"],json!(3.5),"follows the Studio's saved word timing");
         assert!(graphic_cues(&json!({"animations":[]}), &lib, &std::collections::HashMap::new()).is_empty());
     }
@@ -1305,6 +1337,33 @@ mod tests {
         let ho = report["words"].as_array().unwrap().iter().find(|w| w["word_id"] == found[0]["word_id"]).unwrap();
         assert_eq!((ho["start"].clone(), ho["timing_source"].clone()), (json!(4.3), json!("reference")), "reference timing kept, not replaced");
         assert!(report["words"].as_array().unwrap().iter().all(|w| w.get("forced").is_none()));
+    }
+
+    #[test]
+    fn repeated_lyrics_keep_separate_video_clocks_and_unique_anchor_ids() {
+        let (dir,mut s)=project("repeated-clocks");
+        let path=dir.join("artifacts/official_lyrics.json");
+        let mut sheet:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        sheet["structure_as_sung"]=json!(["chorus","chorus"]);fs::write(path,sheet.to_string()).unwrap();
+        fs::create_dir_all(dir.join("hyperframes")).unwrap();
+        fs::write(dir.join("hyperframes/index.html"),r#"<html><head></head><body><div id="root" data-composition-id="main">
+<div id="kinetic-ch-l1-0" class="clip lyric-word-clip" data-start="4" data-duration="20">Hey</div>
+<div id="kinetic-ch-l1-0" class="clip lyric-word-clip" data-start="14" data-duration="2">Hey</div><audio id="song"></audio></div></body></html>"#).unwrap();
+        let track=cmd_words_studio_track(&mut s,&json!({})).unwrap();
+        assert_eq!(track["sections"][0]["start"],json!(4.0));assert_eq!(track["sections"][1]["start"],json!(14.0));
+        assert_eq!(track["sections"][0]["clips"].as_array().unwrap().len(),1);
+        assert!(track["sections"][0]["end"].as_f64().unwrap()<=14.0);
+        let times=studio_times(&mut s);
+        assert_eq!(times["chorus#1:ch-l1/w0"].0,4.0);assert_eq!(times["chorus#2:ch-l1/w0"].0,14.0);
+        let transcript=dir.join("song.transcript.json");
+        let mut source:Value=serde_json::from_slice(&fs::read(&transcript).unwrap()).unwrap();
+        let again:Vec<Value>=source["words"].as_array().unwrap()[6..].iter().cloned().map(|mut w|{w["start"]=json!(w["start"].as_f64().unwrap()+10.0);w["end"]=json!(w["end"].as_f64().unwrap()+10.0);w}).collect();
+        source["words"].as_array_mut().unwrap().extend(again);fs::write(transcript,source.to_string()).unwrap();
+        cmd_words_track(&mut s,&json!({})).unwrap();
+        let html=fs::read_to_string(dir.join("hyperframes/index.html")).unwrap();
+        assert!(html.contains("kinetic-r1-ch-l1-0") && html.contains("kinetic-r2-ch-l1-0"));
+        let track=cmd_words_studio_track(&mut s,&json!({})).unwrap();
+        assert!(track["sections"][0]["end"].as_f64().unwrap()<10.0,"first chorus does not extend into its repeat");
     }
 
     #[test]

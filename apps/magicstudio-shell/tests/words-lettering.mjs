@@ -111,3 +111,9 @@ assert.equal(editLine(anchors,'Two times around')[0].display_text,'Two');
 assert.equal(anchors[0].text,'Three','presentation editing never mutates the source lyric');
 assert.throws(()=>editLine(anchors,'x '.repeat(300)),/256 words/);
 console.log('PASS inline presentation edits preserve audio and word anchors');
+
+vm.runInContext(`var repeated={...anim,scope:{section:'verse_1',occurrence:2},words:anim.words.map(w=>({...w,start:w.start+10}))};
+ wordsPanel.read.document.animations.push(repeated);
+ wordsPanel.studio={sections:[{section:'verse_1',occurrence:1,clips:[{word_id:'l1/w0',start:1}]},{section:'verse_1',occurrence:2,clips:[{word_id:'l1/w0',start:11}]}]};`,c);
+assert.equal(vm.runInContext('wordsAt(anim.words[0])',c),1);
+assert.equal(vm.runInContext('wordsAt(repeated.words[0])',c),11,'repeated lines use their own clip timing');

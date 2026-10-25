@@ -29,7 +29,7 @@ const wordsSongPath = () => state.data?.status?.stages?.find((s) => s.id === "so
 const wordsCurrent = () => wordsPanel.read?.document?.animations?.find((a) => a.animation_id === wordsPanel.selected);
 // The same printed section in the finished video: its span on the song clock and its lyric clips.
 const wordsStudioSection = (anim) => wordsPanel.studio?.sections?.find((s) => s.section === anim?.scope?.section && s.occurrence === anim?.scope?.occurrence);
-const wordsClip = (id) => wordsPanel.studio?.sections?.flatMap((s) => s.clips).find((c) => c.word_id === id);
+const wordsClip = (id, anim = wordsCurrent()) => wordsStudioSection(anim)?.clips.find((c) => c.word_id === id);
 const wordsClock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
 function wordsLabel(anim) {
@@ -123,7 +123,7 @@ async function wordsApplyRegistry(name) {
 
 // The song clock of the page. A word sits at its clip in the video (else the sheet's own time); a
 // section spans its stretch of the video (else its words).
-const wordsAt = (w) => wordsClip(w.word_id)?.start ?? +w.start;
+const wordsAt = (w) => wordsClip(w.word_id, wordsPanel.read?.document?.animations?.find((a) => a.words.includes(w)) || wordsCurrent())?.start ?? +w.start;
 function wordsSpan(anim) {
   const video = wordsStudioSection(anim);
   return video ? { start: video.start, end: video.end } : { start: Math.min(...anim.words.map(wordsAt)), end: Math.max(...anim.words.map((w) => +w.end)) };
