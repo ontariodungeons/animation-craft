@@ -51,10 +51,11 @@ window.magicBridge = {
   },
   state() {
     return {
+      identity: state.identity||null,
       companions: window.magicCompanions?.snapshot() || null,
       animation: typeof animationFeedback === "function" ? animationFeedback() : null,
       project: state.project, view: document.body.classList.contains("at-home") ? "home" : state.view, open_block: state.open,
-      storyboard_page: state.page + 1, agent_open: agent.open, agent_session: agent.session,
+      storyboard_page: state.page + 1, drawer: window.workshopDrawers?.active||null, agent_open: agent.open, agent_session: agent.session,
       studio: serverUrl?.() || null, toast: $("toast").classList.contains("show") ? $("toast").textContent : null,
     };
   },

@@ -30,4 +30,6 @@ jobs:
           node apps/magicstudio-shell/tests/agent-selection.mjs
           node apps/magicstudio-shell/tests/panels.mjs
           node apps/magicstudio-shell/tests/cast.mjs
+          node apps/magicstudio-shell/tests/drawers.mjs
+          node apps/magicstudio-shell/tests/words-lettering.mjs
           node apps/magicstudio-shell/tests/ui-lint.mjs --report

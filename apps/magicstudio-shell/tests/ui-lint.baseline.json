@@ -240,6 +240,26 @@
       "style_writes": 0,
       "geometry_without_custom_property": 0,
       "lines": 141
+    },
+    "drawers.css": {
+      "px_outside_root": 0,
+      "hex_outside_root": 0,
+      "ms_outside_root": 0,
+      "raw_px_in_component_rules": 0,
+      "outside_in_overrides": 2,
+      "lines": 24,
+      "rules": 23,
+      "selectors": 22
+    },
+    "drawers.js": {
+      "hand_built_dots": 0,
+      "retired": 0,
+      "ids_without_config_entry": 0,
+      "class_from_code": 0,
+      "style_attributes": 0,
+      "style_writes": 0,
+      "geometry_without_custom_property": 0,
+      "lines": 38
     }
   }
 }

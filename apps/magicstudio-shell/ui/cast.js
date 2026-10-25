@@ -55,7 +55,7 @@ function castSelect(label,options,value,change) {
 }
 function castInput(label,value,change,multiline=false) {
   const input=el(multiline?'textarea':'input',{'aria-label':label,title:label,...(!multiline?{type:'text'}:{rows:4})});
-  input.value=value||'';input.addEventListener('input',()=>change(input.value));return input;
+  input.value=input.defaultValue=value||'';input.addEventListener('input',()=>change(input.value));return input;
 }
 function castCard(candidate,department) {
   const update=(key,value)=>{candidate[key]=value;castChanged();};
@@ -139,7 +139,7 @@ async function castSave() {
     cast.items[cast.items.indexOf(item)]=saved.department;
     const current=cast.drafts.get(id);
     if(current===draft){current.revision=saved.department.revision;if(JSON.stringify(current.document)===JSON.stringify(document))learningStore(castKey(id),null);else learningStore(castKey(id),current);}
-    if(cast.active&&cast.department===id){$('cast-saved-file').querySelector('pre').textContent=saved.department.markdown;castStatus(`Saved ${saved.department.path}`);}
+    if(cast.active&&cast.department===id){if(JSON.stringify(current.document)===JSON.stringify(document))$('cast-page')?.querySelectorAll('input,textarea').forEach(n=>n.defaultValue=n.value);$('cast-saved-file').querySelector('pre').textContent=saved.department.markdown;castStatus(`Saved ${saved.department.path}`);}
   }catch(e){
     if(cast.workspace===workspace&&cast.active&&cast.department===id){
       try{const latest=await castApi('crew.list',{workspace});if(cast.workspace===workspace)cast.items=latest.departments;}catch{}

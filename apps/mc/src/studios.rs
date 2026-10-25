@@ -44,6 +44,8 @@ pub fn rows() -> (Vec<Value>, Vec<Value>) {
                 "endpoint": endpoint,
                 "studio": short,
                 "pid": s["identity"]["pid"],
+                "port": s["identity"]["control_port"],
+                "writer_owner": s["writer_owner"],
                 "project": s["active_project"],
                 "view": s["view"],
                 "open_block": s["open_block"],
@@ -82,7 +84,7 @@ pub fn run(as_json: bool, target: Option<&str>, unpin: bool) -> i32 {
         return 0;
     }
     if let Some(target) = target {
-        let Some(row) = rows.iter().find(|r| r["studio"] == target || r["endpoint"] == target) else {
+        let Some(row) = rows.iter().find(|r| r["studio"] == target || r["port"].as_u64().is_some_and(|port|port.to_string()==target) || r["endpoint"] == target) else {
             eprintln!("mc studios: no live Studio matches {target}. Run `mc studios` for the list.");
             return 1;
         };
@@ -112,10 +114,10 @@ pub fn run(as_json: bool, target: Option<&str>, unpin: bool) -> i32 {
         println!("     same project state, same commands, no window to render.");
         return 0;
     }
-    println!("{:<8} {:<8} {:<30} {:>7}  {:<20} {}", "STUDIO", "VIEW", "PROJECT", "PID", "READY", "ENDPOINT");
+    println!("{:<8} {:<7} {:<8} {:<30} {:>7}  {:<20} {}", "STUDIO", "PORT", "VIEW", "PROJECT", "PID", "READY", "ENDPOINT");
     for row in &rows {
         let ready = if row["ready"] == true { "ready".to_string() } else { row["unsaved"].as_str().unwrap_or("unknown").to_string() };
-        println!("{:<8} {:<8} {:<30} {:>7}  {:<20} {}", row["studio"].as_str().unwrap_or("-"), row["view"].as_str().unwrap_or("-"), name(row), row["pid"].as_u64().unwrap_or(0), ready, bridge(row));
+        println!("{:<8} {:<7} {:<8} {:<30} {:>7}  {:<20} {}", row["studio"].as_str().unwrap_or("-"), row["port"].as_u64().map(|v|v.to_string()).unwrap_or_else(||"unknown".into()), row["view"].as_str().unwrap_or("-"), name(row), row["pid"].as_u64().unwrap_or(0), ready, bridge(row));
     }
     if !errors.is_empty() {
         println!("\n{} endpoint(s) did not answer: {}", errors.len(), errors.iter().filter_map(|e| e["error"].as_str()).collect::<Vec<_>>().join("; "));

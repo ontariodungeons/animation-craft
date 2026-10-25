@@ -10,8 +10,7 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, W
 
 /// The command line, for the project view on load: project and studio URL, plus `--view <project|studio>`
 /// and `--open <song|lyrics|transcript|animate|agent>` to start on a given tab and block (or with the agent open).
-#[tauri::command]
-fn startup() -> Value {
+fn launch_options() -> Value {
     let (mut positional, mut view, mut open) = (Vec::new(), None, None);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -25,6 +24,16 @@ fn startup() -> Value {
         }
     }
     json!({"project": positional.first(), "studio": positional.get(1), "view": view, "open": open})
+}
+
+#[derive(Default)]
+struct ControlPort(std::sync::Mutex<Option<u16>>);
+pub fn studio_identity(app: &tauri::AppHandle) -> Value {
+    json!({"application":"Magic Studio","frontend":"Tauri","pid":std::process::id(),"executable":std::env::current_exe().ok(),"version":env!("CARGO_PKG_VERSION"),"build_id":env!("MAGICSTUDIO_BUILD_ID"),"branch":env!("MAGICSTUDIO_BUILD_BRANCH"),"control_port":app.state::<ControlPort>().0.lock().ok().and_then(|v|*v)})
+}
+#[tauri::command]
+fn startup(app:tauri::AppHandle) -> Value {
+    let mut start=launch_options();start["identity"]=studio_identity(&app);start
 }
 
 mod bridge;
@@ -469,11 +478,11 @@ fn place_webview(view: &tauri::Webview, top: i32, right: i32, bottom: i32, is_st
 }
 
 #[derive(Default)]
-struct AgentDock(std::sync::Mutex<f64>);
+struct DrawerHeight(std::sync::Mutex<f64>);
 
 #[tauri::command]
-fn agent_dock(app: tauri::AppHandle, width: f64) -> Result<(), String> {
-    *app.state::<AgentDock>().0.lock().map_err(|e|e.to_string())?=width.clamp(0.0,600.0);
+fn drawer_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    *app.state::<DrawerHeight>().0.lock().map_err(|e|e.to_string())?=height.max(0.0);
     layout(&app);
     Ok(())
 }
@@ -483,15 +492,15 @@ fn layout(app: &tauri::AppHandle) {
     let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
     let size = physical.to_logical::<f64>(scale);
     let (view, _) = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or(("project".into(),0.5));
-    let dock = app.state::<AgentDock>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.width-240.0).max(0.0));
+    let top=BAR+app.state::<DrawerHeight>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.height-BAR-FOOTER).max(0.0));
     place_webview(&project,0,0,0,false);
     #[cfg(not(target_os="linux"))]
     { let _=project.set_position(LogicalPosition::new(0.0,0.0)); let _=project.set_size(size); }
     if let Some(studio)=app.get_webview("studio") {
         if view=="studio" || view=="split" {
-            place_webview(&studio,BAR as i32,dock.round() as i32,FOOTER as i32,true);
+            place_webview(&studio,top.round() as i32,0,FOOTER as i32,true);
             #[cfg(not(target_os="linux"))]
-            { let _=studio.set_position(LogicalPosition::new(0.0,BAR)); let _=studio.set_size(LogicalSize::new(size.width-dock,size.height-BAR-FOOTER)); }
+            { let _=studio.set_position(LogicalPosition::new(0.0,top)); let _=studio.set_size(LogicalSize::new(size.width,(size.height-top-FOOTER).max(0.0))); }
             let _=studio.show();
         } else { let _=studio.hide(); }
     }
@@ -551,13 +560,30 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(View::default())
-        .manage(AgentDock::default())
+        .manage(DrawerHeight::default())
+        .manage(ControlPort::default())
         .manage(Engine::default())
         .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, agent_dock, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
         .setup(|app| {
+            #[cfg(unix)]
+            {
+                let options=launch_options();
+                let existing=if let Some(path)=options["project"].as_str(){
+                    magicstudio_engine::studio_sessions::for_project(std::path::Path::new(path))?
+                }else{
+                    magicstudio_engine::studio_sessions::discover()["sessions"].as_array().and_then(|rows|rows.iter().find(|row|row["identity"]["build_id"]==env!("MAGICSTUDIO_BUILD_ID")).cloned())
+                };
+                if let Some(existing)=existing {
+                    if let Some(endpoint)=existing["endpoint"].as_str().and_then(|v|v.strip_prefix("unix:")) {
+                        if magicstudio_engine::studio_sessions::request(std::path::Path::new(endpoint),"ui.focus",json!({"_expected_instance":existing["instance"]})).is_ok(){app.handle().exit(0);return Ok(());}
+                    }
+                }
+            }
+            let port=std::env::args().skip_while(|a|a!="--control").nth(1).map(|v|v.parse::<u16>()).transpose()?.unwrap_or(0);
+            bridge::serve(app.handle().clone(),port)?;
             let window = WindowBuilder::new(app, "main").title("Magic Studio").inner_size(1440.0, 900.0).build()?;
             let size = window.inner_size()?.to_logical::<f64>(window.scale_factor()?);
             window.add_child(
@@ -567,11 +593,6 @@ fn main() {
             )?;
             #[cfg(unix)]
             if let Err(e)=bridge::serve_local(app.handle().clone()){eprintln!("private UI feedback: {e}");}
-            // `--control <port>`: the CLI and MCP drive this window (same protocol as before).
-            if let Some(port) = std::env::args().skip_while(|a| a != "--control").nth(1) {
-                let port: u16 = port.parse().map_err(|_| format!("--control needs a port, got {port}"))?;
-                bridge::serve(app.handle().clone(), port);
-            }
             // Every resize re-applies the layout for the open tab.
             let handle = app.handle().clone();
             window.on_window_event(move |event| {

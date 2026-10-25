@@ -666,6 +666,50 @@ fn ui_look(bridge: Option<&str>, mut args: Value) -> Value {
     }
 }
 
+/// `ui.read`: what the live window shows, as text. The window draws itself to a PNG (`ui.look`); the local
+/// vision model (Ollama, llava-llama3) reads it and answers `ask=`, and tesseract gives each line of text
+/// with its box (window pixels), beside the window's own state, so an agent checks a view by reading it.
+fn ui_read(addr: &str, mut args: Value) -> Result<Value, String> {
+    let out = args["output"].as_str().map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("magicstudio-read-{}.png", std::process::id())));
+    args["output"] = json!(out);
+    let question = args["ask"].as_str().unwrap_or("").to_owned();
+    let state = bridge_call(addr, "ui.look", args)?;
+    let ocr = std::process::Command::new("tesseract").arg(&out).arg("stdout").args(["--psm", "11", "tsv"]).output()
+        .map_err(|e| format!("tesseract is needed to read the window ({e}); install it with omarchy pkg add tesseract"))?;
+    if !ocr.status.success() { return Err(format!("tesseract could not read {}: {}", out.display(), String::from_utf8_lossy(&ocr.stderr).trim())); }
+    let mut lines: Vec<(String, [i64; 4])> = Vec::new();
+    let mut key = String::new();
+    for row in String::from_utf8_lossy(&ocr.stdout).lines().skip(1) {
+        let f: Vec<&str> = row.split('\t').collect();
+        if f.len() < 12 || f[11].trim().is_empty() || f[10].parse::<f64>().unwrap_or(-1.0) < 30.0 { continue; }
+        let n = |i: usize| f[i].parse::<i64>().unwrap_or(0);
+        let (x, y, w, h) = (n(6), n(7), n(8), n(9));
+        let this = format!("{}-{}-{}", f[2], f[3], f[4]);
+        match lines.last_mut() {
+            Some((text, b)) if this == key => { text.push(' '); text.push_str(f[11]); b[2] = b[2].max(x + w - b[0]); b[3] = b[3].max(y + h - b[1]); }
+            _ => { lines.push((f[11].to_owned(), [x, y, w, h])); key = this; }
+        }
+    }
+    // The local vision model reads the picture as a person would and answers `ask`, if given.
+    let png = std::fs::read(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let ocr_text = lines.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join(" | ");
+    let prompt = format!("This is a screenshot of a desktop app. Text read from it by OCR: {ocr_text}. Using only what you can see and that text, say in two sentences what the screen is showing.{}",
+        if question.is_empty() { String::new() } else { format!(" Then answer: {question}") });
+    let body = json!({"model": std::env::var("MAGICSTUDIO_OCR_VLM").unwrap_or_else(|_| "llava-llama3:latest".into()), "prompt": prompt, "images": [base64(&png)], "stream": false});
+    let request = std::env::temp_dir().join(format!("magicstudio-read-{}.json", std::process::id()));
+    let reading = std::fs::write(&request, body.to_string()).ok().and_then(|_| std::process::Command::new("curl")
+        .args(["-s", "--max-time", "180", "-H", "Content-Type: application/json", "--data-binary"]).arg(format!("@{}", request.display()))
+        .arg(std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434/api/generate".into())).output().ok())
+        .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).and_then(|v| v["response"].as_str().map(str::to_owned));
+    let _ = std::fs::remove_file(&request);
+    let mut summary = state.clone();
+    if let Some(m) = summary.as_object_mut() { m.remove("elements"); }
+    Ok(json!({"ok": true, "trust": "state and text are facts; reading is the local vision model's description", "image": out, "state": summary, "reading": reading.unwrap_or_else(|| "local vision model unavailable (ollama llava-llama3); OCR text below".into()), "elements": state["elements"].as_array().map_or(0, Vec::len),
+        "lines": lines.iter().map(|(t, b)| json!({"text": t, "box": b})).collect::<Vec<_>>(),
+        "text": lines.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("\n")}))
+}
+
 /// Standard base64 (RFC 4648, padded).
 fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -1086,7 +1130,8 @@ fn main() {
                 if v["ok"]==false{std::process::exit(1);}
                 return;
             }
-            let res = if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
+            let res = if id=="ui.read" {ui_read(a.bridge_addr().as_deref().unwrap_or("auto"),params)
+            }else if matches!(id,"ui.feedback"|"ui.components"|"ui.controls"|"ui.attention"|"app.quit") {bridge_call(a.bridge_addr().as_deref().unwrap_or("auto"),id,params)
             }else if let Some(addr) = a.bridge_addr() {
                 bridge_call(&addr, id, params)
             } else {

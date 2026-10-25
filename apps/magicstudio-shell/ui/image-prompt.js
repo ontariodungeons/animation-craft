@@ -76,10 +76,11 @@ function imagePromptBlock() {
   const status = el('p', { id: 'image-status', role: 'status', 'aria-live': 'polite', class: 'why' });
   function updateStatus() {
     status.dataset.signal = draft.error ? '3' : draft.result ? '2' : '0';
-    if (draft.busy) status.textContent = `image.generate request running · ${elapsed()}s elapsed${targetLabel ? ` · target ${targetLabel}` : ''}`;
+    if (draft.busy) status.textContent = `Creating artwork · ${elapsed()}s${targetLabel ? ` · ${targetLabel}` : ''}`;
     else if (draft.error) status.textContent = draft.error;
-    else if (draft.result) status.textContent = `✓ Completed in ${draft.completedElapsed ?? 0}s · ${draft.result.width} × ${draft.result.height} · ${draft.result.native_tool_receipt_verified ? 'native image receipt verified' : 'receipt unavailable'} · candidate needs visual review${draft.candidateTarget ? ` · captured ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}${draft.refreshError ? ` · ${draft.refreshError}` : ''}`;
-    else status.textContent = 'Native Codex image tool · current login · quality and dimensions are tool-controlled.';
+    else if (draft.result) status.textContent = `Ready · ${draft.result.width} × ${draft.result.height} · Review candidate${draft.candidateTarget ? ` · ${draft.candidateTarget.name} (${draft.candidateTarget.partId})` : ''}${draft.refreshError ? ` · ${draft.refreshError}` : ''}`;
+    else status.textContent = 'Describe the artwork you want to create.';
+    status.title=draft.result?`Completed in ${draft.completedElapsed??0}s · ${draft.result.native_tool_receipt_verified?'native receipt verified':'receipt unavailable'}`:status.textContent;
   }
   updateStatus();
   const generate = el('button', { id: 'image-generate', 'data-commands': 'image.generate', 'aria-label': 'Gaffer: generate artwork candidate', onclick: async () => {
@@ -114,9 +115,10 @@ function imagePromptBlock() {
     try { await navigator.clipboard.writeText(command.textContent); toast('Image command copied · nothing executed'); }
     catch { toast('Clipboard unavailable · select the command text'); }
   } }, 'Copy command');
-  const body = [el('label', { for: 'image-prompt' }, 'Prompt'), prompt,
-    el('label', { for: 'image-model' }, 'Codex model'), model, models, status, generate,
-    el('details', {}, el('summary', {}, 'CLI command'), command, copy)];
+  const settings=el('div',{id:'image-settings'},el('label',{for:'image-model'},'Model'),model,models,
+    el('details', {}, el('summary', {}, 'CLI command'), command, copy));
+  settings.hidden=$('gaffer-config-toggle')?.getAttribute('aria-expanded')!=='true';
+  const body = [el('label', { for: 'image-prompt' }, 'Prompt'), prompt,status,generate,settings];
   if (draft.result?.image) body.push(el('img', { class: 'image-result', src: convertFileSrc(draft.result.image), alt: 'Generated candidate artwork · needs visual review' }),
     el('button', { class: 'ghost', id: 'image-open-result', onclick: () => openPath(draft.result.image) }, 'Open generated image'));
   window.uiRegistry.fact({ id: 'magic-image-pane', project: state.project, state: draft.error ? 'failed' : draft.busy ? 'working' : draft.result ? 'ready' : 'idle', reason: draft.error || null, source: 'artwork result' });

@@ -1,5 +1,5 @@
 {
-  "about": "Kinetic lyric library: how a meaning word performs (acts), how the other words arrive (entrances), how a line sits in the frame (layouts), and a transparent layer over the section (overlays: a HyperFrames registry block with a blend mode and opacity; blocks drawn on black use screen so the black disappears). Read by words.save/compose/apply.",
+  "about": "Kinetic lyric library: how a meaning word performs (acts), how the other words arrive (entrances), how a line sits in the frame (layouts), and a transparent layer over the section (overlays: a HyperFrames registry block with a blend mode and opacity; blocks drawn on black use screen so the black disappears). Read by words.save/compose/apply. Letterings are named style presets; strokes are hand-drawn marks a design anchors to a word (drawn on at its sung time).",
   "acts": {
     "jump": {
       "name": "Jump",
@@ -370,6 +370,143 @@
       "block": "snow",
       "blend": "normal",
       "opacity": 0.85
+    }
+  },
+  "letterings": {
+    "storybook": {
+      "name": "Storybook",
+      "does": "Book serif, rust italic heroes",
+      "style": {
+        "font": "C059",
+        "weight": 700,
+        "size": 64,
+        "color": "#173F49",
+        "outline": "#FFF8E9",
+        "hero_font": "C059",
+        "hero_weight": 700,
+        "hero_italic": true,
+        "hero_size": 124,
+        "hero_color": "#B8442A"
+      }
+    },
+    "poster": {
+      "name": "Poster",
+      "does": "Tall condensed letters, bold orange heroes",
+      "style": {
+        "font": "Nimbus Sans Narrow",
+        "weight": 700,
+        "size": 70,
+        "color": "#1F2A33",
+        "outline": "#FFFFFF",
+        "hero_font": "Nimbus Sans Narrow",
+        "hero_weight": 700,
+        "hero_italic": false,
+        "hero_size": 140,
+        "hero_color": "#E4572E"
+      }
+    },
+    "sunny": {
+      "name": "Sunny",
+      "does": "Round sans, golden heroes",
+      "style": {
+        "font": "Liberation Sans",
+        "weight": 700,
+        "size": 62,
+        "color": "#3B2A1A",
+        "outline": "#FFF3D6",
+        "hero_font": "Nimbus Sans",
+        "hero_weight": 700,
+        "hero_italic": false,
+        "hero_size": 128,
+        "hero_color": "#E8A33D"
+      }
+    },
+    "classic": {
+      "name": "Classic",
+      "does": "Roman type, plum italic heroes",
+      "style": {
+        "font": "Nimbus Roman",
+        "weight": 400,
+        "size": 62,
+        "color": "#1F2A33",
+        "outline": "#FFF8E9",
+        "hero_font": "Nimbus Roman",
+        "hero_weight": 700,
+        "hero_italic": true,
+        "hero_size": 128,
+        "hero_color": "#7A3E9D"
+      }
+    },
+    "ocean": {
+      "name": "Ocean",
+      "does": "Clean sans, sea-blue heroes",
+      "style": {
+        "font": "Noto Sans",
+        "weight": 700,
+        "size": 60,
+        "color": "#0E4D64",
+        "outline": "#E8FBFF",
+        "hero_font": "Noto Serif",
+        "hero_weight": 700,
+        "hero_italic": false,
+        "hero_size": 124,
+        "hero_color": "#1B9AAA"
+      }
+    },
+    "night": {
+      "name": "Night",
+      "does": "Light words, warm glowing heroes",
+      "style": {
+        "font": "Nimbus Sans",
+        "weight": 700,
+        "size": 60,
+        "color": "#FFF8E9",
+        "outline": "#10243A",
+        "hero_font": "Nimbus Roman",
+        "hero_weight": 700,
+        "hero_italic": true,
+        "hero_size": 130,
+        "hero_color": "#FFD166"
+      }
+    }
+  },
+  "strokes": {
+    "underline": {
+      "name": "Underline",
+      "does": "A hand-drawn line under the word",
+      "view_box": "0 0 280 30",
+      "d": "M 5 14 Q 61 5 125 13 T 269 10",
+      "draw": 0.55,
+      "track": "lettering"
+    },
+    "swoop": {
+      "name": "Swoop",
+      "does": "A flight trail rising past the word",
+      "view_box": "0 0 790 160",
+      "d": "M 10 145 Q 126 170 217 93 T 438 58 Q 578 29 756 7 M 730 5 L 761 5 L 746 29",
+      "draw": 1.6
+    },
+    "loop": {
+      "name": "Loop",
+      "does": "A loop-the-loop arrow",
+      "view_box": "0 0 620 110",
+      "d": "M 15 20 C 110 95 425 95 455 40 C 485 -4 350 -3 352 37 C 355 95 515 85 602 50 M 579 33 L 608 49 L 586 73",
+      "draw": 1.6
+    },
+    "hill": {
+      "name": "Wave",
+      "does": "A gentle wave under the word",
+      "view_box": "0 0 410 95",
+      "d": "M 7 77 Q 73 72 118 32 Q 171 -8 228 31 Q 279 75 400 76",
+      "draw": 1.4,
+      "track": "lettering"
+    },
+    "down": {
+      "name": "Arrow down",
+      "does": "A wandering arrow pointing down",
+      "view_box": "0 0 160 330",
+      "d": "M 73 13 C 27 67 104 129 66 196 Q 47 231 61 289 M 30 264 L 61 294 L 87 260",
+      "draw": 1.0
     }
   }
 }
