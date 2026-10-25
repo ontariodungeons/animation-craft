@@ -1137,6 +1137,22 @@
       "component": "control",
       "label": "Studio port and build",
       "indicator": "hidden"
+    },
+    "words-view-modes": {
+      "component": "segmented",
+      "label": "Lyrics view modes",
+      "indicator": "hidden"
+    },
+    "words-link-controls": {
+      "component": "transport",
+      "label": "Lyric and drawing connections",
+      "indicator": "hidden"
+    },
+    "words-workspace-controls": {
+      "component": "panel-body",
+      "look": "settings",
+      "label": "Selected Lyrics view controls",
+      "indicator": "hidden"
     }
   },
   "rails": {

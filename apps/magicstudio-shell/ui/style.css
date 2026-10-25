@@ -1,5 +1,6 @@
 /* Magic Studio shell — calm, focused, one accent. Tokens follow magic-studio-timeline.figcraft. */
 :root {
+  --words-link-cycle: 16s;
   /* Design page: designed lyric lettering shows on paper, as on the video's light scenes. */
   --lettering-paper: #f4efe4; --lettering-ink: #1f2a33;
   --bg: #0b1017;
@@ -963,10 +964,11 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 /* A sung word in its own lettering; the line's design sets these through --word-* values. */
 /* Arrows from each lyric line to its film-roll frame: transparent, over the page, never in the way. */
 #view-design.active { position: relative; }
-#view-design > svg.words-arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; width: var(--arrows-width); height: var(--arrows-height); }
-#view-design > svg.words-arrows path { fill: none; stroke: var(--tone-transcript); stroke-width: 2; opacity: .16; }
-#view-design > svg.words-arrows path.active { opacity: .4; }
-#view-design > svg.words-arrows path[data-kind="chorus"] { stroke: var(--tone-lyrics); }
+#view-design > svg.words-arrows { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 1; width: var(--arrows-width); height: var(--arrows-height); }
+#view-design > svg.words-arrows path { fill: none; stroke: var(--link-a, var(--tone-transcript)); stroke-width: 2; opacity: .32; pointer-events: stroke; cursor: pointer; stroke-dasharray: 5 4; }
+#view-design > svg.words-arrows path.active { opacity: .75; stroke-width: 3; }
+#view-design > svg.words-arrows.front { z-index: 4; }
+#view-design > svg.words-arrows.front path { stroke-dasharray: none; }
 /* Kinetic layers under the stage: rows of library cards and the section's meaning words. */
 .words-layers { display: flex; flex-direction: column; gap: var(--space-2); }
 .words-layers .words-effects { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-5) * 3.4), 1fr)); gap: var(--space-1); }
@@ -1094,3 +1096,24 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-line[aria-invalid="true"] { outline-color: var(--amber); }
 .words-backdrop { display: flex; align-items: center; gap: var(--space-2); }
 .words-backdrop select { flex: 1; min-width: 0; }
+
+#view-design.active { height: var(--words-available); }
+#words-main { max-height: var(--words-available); }
+#words-main > :not(#words-workspace-controls) { flex-shrink: 0; }
+#words-workspace-controls { min-height: 0; overflow: auto; padding-bottom: var(--space-3); overscroll-behavior: contain; }
+#words-workspace-controls .words-effects { max-height: none; overflow: visible; }
+#words-main .words-preview .stage { max-height: calc(var(--words-available) * .46); }
+#words-video-frame { left: var(--frame-x, 0); top: var(--frame-y, 0); }
+#words-view-modes > button { display: flex; align-items: center; justify-content: center; gap: var(--space-1); }
+.words-view-icon { display: inline-flex; }
+.words-view-icon svg { width: var(--text-lg); height: var(--text-lg); fill: none; stroke: currentColor; stroke-width: 1.8; }
+#words-link-controls input[type="color"] { width: var(--size-30); height: var(--size-30); padding: var(--space-1); cursor: pointer; }
+.words-timing { display: flex; flex-direction: column; gap: var(--space-3); }
+.words-timing-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.words-timing-summary > p { flex-basis: 100%; }
+#view-design:not([data-words-mode="timing"]) .words-cue-handle { display: none; }
+
+.words-link-anchor { fill: var(--surface); stroke: var(--accent); stroke-width: 2; pointer-events: all; cursor: ns-resize; touch-action: none; }
+.words-link-anchor:hover, .words-link-anchor:focus { fill: var(--accent); stroke: var(--text); outline: none; }
+@media (prefers-reduced-motion: no-preference) { #view-design > svg.words-arrows.blending path.active { animation: words-link-blend var(--words-link-cycle) ease-in-out infinite alternate; } }
+@keyframes words-link-blend { from { stroke: var(--link-a); } to { stroke: var(--link-b); } }
