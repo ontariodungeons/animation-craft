@@ -142,6 +142,8 @@ SUBCOMMANDS
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard edit scene <N> <text> [field=action]  edit an existing native scene text field and save
   exec <id> [key=value ...]           run one command; prints its result as JSON
+  <project> image add <file> [name=...] [background=... | character=...]
+                                      register an image; outside files are copied into project assets
   <project> <subcommand | command id> [ARGS]
                                       run against one project: an .magic, or a folder with exactly
                                       one (a song's hyperframes/ or remotion/ folder finds its song);
@@ -798,12 +800,12 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
  Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
 }
 
-const SUBCOMMANDS: &[&str] = &["help", "-h", "panels", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips"];
+const SUBCOMMANDS: &[&str] = &["help", "-h", "panels", "version", "login", "workshop", "tui", "backstage", "booth", "center", "sprocket", "info", "commands", "find", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "debug", "clips", "image"];
 
 /// The command line with a leading project path resolved (see `project_argument`), read once.
 fn cli_args() -> &'static Vec<String> {
     static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    ARGS.get_or_init(|| project_argument(std::env::args().collect()).unwrap_or_else(|e| usage(e)))
+    ARGS.get_or_init(|| project_argument(std::env::args().collect()).and_then(image_add_argument).unwrap_or_else(|e| usage(e)))
 }
 
 /// `mc <project> <subcommand | command id> ...`: a leading project path becomes
@@ -825,6 +827,26 @@ fn project_argument(mut raw: Vec<String>) -> Result<Vec<String>, String> {
     }
     raw.push(format!("project={}", project.display()));
     raw.push(format!("_expected_project={}", project.display()));
+    Ok(raw)
+}
+
+/// Friendly spelling; all persistence, ownership and copying stay in project.add_asset.
+fn image_add_argument(mut raw: Vec<String>) -> Result<Vec<String>,String> {
+    let mut i=1;
+    while i<raw.len() && raw[i].starts_with('-') && !SUBCOMMANDS.contains(&raw[i].as_str()) { i+=if raw[i]=="--bridge"{2}else{1}; }
+    if raw.get(i).map(String::as_str)!=Some("image"){return Ok(raw);}
+    if raw.get(i+1).map(String::as_str)!=Some("add") || raw.get(i+2).is_none(){return Err("image add <file> [name=<label>] [background=<name> | character=<name>]".into());}
+    if raw[i+3..].iter().any(|v|!v.contains('=')){return Err("image add takes one file; options use key=value".into());}
+    let path=std::fs::canonicalize(&raw[i+2]).map_err(|e|format!("{}: {e}",raw[i+2]))?;
+    if !path.is_file(){return Err("image add needs an image file".into());}
+    if !path.extension().and_then(|e|e.to_str()).is_some_and(|e|["png","jpg","jpeg","webp","svg","gif","bmp","tif","tiff","exr"].contains(&e.to_ascii_lowercase().as_str())){return Err("Unsupported image extension".into());}
+    if raw[i+3..].iter().any(|v|v.starts_with("path=")||v.starts_with("kind=")||v.starts_with("preset=")||v.starts_with("save=")){return Err("image add fixes path and kind=image; use project.add_asset for other asset types".into());}
+    let destination=raw[i+3..].iter().any(|v|["background=","character=","image="].iter().any(|key|v.starts_with(key)));
+    raw.splice(i..i+3,["exec".into(),"project.add_asset".into(),format!("path={}",path.display()),"kind=image".into(),"save=true".into()]);
+    if !destination {
+        let folder:String=path.file_stem().and_then(|v|v.to_str()).unwrap_or("image").chars().map(|c|if c.is_alphanumeric()||c=='-'||c=='_'{c}else{'-'}).collect();
+        raw.push(format!("image={folder}"));
+    }
     Ok(raw)
 }
 
@@ -1466,6 +1488,25 @@ mod project_argument_tests {
         dir
     }
     fn args(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn image_add_keeps_project_pin_and_imports_files_with_spaces() {
+        let dir=temp("image-add");
+        let project=dir.join("Song.magic");let image=dir.join("Sea scene.svg");
+        std::fs::write(&project,"{}").unwrap();std::fs::write(&image,"<svg/>").unwrap();
+        let input=args(&["mc","--bridge","19971",project.to_str().unwrap(),"image","add",image.to_str().unwrap(),"name=Sea scene"]);
+        let got=image_add_argument(project_argument(input).unwrap()).unwrap();
+        assert_eq!(&got[3..5], &["exec","project.add_asset"]);
+        for value in [format!("path={}",image.display()),"kind=image".into(),"image=Sea-scene".into(),"name=Sea scene".into(),format!("_expected_project={}",project.display())] {assert!(got.contains(&value),"{got:?}");}
+        let got=image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),"background=sea"])).unwrap();
+        assert!(got.contains(&"background=sea".into()));assert!(!got.iter().any(|v|v.starts_with("image=")));
+        for tail in ["kind=video","path=elsewhere","preset=cat","second-file"] {
+            assert!(image_add_argument(args(&["mc","image","add",image.to_str().unwrap(),tail])).is_err());
+        }
+        assert!(image_add_argument(args(&["mc","image","add",dir.to_str().unwrap()])).is_err());
+        assert!(image_add_argument(args(&["mc","image","add","/no/such/image.png"])).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn file_folder_and_video_target_folder_resolve_to_the_one_project() {

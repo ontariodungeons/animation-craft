@@ -1,9 +1,9 @@
 # Shared panel refactor and companions
 
-Branch: `fix/panel-unification`  
-Worktree: `.worktrees/panel-unification`  
-Base: `5ab274ba7053f6f580988ae9ba21ea8137f1ccea`  
-Implementation through: `24e62387`  
+Branch: `fix/panel-unification`
+Worktree: `.worktrees/panel-unification`
+Base: `5ab274ba7053f6f580988ae9ba21ea8137f1ccea`
+Implementation through: `24e62387`
 PRs: [#28 — shared refactor](https://github.com/ontariodungeons/animation-craft/pull/28), then [#29 — integrate into main](https://github.com/ontariodungeons/animation-craft/pull/29). Both are published, open, non-draft and mergeable. No merge has been performed.
 
 ## Implemented and verified

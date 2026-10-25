@@ -7,20 +7,20 @@ Recovered 2026-10-24. This preserves Jesse's original requirement separately fro
 Source: Grok session `01a16e65-5099-7572-9be0-010a885aad89`, `chat_history.jsonl:103`, the tool result of a plan review. It was not a normal user-role log entry, which is why the initial user-message search missed it.
 
 > There's more steps to understand, and maybe you're saying animate.prepare does this? It's already been proven and done on this machine, but 3 agents also tried ways that didn't work. Results must be verified by all the working animation controls working. If we can't find it we could locate the earlier app when it was called animationcraft, but I believe I saw it working here with 80% of the facial and motion, wing movements, arm motions,  and antanea bending and swaying for idle
-> 
-> Animate.prepare steps: 
+>
+> Animate.prepare steps:
 > 1. choose static image to animate
 > 2. script locate template scripts that will create the required sheets: turnaround, poses (walk, run, jump, etc), limps, and then I think we need a joints and/or skeletal sheet
 > 3. Run image_gen yourself from the cli reponse, or ask gaffer (I think I need to change that name, I can't remember it) or use the cli to invoke something like mc animate <image>. A terminal wizard process that you can -y and skip should lead you to ask gaffer as default (hit ok?)
-> 3. Asset sheets arrive and need another cli command that calls a script that will break all the images into their individual files. 
+> 3. Asset sheets arrive and need another cli command that calls a script that will break all the images into their individual files.
 > - Cleaning what it can overall from each sheet and making it transparent first
-> - cutting/cropping/magic (ai cli command can likely crap nearly the exact image) each image 
-> - return cleaned sets of images ready to wire into animation 
-> 4. The next script knows the exact expected names of limbs and basic moving parts (treat a bee or even a swaying flower on initial load as if it has limbs, or have a setting for humanoid and custom. For this you must use ponytail architecture and logic to inherit a reusable method or class that allows for adding specific cropping for this new asset type "fish", "flower", "bee". 
+> - cutting/cropping/magic (ai cli command can likely crap nearly the exact image) each image
+> - return cleaned sets of images ready to wire into animation
+> 4. The next script knows the exact expected names of limbs and basic moving parts (treat a bee or even a swaying flower on initial load as if it has limbs, or have a setting for humanoid and custom. For this you must use ponytail architecture and logic to inherit a reusable method or class that allows for adding specific cropping for this new asset type "fish", "flower", "bee".
 > - a cli command suggested after the initial animation
-> - the animation subject and images load in the main ui panel, 
+> - the animation subject and images load in the main ui panel,
 > - the ui config shows green to yellow depending
-> 
+>
 > And that's how it goes. It's a lot to pack in 3-4 scripts but the automation is nearly scripted, I need to run tests on lots of animation subjects and open every project and let the ui backend show what works and not as you go
 
 ## Source locations

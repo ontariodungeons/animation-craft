@@ -6,7 +6,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../ui/words.js',import.meta.url),'utf8');
 const el=(tag,attrs={},...kids)=>{const props={};return {tag,...attrs,kids,dataset:{},style:{setProperty:(k,v)=>{props[k]=v},props},
   appendChild(n){this.kids.push(n)},prepend(n){this.kids.unshift(n)},replaceChildren(...nodes){this.kids=nodes},setAttribute(k,v){this[k]=v}}};
-const c=vm.createContext({console,JSON,Map,Set,Math,Number,String,structuredClone,requestAnimationFrame(){},addEventListener(){},ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},
+const c=vm.createContext({console,JSON,Map,Set,Math,Number,String,structuredClone,innerHeight:900,requestAnimationFrame(){},addEventListener(){},ResizeObserver:class{observe(){}},MutationObserver:class{observe(){}},
   window:{addEventListener(){}},document:{createElementNS:(_,tag)=>el(tag),body:{},getElementById:()=>null,addEventListener(){},createElement:()=>({getContext:()=>({measureText:()=>({width:0})}),style:{},addEventListener(){}})},state:{},$:()=>null,invoke:async()=>({}),el,ICONS:{}});
 vm.runInContext(source,c);
 let renders=0;c.wordsRender=()=>{renders++};
@@ -54,7 +54,8 @@ const panel2=vm.runInContext('wordsLayers(anim)',c);
 await flat(panel2).find((n)=>n.tag==='button'&&words(n).includes('Poster')).onclick();
 assert.equal(saves.find((r)=>r.id==='words.save').params.kinetic.style.font,'Nimbus Sans Narrow','a lettering card sets the section style');
 saves.length=0;
-await flat(panel2).find((n)=>n.tag==='button'&&words(n).includes('Wave')).onclick();
+const motionPanel=vm.runInContext("wordsPanel.mode='motion';wordsLayers(anim)",c);
+await flat(motionPanel).find((n)=>n.tag==='button'&&words(n).includes('Wave')).onclick();
 assert.equal(JSON.stringify(saves.find((r)=>r.id==='words.save').params.kinetic.draws),'[{"word_id":"l1/w1","stroke":"hill","place":"under"}]','a stroke is anchored to the picked word');
 // Independent graphic intervals connect only to intersecting, anchored lyric words.
 vm.runInContext(`anim.kinetic.style={font:'serif',weight:400,hero_weight:800};`,c);
@@ -70,7 +71,7 @@ const wave=vm.runInContext("wordsStroke(wordsPanel.read.kinetic_library.strokes.
 assert.equal(wave.kids[0].d,'M 7 77 Q 73 72 118 32','visual cue uses the actual library path');
 // The Design view's own width picks its layout: narrow retains both tracks; tight puts the stage above the two tracks.
 for (const [width, narrow, tight] of [[1400, false, false], [900, true, false], [401, true, true]]) {
-  const classes = new Set(); const view = { clientWidth: width, classList: { toggle: (k, on) => on ? classes.add(k) : classes.delete(k) } };
+  const classes = new Set(); const view = { style:{setProperty(){}},getBoundingClientRect:()=>({top:60}),clientWidth: width, classList: { toggle: (k, on) => on ? classes.add(k) : classes.delete(k) } };
   vm.runInContext('wordsWidth', c)(view);
   assert.equal(classes.has('narrow'), narrow, `narrow at ${width}px`); assert.equal(classes.has('tight'), tight, `tight at ${width}px`);
 }
@@ -111,3 +112,9 @@ assert.equal(editLine(anchors,'Two times around')[0].display_text,'Two');
 assert.equal(anchors[0].text,'Three','presentation editing never mutates the source lyric');
 assert.throws(()=>editLine(anchors,'x '.repeat(300)),/256 words/);
 console.log('PASS inline presentation edits preserve audio and word anchors');
+
+vm.runInContext(`var repeated={...anim,scope:{section:'verse_1',occurrence:2},words:anim.words.map(w=>({...w,start:w.start+10}))};
+ wordsPanel.read.document.animations.push(repeated);
+ wordsPanel.studio={sections:[{section:'verse_1',occurrence:1,clips:[{word_id:'l1/w0',start:1}]},{section:'verse_1',occurrence:2,clips:[{word_id:'l1/w0',start:11}]}]};`,c);
+assert.equal(vm.runInContext('wordsAt(anim.words[0])',c),1);
+assert.equal(vm.runInContext('wordsAt(repeated.words[0])',c),11,'repeated lines use their own clip timing');

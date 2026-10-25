@@ -8,7 +8,7 @@ index 74e9e01..2f5f8a4 100644
 -description: Use whenever an agent must produce AnimationCraft asset sheets — a turnaround, a skeleton and limbs sheet, or a pose sheet — for an imported character. The exact canvas, layout, naming and background rules so every sheet is cut, registered and rigged the same way.
 +description: Use whenever an agent must produce Magic Studio asset sheets — a turnaround, a skeleton and limbs sheet, or a pose sheet — for an imported character. The exact canvas, layout, naming and background rules so every sheet is cut, registered and rigged the same way.
  ---
- 
+
  # Asset sheets (turnaround · skeleton & limbs · poses)
 diff --git c/.agents/skills/craft-app-lifecycle/SKILL.md i/.agents/skills/craft-app-lifecycle/SKILL.md
 index dc04717..79d2218 100644
@@ -20,10 +20,10 @@ index dc04717..79d2218 100644
 -description: Use when starting or stopping a live Craft desktop app (AnimationCraft, PhotoCraft, EffectCraft, VectorCraft, FilmCraft) from an agent session, especially after visual review or screenshots, to close the exact instance cleanly instead of leaving it running or force-killing it.
 +description: Use when starting or stopping a live Craft desktop app (Magic Studio, PhotoCraft, EffectCraft, VectorCraft, FilmCraft) from an agent session, especially after visual review or screenshots, to close the exact instance cleanly instead of leaving it running or force-killing it.
  ---
- 
+
  # Craft app lifecycle
 @@ -31,7 +31,7 @@ the process to exit and the port to become free.
- 
+
  | App | Close the live window | Notes |
  |---|---|---|
 -| AnimationCraft | `mc --bridge PORT exec app.quit` or MCP `app_quit` with `mcp --bridge PORT` | Closes immediately; save the project first. Headless MCP returns an error for `app_quit`. |
@@ -45,10 +45,10 @@ index 5122d4c..b2cab44 100644
 +name: magicstudio-shell-ui
 +description: Use before building or changing any screen of the Magic Studio Tauri shell (apps/animationcraft-shell/ui). The shell's design system — calm dark surfaces, teal primary actions with restrained functional section accents, icons over words with tooltips, cards that lift on hover, expanding blocks, one primary action per place — with its tokens, components, motion, layout and the live verify loop.
  ---
- 
+
 -# AnimationCraft shell UI
 +# Magic Studio shell UI
- 
+
  The shell is a creative tool for one person working with an agent. Every screen answers: **what is this,
  what's its state, what's the one next step.** Everything else waits behind a hover, a tooltip or a click.
 diff --git c/.agents/skills/animationcraft-shell-ui/research.md i/.agents/skills/magicstudio-shell-ui/research.md
@@ -61,7 +61,7 @@ index 7baab50..a37ae0a 100644
 @@ -1,4 +1,4 @@
 -# AnimationCraft shell research and proposed Animation workspace
 +# Magic Studio shell research and proposed Animation workspace
- 
+
  Research date: 2026-10-21. **Animation layout approved by the user on 2026-10-21; implementation is in progress.**
  Authority: user instructions and `apps/animationcraft-shell/HANDOFF.md` at `e1cac3a`.
 @@ -155,7 +155,7 @@ being sent together. Each agent run has Undo. Desktop setup connects Claude Code
@@ -70,7 +70,7 @@ index 7baab50..a37ae0a 100644
  controls are contextual; this is composition editing, not a character bone/pose system. Audio and
 -beat landmarks belong to timing; AnimationCraft retains its own character motion authoring.
 +beat landmarks belong to timing; Magic Studio retains its own character motion authoring.
- 
+
  Adopt directing an agent on the frame, queued notes and run-level undo. Reject porting animation
  authoring into the video target, or assuming desktop and browser Studio layouts are identical.
 @@ -174,7 +174,7 @@ Design and Prototype are distinct contexts; no selection exposes page-level prop
@@ -80,10 +80,10 @@ index 7baab50..a37ae0a 100644
 -than a disconnected assistant. Empty-canvas generation is possible, but AnimationCraft's imported
 +than a disconnected assistant. Empty-canvas generation is possible, but Magic Studio's imported
  artwork needs a more specific preparation path.
- 
+
  Adopt one selection model, inspectable output and contextual properties. Reject hiding essential
 @@ -335,7 +335,7 @@ Sources: [Cua repository/demo](https://github.com/trycua/cua#cua-driver),
- 
+
  1. **Persistent live MCP.** Global command: `mc --bridge 19897 mcp`, with no project
     path. Initially proposed as a user configuration change; the user then explicitly authorized
 -   moving MCP to the shell. The global `animationcraft` command was updated with a backup and
@@ -101,10 +101,10 @@ index 50977c8..a430870 100644
 -description: Use when working on a song's storyboard in AnimationCraft — reading, searching or editing scenes, adding or replacing panels and prompts, recording notes or lyric corrections, or preparing a scene for approval. The storyboard PDF is one shared document of chapters (scenes) for the user and every agent.
 +description: Use when working on a song's storyboard in Magic Studio — reading, searching or editing scenes, adding or replacing panels and prompts, recording notes or lyric corrections, or preparing a scene for approval. The storyboard PDF is one shared document of chapters (scenes) for the user and every agent.
  ---
- 
+
 -# Storyboard (AnimationCraft)
 +# Storyboard (Magic Studio)
- 
+
  A song project is one folder with an `<Song>.acproj` file. Its storyboard is ONE shared document:
  `storyboard/storyboard.pdf` (portrait): page 1 lists every caption (number, time, lyric); then the
  **Cast & sets** board (master prompt, locks, a card per character and location); then one page per
@@ -113,7 +113,7 @@ index 50977c8..a430870 100644
 -Every box is a form field: type into it, or put an image in an image box, in AnimationCraft or
 +Every box is a form field: type into it, or put an image in an image box, in Magic Studio or
  PDFCraft. `workshop.build_storyboard` redraws the pages and keeps the text typed into fields.
- 
+
  ## Sources (the template)
 @@ -51,7 +51,7 @@ Every edit puts the scene back to **needs review** and rebuilds the PDF. Only th
  1. `storyboard.toc`, then `storyboard.read` the scene you were given. Work one scene at a time.
@@ -121,7 +121,7 @@ index 50977c8..a430870 100644
  3. Record it with `storyboard.edit`: the panel, its prompt, and a short note of what you changed.
 -4. Stop and report. The user reviews that scene in AnimationCraft's storyboard pane.
 +4. Stop and report. The user reviews that scene in Magic Studio's storyboard pane.
- 
+
  ## Rules
  - Keep layers separate: a background, each character, each prop and each drawn track as its own file. One flattened image never stands in for several layers.
 diff --git c/.githooks/pre-commit i/.githooks/pre-commit
@@ -131,7 +131,7 @@ index c994b40..4791deb 100755
 @@ -9,15 +9,20 @@ if [ -n "$FORBIDDEN_STAGED" ]; then
      exit 1
  fi
- 
+
 +# Constrain parallel rustc/linker jobs and test threads so pre-commit never
 +# spikes the Hyprland terminal scope memory and triggers systemd-oomd.
 +export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
@@ -142,7 +142,7 @@ index c994b40..4791deb 100755
 -cargo test --offline -p animationcraft-engine --test agent_security --quiet
 +cargo test --offline -p animationcraft-engine --test agent_security --quiet -- --test-threads=1
  node apps/animationcraft-shell/tests/agent-selection.mjs
- 
+
  # 2. If Rust files are staged, run workspace compile check + test suite on commit
  RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
  if [ -n "$RUST_STAGED" ]; then
@@ -176,17 +176,17 @@ index b0478aa..f1973da 100644
 @@ -1,15 +1,15 @@
 -# Working on AnimationCraft with concurrent agents
 +# Working on Magic Studio with concurrent agents
- 
+
  Read `README.md` for the current native-app architecture and `CLAUDE.md` for the general coding guidelines. These rules keep independent
  UI, engine, pipeline, and test work from overwriting one another.
- 
+
  ## Canonical application
- 
+
 -The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell -p mc`; desktop menu **AnimationCraft Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless.
 +The application is `apps/animationcraft-shell` (Tauri). Build with `cargo build -p animationcraft-shell -p mc`; desktop menu **Magic Studio**. UI files are embedded: rebuild after edits. CLI and MCP use `mc` and the same Rust engine registry. Use an explicitly selected Studio `--control` port for live access; otherwise sessions are headless. The product is **Magic Studio**; project files keep the `.acproj` extension, which remains a compatible alias during the rename.
- 
+
  ## Drive the app: CLI, MCP and skill
- 
+
 -- Skill: `~/.agents/skills/animationcraft/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
 +- Skill: `~/.agents/skills/magicstudio/SKILL.md` (workflow, tools, gotchas), like the other *craft apps.
  - CLI: `mc help`; `mc exec <command> key=value`, or add
@@ -198,26 +198,26 @@ index bab3174..408143c 100644
 +++ i/README.md
 @@ -1,6 +1,6 @@
  # Magic Studio
- 
+
 -The application is the Tauri shell in `apps/animationcraft-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types.
 +The application is the Tauri shell in `apps/animationcraft-shell`. Its embedded UI, CLI and MCP share the Rust engine command registry and domain types. The product is **Magic Studio**. The crate/binary name `animationcraft-shell` and the project-file extension `.acproj` remain compatible aliases during the rename.
- 
+
  ## Run and discover
- 
+
 @@ -11,13 +11,13 @@ mc --help
  mc commands
  ```
- 
+
 -The Omarchy menu entry is **AnimationCraft Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
 +The Omarchy menu entry is **Magic Studio**. Rebuild the shell after changing `apps/animationcraft-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
- 
+
  ## CLI and MCP
- 
+
  `mc exec <id> key=value` executes one command. `mc run <file.jsonl|->` keeps one headless session across JSONL commands with `id` and `params`. Separate `exec` calls do not share the open project.
- 
+
 -Register one AnimationCraft MCP server per client: command `mc`, args `["mcp"]`. It uses a headless engine session. To use an already configured live Studio bridge, explicitly select its port:
 +Register one Magic Studio MCP server per client: command `mc`, args `["mcp"]`. It uses a headless engine session. To use an already configured live Studio bridge, explicitly select its port:
- 
+
  ```bash
  mc --bridge <port> exec ui.state
 diff --git c/apps/animationcraft-shell/Cargo.toml i/apps/animationcraft-shell/Cargo.toml
@@ -239,13 +239,13 @@ index 9a55b8f..a38b0ea 100644
 @@ -1,4 +1,4 @@
 -# AnimationCraft shell — handoff (2026-10-21)
 +# Magic Studio shell — handoff (2026-10-21)
- 
+
  **Historical checkpoint — not current operating instructions.** This records the 2026-10-21
  shell migration. Use [README](../../README.md), [AGENTS.md](../../AGENTS.md), and the current task
 @@ -35,7 +35,7 @@ Coordinate overlapping files before editing; this historical handoff assigns no
- 
+
  ## The user's rules (non-negotiable)
- 
+
 -- **Animation happens in AnimationCraft's Animation view, never in HyperFrames or Remotion.** Video targets
 +- **Animation happens in Magic Studio's Animation view, never in HyperFrames or Remotion.** Video targets
    (HyperFrames/Remotion/FilmCraft) only assemble the final video.
@@ -258,14 +258,14 @@ index de4fd83..ea07fa7 100644
 @@ -1,6 +1,6 @@
 -# AnimationCraft app agent
 +# Magic Studio app agent
- 
+
 -You are the technical and creative collaborator inside AnimationCraft. Help the user spend their time
 +You are the technical and creative collaborator inside Magic Studio. Help the user spend their time
  designing movement, timing and polish. Own the application's behavior, not just its chat: observe the
  live app, act through its tools, show the result, and leave work reversible and inspectable.
- 
+
 @@ -8,7 +8,7 @@ live app, act through its tools, show the result, and leave work reversible and
- 
+
  1. Read `.agents/skills/animationcraft-shell-ui/SKILL.md` from the repository root. Learn its
     visual and interaction contracts; distinguish approved requirements from proposed designs.
 -2. Read the relevant ArtCraft, AnimationCraft, layered-motion, rigging and QA skills named by the
@@ -279,7 +279,7 @@ index a163312..a8a669b 100644
 +++ i/apps/animationcraft-shell/frontend/theatre-frame.js
 @@ -5,22 +5,50 @@ import studio from '@theatre/studio';
  import {theatreProjectId} from './project-id.mjs';
- 
+
  studio.initialize({usePersistentStorage:false});
 +try{
 + studio.transaction(({stateEditors})=>{
@@ -429,7 +429,7 @@ index ed2404d..2af1a93 100644
      }
      result
  }
- 
+
 +/// Writes back only what a background command changed relative to `base`, the copy it started
 +/// from, so edits the window made meanwhile survive. Assets and project assets merge by id.
 +fn merge_back(shared: &mut Session, base: &Session, finished: &Session) {
@@ -477,19 +477,19 @@ index ed2404d..2af1a93 100644
 +    .await
 +    .map_err(|e| e.to_string())?
  }
- 
+
  /// The project folder of a `.acproj` path.
 @@ -389,6 +427,8 @@ fn open_path(path: String) -> Result<(), String> {
- 
+
  /// Height of the project view's top bar (logical px).
  const BAR: f64 = 48.0;
 +/// Height of the shell's unified footer, kept clear below the Studio webview (logical px).
 +const FOOTER: f64 = 30.0;
- 
+
  /// Which view is showing (`project`, `split` or `studio`) and, for split, the share of the
  /// window the project view takes (the frame between them is dragged in the project view).
 @@ -402,7 +442,7 @@ impl Default for View {
- 
+
  /// Native webviews share one allocation. Studio occupies the content rectangle;
  /// the shell remains full-height so its docked agent can sit beside Studio.
 -fn place_webview(view: &tauri::Webview, top: i32, right: i32, is_studio: bool) {
@@ -508,7 +508,7 @@ index ed2404d..2af1a93 100644
 -    let _ = (view, top, right, is_studio);
 +    let _ = (view, top, right, bottom, is_studio);
  }
- 
+
  #[derive(Default)]
 @@ -442,14 +482,14 @@ fn layout(app: &tauri::AppHandle) {
      let size = physical.to_logical::<f64>(scale);
@@ -681,7 +681,7 @@ index 9e5245d..0b19324 100644
 +  if ((e.key === "/" || e.key === "\\") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); agentToggle(); return; }
    if (e.key === "Escape" && agent.open && !$("point-overlay").classList.contains("on")) agentToggle(false);
  });
- 
+
 diff --git c/apps/animationcraft-shell/ui/animation.js i/apps/animationcraft-shell/ui/animation.js
 index 2a2ad2d..96d16b7 100644
 --- c/apps/animationcraft-shell/ui/animation.js
@@ -977,7 +977,7 @@ index 2a2ad2d..96d16b7 100644
 + if($('motion-part-angle')&&document.activeElement!==$('motion-part-angle')){const deg=Math.round((magicTheatre.rotation||0)*10)/10;$('motion-part-angle').value=String(deg);if($('motion-part-angle-out'))$('motion-part-angle-out').textContent=`${deg}°`;}
 + if(!motion.playing||magicTheatre.interactionRevision>magicTheatre.savedRevision)theatreSeek(motion.time);
  }
- 
+
  function pathControls(){
 @@ -192,7 +303,7 @@ function pathControls(){
    motionRange('motion-size-start','Start size',1,Math.max(200,motion.startSize),1,motion.startSize,'%',v=>motion.startSize=v),
@@ -1001,7 +1001,7 @@ index 420bdf5..8a86c15 100644
 @@ -70,10 +70,25 @@ function setupMagicSplitters() {
  }
  setupMagicSplitters();
- 
+
 +// The Generate card folds to its header (folded by default so Parts & assets gets the room).
 +function setupGenerateToggle() {
 +  const toggle = $('magic-image-toggle');
@@ -1046,7 +1046,7 @@ index 420bdf5..8a86c15 100644
 +  slot.append(el('div', { class: 'magic-assets-grid' }, assets.map((asset) =>
 +    magicAssetTile(asset, { candidate: draft?.result?.asset_id === asset.id, onclick: () => openAnimation(asset.id) }))));
  }
- 
+
 +// One compact tile per project asset: the Project/Studio catalog and the Animation Assets tab.
 +function magicAssetTile(asset, { active = false, candidate = false, onclick }) {
 +  const name = asset.name || asset.id;
@@ -1129,10 +1129,10 @@ index 420bdf5..8a86c15 100644
 +  return el("section", { class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id }, head,
      el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
  }
- 
+
 @@ -181,6 +258,7 @@ function objectCard(name, layers, stacked) {
  }
- 
+
  function renderBlocks() {
 +  updateAppFooter();
    const s = state.data?.status;
@@ -1140,7 +1140,7 @@ index 420bdf5..8a86c15 100644
    box.replaceChildren();
 @@ -253,6 +331,7 @@ function renderBlocks() {
  // ---- Storyboard: title cards ------------------------------------------------------------
- 
+
  function renderStoryboard() {
 +  updateAppFooter();
    const sb = state.data?.storyboard;
@@ -1161,7 +1161,7 @@ index 420bdf5..8a86c15 100644
 -    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;};
 +    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;updateAppFooter();};
    }
- 
+
    renderStoryboardText();
 @@ -360,6 +440,7 @@ async function showStudio() {
  async function setView(view, action) {
@@ -1182,7 +1182,7 @@ index 420bdf5..8a86c15 100644
 @@ -392,13 +474,21 @@ function serverUrl() {
    return state.studioUrl || (server.running ? server.url : null);
  }
- 
+
 +// The video project lives in the engine session (workshop.status / video.init); the UI keeps no copy.
 +function videoProject() {
 +  const s = state.data?.status;
@@ -1200,7 +1200,7 @@ index 420bdf5..8a86c15 100644
 +  updateAppFooter();
 +  $("target").title = `${url ? `Studio running at ${url} · click to stop` : "Studio off · click to start"}\n${project ? `Video project: ${project}` : "No video project yet · starting the studio creates it"}`;
  }
- 
+
  async function toggleServer() {
 @@ -406,6 +496,11 @@ async function toggleServer() {
    const on = !serverUrl();
@@ -1228,7 +1228,7 @@ index 036608e..ab9a9ff 100644
 +++ i/apps/animationcraft-shell/ui/home.js
 @@ -6,6 +6,7 @@ const FILM = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16"
  const CROSS = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
- 
+
  async function showHome() {
 +  if (typeof theatreCanLeave === "function" && !theatreCanLeave()) return;
    if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
@@ -1247,13 +1247,13 @@ index 036608e..ab9a9ff 100644
    await renderRecent();
 @@ -51,7 +52,7 @@ async function renderRecent() {
  }
- 
+
  async function openDialog() {
 -  const path = await dialog.open({ title: "Open project", filters: [{ name: "AnimationCraft project", extensions: ["acproj"] }] });
 +  const path = await dialog.open({ title: "Open project", filters: [{ name: "Magic Studio project", extensions: ["acproj"] }] });
    if (path) openProject(path);
  }
- 
+
 diff --git c/apps/animationcraft-shell/ui/index.html i/apps/animationcraft-shell/ui/index.html
 index a9bab9e..f99adb6 100644
 --- c/apps/animationcraft-shell/ui/index.html
@@ -1419,7 +1419,7 @@ index 69b2e02..131bc37 100644
  .dot.busy { background: var(--amber); animation: pulse 900ms ease-in-out infinite alternate; }
 @@ -85,7 +91,7 @@ main { flex: 1; min-height: 0; position: relative; }
  .blocks.collapsed .block-head .ico { margin: 0 auto; }
- 
+
  .block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); transition: border-color var(--fast) var(--ease); }
 -.block.open { border-color: #34404f; }
 +.block.open { border-color: color-mix(in srgb, var(--block-tone, var(--line)) 40%, var(--line)); }
@@ -1456,7 +1456,7 @@ index 69b2e02..131bc37 100644
 +.point-box { position: fixed; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 19%, transparent); pointer-events: none; transition: all 90ms var(--ease); }
  .point-hint { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
  .agent.drop { box-shadow: -24px 0 60px #0007, inset 0 0 0 2px var(--accent); }
- 
+
  /* Magic Studio keeps chat, generation, and fish parts in one resizable right workstation. */
 -:root { --magic-workstation-width: clamp(290px, 27vw, 380px); }
 +:root { --magic-workstation-width: clamp(290px, 27vw, 380px); --footer-h: 30px; }
@@ -1523,7 +1523,7 @@ index 69b2e02..131bc37 100644
 @@ -332,13 +341,42 @@ body.at-home .tabs, body.at-home .target, body.at-home .agent-toggle { visibilit
  .sheet p { margin: 0; font-size: 11.5px; word-break: break-all; }
  .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
- 
+
 -/* Animation: performance controls left, an uncluttered stage, transport below. */
 +/* Animation: performance controls left, an uncluttered stage, full-width Theatre below. */
  #view-animation { min-width:0; }
@@ -1591,7 +1591,7 @@ index 69b2e02..131bc37 100644
 -.sb-link:hover,.sb-link:focus-visible { background:#64d7c218; border-color:var(--accent); outline:none; }
 +.sb-link:hover,.sb-link:focus-visible { background:color-mix(in srgb,var(--accent) 9%,transparent); border-color:var(--accent); outline:none; }
  .agent-head .agent-title { margin-right:auto; }
- 
+
  body.movie-document:not(.project-details-open) #blocks { display:none; }
 @@ -535,3 +581,120 @@ kbd { display: inline-block; font: 10px/1 ui-monospace, monospace; border: 1px s
   line-height:1.2; box-shadow:none; outline:none; }
@@ -1887,7 +1887,7 @@ index a2993e0..e65c486 100644
 +                self.state["agent_gang"]=self.agent_gang.clone();
                  if self.message.starts_with("Chat ") && !self.message.starts_with("Chat error:") && self.chat_receiver.is_none(){self.message=chat_outcome(&self.state);}
                  self.observe_chat_delivery();
- 
+
 @@ -366,6 +399,8 @@ const GREEN: Color=Color::Rgb(79,232,143);
  const AMBER: Color=Color::Rgb(246,193,104);
  const RED: Color=Color::Rgb(255,118,130);
@@ -2071,7 +2071,7 @@ index a2993e0..e65c486 100644
 + };
 + f.render_widget(Paragraph::new(footer),chunks[4]);
  }
- 
+
  fn render(f: &mut Frame,c: &Center) {
 @@ -800,7 +934,7 @@ pub fn start(p: Value, print: bool) -> Result<(), String> {
                  match key.code{
@@ -2097,7 +2097,7 @@ index 02a40d3..2915fb8 100644
 +++ i/apps/mc/src/main.rs
 @@ -78,18 +78,20 @@ OPTIONS
    --bridge <port|host:port|auto|unix:path>  send commands to a running `animationcraft-shell --control <port>` GUI window
- 
+
  SUBCOMMANDS
 -  center [project=<file>]             interactive Command Center (no automatic Studio launch)
 +  booth [project=<file>]              interactive The Booth (no automatic Studio launch)
@@ -2135,10 +2135,10 @@ index 02a40d3..2915fb8 100644
 @@ -673,7 +675,7 @@ fn storyboard_edit_params(raw:&[String])->Result<Value,String>{
   Ok(json!({"scene":scene,"field":field,"value":args[4],"_origin":"CLI"}))
  }
- 
+
 -const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "center", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
 +const SUBCOMMANDS: &[&str] = &["help", "-h", "version", "login", "booth", "center", "sprocket", "info", "commands", "vision", "storyboard", "exec", "run", "mcp", "agent", "doctor", "clips"];
- 
+
  /// The command line with a leading project path resolved (see `project_argument`), read once.
  fn cli_args() -> &'static Vec<String> {
 @@ -768,8 +770,44 @@ fn main() {
@@ -2234,7 +2234,7 @@ index 42a74bc..9f59f8c 100644
      } else {json!({})};
      if stored.get("agent").is_some_and(|v|!v.is_string()) {return Err(invalid("Invalid saved agent; choose an installed chat agent in the app. No fallback selected"));}
 @@ -83,6 +83,7 @@ pub fn opencode_program() -> Result<std::path::PathBuf> {
- 
+
  /// Never propagate raw child output into UI, journal or logs on failure: it can contain credentials.
  fn run(dir:&Path, tool:&str, args:&[String]) -> Result<String> {
 +    let _slot = crate::workspace::acquire_tool_slot();
@@ -2407,7 +2407,7 @@ index 8752da4..2857f55 100644
 -//! checks for lingering AnimationCraft/Craft processes, stale bridge/dev-server ports,
 +//! checks for lingering Magic Studio/Craft processes, stale bridge/dev-server ports,
  //! external tool availability, and source code smells worth running `/ponytail-review` on.
- 
+
  use std::path::{Path, PathBuf};
 @@ -61,6 +61,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
              let is_ac = matches!(
@@ -2452,7 +2452,7 @@ index 8752da4..2857f55 100644
 @@ -108,6 +112,42 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
          }
      }
- 
+
 +    // Identify duplicate MCP server instances per executable (keep the newest PID per exe).
 +    let mut newest_mcp_by_exe = std::collections::HashMap::<String, u32>::new();
 +    for p in &processes {
@@ -2522,7 +2522,7 @@ index 8752da4..2857f55 100644
 @@ -238,6 +283,29 @@ mod mc_process_tests {
      }
  }
- 
+
 +fn read_proc_status(pid: u32) -> (Option<u64>, Option<u32>) {
 +    let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
 +        return (None, None);
@@ -2608,7 +2608,7 @@ index 8627e83..4498855 100644
 @@ -574,6 +586,195 @@ fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
      Ok(rig)
  }
- 
+
 +fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
 +    let Some(map) = motion_obj.as_object() else {
 +        return Vec::new();
@@ -2869,13 +2869,13 @@ index 7c5a289..3bf1c8f 100644
 --- c/crates/engine/src/project.rs
 +++ i/crates/engine/src/project.rs
 @@ -6,7 +6,7 @@ use serde_json::{Value, json};
- 
+
  use crate::{EngineError, Result, Session};
- 
+
 -/// Identifies an AnimationCraft project file (`.acproj`, JSON).
 +/// Identifies a Magic Studio project file (`.acproj`, JSON).
  const PROJECT_FORMAT: &str = "animationcraft.project";
- 
+
  /// Writes the open project's asset connections to its `.acproj` file.
 @@ -26,7 +26,7 @@ pub fn write_project_file(s: &Session) -> Result<()> {
          })
@@ -2945,13 +2945,13 @@ index 3d9a2ea..77e8a32 100644
 +            invalid("Magic Studio config directory unavailable; no recent-project fallback used")
          })
  }
- 
+
  fn parse(bytes: &[u8]) -> Result<Value> {
      serde_json::from_slice::<Value>(bytes).ok().filter(Value::is_object)
 -        .ok_or_else(||invalid("Invalid AnimationCraft settings.json; repair it explicitly. No history fallback used"))
 +        .ok_or_else(||invalid("Invalid Magic Studio settings.json; repair it explicitly. No history fallback used"))
  }
- 
+
  fn stored() -> Result<Value> {
 diff --git c/crates/engine/src/rig.rs i/crates/engine/src/rig.rs
 index 2176fdd..92054fa 100644
@@ -2996,7 +2996,7 @@ index e1b74af..c030237 100644
  //! and provides [`Session::execute`] for command dispatch.
 @@ -12,7 +12,7 @@ use serde_json::Value;
  use crate::{EngineError, Result};
- 
+
  /// The engine session. All project changes go through [`Session::execute`].
 -#[derive(Debug, Clone)]
 +#[derive(Debug)]
@@ -3039,7 +3039,7 @@ index e1b74af..c030237 100644
          }
      }
  }
- 
+
 +impl Clone for Session {
 +    fn clone(&self) -> Self {
 +        Self {
@@ -3131,7 +3131,7 @@ index 92028fa..e4e401a 100644
 +  if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
 +  return Ok(val);
   }
- 
+
   let Some(deck)=board["deck"].as_str().filter(|p|Path::new(p).is_file()) else{return Ok(json!([]));};
 - let dir=crate::workshop::project_dir(s)?;
   let count=board["previews"].as_array().map_or(0,Vec::len);
@@ -3160,7 +3160,7 @@ index 92028fa..e4e401a 100644
 + if let Some(k)=key && let Ok(mut guard)=native_fields_cache().lock(){if guard.len()>32{guard.clear();}guard.insert(k,val.clone());}
 + Ok(val)
  }
- 
+
  /// Stage a native text replacement in the existing design draft, then use its Save path.
 diff --git c/crates/engine/src/video_target.rs i/crates/engine/src/video_target.rs
 index 3b8cbd8..c110e94 100644
@@ -3187,7 +3187,7 @@ index 3b8cbd8..c110e94 100644
 +    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str())?);}
      Ok(status)
  }
- 
+
 diff --git c/crates/engine/src/workshop.rs i/crates/engine/src/workshop.rs
 index 89cf49a..4508408 100644
 --- c/crates/engine/src/workshop.rs
@@ -3218,7 +3218,7 @@ index c63afb9..d4cdd79 100644
 @@ -118,8 +118,40 @@ pub fn build_blender_check_args(
      args
  }
- 
+
 +pub(crate) struct ToolSlotGuard;
 +impl Drop for ToolSlotGuard {
 +    fn drop(&mut self) {
@@ -3261,21 +3261,21 @@ index 075e8f9..dcfe45e 100644
 --- c/docs/superpowers/plans/2026-10-20-render-wars-ep02-production.md
 +++ i/docs/superpowers/plans/2026-10-20-render-wars-ep02-production.md
 @@ -152,7 +152,7 @@
- 
+
  **Interfaces:**
  - Consumes: Sol's manifest (turnarounds, transparency flags).
 -- Produces: AnimationCraft cutout rigs exported with `mc exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
 +- Produces: Magic Studio cutout rigs exported with `mc exec export.layered_motion` for 2D performance, and `CHAR_REMY_Body` (rigged mesh) in `stage.blend`.
- 
+
  - [ ] **Step 1:** Import each character with `mc` (`asset.cut_sheet` → `asset.build_cutout_rig`) and validate it with `assets.assess`. Likeness must match the turnarounds (check with `intake.compare_reference`).
  - [ ] **Step 2:** Pose library per character (pose-library-design): neutral, smug, recoil, drenched, conduct, point. Check silhouettes for readability at 25% scale.
 @@ -236,7 +236,7 @@ Each insert keeps its native document in `PROJECT/apps/<app>/` and its render in
- 
+
  ### Task 11: Evidence ledger, closing card, review page, CLI
- 
+
 -**Files:** `PROJECT/ledger.csv`, `PROJECT/review.html`, the commands `production.voice`, `production.timeline` and `production.ledger` in `crates/engine/src/` (wired like `export.layered_motion` in `commands.rs:327`), and AnimationCraft `README.md` lines
 +**Files:** `PROJECT/ledger.csv`, `PROJECT/review.html`, the commands `production.voice`, `production.timeline` and `production.ledger` in `crates/engine/src/` (wired like `export.layered_motion` in `commands.rs:327`), and Magic Studio `README.md` lines
- 
+
  - [ ] **Step 1:** Fill `ledger.csv` from the actual edit (FilmCraft `sequence.inspect` gives the shot timecodes). Run `mc exec production.ledger spec=PROJECT/production.json ledger=PROJECT/ledger.csv` and fix or remove every failure. The closing card text comes from `LedgerReport` (the achieved counts), and the card is rendered in EffectCraft and placed at the end.
  - [ ] **Step 2:** `review.html`:
 diff --git c/docs/superpowers/plans/2026-10-21-animation-shell.md i/docs/superpowers/plans/2026-10-21-animation-shell.md
@@ -3288,9 +3288,9 @@ index b599f5a..c8216cb 100644
  **Stack:** Existing Tauri 2.x/Rust, vanilla JS/CSS, Craft CLI pipeline.
 -**Spec:** `.agents/skills/animationcraft-shell-ui/research.md`, approved by the user on 2026-10-21; HANDOFF is the behavior/source inventory.
 +**Spec:** `.agents/skills/magicstudio-shell-ui/research.md`, approved by the user on 2026-10-21; HANDOFF is the behavior/source inventory.
- 
+
  ## Constraints and review focus
- 
+
 diff --git c/pipeline/character_iteration_exporter.py i/pipeline/character_iteration_exporter.py
 index fdd95eb..6aa9839 100644
 --- c/pipeline/character_iteration_exporter.py
@@ -3303,7 +3303,7 @@ index fdd95eb..6aa9839 100644
 +                f"Magic Studio 2D Track - {title} | Action {a_idx + 1}/6: {track['title']} | Pose: {pose_entry['label']}",
                  fill=(230, 240, 255),
              )
- 
+
 diff --git c/pipeline/test_movie_board.py i/pipeline/test_movie_board.py
 index 865d66d..018ca88 100644
 --- c/pipeline/test_movie_board.py
@@ -3311,7 +3311,7 @@ index 865d66d..018ca88 100644
 @@ -108,4 +108,33 @@ class SourceLineIds(unittest.TestCase):
    self.assertEqual([l['id'] for l in mapped],['verse-A','verse-B']);self.assertEqual([l['text'] for l in mapped],['Hello, fish','Keep swimming.']);self.assertEqual([i for l in mapped for i in l['word_ids']],['a','b','c','d'])
    self.assertEqual(module.source_line_breaks(words+[dict(id='extra',text='unknown',start=7,end=8)],lines),[],"unmapped words must not be silently dropped")
- 
+
 +class TemplateRequirements(unittest.TestCase):
 + def test_checks_actual_pdf_pages_and_fields_not_saved_ready_flags(self):
 +  import sys,subprocess,hashlib
@@ -3347,7 +3347,7 @@ index 2547e86..53b7f39 100755
 --- c/scripts/import_character.py
 +++ i/scripts/import_character.py
 @@ -3,8 +3,8 @@
- 
+
  Workflow:
    1. Runs PhotoCraft `select.subject` for automatic segmentation (zero hardcoded coordinates).
 -  2. Runs AnimationCraft `vision.analyze` to verify coverage, alpha integrity, and fringe metrics.
@@ -3358,8 +3358,8 @@ index 2547e86..53b7f39 100755
  """
  import argparse
 @@ -18,7 +18,7 @@ import sys
- 
- 
+
+
  def find_bridge_port() -> int | None:
 -    """Find active AnimationCraft control port between 9888 and 9899."""
 +    """Find active Magic Studio control port between 9888 and 9899."""
@@ -3391,7 +3391,7 @@ index 2547e86..53b7f39 100755
 -        print("Notice: No live AnimationCraft window found on control ports (9888–9899). Skipping GUI stage load.")
 +        print("Notice: No live Magic Studio window found on control ports (9888–9899). Skipping GUI stage load.")
          return
- 
+
 -    print(f"\n[3/3] Loading asset into live AnimationCraft (port {bridge_port})...")
 +    print(f"\n[3/3] Loading asset into live Magic Studio (port {bridge_port})...")
      add_cmd = [
@@ -3405,4 +3405,3 @@ index 2547e86..53b7f39 100755
 +        print(f"      Successfully loaded '{name}' ({asset_id}) onto active Magic Studio stage!")
      else:
          print(f"      Warning: failed to load asset onto stage: {stderr or stdout}")
- 
