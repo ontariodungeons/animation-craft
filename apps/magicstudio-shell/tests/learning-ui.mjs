@@ -20,7 +20,7 @@ const fixture=`<!doctype html><meta charset="utf-8"><link rel="stylesheet" href=
 window.state={project:${JSON.stringify(project)},view:'skills'};window.$=id=>document.getElementById(id);window.toast=()=>{};window.openPath=()=>{};
 window.el=(tag,attrs={},...children)=>{let n=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(v!==null&&v!==undefined)n.setAttribute(k,v);}for(const c of children.flat(Infinity)){if(c!==null&&c!==undefined)n.append(c instanceof Node?c:document.createTextNode(String(c)));}return n;};
 window.invoke=async(_name,p)=>{const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});const d=await r.json();if(d.error)throw Error(d.error);return d;};
-</script><script src="/vendor/learning/learning-editor.js"></script><script src="/skills.js"></script><script>setupSkillsAdd();renderSkills();</script>`;
+</script><script src="/vendor/learning/learning-editor.js"></script><script src="/cast.js"></script><script src="/skills.js"></script><script>setupSkillsAdd();renderSkills();</script>`;
 const server=http.createServer(async(req,res)=>{
  if(req.url==='/'){res.setHeader('Content-Type','text/html');return res.end(fixture);}
  if(req.url==='/api'){let raw='';for await(const b of req)raw+=b;try{const p=JSON.parse(raw);calls.push(p.id);res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(exec(p.id,p.params)));}catch(e){res.statusCode=409;return res.end(JSON.stringify({error:String(e)}));}}
@@ -31,7 +31,19 @@ const browser=await chromium.launch({executablePath:'/usr/lib/chromium/chromium'
 try {
  const page=await browser.newPage({viewport:{width:1261,height:900}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
  await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('#learning-home').waitFor({timeout:3000});
- await page.locator('[data-task="import-timing"]').first().click();await page.locator('.ProseMirror h1').waitFor();
+ const homeTasks=await page.locator('#learning-home [data-task]').evaluateAll(nodes=>nodes.map(n=>n.dataset.task));
+ assert.equal(new Set(homeTasks).size,homeTasks.length,'home has one card per task');
+ await page.locator('#learning-category-audio').click();
+ await page.waitForFunction(()=>document.querySelector('#learning-category-audio')?.getAttribute('aria-pressed')==='true');
+ await page.locator('#learning-category-art').click();
+ assert.equal(await page.locator('#learning-category-audio').getAttribute('aria-pressed'),'false');
+ await page.locator('#learning-overview').click();
+ for(const width of [1440,1261,941,700]){
+  await page.setViewportSize({width,height:1000});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`no overflow at ${width}px`);
+  await page.screenshot({path:path.join(process.env.CARGO_TARGET_DIR||'target',`learning-after-${width}.png`)});
+ }
+ await page.locator('#learning-home [data-task="import-timing"]').click();await page.locator('.ProseMirror h1').waitFor();
  await page.locator('.ProseMirror h1').click();await page.keyboard.press('End');await page.keyboard.type(' edited');
  await page.locator('#learning-save').click();await page.waitForFunction(()=>document.querySelector('#learning-save-state')?.textContent.includes('Saved'));
  let info=exec('skills.info',{id:'import-timing'}).skill;assert.match(info.name,/edited$/);assert.match(info.markdown,/workshop.import_transcript/);
@@ -43,7 +55,7 @@ try {
  assert.ok(await page.locator('#learning-recover-draft').isVisible());
  await page.locator('#learning-remove').click();await page.locator('#learning-restore').waitFor();assert.equal(exec('skills.info',{id:'import-timing'}).skill.removed,true);await page.locator('#learning-restore').click();
  assert.equal(exec('skills.info',{id:'import-timing'}).skill.removed,false);
- await page.setViewportSize({width:700,height:900});await page.screenshot({path:path.resolve('target/learning-ui-narrow.png')});
+ await page.setViewportSize({width:700,height:900});await page.screenshot({path:path.join(process.env.CARGO_TARGET_DIR||'target','learning-ui-narrow.png')});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no viewport-wide overflow');
  assert.deepEqual(errors,[]);assert.ok(calls.every(x=>x.startsWith('skills.')),'UI never executes production instructions');
  console.log('PASS Learning UI: real inline editing/save, CLI conflict preserves draft, recoverable draft, remove/restore, 700px layout');
