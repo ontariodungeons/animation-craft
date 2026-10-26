@@ -1,10 +1,62 @@
-name: Change or problem
-description: A sentence is enough. Technical details are the maintainer's job.
+name: Problem report
+description: Describe a problem, its evidence, and the result that would resolve it.
+title: '[Problem] '
 body:
-  - type: textarea
-    id: change
+  - type: markdown
     attributes:
-      label: What should change?
-      description: Say what you need or what went wrong.
+      value: |
+        Report observed facts separately from hypotheses. Redact secrets, credentials, and private material from logs and screenshots. If a fact is unknown, say so; do not guess.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and impact
+      description: What is blocked or difficult, and who is affected?
     validations:
       required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and prerequisites
+      description: Give the smallest steps, required inputs, and frequency. If not reproduced, explicitly say “Not yet reproduced” and describe the observed situation.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected versus actual behavior
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Observed evidence
+      description: Include redacted errors, logs, screenshots, or command results. State explicitly if no evidence was captured.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and commit
+      description: Record the app/build version or commit, OS, relevant tool versions, and UI/CLI/TUI entry point. Mark unavailable details unknown.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: List observable results that will demonstrate resolution. Identify checks requiring human review.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope, non-goals, and workaround
+      description: Optional boundaries, workarounds tried, and their limitations.
+  - type: textarea
+    id: related
+    attributes:
+      label: Related work and artifacts
+      description: Optional issue/PR links, branch and commit IDs, or supporting artifacts.
