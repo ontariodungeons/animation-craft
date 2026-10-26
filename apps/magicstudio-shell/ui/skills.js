@@ -1,6 +1,7 @@
 // One bounded task file is the source for the human surface and CLI. No instruction execution.
 const learning = { items:[], directory:null, selected:null, category:null, search:'', editor:null, epoch:0, dirty:false, conflict:null, removed:null };
 const LEARNING_CATEGORIES = [['audio','Audio → lyrics'],['storyboard','Native storyboard'],['art','Art preparation'],['motion','Rig & motion'],['review','Review & release'],['correction','Correction loop']];
+const LEARNING_CATEGORY_HINTS = ['Intake + transcript','Native scene/design','Approval + receipts','Parts, pivots, motion','Whole film + exact version','Repair the source, then recheck'];
 const lnode=(tag,cls,...children)=>el(tag,{class:cls},...children);
 const lbutton=(id,label,action,title=label)=>el('button',{id,class:'ghost',onclick:action,title},label);
 const lkey=(suffix='draft')=>`learning:${suffix}:${learning.directory}:${learning.selected?.id}`;
@@ -18,12 +19,15 @@ async function renderSkills(){
 }
 function learningMount(){
   const root=$('view-skills');if(!root||$('learning-layout'))return;
-  const search=el('input',{id:'learning-search',type:'search',placeholder:'Find a task / command',title:'Search task content'});
+  const search=el('input',{id:'learning-search',type:'search',placeholder:'Find a production step',title:'Search task content'});
   search.addEventListener('input',()=>{learning.search=search.value;learningRail();if(!learning.selected)learningHome();});
+  const taskLabel=lnode('p','learning-rail-label','TASKS');taskLabel.id='learning-task-label';
   const rail=lnode('aside','learning-rail',lnode('h2','', 'Production manual'),search,
     lbutton('learning-cast','MOPPETS cast',castOpen,'Choose the Magic Studio cast and edit shared department AGENTS.md files'),
     lbutton('learning-overview','Production path',()=>{learning.category=null;learningHome();}),
-    lnode('nav','learning-categories',...LEARNING_CATEGORIES.map(([id,title])=>lbutton(`learning-category-${id}`,title,()=>{learning.category=id;learningHome();}))),
+    lnode('p','learning-rail-label','MUSIC VIDEO / MAIN PATH'),
+    lnode('nav','learning-categories',...LEARNING_CATEGORIES.map(([id,title],i)=>el('button',{id:`learning-category-${id}`,class:'learning-category-link',title:title,'aria-label':title,onclick:()=>{learning.category=id;learningHome();}},lnode('strong','',`${String(i+1).padStart(2,'0')}  ${title}`),lnode('small','',LEARNING_CATEGORY_HINTS[i])))),
+    taskLabel,
     lnode('div','learning-task-list'),lnode('p','learning-location',learning.directory));
   rail.addEventListener('dragover',e=>e.preventDefault());rail.addEventListener('drop',e=>{e.preventDefault();const source=e.dataTransfer.getData('text/uri-list')||e.dataTransfer.getData('text/plain');if(source)learningImportSource(source.trim());});
   const main=lnode('main','learning-main',lnode('header','learning-bar',lnode('span','learning-breadcrumb','Learning / production path'),
@@ -35,21 +39,29 @@ function learningMount(){
 function learningMatches(item){const q=learning.search.toLowerCase();return !q||[item.name,item.markdown,item.category].join(' ').toLowerCase().includes(q);}
 function learningRail(){
   const list=$('view-skills')?.querySelector('.learning-task-list');if(!list)return;
-  list.replaceChildren(...learning.items.filter(learningMatches).map(item=>el('button',{class:`learning-task ${learning.selected?.id===item.id?'active':''}`,'data-task':item.id,title:item.name,onclick:()=>learningOpen(item.id)},lnode('strong','',item.name||item.id),lnode('small','',`${item.category||'legacy reference'} · ${item.block?.word_count||0} words${item.blocked?' · blocked':''}`))));
+  const items=learning.items.filter(item=>learningMatches(item)&&(!learning.category||item.category===learning.category));
+  for(const [id] of LEARNING_CATEGORIES){const button=$(`learning-category-${id}`);button.classList.toggle('active',learning.category===id);button.setAttribute('aria-pressed',String(learning.category===id));}
+  list.hidden=!learning.selected;$('learning-task-label').hidden=list.hidden;
+  list.replaceChildren(...items.map(item=>el('button',{class:`learning-task ${learning.selected?.id===item.id?'active':''}`,'data-task':item.id,title:item.name,onclick:()=>learningOpen(item.id)},lnode('strong','',item.name||item.id),lnode('small','',`${item.category||'legacy reference'} · ${item.block?.word_count||0} words${item.blocked?' · blocked':''}`))));
 }
 async function learningHome(){
   castLeave();
   await learning.editor?.destroy();learning.editor=null;learning.selected=null;learning.dirty=false;learning.conflict=null;learning.epoch++;
   const surface=$('view-skills').querySelector('.learning-surface');surface.replaceChildren();surface.id='learning-home';
   $('learning-save').disabled=true;$('learning-save-state').textContent='';learningRail();
-  const heading=learning.category?LEARNING_CATEGORIES.find(x=>x[0]===learning.category)?.[1]||learning.category:'One production process. Exact tasks.';
-  surface.append(lnode('h1','',heading),lnode('p','learning-intro','Resolve the requested track, reuse its timing, then follow each bounded task. Missing authority is explicit.'));
+  const heading=learning.category?LEARNING_CATEGORIES.find(x=>x[0]===learning.category)?.[1]||learning.category:learning.search?'Search results':'“Make a video for track 17.”';
   if(!learning.category&&!learning.search){
-    const grid=lnode('div','learning-grid',...LEARNING_CATEGORIES.map(([id,title],i)=>el('button',{class:'learning-category-card',onclick:()=>{learning.category=id;learningHome();}},lnode('small','',String(i+1).padStart(2,'0')),lnode('h2','',title),lnode('span','',`${learning.items.filter(v=>v.category===id).length} bounded tasks`))));
-    surface.append(grid,lnode('div','learning-actions',lbutton('learning-production-diagram','Production diagram',()=>learningDiagram('production')),lbutton('learning-correction-diagram','Correction diagram',()=>learningDiagram('correction'))));
+    surface.append(lnode('p','learning-eyebrow','EXAMPLE / REQUEST → AUTHORITATIVE SKILL → EXISTING TOOLS'),lnode('h1','',heading),lnode('p','learning-intro','Resolve the requested track, reuse its timing, then follow each bounded task. Missing authority is explicit.'));
+    const milestones=[['01','Track 17','Request: make a music video'],['02','Project / audio','Resolve canonical files first'],['03','Missing intent?','Ask only essential creative input'],['04','Timing authority','Read requested skill; keep its output']];
+    surface.append(lnode('div','learning-startup',...milestones.map(([n,title,sub])=>lnode('div','learning-startup-step',lnode('small','',n),lnode('strong','',title),lnode('span','',sub)))));
+    surface.append(lnode('div','learning-path-heading','FIRST ACTIONS / LITERAL ENTRY POINTS'));
+  } else {
+    surface.append(lnode('h1','',heading),lnode('p','learning-intro','Resolve the requested track, reuse its timing, then follow each bounded task. Missing authority is explicit.'));
   }
-  const tasks=learning.items.filter(v=>learningMatches(v)&&(learning.category?v.category===learning.category:learning.search||['resolve-project','choose-audio','timing-skill','import-timing'].includes(v.id)));
-  surface.append(lnode('div','learning-grid learning-task-grid',...tasks.map(v=>el('button',{class:'learning-summary','data-task':v.id,onclick:()=>learningOpen(v.id)},lnode('h3','',v.name),lnode('code','',v.block?.action?.ref||v.source||'Legacy reference'),lnode('p','',v.block?.output||'Original registry content preserved.'),v.blocked?lnode('p','learning-warning',v.blocked):null))));
+  const overview=!learning.category&&!learning.search;
+  const tasks=overview?['resolve-project','timing-skill','import-timing'].map(id=>learning.items.find(item=>item.id===id)).filter(Boolean):learning.items.filter(v=>learningMatches(v)&&(!learning.category||v.category===learning.category));
+  surface.append(lnode('div',`learning-grid learning-task-grid ${overview?'learning-stage-grid':''}`,...tasks.map((v,i)=>el('button',{class:`learning-summary ${overview?'learning-stage-card':''}`,'data-task':v.id,'aria-label':v.name,title:v.name,onclick:()=>learningOpen(v.id)},overview?lnode('small','',String(i+1).padStart(2,'0')):null,lnode('h3','',v.name),lnode('code','',v.block?.action?.ref||v.source||'Legacy reference'),lnode('p','',v.block?.output||'Original registry content preserved.'),v.blocked?lnode('p','learning-warning',v.blocked):null))));
+  if(overview)surface.append(lnode('div','learning-actions learning-diagram-actions',lbutton('learning-production-diagram','Production diagram',()=>learningDiagram('production')),lbutton('learning-correction-diagram','Correction diagram',()=>learningDiagram('correction'))));
   if(learning.removed)surface.append(lnode('div','learning-restore','Removed task preserved. ',lbutton('learning-restore','Undo removal',learningRestore)));
   learningMessage();
 }
