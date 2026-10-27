@@ -42,7 +42,8 @@ fn update(path: &str, forget: bool) -> Result<(), String> {
             != path
     });
     // Never persist test/fixture or temp paths as the user's recent project.
-    if path.contains("/.agent/") || path.contains("/tmp/") {
+    if path.contains("/.agent/") || path.contains("/tmp/")
+        || Path::new(&path).starts_with(std::env::temp_dir()) {
         return Ok(());
     }
     if !forget {
@@ -62,47 +63,69 @@ pub fn record(path: &str) -> Result<(), String> {
 pub fn forget(path: &str) -> Result<(), String> {
     update(path, true)
 }
-pub fn catalog(s: &mut crate::Session, _: &Value) -> crate::Result<Value> {
-    let discovery = crate::studio_sessions::discover();
-    let mut sessions = discovery["sessions"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    if s.project_owner.is_some() {
-        if let Some(path) = &s.project_path {
-            sessions.push(json!({"canonical_project":path,"identity":{"pid":std::process::id()},"unsaved_state":"unknown; inspect live UI feedback"}));
-        }
+pub fn catalog(s: &mut crate::Session, params: &Value) -> crate::Result<Value> {
+    if let Some(forget_path) = params["forget"].as_str() {
+        forget(forget_path).map_err(crate::EngineError::InvalidParams)?;
     }
+    let active = s
+        .project_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
     let mut seen = std::collections::HashSet::new();
-    let mut projects:Vec<Value>=list().into_iter().map(|p|fs::canonicalize(&p).map(|v|v.to_string_lossy().into_owned()).unwrap_or(p)).filter(|p|seen.insert(p.clone())).map(|p|{
-  let path=Path::new(&p);let dir=path.parent().unwrap_or(path);let thumb=dir.join("storyboard/.preview/page-01.png");let owners:Vec<Value>=sessions.iter().filter(|s|s["canonical_project"].as_str()==Some(&p)).map(|s|json!({"endpoint":s["endpoint"],"instance":s["instance"],"pid":s["identity"]["pid"],"unsaved_state":s["unsaved_state"]})).collect();
-  json!({"path":p,"project_id":p,"identity_kind":"canonical path","name":path.file_stem().and_then(|v|v.to_str()).unwrap_or(&p),"folder":dir,"exists":path.is_file(),"thumb":thumb.is_file().then(||thumb.to_string_lossy().into_owned()),"open_state":if owners.len()==1{"open"}else if owners.len()>1{"ambiguous"}else if discovery["errors"].as_array().is_some_and(|v|v.iter().any(|e|!e["error"].as_str().is_some_and(|s|s.starts_with("stale endpoint:")))){"unknown"}else{"not_observed_open"},"sessions":owners,"readiness":readiness(path)})
- }).collect();
+    let mut projects: Vec<Value> = list()
+        .into_iter()
+        .map(|p| {
+            fs::canonicalize(&p)
+                .map(|v| v.to_string_lossy().into_owned())
+                .unwrap_or(p)
+        })
+        .filter(|p| seen.insert(p.clone()))
+        .map(|p| {
+            let path = Path::new(&p);
+            let dir = path.parent().unwrap_or(path);
+            let thumb = dir.join("storyboard/.preview/page-01.png");
+            let is_open = active.as_deref() == Some(p.as_str());
+            json!({
+                "path": p,
+                "project_id": p,
+                "identity_kind": "canonical path",
+                "name": path.file_stem().and_then(|v| v.to_str()).unwrap_or(&p),
+                "folder": dir,
+                "exists": path.is_file(),
+                "thumb": thumb.is_file().then(|| thumb.to_string_lossy().into_owned()),
+                "open_state": if is_open { "open" } else { "ready" },
+                "sessions": [],
+                "readiness": readiness(path)
+            })
+        })
+        .collect();
     projects.sort_by_key(|v| v["exists"] != true);
-    Ok(
-        json!({"projects":projects,"source":file(),"scope":"existing Home navigation history; newest ten, not all filesystem projects","discovery_errors":discovery["errors"]}),
-    )
+    Ok(json!({
+        "projects": projects,
+        "source": file(),
+        "scope": "existing Home navigation history; newest ten, not all filesystem projects",
+        "discovery_errors": []
+    }))
 }
 
 fn readiness(path: &Path) -> Value {
-    let mut inspected = crate::Session::default();
-    let opened = match crate::project::cmd_project_open(
-        &mut inspected,
-        &json!({"path":path,"record_recent":false}),
-    ) {
-        Ok(v) => v,
-        Err(error) => {
-            return json!({"state":"unreadable","next_step":error.to_string(),"editor_ready":false});
-        }
+    let Ok(text) = fs::read_to_string(path) else {
+        return json!({"state":"unreadable","next_step":"Project file is missing or unreadable","editor_ready":false});
     };
-    let control = crate::command_center::status(&mut inspected, &json!({})).unwrap_or(json!({}));
-    let workshop = &opened["workshop"];
-    let audio = workshop["stages"]
-        .as_array()
-        .is_some_and(|v| v.iter().any(|s| s["id"] == "song" && s["done"] == true));
-    let transcript = control["transcript"]["valid"] == true;
-    let editor_ready = workshop["video_project_exists"] == true
-        && workshop["video_server"]["running"] == true;
+    let Ok(doc) = serde_json::from_str::<Value>(&text) else {
+        return json!({"state":"unreadable","next_step":"Invalid project JSON","editor_ready":false});
+    };
+    if doc["format"].as_str() != Some("magicstudio.project") {
+        return json!({"state":"unreadable","next_step":"Not a Magic Studio project","editor_ready":false});
+    }
+    let dir = path.parent().unwrap_or(path);
+    let audio = doc["workshop"]["audio"]
+        .as_str()
+        .is_some_and(|a| !a.is_empty() && (dir.join(a).is_file() || Path::new(a).is_file()));
+    let transcript = dir.join("transcript.json").is_file() || dir.join("lyrics/words.json").is_file();
+    let editor_ready = doc["workshop"]["video_project"]
+        .as_str()
+        .is_some_and(|v| !v.is_empty() && (dir.join(v).is_dir() || Path::new(v).is_dir()));
     let next = if !audio {
         "Choose existing song audio"
     } else if !transcript {
@@ -110,7 +133,7 @@ fn readiness(path: &Path) -> Value {
     } else if !editor_ready {
         "Review project; editor setup or server is still required"
     } else {
-        "Open the existing running video editor"
+        "Open project"
     };
-    json!({"audio_available":audio,"transcript_valid":transcript,"editor_ready":editor_ready,"approval":"not inferred","next_step":next,"problems":control["problems"],"quick_actions":[{"label":"Project details","view":"project","open_block":"song","enabled":true},{"label":"Lyrics / transcript","view":"project","open_block":"lyrics","enabled":transcript},{"label":"Running video editor","view":"studio","enabled":editor_ready}]})
+    json!({"audio_available":audio,"transcript_valid":transcript,"editor_ready":editor_ready,"approval":"not inferred","next_step":next,"problems":[],"quick_actions":[{"label":"Project details","view":"project","open_block":"song","enabled":true},{"label":"Lyrics / transcript","view":"project","open_block":"lyrics","enabled":transcript},{"label":"Running video editor","view":"studio","enabled":editor_ready}]})
 }

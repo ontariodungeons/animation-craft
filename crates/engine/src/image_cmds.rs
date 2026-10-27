@@ -66,14 +66,14 @@ pub fn cmd_image_register_frame(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result)
 }
 
-/// Mask the active asset's source into per-part PNGs from explicit `regions` polygons.
-pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
+/// Resolve the target asset ID and validated source image path for an `image.*` command.
+fn resolve_asset_source(s: &Session, params: &Value, verb: &str) -> Result<(String, std::path::PathBuf)> {
     let asset_id = params
         .get("asset")
         .and_then(Value::as_str)
         .map(str::to_string)
         .or_else(|| s.active_asset.clone())
-        .ok_or_else(|| EngineError::InvalidParams("no active asset to break apart".into()))?;
+        .ok_or_else(|| EngineError::InvalidParams(format!("no active asset to {verb}")))?;
 
     let existing_asset = s.assets.get(&asset_id).cloned().ok_or_else(|| {
         EngineError::InvalidParams(format!("asset `{asset_id}` is not loaded in session"))
@@ -91,6 +91,12 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
             source_path.display()
         )));
     }
+    Ok((asset_id, source_path))
+}
+
+/// Mask the active asset's source into per-part PNGs from explicit `regions` polygons.
+pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
+    let (asset_id, source_path) = resolve_asset_source(s, params, "break apart")?;
 
     let root = workspace_root(s);
     let out_dir = if let Some(dir_str) = params.get("out_dir").and_then(Value::as_str) {
@@ -206,7 +212,8 @@ pub fn cmd_image_break_apart(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 /// `joints` (rig.from_sheet's placed parts: id, parent, pivot) replaces the centre pivots and the
-/// largest-part root with the placed joints and parents.
+/// largest-part root with the placed joints and parents, and seeds initial timed 2D tracks
+/// (`rest`, `walk`, `wave`, `jump`) so the cutout rig immediately has fluid multi-part motion.
 fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value], joints: Option<&[Value]>) -> Result<std::path::PathBuf> {
     let mut layers = Vec::new();
     let mut canvas = (0, 0);
@@ -226,11 +233,66 @@ fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value], j
     let root = joints
         .and_then(|j| j.iter().find(|p| p["parent"].is_null()).and_then(|p| p["id"].as_str()).map(str::to_string))
         .unwrap_or_else(|| layers.iter().max_by_key(|l| l.3).map(|l| l.0.clone()).unwrap_or_default());
-    // One starting track to draw paths on: the root bobs and tilts gently, as a cut-out at rest does.
-    let rest = json!({"id": "rest", "label": "Rest · gentle bob", "duration": 4, "loop": true, "motion": {root.as_str(): {
-        "position": [{"kind": "oscillate", "axis": 1, "amplitude": 4, "hz": 0.5, "phase": 0}],
-        "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.2, "hz": 0.5, "phase": 0.25}]}}});
-    let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": [rest],
+
+    let mut rest_motion = serde_json::Map::new();
+    let mut walk_motion = serde_json::Map::new();
+    let mut wave_motion = serde_json::Map::new();
+    let mut jump_motion = serde_json::Map::new();
+
+    for (id, _, _, _) in &layers {
+        let low = id.to_ascii_lowercase();
+        if *id == root {
+            rest_motion.insert(id.clone(), json!({
+                "position": [{"kind": "oscillate", "axis": 1, "amplitude": 4.0, "hz": 0.5, "phase": 0.0}],
+                "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.2, "hz": 0.5, "phase": 0.25}]
+            }));
+            walk_motion.insert(id.clone(), json!({
+                "position": [{"kind": "oscillate", "axis": 1, "amplitude": 6.0, "hz": 2.0, "phase": 0.0}],
+                "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 2.5, "hz": 1.0, "phase": 0.0}]
+            }));
+            wave_motion.insert(id.clone(), json!({
+                "position": [{"kind": "oscillate", "axis": 1, "amplitude": 3.0, "hz": 0.75, "phase": 0.0}],
+                "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.8, "hz": 0.75, "phase": 0.15}]
+            }));
+            jump_motion.insert(id.clone(), json!({
+                "position": [{"kind": "oscillate", "axis": 1, "amplitude": 22.0, "hz": 1.0, "phase": 0.0}],
+                "rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 3.5, "hz": 1.0, "phase": 0.2}]
+            }));
+        } else if low.contains("head") {
+            rest_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 1.8, "hz": 0.5, "phase": 0.15}]}));
+            walk_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 3.0, "hz": 1.0, "phase": 0.2}]}));
+            wave_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 4.5, "hz": 1.2, "phase": 0.1}]}));
+            jump_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 5.0, "hz": 1.0, "phase": 0.25}]}));
+        } else if low.contains("ear") || low.contains("tail") || low.contains("hair") || low.contains("prop") {
+            // Secondary follow-through with phase lag relative to parent gesture
+            let phase = if low.contains("_r") || low.contains("right") { 0.42 } else { 0.32 };
+            rest_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 3.5, "hz": 0.5, "phase": phase}]}));
+            walk_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 9.0, "hz": 1.0, "phase": phase}]}));
+            wave_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 6.5, "hz": 1.2, "phase": phase}]}));
+            jump_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 12.0, "hz": 1.0, "phase": phase}]}));
+        } else if low.contains("arm") || low.contains("wing") {
+            let is_left = low.contains("_l") || low.contains("left");
+            let phase = if is_left { 0.0 } else { 0.5 };
+            walk_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 16.0, "hz": 1.0, "phase": phase}]}));
+            if is_left {
+                wave_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 26.0, "hz": 1.8, "phase": 0.0}]}));
+            }
+            jump_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 22.0, "hz": 1.0, "phase": 0.1}]}));
+        } else if low.contains("leg") || low.contains("foot") {
+            let is_left = low.contains("_l") || low.contains("left");
+            let phase = if is_left { 0.5 } else { 0.0 };
+            walk_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 18.0, "hz": 1.0, "phase": phase}]}));
+            jump_motion.insert(id.clone(), json!({"rotation": [{"kind": "oscillate", "axis": 0, "amplitude": 14.0, "hz": 1.0, "phase": 0.0}]}));
+        }
+    }
+
+    let tracks = vec![
+        json!({"id": "rest", "label": "Rest · gentle bob", "duration": 4, "loop": true, "motion": rest_motion}),
+        json!({"id": "walk", "label": "Walk · stride cycle", "duration": 3, "loop": true, "motion": walk_motion}),
+        json!({"id": "wave", "label": "Wave · greeting", "duration": 3, "loop": true, "motion": wave_motion}),
+        json!({"id": "jump", "label": "Jump · hop", "duration": 2, "loop": true, "motion": jump_motion}),
+    ];
+    let rig = json!({"rig_type": "layered_motion", "character_id": asset_id, "canvas": [canvas.0, canvas.1], "fps": 30, "tracks": tracks,
         "layers": layers.iter().map(|(id, file, pivot, _)| match joint(id) {
             Some(j) => json!({"id": id, "file": file, "pivot": j["pivot"], "parent": j["parent"]}),
             None => json!({"id": id, "file": file, "pivot": pivot, "parent": if *id == root { Value::Null } else { json!(root) }}),
@@ -240,20 +302,28 @@ fn write_parts_rig(out_dir: &std::path::Path, asset_id: &str, order: &[Value], j
     Ok(path)
 }
 
-/// A rig sheet from `image.generate rig_parts=...` becomes a layered rig: pipeline/rig_from_sheet.py cuts the
-/// cells, places each part where it sits on the assembled asset and finds the joints; rig.json is then
-/// written like image.break_apart's. Connect it with project.add_asset kind=cutout_rig.
+/// A rig sheet (either from `image.generate rig_parts=...` with adjacent `generation.json`, or an existing
+/// user sheet with explicit `parts=[{id, parent, pivot}]`) becomes a layered rig: `pipeline/rig_from_sheet.py`
+/// cuts the cells, places each part where it sits on the assembled asset and finds the joints; `rig.json` is then
+/// written with initial timed 2D tracks (`rest`, `walk`, `wave`, `jump`). Connect it with `project.add_asset kind=cutout_rig`.
 pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     let invalid = |message: String| EngineError::InvalidParams(message);
     let sheet_ref = p["sheet"].as_str().filter(|v| !v.is_empty())
-        .ok_or_else(|| invalid("rig.from_sheet needs sheet=<generated rig sheet asset id or PNG path>".into()))?;
+        .ok_or_else(|| invalid("rig.from_sheet needs sheet=<rig sheet asset id or PNG path>".into()))?;
     let sheet = match s.project_assets.iter().find(|a| a.id == sheet_ref).and_then(|a| a.path.clone()) {
         Some(path) => path,
         None => resolve_workspace_path(s, sheet_ref),
     };
+    if !sheet.is_file() {
+        return Err(invalid(format!("rig sheet not found: {}", sheet.display())));
+    }
     let receipt = sheet.with_file_name("generation.json");
-    if !sheet.is_file() || !receipt.is_file() {
-        return Err(invalid(format!("{} needs its generation.json beside it; make the sheet with image.generate rig_parts=...", sheet.display())));
+    let explicit_parts = p.get("parts").or_else(|| p.get("rig_parts")).filter(|v| !v.is_null());
+    if !receipt.is_file() && explicit_parts.is_none() {
+        return Err(invalid(format!(
+            "{} has no adjacent generation.json; pass `parts=[{{\"id\":...,\"parent\":...,\"pivot\":[u,v]}}]` for an existing user sheet, or generate one with `image.generate rig_parts=...`",
+            sheet.display()
+        )));
     }
     let name = crate::workspace::sanitize_asset_id(p["name"].as_str().unwrap_or("rig"));
     let out_dir = match p["out_dir"].as_str() {
@@ -262,8 +332,29 @@ pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let root = workspace_root(s);
     let script = root.join("pipeline/rig_from_sheet.py");
-    let mut args = vec![script.to_string_lossy().into_owned(), "--sheet".into(), sheet.to_string_lossy().into_owned(),
-        "--receipt".into(), receipt.to_string_lossy().into_owned(), "--out-dir".into(), out_dir.to_string_lossy().into_owned()];
+    let mut args = vec![
+        script.to_string_lossy().into_owned(),
+        "--sheet".into(),
+        sheet.to_string_lossy().into_owned(),
+        "--out-dir".into(),
+        out_dir.to_string_lossy().into_owned(),
+    ];
+    if receipt.is_file() {
+        args.extend(["--receipt".into(), receipt.to_string_lossy().into_owned()]);
+    }
+    if let Some(parts) = explicit_parts {
+        if !parts.as_array().is_some_and(|a| (2..=15).contains(&a.len()) && a.iter().all(|item| item.get("id").and_then(Value::as_str).is_some_and(|id| !id.is_empty()))) {
+            return Err(invalid("parts must be an array of 2 to 15 part objects with non-empty `id`".into()));
+        }
+        args.extend(["--parts".into(), parts.to_string()]);
+    }
+    if let Some(ref_raw) = p["reference"].as_str().filter(|v| !v.is_empty()) {
+        let ref_path = resolve_workspace_path(s, ref_raw);
+        if !ref_path.is_file() {
+            return Err(invalid(format!("reference image not found: {}", ref_path.display())));
+        }
+        args.extend(["--reference".into(), ref_path.to_string_lossy().into_owned()]);
+    }
     if let Some(pivots) = p.get("pivots").filter(|v| !v.is_null()) {
         if !pivots.as_object().is_some_and(|m| m.values().all(|v| v.as_array().is_some_and(|a| a.len() == 2 && a.iter().all(|n| n.as_f64().is_some_and(|n| (0.0..=1.0).contains(&n)))))) {
             return Err(invalid("pivots maps part ids to [u, v] inside the part, each 0 to 1".into()));
@@ -294,31 +385,121 @@ pub fn cmd_rig_from_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(placement)
 }
 
+/// Surgical PhotoCraft recut of a single rigged part from its clean source art (`pipeline/recut_part.py`).
+pub fn cmd_part_recut(s: &mut Session, p: &Value) -> Result<Value> {
+    let invalid = |msg: String| EngineError::InvalidParams(msg);
+    let source_raw = p["source"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("part.recut needs source=<clean source PNG>".into()))?;
+    let part_raw = p["part"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("part.recut needs part=<existing part PNG>".into()))?;
+    let out_raw = p["out"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("part.recut needs out=<output part PNG>".into()))?;
+    let at_val = p.get("at").ok_or_else(|| invalid("part.recut needs at=[x,y] or \"x,y\"".into()))?;
+    let at_str = if let Some(s_at) = at_val.as_str() {
+        s_at.to_string()
+    } else if let Some(arr) = at_val.as_array().filter(|a| a.len() == 2) {
+        format!("{},{}", arr[0].as_f64().unwrap_or(0.0) as i64, arr[1].as_f64().unwrap_or(0.0) as i64)
+    } else {
+        return Err(invalid("`at` must be [x, y] or \"x,y\"".into()));
+    };
+    let source = resolve_workspace_path(s, source_raw);
+    let part = resolve_workspace_path(s, part_raw);
+    let out = resolve_workspace_path(s, out_raw);
+    if !source.is_file() {
+        return Err(invalid(format!("source PNG not found: {}", source.display())));
+    }
+    if !part.is_file() {
+        return Err(invalid(format!("part PNG not found: {}", part.display())));
+    }
+    let root = workspace_root(s);
+    let script = root.join("pipeline/recut_part.py");
+    let mut args = vec![
+        script.to_string_lossy().into_owned(),
+        "--source".into(),
+        source.to_string_lossy().into_owned(),
+        "--part".into(),
+        part.to_string_lossy().into_owned(),
+        "--at".into(),
+        at_str,
+        "--out".into(),
+        out.to_string_lossy().into_owned(),
+    ];
+    if let Some(scale) = p["scale"].as_f64() {
+        args.extend(["--scale".into(), scale.to_string()]);
+    }
+    if let Some(expand) = p["expand"].as_i64() {
+        args.extend(["--expand".into(), expand.to_string()]);
+    }
+    if let Some(smooth) = p["smooth"].as_i64() {
+        args.extend(["--smooth".into(), smooth.to_string()]);
+    }
+    if let Some(behind) = p["behind"].as_array() {
+        for item in behind {
+            if let Some(spec) = item.as_str().filter(|v| !v.is_empty()) {
+                args.extend(["--behind".into(), spec.to_string()]);
+            }
+        }
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut res: Value = stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok())
+        .ok_or_else(|| EngineError::CommandFailed("part.recut".into(), "recut_part.py returned no JSON".into()))?;
+    res["command"] = json!("part.recut");
+    Ok(res)
+}
+
+/// Normalize a non-standard turnaround or action pose sheet (`pipeline/step_sheet_normalizer.py`):
+/// detects panels, resizes cells via PhotoCraft, labels via Hybrid OCR + Jev Vision fallback,
+/// reorders into canonical slots, and expands directional walk_right/walk_left slots.
+pub fn cmd_sheet_normalize(s: &mut Session, p: &Value) -> Result<Value> {
+    let invalid = |msg: String| EngineError::InvalidParams(msg);
+    let source_raw = p["source"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("sheet.normalize needs source=<sheet PNG/JPEG path>".into()))?;
+    let source = resolve_workspace_path(s, source_raw);
+    if !source.is_file() {
+        return Err(invalid(format!("sheet source not found: {}", source.display())));
+    }
+    let character = crate::workspace::sanitize_asset_id(p["character"].as_str().unwrap_or("character"));
+    let kind = p["kind"].as_str().unwrap_or("auto");
+    let out_dir = match p["out_dir"].as_str().filter(|v| !v.is_empty()) {
+        Some(dir) => resolve_workspace_path(s, dir),
+        None => workspace_root(s).join("exports/pose_and_parts").join(format!("{character}_{kind}_normalized")),
+    };
+    let root = workspace_root(s);
+    let script = root.join("pipeline/step_sheet_normalizer.py");
+    let mut args = vec![
+        script.to_string_lossy().into_owned(),
+        "--source".into(),
+        source.to_string_lossy().into_owned(),
+        "--out-dir".into(),
+        out_dir.to_string_lossy().into_owned(),
+        "--kind".into(),
+        kind.into(),
+        "--character".into(),
+        character,
+    ];
+    if let Some(cw) = p["cell_width"].as_i64() {
+        args.extend(["--cell-width".into(), cw.to_string()]);
+    }
+    if let Some(ch) = p["cell_height"].as_i64() {
+        args.extend(["--cell-height".into(), ch.to_string()]);
+    }
+    if p["expand_directions"].as_bool() == Some(false) {
+        args.push("--no-expand-directions".into());
+    }
+    if let Some(tol) = p["tolerance"].as_i64() {
+        args.extend(["--tolerance".into(), tol.to_string()]);
+    }
+    let stdout = run_tool_in(&root, "python3", &args)?;
+    let mut res: Value = serde_json::from_str(&stdout)
+        .or_else(|_| stdout.lines().rev().find_map(|line| serde_json::from_str(line).ok()).ok_or(()))
+        .map_err(|_| EngineError::CommandFailed("sheet.normalize".into(), "step_sheet_normalizer.py returned invalid JSON".into()))?;
+    res["command"] = json!("sheet.normalize");
+    Ok(res)
+}
+
 /// Warp the active asset's source with explicit src/dst pins via PhotoCraft puppet warp.
 pub fn cmd_image_puppet_warp(s: &mut Session, params: &Value) -> Result<Value> {
-    let asset_id = params
-        .get("asset")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| s.active_asset.clone())
-        .ok_or_else(|| EngineError::InvalidParams("no active asset to warp".into()))?;
-
-    let existing_asset = s.assets.get(&asset_id).cloned().ok_or_else(|| {
-        EngineError::InvalidParams(format!("asset `{asset_id}` is not loaded in session"))
-    })?;
-
-    let source_path = if let Some(src_override) = params.get("source").and_then(Value::as_str) {
-        resolve_workspace_path(s, src_override)
-    } else {
-        existing_asset.path.clone()
-    };
-
-    if !source_path.is_file() {
-        return Err(EngineError::InvalidParams(format!(
-            "source image for asset `{asset_id}` does not exist: {}",
-            source_path.display()
-        )));
-    }
+    let (asset_id, source_path) = resolve_asset_source(s, params, "warp")?;
 
     let root = workspace_root(s);
     let out_path = if let Some(out_raw) = params.get("out").and_then(Value::as_str) {
@@ -376,29 +557,7 @@ pub fn cmd_image_puppet_warp(s: &mut Session, params: &Value) -> Result<Value> {
 
 /// Convert a color to alpha on the active asset's source via PhotoCraft.
 pub fn cmd_image_color_to_alpha(s: &mut Session, params: &Value) -> Result<Value> {
-    let asset_id = params
-        .get("asset")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| s.active_asset.clone())
-        .ok_or_else(|| EngineError::InvalidParams("no active asset to convert".into()))?;
-
-    let existing_asset = s.assets.get(&asset_id).cloned().ok_or_else(|| {
-        EngineError::InvalidParams(format!("asset `{asset_id}` is not loaded in session"))
-    })?;
-
-    let source_path = if let Some(src_override) = params.get("source").and_then(Value::as_str) {
-        resolve_workspace_path(s, src_override)
-    } else {
-        existing_asset.path.clone()
-    };
-
-    if !source_path.is_file() {
-        return Err(EngineError::InvalidParams(format!(
-            "source image for asset `{asset_id}` does not exist: {}",
-            source_path.display()
-        )));
-    }
+    let (asset_id, source_path) = resolve_asset_source(s, params, "convert")?;
 
     let root = workspace_root(s);
     let out_path = if let Some(out_raw) = params.get("out").and_then(Value::as_str) {
@@ -461,29 +620,7 @@ pub fn cmd_image_color_to_alpha(s: &mut Session, params: &Value) -> Result<Value
 
 /// Content-aware fill on a named selection of the active asset's source via PhotoCraft.
 pub fn cmd_image_content_aware_fill(s: &mut Session, params: &Value) -> Result<Value> {
-    let asset_id = params
-        .get("asset")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| s.active_asset.clone())
-        .ok_or_else(|| EngineError::InvalidParams("no active asset to fill".into()))?;
-
-    let existing_asset = s.assets.get(&asset_id).cloned().ok_or_else(|| {
-        EngineError::InvalidParams(format!("asset `{asset_id}` is not loaded in session"))
-    })?;
-
-    let source_path = if let Some(src_override) = params.get("source").and_then(Value::as_str) {
-        resolve_workspace_path(s, src_override)
-    } else {
-        existing_asset.path.clone()
-    };
-
-    if !source_path.is_file() {
-        return Err(EngineError::InvalidParams(format!(
-            "source image for asset `{asset_id}` does not exist: {}",
-            source_path.display()
-        )));
-    }
+    let (asset_id, source_path) = resolve_asset_source(s, params, "fill")?;
 
     let root = workspace_root(s);
     let out_path = if let Some(out_raw) = params.get("out").and_then(Value::as_str) {

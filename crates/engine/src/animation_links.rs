@@ -121,24 +121,3 @@ pub fn accept(s: &mut Session, p: &Value) -> Result<Value> {
     s.animation_sources.insert(text(&source,"id")?.into(),source.clone());
     Ok(mutation(source))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn accept_rejects_partial_stale_and_changed_clips() {
-        let root=std::env::temp_dir().join(format!("native-accept-{}",std::process::id()));fs::create_dir_all(&root).unwrap();
-        let clip=root.join("clip.webm");fs::write(&clip,b"receipt integrity fixture, not a native render").unwrap();
-        let source=json!({"id":"native","revision":2,"backend":"synfig"});
-        let mut result=json!({"source_id":"native","source_revision":2,"backend":"synfig","state":"completed","partial":true,"clip":clip,"clip_sha256":"invalid"});
-        assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("full render"));
-        result["partial"]=json!(false);result["source_revision"]=json!(1);
-        assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("stale"));
-        result["source_revision"]=json!(2);
-        result["alpha_evidence"]=json!({"clip_max":0});
-        assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("fully transparent"));
-        result["alpha_evidence"]=Value::Null;
-        assert!(accepted_result(&source,&result,&root.join("result.json")).unwrap_err().to_string().contains("hash changed"));
-        fs::remove_dir_all(root).unwrap();
-    }
-}

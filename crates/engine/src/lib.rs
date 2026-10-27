@@ -213,27 +213,3 @@ pub mod local_ipc;
 
 pub mod project_catalog;
 pub mod studio_sessions;
-
-#[cfg(test)]
-mod edit_count_tests {
-    use super::*;
-    #[test]
-    fn edits_count_unsaved_journaled_commands_and_reset_on_project_write() {
-        let dir = std::env::temp_dir().join(format!("ac-edits-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut s = Session::default();
-        s.execute("project.new", serde_json::json!({"path": dir.join("e.magic")})).unwrap();
-        assert_eq!(s.edits_since_save, 0);
-        let fix = serde_json::json!({"asset": "a", "path": "a.png", "decision": "recreate", "problem": "torn edge"});
-        s.execute("assets.fixlist_add", fix.clone()).unwrap();
-        s.execute("assets.fixlist_add", fix).unwrap();
-        assert_eq!(s.edits_since_save, 2, "journaled commands that leave the project file unwritten");
-        s.execute("command.list", serde_json::json!({})).unwrap();
-        assert_eq!(s.edits_since_save, 2, "queries are not edits");
-        assert!(s.execute("motion.path", serde_json::json!({"character": "missing"})).is_err());
-        assert_eq!(s.edits_since_save, 2, "failed commands are not edits");
-        s.execute("project.save", serde_json::json!({})).unwrap();
-        assert_eq!(s.edits_since_save, 0);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-}

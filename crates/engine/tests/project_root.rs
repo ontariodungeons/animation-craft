@@ -78,7 +78,7 @@ fn project_root_child() {
         production.to_string_lossy().as_ref()
     );
     assert_eq!(fs::read(&config).unwrap(), saved);
-    // Test/fixture paths under /tmp are never persisted as recent projects.
+    // Fixtures under the configured temporary directory never enter Recent, including custom TMPDIR.
     assert!(!magicstudio_engine::project_catalog::list().iter().any(|p| p.contains("explicit-tests")));
     let created = session
         .execute("project.intake", json!({"name":"Production Song"}))

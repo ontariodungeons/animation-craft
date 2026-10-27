@@ -148,6 +148,16 @@ fn select(matches:&[Value])->Result<Option<Value>,String>{
 
 /// Shared app opening for desktop, CLI and MCP. Existing windows are never replaced.
 pub fn open(executable: &Path, project: Option<&str>) -> Result<Value, String> {
+    open_with_options(executable, project, false, None)
+}
+
+/// Open Magic Studio with optional `--animate` focus mode and `--character` selection.
+pub fn open_with_options(
+    executable: &Path,
+    project: Option<&str>,
+    animate_only: bool,
+    character: Option<&str>,
+) -> Result<Value, String> {
     let project = project.map(Path::new).map(canonical).transpose()?;
     if let Some(path) = &project {
         if let Some(existing) = for_project(path)? {
@@ -163,7 +173,17 @@ pub fn open(executable: &Path, project: Option<&str>) -> Result<Value, String> {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR missing")?;
     let dir = PathBuf::from(runtime).join("magicstudio-studio");
     let mut command = std::process::Command::new(executable);
-    if let Some(path) = &project { command.arg(path); } else { command.arg("--new"); }
+    if animate_only {
+        command.arg("--animate");
+    }
+    if let Some(ch) = character {
+        command.args(["--character", ch]);
+    }
+    if let Some(path) = &project {
+        command.arg(path);
+    } else if !animate_only {
+        command.arg("--new");
+    }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
     command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     let mut child = command.spawn().map_err(|e|format!("Cannot launch {}: {e}",executable.display()))?;

@@ -136,11 +136,15 @@ impl Config {
         Ok(())
     }
 
-    pub fn load(path: &std::path::Path) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let config: Self = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    pub fn from_json_str(text: &str) -> Result<Self, String> {
+        let config: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
         config.validate()?;
         Ok(config)
+    }
+
+    pub fn load(path: &std::path::Path) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        Self::from_json_str(&text)
     }
 }
 
@@ -200,7 +204,10 @@ impl PanelReport {
         };
         report.project = feedback["project"].as_str().map(str::to_owned);
         report.studio = feedback["identity"].clone();
-        if feedback["ui_ready"] == false || feedback["frontend_report_age_ms"].as_u64().is_some_and(|age| age > 5000) {
+        if feedback["connection"] == "not_observed_open" {
+            report.available = false;
+            report.error = None;
+        } else if feedback["ui_ready"] == false || feedback["frontend_report_age_ms"].as_u64().is_some_and(|age| age > 5000) {
             report.available = false;
             report.error = Some("Studio observation is stale or not ready".into());
         }

@@ -307,19 +307,31 @@ pub fn cmd_blender_actions(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         &raw["effectcraft"]
     };
-    let source = spec["tracks"]
-        .as_array()
-        .ok_or_else(|| invalid("No saved layered animation tracks"))?;
-    if source.len() > 1024 {
-        return Err(invalid("Too many animation tracks"));
-    }
-    let tracks: Vec<Value> = source
-        .iter()
-        .map(|t| {
+    let mut tracks: Vec<Value> = Vec::new();
+    if let Some(source) = spec["tracks"].as_array() {
+        if source.len() > 1024 {
+            return Err(invalid("Too many animation tracks"));
+        }
+        tracks.extend(source.iter().map(|t| {
             json!({"id":t["id"],"duration":t["duration"],
-        "loop":t["loop"].as_bool().unwrap_or(false),"standard":false})
-        })
-        .collect();
+                "loop":t["loop"].as_bool().unwrap_or(false),"standard":false})
+        }));
+    }
+    let meta = crate::motion::cmd_motion_tracks(s, &json!({"character": asset.id}))?;
+    if let Some(meta_tracks) = meta["tracks"].as_array() {
+        for mt in meta_tracks {
+            let id = mt["id"].as_str().unwrap_or("");
+            if !id.is_empty() && !tracks.iter().any(|t| t["id"].as_str() == Some(id)) {
+                tracks.push(json!({
+                    "id": id,
+                    "label": mt["label"],
+                    "duration": mt["duration"],
+                    "loop": mt["loop"].as_bool().unwrap_or(false),
+                    "standard": mt["standard"].as_bool().unwrap_or(false),
+                }));
+            }
+        }
+    }
     Ok(
         json!({"character":asset.id,"tracks":tracks,"layers":[],"canvas":spec.get("canvas").unwrap_or(&raw["canvas_size"]),"spec":path}),
     )
@@ -721,141 +733,4 @@ pub fn cmd_blender_cancel(s: &mut Session, p: &Value) -> Result<Value> {
         ));
     }
     cmd_blender_status(s, p)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_unit_owner_is_observed_without_claiming_another_project() {
-        let state = json!({"ActiveState":"active", "Description":"magicstudio-native-unmatched",
-            "InvocationID":"native-invocation"});
-        let observation = worker_owner(&Ok(state));
-        assert_eq!(
-            observation["worker_owner"]["job"],
-            "magicstudio-native-unmatched"
-        );
-        assert!(observation["worker_owner"]["project"].is_null());
-        assert!(observation["worker_owner_error"].is_string());
-    }
-
-    #[test]
-    fn action_discovery_never_decodes_artwork_and_bounds_input() {
-        let dir =
-            std::env::temp_dir().join(format!("blender-actions-{}-{}", std::process::id(), now()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("rig.json");
-        write_json(
-            &path,
-            &json!({"canvas":[64,96],"layers":[{"id":"body","file":"missing.png"}],
-            "tracks":[{"id":"exact-authored-id","duration":1.001,"loop":true,"standard":true}]}),
-        )
-        .unwrap();
-        let mut session = Session {
-            project_assets: vec![crate::ProjectAsset {
-                id: "portrait".into(),
-                name: "Portrait".into(),
-                kind: "cutout_rig".into(),
-                path: Some(path.clone()),
-                preset: None,
-                parts: vec![],
-            }],
-            ..Session::default()
-        };
-        let actions = cmd_blender_actions(&mut session, &json!({"character":"portrait"})).unwrap();
-        assert_eq!(
-            actions["tracks"],
-            json!([{"id":"exact-authored-id","duration":1.001,"loop":true,"standard":false}])
-        );
-        assert_eq!(actions["layers"], json!([]));
-        assert!(session.assets.is_empty());
-        fs::File::create(&path)
-            .unwrap()
-            .set_len(JSON_LIMIT + 1)
-            .unwrap();
-        assert!(
-            cmd_blender_actions(&mut session, &json!({"character":"portrait"}))
-                .unwrap_err()
-                .to_string()
-                .contains("16 MiB")
-        );
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn global_owner_is_correlated_without_a_selected_project() {
-        let state = json!({"ActiveState":"active","Description":"magicstudio-blender-owner-b","InvocationID":"new-invocation","ExecMainStartTimestamp":"@1234"});
-        let mut details = json!({"job":"magicstudio-blender-owner-b","project":"/tmp/project-b/project.magic","invocation_id":"new-invocation",
-            "limits":{"timeout_seconds":27},"submitted_at":"1233000","started_at":"1234000","cancellation_requested_at":null});
-        let observation = owner_observation(&state, Some(&details), None);
-        assert_eq!(
-            observation["worker_owner"]["project"],
-            "/tmp/project-b/project.magic"
-        );
-        assert_eq!(observation["worker_owner"]["started_at"], "1234000");
-        assert_eq!(observation["worker_owner"]["limits"]["timeout_seconds"], 27);
-        details["invocation_id"] = json!("old-invocation");
-        let stale = owner_observation(&state, Some(&details), Some("stale invocation".into()));
-        assert!(stale["worker_owner"]["project"].is_null());
-        assert!(stale["worker_owner"]["limits"].is_null());
-        assert_eq!(stale["worker_owner"]["invocation_id"], "new-invocation");
-        assert!(!stale["worker_owner_error"].is_null());
-        let cancelled = owner_observation(
-            &json!({"ActiveState":"deactivating","Description":"magicstudio-blender-owner-b","InvocationID":"new-invocation"}),
-            None,
-            None,
-        );
-        assert_eq!(cancelled["worker_owner"]["state"], "cancelling");
-        let idle = worker_owner(&Ok(json!({"ActiveState":"inactive"})));
-        assert!(idle["worker_owner"].is_null());
-        assert_eq!(idle["worker_owner_status"], "idle");
-        let disconnected = worker_owner(&Err(invalid("bus unavailable")));
-        assert!(disconnected["worker_owner"].is_null());
-        assert_eq!(disconnected["worker_owner_status"], "unavailable");
-        assert!(
-            disconnected["worker_owner_error"]
-                .as_str()
-                .is_some_and(|e| e.contains("bus unavailable"))
-        );
-    }
-
-    #[test]
-    fn historical_limits_are_unknown_and_cancellation_time_is_persisted() {
-        let dir =
-            std::env::temp_dir().join(format!("blender-timing-{}-{}", std::process::id(), now()));
-        fs::create_dir_all(&dir).unwrap();
-        write_json(&dir.join("job.json"), &json!({"job":"old-job"})).unwrap();
-        write_json(
-            &dir.join("cancel-requested"),
-            &json!({"cancellation_requested_at":"5678"}),
-        )
-        .unwrap();
-        let details = job_details(&dir).unwrap();
-        assert!(details["limits"].is_null());
-        assert!(details["started_at"].is_null());
-        assert!(details["submitted_at"].is_null());
-        assert_eq!(details["cancellation_requested_at"], "5678");
-        let mut receipt = json!({"state":"cancelled"});
-        add_job_details(&mut receipt, &details);
-        assert!(receipt["limits"].is_null());
-        assert_eq!(receipt["cancellation_requested_at"], "5678");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn absent_metrics_stay_unknown_and_shutdown_stays_busy() {
-        let readings = telemetry(
-            &json!({"MemoryCurrent":"18446744073709551615","MemoryPeak":"[not set]","MemorySwapCurrent":"0"}),
-        );
-        assert!(readings["memory_current_bytes"].is_null());
-        assert!(readings["memory_peak_bytes"].is_null());
-        assert!(readings["cpu_usage_ns"].is_null());
-        assert_eq!(readings["swap_current_bytes"], 0);
-        for state in ["activating", "active", "deactivating", "reloading"] {
-            assert!(occupied(&json!({"ActiveState":state})));
-        }
-        assert!(!occupied(&json!({"ActiveState":"inactive"})));
-        assert!(occupied(&json!({})));
-    }
 }

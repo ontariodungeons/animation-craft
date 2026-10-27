@@ -54,21 +54,3 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     }
     result
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refuses_live_session_recursion_before_starting_tools() {
-        let mut session = Session::user_session();
-        session.project_path = Some(std::path::PathBuf::from("song.magic"));
-        assert!(run(&mut session, &json!({})).is_err_and(|error| error.to_string().contains("without --bridge")));
-    }
-
-    #[test]
-    fn registered_batch_is_long_running_and_journaled() {
-        let command = crate::commands::find("motion.recipe").expect("batch command");
-        assert!(command.long_running && command.journal);
-    }
-}

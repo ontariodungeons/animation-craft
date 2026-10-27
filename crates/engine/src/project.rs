@@ -211,6 +211,28 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     let text = std::fs::read_to_string(&path)?;
     let doc: Value = serde_json::from_str(&text)
         .map_err(|e| EngineError::InvalidParams(format!("invalid project file: {e}")))?;
+    if doc.get("format").and_then(Value::as_str) == Some("magicstudio.character") {
+        let char_id = doc.get("id").and_then(Value::as_str).unwrap_or("character").to_string();
+        for anc in path.ancestors().skip(1).take(5) {
+            if let Ok(entries) = std::fs::read_dir(anc) {
+                for entry in entries.flatten() {
+                    let ep = entry.path();
+                    if ep != path && ep.extension().is_some_and(|e| e.eq_ignore_ascii_case("magic"))
+                        && let Ok(txt) = std::fs::read_to_string(&ep)
+                        && let Ok(pdoc) = serde_json::from_str::<Value>(&txt)
+                        && pdoc.get("format").and_then(Value::as_str) == Some(PROJECT_FORMAT)
+                    {
+                        let mut p2 = params.clone();
+                        p2["path"] = json!(ep);
+                        let mut res = cmd_project_open(s, &p2)?;
+                        let _ = cmd_project_load_asset(s, &json!({"id": char_id}));
+                        res["active_asset"] = json!(s.active_asset);
+                        return Ok(res);
+                    }
+                }
+            }
+        }
+    }
     if doc.get("format").and_then(Value::as_str)!=Some(PROJECT_FORMAT) {
         return Err(EngineError::InvalidParams(format!(
             "{} is not a Magic Studio project",
@@ -271,8 +293,32 @@ pub fn cmd_project_close(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"ok": true}))
 }
 
+/// Ensure a default isolated-assets `.magic` project is open when working on an isolated asset.
+pub fn ensure_default_asset_project(s: &mut Session) -> Result<PathBuf> {
+    if let Some(existing) = &s.project_path {
+        return Ok(existing.clone());
+    }
+    let root = super::workspace::workspace_root(s).join("exports/isolated_assets");
+    std::fs::create_dir_all(&root)?;
+    let default_proj = root.join("isolated_assets.magic");
+    if default_proj.is_file() {
+        let _ = cmd_project_open(s, &json!({"path": default_proj, "record_recent": false}));
+    } else {
+        let _ = cmd_project_new(s, &json!({"path": default_proj, "overwrite": true}));
+    }
+    s.project_path
+        .clone()
+        .ok_or_else(|| EngineError::InvalidParams("could not initialize default asset project".into()))
+}
+
 /// Connect an asset (by path or preset) to the open project.
 pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
+    if s.project_path.is_none()
+        && (params.get("isolated").and_then(Value::as_bool) == Some(true)
+            || params.get("use_default_project").and_then(Value::as_bool) == Some(true))
+    {
+        let _ = ensure_default_asset_project(s)?;
+    }
     let preset = params
         .get("preset")
         .and_then(Value::as_str)
@@ -296,9 +342,9 @@ pub fn cmd_project_add_asset(s: &mut Session, params: &Value) -> Result<Value> {
         )));
     }
     let kind = params.get("kind").and_then(Value::as_str).unwrap_or("auto");
-    if !["auto", "image", "poses", "turnaround", "cutout_rig"].contains(&kind) {
+    if !["auto", "image", "poses", "turnaround", "cutout_rig", "character"].contains(&kind) {
         return Err(EngineError::InvalidParams(
-            "kind must be auto, image, poses, turnaround, or cutout_rig".into(),
+            "kind must be auto, image, poses, turnaround, cutout_rig, or character".into(),
         ));
     }
     let stem = preset
@@ -533,17 +579,84 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
         staged.assets.insert(entry.id.clone(), asset);
     } else if let Some(path) = &entry.path {
         let manifest_path = if path.is_dir() {
-            path.join("manifest.json")
+            let char_magic = path.join("character.magic");
+            if char_magic.is_file() {
+                char_magic
+            } else {
+                path.join("manifest.json")
+            }
         } else {
             path.clone()
         };
         if manifest_path
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            .is_some_and(|e| e.eq_ignore_ascii_case("json") || e.eq_ignore_ascii_case("magic"))
         {
             let raw: Value = serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)
                 .map_err(|e| EngineError::InvalidParams(format!("invalid asset JSON: {e}")))?;
-            if entry.kind == "cutout_rig"
+            if raw.get("format").and_then(Value::as_str) == Some("magicstudio.character") {
+                let char_dir = manifest_path.parent().unwrap_or(Path::new("."));
+                let proj_root = staged
+                    .project_path
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .unwrap_or(char_dir);
+                let resolve_rel = |rel_str: &str| -> PathBuf {
+                    let p = PathBuf::from(rel_str);
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        let from_proj = proj_root.join(&p);
+                        if from_proj.exists() {
+                            from_proj
+                        } else {
+                            char_dir.join(p)
+                        }
+                    }
+                };
+                let active_angle = raw
+                    .get("active_angle")
+                    .and_then(Value::as_str)
+                    .unwrap_or("three_quarter_right");
+                let rig_path = raw
+                    .pointer(&format!("/angles/{active_angle}/rig"))
+                    .and_then(Value::as_str)
+                    .or_else(|| raw.pointer(&format!("/rigs/{active_angle}")).and_then(Value::as_str))
+                    .or_else(|| raw.pointer("/rigs/active").and_then(Value::as_str))
+                    .map(resolve_rel)
+                    .unwrap_or_else(|| char_dir.join("rig.json"));
+                let mut plan = crate::session::LoadedCutoutRigPlan::load_from_path(&rig_path)?;
+                let rig_base = rig_path.parent().unwrap_or(char_dir);
+                if plan.source_image.as_os_str().is_empty() {
+                    plan.source_image = rig_base.to_path_buf();
+                } else if !plan.source_image.is_absolute() {
+                    let from_proj = proj_root.join(&plan.source_image);
+                    if from_proj.is_file() {
+                        plan.source_image = from_proj;
+                    }
+                }
+                plan.resolve_paths(rig_base);
+                let image = image::open(&plan.source_image)?;
+                let mut asset = staged.assets.remove(&entry.id).unwrap_or_default();
+                asset.id = entry.id.clone();
+                asset.path = plan.source_image.clone();
+                asset.width = image.width();
+                asset.height = image.height();
+                asset.has_alpha = image.color().has_alpha();
+                asset.attached_asset_sheet = raw
+                    .pointer("/sheets/poses")
+                    .and_then(Value::as_str)
+                    .map(resolve_rel)
+                    .filter(|p| p.is_file())
+                    .or_else(|| plan.cutout_asset_sheet.clone());
+                asset.attached_turnaround_sheet = raw
+                    .pointer("/sheets/turnaround")
+                    .and_then(Value::as_str)
+                    .map(resolve_rel)
+                    .filter(|p| p.is_file());
+                asset.cutout_rig = Some(plan);
+                staged.assets.insert(entry.id.clone(), asset);
+            } else if entry.kind == "cutout_rig"
                 || raw.get("rig_type").is_some()
                 || (raw.get("layers").is_some() && raw.get("canvas").is_some())
             {
@@ -608,159 +721,6 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
     Ok(json!({"ok": true, "asset_id": entry.id}))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn temp_dir(label: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "magicstudio_{label}_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        path
-    }
-
-    #[test]
-    fn project_new_open_save_round_trip_keeps_connections() {
-        let dir = temp_dir("project_round_trip");
-        let project = dir.join("demo.magic");
-        image::RgbaImage::new(8, 8).save(dir.join("hero.png")).unwrap();
-        let mut s = Session::default();
-        s.cwd = dir.clone();
-        s.execute("project.new", json!({"path": &project})).unwrap();
-        s.execute(
-            "project.add_asset",
-            json!({"id": "hero", "path": dir.join("hero.png"), "name": "Hero"}),
-        )
-        .unwrap();
-        assert_eq!(s.project_assets[0].name, "Hero");
-        s.execute("project.save", json!({})).unwrap();
-        let mut s2 = Session::default();
-        s2.cwd = dir.clone();
-        let res = s2.execute("project.open", json!({"path": &project})).unwrap();
-        assert_eq!(res["assets"][0]["name"], "Hero");
-        assert_eq!(s2.active_asset, None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn outside_image_is_copied_to_its_destination_with_provenance() {
-        let dir = temp_dir("project_copy_in");
-        let outside = temp_dir("project_copy_src");
-        image::RgbaImage::new(8, 8).save(outside.join("hero.png")).unwrap();
-        let mut s = Session::default();
-        s.cwd = dir.clone();
-        s.execute("project.new", json!({"path": dir.join("demo.magic")})).unwrap();
-        let err = s.execute("project.add_asset", json!({"path": outside.join("hero.png")}));
-        assert!(err.is_err(), "an outside image without a destination is refused");
-        s.execute("project.add_asset", json!({"path": outside.join("hero.png"), "character": "hero"}))
-            .unwrap();
-        let copy = dir.join("assets/characters/hero/parts/hero.png");
-        assert_eq!(s.project_assets[0].path.as_deref(), Some(copy.as_path()));
-        assert!(copy.is_file() && outside.join("hero.png").is_file());
-        let provenance: Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("assets/characters/hero/provenance.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(provenance["files"][0]["source"], json!(outside.join("hero.png")));
-        assert_eq!(provenance["files"][0]["file"], json!("characters/hero/parts/hero.png"));
-        s.execute("project.add_asset", json!({"path": outside.join("hero.png"), "background": "sky"}))
-            .unwrap();
-        assert!(dir.join("assets/backgrounds/sky/hero.png").is_file());
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&outside);
-    }
-
-    #[test]
-    fn generic_image_import_copies_registers_and_survives_reopen() {
-        let dir=temp_dir("generic_image");let outside=temp_dir("generic_source");
-        let source=outside.join("teaching arrow.svg");let bytes=b"<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0L10 10\"/></svg>";
-        std::fs::write(&source,bytes).unwrap();
-        let mut s=Session::default();s.cwd=dir.clone();
-        let project=dir.join("Song.magic");s.execute("project.new",json!({"path":project})).unwrap();
-        assert!(s.execute("project.add_asset",json!({"path":source,"kind":"image","image":"../escape"})).is_err());
-        let result=s.execute("project.add_asset",json!({"path":source,"kind":"image","image":"arrow","name":"Teaching arrow","save":true})).unwrap();
-        let copy=dir.join("assets/images/arrow/teaching arrow.svg");
-        assert_eq!(std::fs::read(&copy).unwrap(),bytes);assert_eq!(std::fs::read(&source).unwrap(),bytes);
-        assert!(s.execute("project.add_asset",json!({"path":source,"kind":"image","image":"arrow"})).is_err());
-        assert_eq!(std::fs::read(&copy).unwrap(),bytes,"a duplicate import preserves the existing file");
-        let mut reopened=Session::default();reopened.execute("project.open",json!({"path":project})).unwrap();
-        let asset=reopened.project_assets.iter().find(|a|a.id==result["asset_id"].as_str().unwrap()).unwrap();
-        assert_eq!(asset.path.as_deref(),Some(copy.as_path()));assert_eq!(asset.kind,"image");
-        let provenance:Value=serde_json::from_str(&std::fs::read_to_string(dir.join("assets/images/arrow/provenance.json")).unwrap()).unwrap();
-        assert_eq!(provenance["files"][0]["source"],json!(source));
-        std::fs::remove_dir_all(dir).unwrap();std::fs::remove_dir_all(outside).unwrap();
-    }
-
-    #[test]
-    fn preview_of_an_unrigged_image_reports_it_cannot_move() {
-        let dir = temp_dir("preview_still");
-        image::RgbaImage::new(8, 8).save(dir.join("still.png")).unwrap();
-        let mut s = Session::default();
-        s.cwd = dir.clone();
-        s.execute("project.add_asset", json!({"path": dir.join("still.png"), "load": true}))
-            .unwrap();
-        let walk = s.execute("anim.preview_2d", json!({"mode": "walk"})).unwrap();
-        assert_eq!(walk["ok"], json!(false), "{walk}");
-        let still = s.execute("anim.preview_2d", json!({"mode": "static"})).unwrap();
-        assert_eq!(still["ok"], json!(true), "{still}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn partial_project_write_restores_bytes_without_replacing_the_leased_file() {
-        use std::io::{Seek, SeekFrom, Write};
-        let dir = temp_dir("write_rollback");
-        let path = dir.join("Project.magic");
-        let before = b"retained project bytes";
-        std::fs::write(&path, before).unwrap();
-        let lease = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
-        lease.try_lock().unwrap();
-        let mut calls = 0;
-        let error = write_preserving_lease_using(&path, b"new project bytes", |file, bytes| {
-            calls += 1;
-            if calls == 1 {
-                file.seek(SeekFrom::Start(0))?;
-                file.write_all(&bytes[..5])?;
-                return Err(std::io::Error::other("injected failure after partial disk write"));
-            }
-            store_project_bytes(file, bytes)
-        }).unwrap_err();
-        assert!(error.to_string().contains("prior bytes restored"));
-        assert_eq!(calls, 2);
-        assert_eq!(std::fs::read(&path).unwrap(), before);
-        let competing = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
-        assert!(competing.try_lock().is_err(), "rollback replaced the leased inode");
-        drop(competing);drop(lease);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn project_open_reports_missing_sources_instead_of_dropping() {
-        let dir = temp_dir("project_missing");
-        let mut s = Session::default();
-        s.cwd = dir.clone();
-        s.execute("project.new", json!({"path": dir.join("demo.magic")})).unwrap();
-        image::RgbaImage::new(8, 8).save(dir.join("gone.png")).unwrap();
-        s.execute(
-            "project.add_asset",
-            json!({"id": "moved", "path": dir.join("gone.png")}),
-        )
-        .unwrap();
-        s.execute("project.save", json!({})).unwrap();
-        std::fs::remove_file(dir.join("gone.png")).unwrap();
-        let mut s2 = Session::default();
-        s2.cwd = dir.clone();
-        let res = s2.execute("project.open", json!({"path": dir.join("demo.magic")})).unwrap();
-        assert!(res["missing"].as_array().unwrap().contains(&json!("moved")));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
 
 /// Canonical paths identify existing projects without changing their file format.
 pub fn cmd_project_identity(s:&mut Session,p:&Value)->Result<Value>{

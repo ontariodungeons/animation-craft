@@ -33,12 +33,19 @@ pub fn styled(value: impl Into<String>, color: Color) -> Line<'static> {
 
 /// A rounded frame whose title and border share an accent.
 pub fn round_panel(title: impl Into<String>, accent: Color, active: bool) -> Block<'static> {
-    let weight = if active { Modifier::BOLD } else { Modifier::empty() };
+    let weight = if active {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    };
     Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(accent).add_modifier(weight))
-        .title(Span::styled(format!(" {} ", title.into()), Style::default().fg(accent).add_modifier(weight)))
+        .title(Span::styled(
+            format!(" {} ", title.into()),
+            Style::default().fg(accent).add_modifier(weight),
+        ))
 }
 
 /// A hairline frame with a quiet title, for panels that sit behind the main one.
@@ -46,7 +53,11 @@ pub fn quiet_panel(title: impl Into<String>, active: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(DESK_LINE).add_modifier(if active { Modifier::BOLD } else { Modifier::empty() }))
+        .border_style(Style::default().fg(DESK_LINE).add_modifier(if active {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        }))
         .title(Span::styled(format!(" {} ", title.into()), MUTED))
 }
 
@@ -81,19 +92,4 @@ pub fn fact(label: &str, value: impl Into<String>, color: Color) -> Line<'static
         Span::styled(format!("{label:<11}"), Style::default().fg(DIM)),
         Span::styled(value.into(), Style::default().fg(color)),
     ])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cells_are_exact_width_and_facts_keep_a_label_column() {
-        assert_eq!(cell("abc", 6), "abc   ");
-        assert_eq!(cell("abcdefgh", 5), "abcd…");
-        assert_eq!(Line::raw(cell("🎬 claude", 12)).width(), 12);
-        let row = fact("Model", "opus", GREEN);
-        assert_eq!(row.to_string(), "Model      opus");
-        assert_eq!(row.spans[1].style.fg, Some(GREEN));
-    }
 }

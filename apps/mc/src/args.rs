@@ -26,6 +26,7 @@ pub(crate) fn parse_value(v: &str) -> Value {
 pub struct Args {
     pub help: bool,
     pub version: bool,
+    pub flag_animate: bool,
     pub flag_keep_going: bool,
     pub flag_clean: bool,
     pub flag_health: bool,
@@ -106,6 +107,7 @@ impl Args {
         Self {
             help: inner.flag("--help"),
             version: inner.wants_version(),
+            flag_animate: inner.flag("--animate") || inner.flag("-a"),
             flag_keep_going: inner.flag("--keep-going"),
             flag_clean: inner.flag("--clean") || inner.flag("-c"),
             flag_health: inner.flag("--health") || inner.flag("-H"),

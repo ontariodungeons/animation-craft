@@ -3,8 +3,7 @@ use super::*;
 use magicstudio_engine::panels::{Config, PanelReport, Reason};
 
 pub(super) fn load_config() -> Result<Config, String> {
-    let path = crate::panels::config_path();
-    Config::load(&path).map_err(|error| format!("{}: {error}", path.display()))
+    crate::panels::load_config().map(|(_, c)| c)
 }
 
 /// Rebuild the cached lines only when the live revision or availability changes.
@@ -22,11 +21,18 @@ pub(super) fn sync(c: &mut Center) {
 
 fn built(c: &Center, report: &PanelReport) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     if let Some(error) = &c.panel_config_error {
-        return (vec![styled(format!("UI config unreadable: {error}"), RED)], Vec::new());
+        return (
+            vec![styled(format!("UI config unreadable: {error}"), RED)],
+            Vec::new(),
+        );
     }
     let mut rows = vec![health_line(report)];
     for (id, entry) in &c.panel_config.elements {
-        let label = entry.label.as_deref().filter(|text| !text.is_empty()).unwrap_or(id.as_str());
+        let label = entry
+            .label
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .unwrap_or(id.as_str());
         let (dot, color, busy) = match report.component(&c.panel_config, id) {
             Some(item) => ("●", signal_color(item.signal), item.busy),
             None => ("·", MUTED, false),
@@ -45,9 +51,17 @@ fn built(c: &Center, report: &PanelReport) -> (Vec<Line<'static>>, Vec<Line<'sta
 
 fn health_line(report: &PanelReport) -> Line<'static> {
     if !report.available {
+        if report.error.is_none() {
+            return styled("UI health  every element configured (headless mode)", GREEN);
+        }
         return styled("UI health  Panels unavailable", AMBER);
     }
-    if report.truncated { return styled("UI health  Incomplete observation; read ui.controls pages", AMBER); }
+    if report.truncated {
+        return styled(
+            "UI health  Incomplete observation; read ui.controls pages",
+            AMBER,
+        );
+    }
     let untracked = report.count(Reason::Untracked);
     let unstyled = report.count(Reason::Unstyled);
     if untracked == 0 && unstyled == 0 {
@@ -65,8 +79,16 @@ fn health_line(report: &PanelReport) -> Line<'static> {
 
 fn detail_lines(report: &PanelReport) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    for (reason, name) in [(Reason::Untracked, "untracked"), (Reason::Unstyled, "unstyled")] {
-        let ids: Vec<&str> = report.unconfigured.iter().filter(|row| row.reason == reason).map(|row| row.id.as_str()).collect();
+    for (reason, name) in [
+        (Reason::Untracked, "untracked"),
+        (Reason::Unstyled, "unstyled"),
+    ] {
+        let ids: Vec<&str> = report
+            .unconfigured
+            .iter()
+            .filter(|row| row.reason == reason)
+            .map(|row| row.id.as_str())
+            .collect();
         if ids.is_empty() {
             continue;
         }

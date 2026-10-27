@@ -20,3 +20,6 @@ magicstudio-engine = { workspace = true }
 serde_json = { workspace = true }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
+
+# Cached usage timestamps only; no clock/network collectors.
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }

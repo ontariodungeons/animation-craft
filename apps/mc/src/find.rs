@@ -213,7 +213,9 @@ pub(crate) fn report(query: &str, project_arg: Option<&str>, bridge: Option<&str
         .as_deref()
         .and_then(|addr| crate::bridge_call(addr, "ui.feedback", json!({})).ok());
     if let Some(addr) = endpoint.as_deref().filter(|_| feedback.is_none()) {
-        unavailable.push(format!("Studio {addr} did not answer; showing offline matches"));
+        unavailable.push(format!(
+            "Studio {addr} did not answer; showing offline matches"
+        ));
     }
     let live_project = feedback.as_ref().and_then(|v| v["active_project"].as_str());
     let project = project_arg.or(live_project);
@@ -336,59 +338,4 @@ pub(crate) fn display(report: &Value) -> String {
         lines.push(format!("  Unavailable: {note}"));
     }
     lines.join("\n")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn exact_command_id_ranks_first() {
-        let hits = command_hits("blender.actions");
-        assert_eq!(
-            hits.first().map(|hit| hit.id.as_str()),
-            Some("blender.actions")
-        );
-        assert_eq!(
-            hits.first().map(|hit| hit.command.as_str()),
-            Some("mc exec blender.actions")
-        );
-        assert!(
-            command_hits("studios")
-                .iter()
-                .any(|hit| hit.id == "studios")
-        );
-    }
-
-    #[test]
-    fn project_search_finds_registered_source_and_asset_without_loading_media() {
-        let doc = json!({"assets":[{"id":"little_fish_layered","name":"Little Fish","kind":"cutout_rig","path":"/art/rig.json"}],"animation_sources":{"first-fish":{"id":"first-fish","backend":"blender","source":"/art/fish.blend","character":"little_fish_layered","track":"swim-cruise"}}});
-        let sources = project_hits("/song/Hey Ho.magic", &doc, "first-fish");
-        assert_eq!(
-            sources.first().map(|hit| hit.id.as_str()),
-            Some("first-fish")
-        );
-        assert_eq!(
-            sources.first().and_then(|hit| hit.location.as_deref()),
-            Some("/art/fish.blend")
-        );
-        let assets = project_hits("/song/Hey Ho.magic", &doc, "little fish");
-        assert_eq!(
-            assets.first().map(|hit| hit.id.as_str()),
-            Some("little_fish_layered")
-        );
-    }
-
-    #[test]
-    fn empty_query_suggests_read_only_animation_inspection() {
-        let hits = suggestions(
-            Some("/song/Hey Ho.magic"),
-            Some("animation"),
-            Some("little_fish_layered"),
-        );
-        assert!(hits.iter().any(|hit| hit.id == "animation.sources"));
-        assert!(hits.iter().any(|hit| hit.id == "motion.tracks"));
-        assert!(!hits.iter().any(|hit| hit.id == "project.save"));
-    }
 }

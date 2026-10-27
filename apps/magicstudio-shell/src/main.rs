@@ -8,15 +8,43 @@ use magicstudio_engine::Session;
 use serde_json::{Value, json};
 use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, WindowBuilder, WindowEvent};
 
+fn default_animate_project() -> Option<String> {
+    let dir = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?
+        .join("magicstudio")
+        .join("animate");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("Character.magic");
+    if !path.exists() {
+        let doc = json!({
+            "format": "magicstudio.project",
+            "version": 1,
+            "name": "Character",
+            "assets": [],
+            "workshop": { "audio": null, "draft_approved": true, "target": "hyperframes", "video_project": null }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&doc).ok()?).ok()?;
+    }
+    Some(path.to_string_lossy().into_owned())
+}
+
 /// The command line, for the project view on load: project and studio URL, plus `--view <project|studio>`
 /// and `--open <song|lyrics|transcript|animate|agent>` to start on a given tab and block (or with the agent open).
 fn launch_options() -> Value {
-    let (mut positional, mut view, mut open) = (Vec::new(), None, None);
-    let mut new_project=false;
+    let (mut positional, mut view, mut open, mut character) = (Vec::new(), None, None, None);
+    let (mut new_project, mut animate_only) = (false, false);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--new" => new_project=true,
+            "--animate" | "-a" => {
+                animate_only = true;
+                if view.is_none() {
+                    view = Some("animation".to_string());
+                }
+            }
+            "--character" => character = args.next(),
             "--view" => view = args.next(),
             "--open" => open = args.next(),
             "--control" => {
@@ -25,7 +53,14 @@ fn launch_options() -> Value {
             _ => positional.push(a),
         }
     }
-    json!({"project": positional.first(), "studio": positional.get(1), "view": view, "open": open, "new_project":new_project})
+    let project = positional.first().cloned().or_else(|| {
+        if animate_only && !new_project {
+            default_animate_project()
+        } else {
+            None
+        }
+    });
+    json!({"project": project, "studio": positional.get(1), "view": view, "open": open, "new_project":new_project, "animate_only": animate_only, "character": character})
 }
 
 #[derive(Default)]
@@ -66,7 +101,11 @@ pub fn state_of(s: &mut Session) -> Result<Value, String> {
     let status = s.execute("workshop.status", json!({})).map_err(|e| e.to_string())?;
     let storyboard = s.execute("workshop.storyboard", json!({})).unwrap_or(Value::Null);
     let assets=s.execute("project.list_assets",json!({})).map_err(|e|e.to_string())?;
-    let design=s.execute("storyboard.design",json!({})).unwrap_or(json!({"placements":[]}));
+    let design=match s.execute("storyboard.design",json!({})) {
+        Ok(design)=>design,
+        Err(error)=>json!({"placements":[],"text_fields":[],"error":error.to_string(),
+            "readiness":{"state":"failed","reason":format!("Cannot read the editable storyboard: {error}")}}),
+    };
     let monitoring=s.execute("center.status",json!({})).map_err(|e|e.to_string())?;
     let storyboard_contents=s.execute("storyboard.read",json!({})).unwrap_or(Value::Null);
     let storyboard_template=s.execute("storyboard.template",json!({})).map_err(|e|e.to_string())?;
@@ -202,6 +241,17 @@ async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:Strin
  tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"prepare_only":true,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
 }
 
+fn project_needs_auto_save(app: &tauri::AppHandle, project: &str, id: &str) -> Result<bool, String> {
+ if id == "project.save" || !magicstudio_engine::find_command(id).is_some_and(|c| c.journal) {
+  return Ok(false);
+ }
+ app.state::<Engine>().with(Some(project), |session| {
+  let path = session.project_path.as_ref().ok_or("No project is open")?;
+  let saved: Value = serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+  Ok(magicstudio_engine::project::project_is_dirty(session, &saved))
+ })
+}
+
 /// Project workflow controls use the installed adjacent CLI, with this window as the target.
 #[tauri::command]
 async fn project_command(app:tauri::AppHandle, project:String, id:String, mut params:Value)->Result<Value,String>{
@@ -212,12 +262,7 @@ async fn project_command(app:tauri::AppHandle, project:String, id:String, mut pa
  params["_client"]=json!("Studio project workflow");
  tauri::async_runtime::spawn_blocking(move || {
   let mut result=project_cli::execute(&app,&id,params)?;
-  let dirty=app.state::<Engine>().with(Some(&project),|session|{
-   let path=session.project_path.as_ref().ok_or("No project is open")?;
-   let saved:Value=serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-   Ok(magicstudio_engine::project::project_is_dirty(session,&saved))
-  })?;
-  if id!="project.save" && dirty && magicstudio_engine::find_command(&id).is_some_and(|c|c.journal) {
+  if project_needs_auto_save(&app,&project,&id)? {
    let saved=project_cli::execute(&app,"project.save",json!({"_client":"Studio project workflow"}))?;
    result["_ui_engine_revision"]=saved["_ui_engine_revision"].clone();
   }
@@ -576,7 +621,9 @@ fn main() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(size.width, size.height),
             )?;
-            menu::install(&window)?;
+            if launch_options()["animate_only"] != true {
+                menu::install(&window)?;
+            }
             #[cfg(unix)]
             if let Err(e)=bridge::serve_local(app.handle().clone()){eprintln!("private UI feedback: {e}");}
             // Every resize re-applies the layout for the open tab.

@@ -33,15 +33,27 @@ impl TuiSettings {
     }
 
     pub fn load() -> Self {
-        let Some(path) = Self::file() else { return Self::default(); };
-        let Ok(bytes) = fs::read(&path) else { return Self::default(); };
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { return Self::default(); };
+        let Some(path) = Self::file() else {
+            return Self::default();
+        };
+        let Ok(bytes) = fs::read(&path) else {
+            return Self::default();
+        };
+        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
+            return Self::default();
+        };
         Self {
-            process_count: v["process_count"].as_u64().map(|n| n as usize).unwrap_or(18),
+            process_count: v["process_count"]
+                .as_u64()
+                .map(|n| n as usize)
+                .unwrap_or(18),
             agent_refresh_secs: v["agent_refresh_secs"].as_u64().unwrap_or(3),
             studio_discovery_secs: v["studio_discovery_secs"].as_u64().unwrap_or(3),
             mcp_scan_secs: v["mcp_scan_secs"].as_u64().unwrap_or(5),
-            log_tail_lines: v["log_tail_lines"].as_u64().map(|n| n as usize).unwrap_or(10),
+            log_tail_lines: v["log_tail_lines"]
+                .as_u64()
+                .map(|n| n as usize)
+                .unwrap_or(10),
             proc_rss_threshold_kb: v["proc_rss_threshold_kb"].as_u64().unwrap_or(500_000),
         }
     }
@@ -59,7 +71,11 @@ impl TuiSettings {
             "log_tail_lines": self.log_tail_lines,
             "proc_rss_threshold_kb": self.proc_rss_threshold_kb,
         });
-        fs::write(&path, serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())
     }
 
     pub fn to_json(&self) -> Value {

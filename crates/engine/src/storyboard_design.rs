@@ -35,7 +35,7 @@ fn content_readiness(design:&Value)->Value{
  for field in fields.into_iter().flatten(){
   if field["field"]=="source" || field["field"]=="lyrics"{continue;}
   let value=field["value"].as_str().unwrap_or("").trim();
-  let instruction=value.starts_with("Describe the story, characters") || value.starts_with("Name this location and place") || value.starts_with("Name the cast and reusable props") || value.starts_with("Register existing artwork") || value.contains("\nRegister existing artwork") || value.starts_with("Place the scene reference") || value.starts_with("See the four panels");
+  let instruction=value.starts_with("Describe the story, characters") || value.starts_with("Name this location and place") || value.starts_with("Name the cast and reusable props") || value.starts_with("Register existing artwork") || value.contains("\nRegister existing artwork") || value.starts_with("Place the scene reference") || value.starts_with("See the four panels") || value.contains("Artwork and acting still need review");
   if value.is_empty() || instruction {
    missing.push(json!({"page":field["page"],"field":field["field"]}));
   }
@@ -86,7 +86,8 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
   return Ok(val);
  }
 
- let Some(deck)=board["deck"].as_str().filter(|p|Path::new(p).is_file()) else{return Ok(json!([]));};
+ let Some(deck)=board["deck"].as_str() else{return Ok(json!([]));};
+ if !Path::new(deck).is_file(){return Err(invalid(&format!("Editable DeckCraft document is missing: {deck}")));}
  let count=board["previews"].as_array().map_or(0,Vec::len);
  let first_scene=board["first_scene_page"].as_u64().unwrap_or(u64::MAX);
  let key=file_cache_key(deck,&format!("{count}:{first_scene}"));

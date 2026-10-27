@@ -1,7 +1,7 @@
 //! Project conversations are commands, shared by the desktop, CLI and MCP.
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
-use std::{fs, path::Path, process::Command, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{fs, path::Path, process::Command, time::{SystemTime, UNIX_EPOCH}};
 
 fn invalid(message: impl Into<String>) -> EngineError { EngineError::InvalidParams(message.into()) }
 fn stamp() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d|d.as_nanos()).unwrap_or(0) }
@@ -69,10 +69,40 @@ fn persist_selection(selection:&Value)->Result<Value>{
     for key in ["agent","provider","model","thinking"]{
         if let Some(value)=selection[key].as_str(){stored[key]=json!(value);}
     }
+    if let Some(extra)=selection["extra_args"].as_array(){
+        stored["extra_args"]=json!(extra);
+    }
     fs::create_dir_all(path.parent().ok_or_else(||invalid("App settings directory unavailable; selection not persisted"))?)?;
     fs::write(&path,serde_json::to_vec_pretty(&stored).map_err(|_|invalid("Cannot encode the app settings; selection not persisted"))?)
         .map_err(|_|invalid("Cannot write the app settings; selection not persisted"))?;
     Ok(stored)
+}
+
+/// Agents Omarchy knows about; the app offers the installed ones and marks the system default.
+pub const AGENT_NAMES: [&str; 15] = [
+    "pi", "omp", "opencode", "ori", "claude", "codex", "grok", "openclaw", "agy", "hermes",
+    "copilot", "crush", "cursor-agent", "muse", "kimi",
+];
+
+fn which_program(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|candidate| candidate.is_file())
+}
+
+pub fn agent_catalog() -> Value {
+    let default = default_agent();
+    let agents: Vec<Value> = AGENT_NAMES
+        .iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "installed": which_program(name).is_some(),
+                "headless": matches!(*name, "opencode" | "omp" | "claude" | "codex"),
+                "default": default.as_deref() == Some(*name),
+            })
+        })
+        .collect();
+    json!({"agents": agents, "default": default})
 }
 
 /// A local runtime (Ollama, LM Studio) needs no account, no quota and no network.
@@ -84,11 +114,64 @@ fn model_is_free(model:&Value)->bool{
     fn zero(v:&Value)->bool{v.as_f64()==Some(0.0)||v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
     model["cost"].as_array().filter(|a|!a.is_empty()).map(|c|c.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"]))).unwrap_or(false)
 }
+/// Known models for an installed agent, read from Omarchy usage state.
+fn omarchy_agent_models(agent: &str) -> Option<Vec<Value>> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")))?;
+    let path = base.join(format!("omarchy/agents/usage/{agent}.json"));
+    let bytes = fs::read(path).ok()?;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    let obj = v["modelUsage"].as_object()?;
+    let list: Vec<Value> = obj.keys().map(|k| {
+        let local = is_local_provider(agent) || k.contains("local") || k.contains("ollama");
+        let free = k.contains("free") || local;
+        json!({
+            "providerID": agent,
+            "id": k,
+            "name": k,
+            "enabled": true,
+            "local": local,
+            "free": free,
+            "cost": []
+        })
+    }).collect();
+    (!list.is_empty()).then_some(list)
+}
+
+fn catalog_dir(s:&Session)->std::path::PathBuf {
+    crate::workshop::project_dir(s).unwrap_or_else(|_|crate::workspace::workspace_root(s))
+}
+
+fn omp_local_models(dir:&Path)->Result<Vec<Value>> {
+    let raw=run(dir,"omp",&["models".into(),"ollama".into(),"--json".into()])?;
+    let response:Value=serde_json::from_str(&raw).map_err(|_|invalid("OMP returned an invalid local model catalog; no inference attempted"))?;
+    let list=response["models"].as_array().ok_or_else(||invalid("OMP local model catalog is unavailable"))?;
+    Ok(list.iter().filter(|m|m["provider"]=="ollama").map(|m|json!({"providerID":"ollama","id":m["id"],"name":m["name"],"enabled":true,"local":true,"free":true,"cost":[]})).collect())
+}
+
+fn discover_agent_catalog(s: &Session, agent: &str) -> Result<Vec<Value>> {
+    let dir = catalog_dir(s);
+    if agent == "omp" {
+        omp_local_models(&dir)
+    } else if agent == "opencode" {
+        models(&dir).or_else(|_| {
+            omarchy_agent_models(agent).ok_or_else(|| invalid("No models found for opencode"))
+        })
+    } else {
+        omarchy_agent_models(agent).ok_or_else(|| {
+            invalid(format!(
+                "Catalog discovery for `{agent}`: no recorded models found in Omarchy usage state"
+            ))
+        })
+    }
+}
+
 /// Sprocket's catalog: local first, then free, then paid. The order is the recommendation.
 pub fn cmd_sprocket_models(s:&mut Session,_p:&Value)->Result<Value>{
     let selection=cmd_agent_config(s,&json!({}))?;
-    if selection["agent"]!="opencode"{return Ok(json!({"agent":selection["agent"],"models":[],"reason":"Catalog discovery is supported by the existing OpenCode API route"}));}
-    let catalog=models(&crate::workshop::project_dir(s)?)?;
+    let agent = selection["agent"].as_str().unwrap_or("opencode");
+    let catalog = discover_agent_catalog(s, agent)?;
     let current=selection["model"].as_str().unwrap_or_default().to_string();
     let mut ranked:Vec<Value>=catalog.iter().filter(|m|m["enabled"]==true).cloned().collect();
     ranked.sort_by_key(|m|{
@@ -97,7 +180,7 @@ pub fn cmd_sprocket_models(s:&mut Session,_p:&Value)->Result<Value>{
     });
     let list:Vec<Value>=ranked.iter().map(|m|json!({"provider":m["providerID"],"model":m["id"],"name":m["name"],"local":m["local"],"free":model_is_free(m),"current":m["id"].as_str()==Some(current.as_str())&&m["providerID"].as_str()==selection["provider"].as_str()})).collect();
     let recommended=list.iter().find(|m|m["current"]==true).or_else(||list.iter().find(|m|m["local"]==true)).or_else(||list.iter().find(|m|m["free"]==true)).or_else(||list.first());
-    Ok(json!({"agent":"opencode","models":list,"recommended":recommended,"current":{"provider":selection["provider"],"model":selection["model"]},"note":"Local models run on this machine with no quota; free models need no account credit."}))
+    Ok(json!({"agent":agent,"models":list,"recommended":recommended,"current":{"provider":selection["provider"],"model":selection["model"]},"note":"Local models run on this machine with no quota; free models need no account credit."}))
 }
 /// Persist the active selection to the shared settings file. Explicit and separate from the
 /// per-session selection: the engine never writes shared defaults on its own.
@@ -110,19 +193,28 @@ pub fn cmd_agent_persist(s:&mut Session,_p:&Value)->Result<Value>{
 /// Switch Sprocket's model, verified against the catalog and persisted for the app and the CLI.
 pub fn cmd_sprocket_use(s:&mut Session,p:&Value)->Result<Value>{
     let wanted=p["model"].as_str().map(str::to_owned).or_else(||p["id"].as_str().map(str::to_owned)).ok_or_else(||invalid("Give model=<provider/id>, e.g. ollama/llama3.2:latest"))?;
-    let (provider,id)=wanted.split_once('/').ok_or_else(||invalid("Give model=<provider/id>, e.g. ollama/llama3.2:latest"))?;
-    let catalog=models(&crate::workshop::project_dir(s)?)?;
+    let selection_current = cmd_agent_config(s, &json!({}))?;
+    let current_agent = selection_current["agent"].as_str().unwrap_or("opencode");
+    let default_provider = selection_current["provider"].as_str().filter(|p| !p.is_empty()).unwrap_or(if current_agent == "omp" { "ollama" } else { current_agent });
+    let (provider,id)=if let Some((p, i)) = wanted.split_once('/') {
+        (p, i)
+    } else {
+        (default_provider, wanted.as_str())
+    };
+    let catalog = discover_agent_catalog(s, current_agent)?;
     let found=catalog.iter().find(|m|m["providerID"]==provider&&m["id"]==id&&m["enabled"]==true)
         .ok_or_else(||invalid(format!("{provider}/{id} is not an enabled model; read sprocket.models for the catalog")))?;
     let previous=cmd_agent_config(s,&json!({}))?;
-    let selection=json!({"agent":"opencode","provider":provider,"model":id});
+    let selection=json!({"agent":current_agent,"provider":provider,"model":id});
     cmd_agent_config(s,&json!({"selection":selection.clone()}))?;
     persist_selection(&selection)?;
     Ok(json!({"ok":true,"selection":selection,"local":found["local"],"free":model_is_free(found),"persisted":true,"previous":{"provider":previous["provider"],"model":previous["model"]}}))
 }
 pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
     let mut value=match &s.agent_selection{Some(v)=>v.clone(),None=>settings()?};
-    if let Some(error)=value["selection_error"].as_str(){return Err(invalid(error));}
+    if p.get("selection").is_none() {
+        if let Some(error)=value["selection_error"].as_str(){return Err(invalid(error));}
+    }
     if let Some(patch)=p.get("selection") {
         let fields=patch.as_object().ok_or_else(||invalid("Active selection must be an object"))?;
         if fields.keys().any(|k|!matches!(k.as_str(),"agent"|"provider"|"model"|"thinking"|"extra_args")){return Err(invalid("Only active chat selection can be changed; credentials remain untouched"));}
@@ -130,8 +222,23 @@ pub fn cmd_agent_config(s: &mut Session, p: &Value) -> Result<Value> {
             if (key=="extra_args"&&!v.is_array()) || (key!="extra_args"&&(!v.is_string()||v.as_str().is_some_and(|x|x.len()>256||x.chars().any(char::is_control)))) {return Err(invalid("Invalid active chat selection"));}
             value[key]=v.clone();
         }
+        if let Some(agent)=fields.get("agent").and_then(Value::as_str) {
+            if !AGENT_NAMES.contains(&agent) { return Err(invalid(format!("unknown agent `{agent}`"))); }
+            if which_program(agent).is_none() { return Err(invalid(format!("`{agent}` is not installed on this machine"))); }
+        }
+        if let Some(obj)=value.as_object_mut(){obj.remove("selection_error");}
     }
     s.agent_selection=Some(value.clone());
+    if p["persist"] == true {
+        persist_selection(&value)?;
+    }
+    let root = crate::workspace::workspace_root(s);
+    value["instructions"] = json!(root.join("apps/magicstudio-shell/agent.md").to_string_lossy());
+    if let (Some(base), Value::Object(catalog)) = (value.as_object_mut(), agent_catalog()) {
+        for (key, val) in catalog {
+            base.insert(key, val);
+        }
+    }
     value["scope"]=json!("active engine/window; shared defaults read only at initialization");Ok(value)
 }
 
@@ -204,110 +311,27 @@ fn models(dir:&Path)->Result<Vec<Value>> {
     Ok(list.iter().map(|m|json!({"providerID":m["providerID"],"id":m["id"],"name":m["name"],"enabled":m["enabled"],"capabilities":m["capabilities"],"cost":m["cost"],"local":is_local_provider(m["providerID"].as_str().unwrap_or_default())})).collect())
 }
 /// Sprocket: the app's own in-app agent, reachable from the CLI and the booth.
-/// A stale (disabled) model selection is repaired in the shared app selection and the
-/// repair is reported in the receipt; nothing is silently overridden per request.
+/// Sending never changes the user's model/provider or persists a replacement.
+/// The selected adapter validates availability and refuses unsupported selections.
 pub fn cmd_sprocket_send(s:&mut Session, params:&Value)->Result<Value>{
-    let mut selection=cmd_agent_config(s,&json!({}))?;
-    let mut repaired=Value::Null;let mut persisted=Value::Null;
-    if selection["agent"]=="opencode" {
-        let catalog=models(&crate::workshop::project_dir(s)?)?;
-        let provider=selection["provider"].as_str().unwrap_or_default().to_string();
-        let model=selection["model"].as_str().unwrap_or_default().to_string();
-        let live=catalog.iter().any(|m|m["providerID"]==json!(provider)&&m["id"]==json!(model)&&m["enabled"]==true);
-        if !live {
-            fn zero(v:&Value)->bool{v.as_f64()==Some(0.0)||v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
-            let free=|m:&Value|->bool{m["cost"].as_array().filter(|a|!a.is_empty()).map(|c|c.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"]))).unwrap_or(false)};
-            let pick=catalog.iter().find(|m|m["enabled"]==true&&m["local"]==true)
-                .or_else(||catalog.iter().find(|m|m["enabled"]==true&&free(m)))
-                .or_else(||catalog.iter().find(|m|m["enabled"]==true));
-            if let Some(m)=pick{
-                cmd_agent_config(s,&json!({"selection":{"agent":"opencode","provider":m["providerID"],"model":m["id"]}}))?;
-                // Persisting is best-effort: the app may hold the settings file locked. The
-                // session still uses the repaired selection; the receipt reports the outcome.
-                if let Err(error)=persist_selection(&json!({"agent":"opencode","provider":m["providerID"],"model":m["id"]})){
-                    persisted=json!({"ok":false,"error":error.to_string()});
-                }
-                repaired=json!({"from":{"provider":provider,"model":model},"to":{"provider":m["providerID"],"model":m["id"]},"reason":"the selected model is no longer enabled in agent.models; the shared app selection was moved to an enabled model"});
-                selection=cmd_agent_config(s,&json!({}))?;
-            }
-        }
-    }
+    let selection=cmd_agent_config(s,&json!({}))?;
     let mut send=params.clone();
     if !send.get("free_only").is_some(){send["free_only"]=json!(true);}
     let mut result=cmd_agent_send(s,&send)?;
-    result["sprocket"]=json!({"name":"Sprocket","role":"the app's own in-app agent","selection":selection,"selection_repaired":repaired,"selection_persisted":persisted});
+    result["sprocket"]=json!({"name":"Sprocket","role":"the app's own in-app agent","selection":selection,"selection_repaired":null,"selection_persisted":null});
     Ok(result)
 }
 
-pub fn cmd_agent_models(s:&mut Session, p: &Value)->Result<Value> {    let mut selection=cmd_agent_config(s,&json!({}))?;
+pub fn cmd_agent_models(s:&mut Session, p: &Value)->Result<Value> {
+    let mut selection=cmd_agent_config(s,&json!({}))?;
     if let Some(agent)=p["agent"].as_str(){selection["agent"]=json!(agent);}
-    if selection["agent"]!="opencode" {return Ok(json!({"agent":selection["agent"],"models":[],"available":false,"reason":"Catalog discovery is supported by the existing OpenCode API route"}));}
-    Ok(json!({"agent":"opencode","models":models(&crate::workshop::project_dir(s)?)?,"available":true}))
-}
-fn model_ref(dir:&Path,selection:&Value,free_only:bool)->Result<Value> {
-    let provider=selection["provider"].as_str().unwrap_or_default();
-    let model=selection["model"].as_str().unwrap_or_default();
-    let wanted=if provider.is_empty() && model.is_empty() {
-        data(&api(dir,"model.default",None,None)?).clone()
-    } else if provider.is_empty() || model.is_empty() {
-        return Err(invalid("OpenCode needs both provider and model IDs from app settings; no default fallback attempted"));
-    } else {json!({"providerID":provider,"id":model})};
-    let catalog=models(dir)?;
-    let found=catalog.iter().find(|m|m["providerID"]==wanted["providerID"] && m["id"]==wanted["id"] && m["enabled"]==true)
-        .ok_or_else(||invalid("Selected provider/model is absent or disabled in agent.models; choose an available model in the app. No fallback attempted"))?;
-    if free_only {
-        fn zero(v:&Value)->bool {v.as_f64()==Some(0.0) || v.as_str().and_then(|s|s.parse::<f64>().ok())==Some(0.0)}
-        // A local model runs on this machine: it cannot be billed, so it is free by definition.
-        if found["local"]==true {return Ok(wanted);}
-        let costs=found["cost"].as_array().filter(|a|!a.is_empty()).ok_or_else(||invalid("Selected model cost is unknown; free-only request refused before inference"))?;
-        if !costs.iter().all(|c|zero(&c["input"])&&zero(&c["output"])&&zero(&c["cache"]["read"])&&zero(&c["cache"]["write"])) {
-            return Err(invalid("Selected model has nonzero or unknown cost; free-only request refused before inference"));
-        }
+    let agent = selection["agent"].as_str().unwrap_or("opencode");
+    match discover_agent_catalog(s, agent) {
+        Ok(m) => Ok(json!({"agent": agent, "models": m, "available": true})),
+        Err(e) => Ok(json!({"agent": agent, "models": [], "available": false, "reason": e.to_string()})),
     }
-    Ok(wanted)
 }
 fn state_dir(s:&Session)->Result<std::path::PathBuf> {Ok(crate::workshop::project_dir(s)?.join(".agent"))}
-fn chat_identity(s:&Session)->Result<Value>{
- let path=s.project_path.as_ref().ok_or_else(||invalid("Open the target project before chat"))?;
- let dir=crate::workshop::project_dir(s)?;
- let files=fs::read_dir(&dir).map_err(|e|invalid(format!("Cannot read the project directory for chat: {e}")))?.filter_map(std::result::Result::ok).filter(|e|e.path().extension().is_some_and(|v|v.eq_ignore_ascii_case("magic"))).count();
- if files>1{return Err(invalid("Multiple project files share this chat directory; chat blocked to prevent cross-project messages. Give each project its own directory; history was preserved"));}
- let project=fs::canonicalize(path).unwrap_or_else(|_|path.clone());
- let owner=state_dir(s)?.join("chat-project.json");
- if let Ok(bytes)=fs::read(owner){let saved:Value=serde_json::from_slice(&bytes).map_err(|_|invalid("Chat project binding is invalid; no message sent"))?;if saved["project"]!=json!(project){return Err(invalid("Chat belongs to another project; no message sent or history changed"));}}
- Ok(json!(project))
-}
-fn request_file(s:&Session)->Result<std::path::PathBuf>{Ok(state_dir(s)?.join("chat-request.json"))}
-fn request_read(s:&Session)->Value{request_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)}
-fn request_write(s:&Session,v:&Value)->Result<()>{fs::create_dir_all(state_dir(s)?)?;write_atomic(&request_file(s)?,&serde_json::to_vec_pretty(v).map_err(|_|invalid("Cannot encode chat receipt"))?)?;Ok(())}
-fn refresh_reply(s:&Session)->Result<Value>{
- chat_identity(s)?;let mut r=request_read(s);
- if !matches!(r["status"].as_str(),Some("running"|"stalled")){return Ok(r);}
- let previous_status=r["status"].clone();
- let dir=crate::workshop::project_dir(s)?;let id=r["session"].as_str().ok_or_else(||invalid("Pending chat has no session"))?;
- let reply=api(&dir,"session.message.list",Some(id),None)?;
- let messages=data(&reply).as_array().ok_or_else(||invalid("OpenCode message list unavailable; pending request preserved"))?;
- let since=r["sent_at"].as_u64().ok_or_else(||invalid("Pending chat has no native prompt receipt; inspect existing session, do not resend"))?;
- let recent:Vec<_>=messages.iter().filter(|m|m["time"]["created"].as_u64().is_some_and(|t|t>=since)).collect();
- let permissions=api(&dir,"session.permission.list",Some(id),None)?;let forms=api(&dir,"session.form.list",Some(id),None)?;
- let pending=data(&permissions).as_array().is_some_and(|a|!a.is_empty())||data(&forms).as_array().is_some_and(|a|!a.is_empty());
- let text=recent.iter().filter(|m|m["type"]=="assistant").flat_map(|m|m["content"].as_array().into_iter().flatten()).filter(|v|v["type"]=="text").filter_map(|v|v["text"].as_str()).collect::<Vec<_>>().join("\n");
- if pending {r["status"]=json!("stalled");r["reason"]=json!("Existing OpenCode permission or question requires attention; no automatic approval");}
- else if recent.iter().any(|m|m["type"]=="idle") {
-  let failure=recent.iter().filter(|m|m["type"]=="assistant").find_map(|m|m["error"].as_object().map(|e|(e["message"].as_str().unwrap_or("the provider returned an error").to_string(),e["type"].as_str().unwrap_or("provider_error").to_string(),e["status"].as_u64())));
-  if text.trim().is_empty(){
-   r["status"]=json!("error");
-   match failure{
-    Some((message,kind,status))=>{r["error"]=json!(message);r["error_type"]=json!(kind);if let Some(status)=status{r["provider_status"]=json!(status);}}
-    None=>{r["error"]=json!("OpenCode became idle without a retrievable text reply");}
-   }
-  }
-  else {verify_model(&dir,id,&r["model_ref"])?;log_push(s,json!({"role":"assistant","text":text,"request_id":r["request_id"],"project":r["project"],"session":id,"agent":"opencode","provider":r["provider"],"model":r["model"]}))?;r["text"]=json!(text);r["status"]=json!("replied");}
- }
- r["checked_at"]=json!(stamp());request_write(s,&r)?;
- if s.record_user_state && previous_status!=r["status"]{crate::activity::append(json!({"stage":if r["status"]=="replied"{"engine_success"}else if r["status"]=="error"{"engine_error"}else{"agent_progress"},"command":"agent.send","request_id":r["request_id"],"project":r["project"],"project_id":r["project"],"command_id":r["request_id"],"status":r["status"],"outputs":{"status":r["status"],"session":r["session"]},"ui_ack":"reply observed; Studio rendering acknowledgement separate"}));}
- Ok(r)
-}
 fn log_file(s:&Session)->Result<std::path::PathBuf> {Ok(state_dir(s)?.join("agent-log.json"))}
 pub(crate) fn log_read(s:&Session)->Value {log_file(s).ok().and_then(|p|fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).filter(Value::is_array).unwrap_or_else(||json!([]))}
 /// Write a file by rename, never in place: the live Studio and the CLI share these
@@ -335,133 +359,75 @@ fn archive(s:&Session)->Result<()> {
     }
     Ok(())
 }
-fn verify_model(dir:&Path,id:&str,wanted:&Value)->Result<()> {
-    let got=api(dir,"session.get",Some(id),None)?;
-    if data(&got)["model"]["id"]!=wanted["id"] || data(&got)["model"]["providerID"]!=wanted["providerID"] {
-        return Err(invalid("OpenCode session model differs from the app selection; no prompt sent or fallback attempted"));
-    }
-    let expected=fs::canonicalize(dir)?;
-    let actual=data(&got)["location"]["directory"].as_str().and_then(|path|fs::canonicalize(path).ok());
-    if actual.as_deref()!=Some(expected.as_path()) {
-        return Err(invalid("OpenCode session location differs from the open project; use agent.new_chat to create a correctly scoped session. Existing history preserved; no prompt sent"));
-    }
-    Ok(())
-}
-// Native per-session policy for one bounded image task; no global config or auth changes.
-fn image_task_cli() -> Result<std::path::PathBuf> {
+// Native per-session policy for bounded Sproket tool/diagnostic tasks; never image generation.
+fn bounded_task_cli() -> Result<std::path::PathBuf> {
     let exe=std::env::current_exe()?;
     let folder=exe.parent().ok_or_else(||invalid("Cannot locate the installed mc CLI"))?;
     let candidate=folder.join("mc");
     let candidate=if candidate.is_file(){candidate}else{folder.parent().unwrap_or(folder).join("mc")};
-    fs::canonicalize(&candidate).map_err(|_|invalid(format!("Image task needs the matching installed CLI at {}; no alternative installed",candidate.display())))
+    fs::canonicalize(&candidate).map_err(|_|invalid(format!("Bounded task needs the matching installed CLI at {}; no alternative installed",candidate.display())))
 }
-fn image_task_permissions() -> Result<Value> {
-    let cli=image_task_cli()?.to_string_lossy().into_owned();
-    Ok(json!([
-        {"action":"*","resource":"*","effect":"deny"},
-        {"action":"read","resource":"*","effect":"allow"},
-        {"action":"skill","resource":"*","effect":"allow"},
-        {"action":"question","resource":"*","effect":"allow"},
-        {"action":"shell","resource":format!("{cli} commands image.generate"),"effect":"allow"},
-        {"action":"shell","resource":format!("{cli} exec image.generate *"),"effect":"allow"}
-    ]))
-}
-fn verify_image_task(s:&Session,id:&str)->Result<()> {
-    let got=api(&crate::workshop::project_dir(s)?,"session.get",Some(id),None)?;
-    if data(&got)["permissions"]!=image_task_permissions()? {return Err(invalid("Native image-task permissions differ; no prompt sent. Start agent.new_chat image_task=true"));}
-    Ok(())
-}
-fn open_session(s:&Session,wanted:&Value,fresh:bool,image_task:bool)->Result<String> {
-    let project=chat_identity(s)?;let dir=crate::workshop::project_dir(s)?;let state=state_dir(s)?;let file=state.join("opencode-session");
-    if !fresh {
-        let id=fs::read_to_string(&file).map_err(|_|invalid("No chat to continue; use agent.new_chat"))?;
-        verify_model(&dir,id.trim(),wanted)?;if image_task{verify_image_task(s,id.trim())?;}return Ok(id.trim().into());
-    }
-    let mut body=json!({"title":"Sproket · Magic Studio","model":wanted,"location":{"directory":fs::canonicalize(&dir).map_err(|e|invalid(format!("Cannot resolve the project directory for the chat: {e}")))?}});
-    if image_task{body["permissions"]=image_task_permissions()?;}
-    let response=api(&dir,"session.create",None,Some(body))?;
-    let id=data(&response)["id"].as_str().filter(|id|id.starts_with("ses_")&&!id.chars().any(char::is_control)).ok_or_else(||invalid("OpenCode did not return a valid session ID; no prompt sent"))?;
-    verify_model(&dir,id,wanted)?;if image_task{verify_image_task(s,id)?;}
-    fs::create_dir_all(&state)?;archive(s)?;
-    if let Ok(previous)=fs::read_to_string(&file) {
-        use std::io::Write;
-        let mut history=fs::OpenOptions::new().create(true).append(true).open(state.join("chat-history.jsonl"))
-            .map_err(|e|invalid(format!("Cannot record the replaced chat: {e}")))?;
-        writeln!(history,"{}",json!({"session":previous.trim(),"replaced_by":id}))
-            .map_err(|e|invalid(format!("Cannot record the replaced chat: {e}")))?;
-    }
-    write_atomic(&state.join("chat-project.json"),json!({"project":project}).to_string().as_bytes())?;
-    write_atomic(&file,id.as_bytes())?;Ok(id.into())
-}
-pub fn cmd_agent_log(s:&mut Session,p:&Value)->Result<Value> {chat_identity(s)?;if p["refresh"]==true{refresh_reply(s)?;}Ok(log_read(s))}
+pub fn cmd_agent_log(s:&mut Session,_p:&Value)->Result<Value> {Ok(log_read(s))}
 pub fn cmd_agent_session(s:&mut Session,_:&Value)->Result<Value> {
-    let project=chat_identity(s)?;
-    let session=fs::read_to_string(state_dir(s)?.join("opencode-session")).ok().map(|s|s.trim().to_owned());
-    let selection=cmd_agent_config(s,&json!({}))?;Ok(json!({"project":project,"session":session,"selection":selection,"request":request_read(s),"runtime_model_verified":false}))
+    let selection=cmd_agent_config(s,&json!({}))?;
+    Ok(json!({"project":s.project_path,"selection":selection,"turns":log_read(s)}))
 }
 pub fn cmd_agent_new_chat(s:&mut Session,params:&Value)->Result<Value> {
-    chat_identity(s)?;
-    let selection=selected(s,params)?;let dir=crate::workshop::project_dir(s)?;
-    if matches!(request_read(s)["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("Existing chat request is pending; retrieve it before starting a new chat"));}
-    let session=if selection["agent"]=="opencode" {
-        let model=model_ref(&dir,&selection,params["free_only"]==true)?;
-        Some(open_session(s,&model,true,params["image_task"]==true)?)
-    } else {archive(s)?;None};
-    Ok(json!({"ok":true,"session":session,"fresh":true,"turns":[],"selection":selection,"inference_started":false}))
+    let selection=selected(s,params)?;
+    let _=archive(s);
+    Ok(json!({"ok":true,"fresh":true,"turns":[],"selection":selection,"inference_started":false}))
 }
 /// Compatibility entry point; use the registered handler rather than a separate chat implementation.
 pub fn new_chat(s:&mut Session,p:&Value)->Result<Value> {cmd_agent_new_chat(s,p)}
 
+// One visible Markdown source, included once; never add a second system-prompt copy.
+fn chat_prompt(project:&Path, instructions:&str, task:&str, message:&str)->String {
+    format!("{task}Current project: {}.\n\n{instructions}\n\n{message}",project.display())
+}
+
+fn chat_args(agent:&str, dir:&Path)->Result<Vec<String>> {
+    match agent {
+        "codex"=>Ok(vec!["exec".into(),"--skip-git-repo-check".into(),"-s".into(),"workspace-write".into(),"-C".into(),dir.to_string_lossy().into_owned()]),
+        "omp"=>Ok(vec!["-p".into(),"--cwd".into(),dir.to_string_lossy().into_owned()]),
+        "claude"=>Ok(vec!["-p".into(),"--permission-mode".into(),"auto".into()]),
+        "opencode"=>Ok(vec!["run".into()]),
+        _=>Err(invalid("Unsupported chat agent")),
+    }
+}
+
 pub fn cmd_agent_send(s:&mut Session,params:&Value)->Result<Value> {
-    chat_identity(s)?;
     let dir=crate::workshop::project_dir(s)?;let selection=selected(s,params)?;
     let agent=selection["agent"].as_str().ok_or_else(||invalid("No chat agent selected"))?;
     let mut said=params["message"].as_str().unwrap_or_default().trim().to_string();
     for path in params["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {said.push_str(&format!("\n[Magic Studio picture: {path}]"));}
     if said.is_empty(){return Err(invalid("message is empty"));}
-    let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/magicstudio-shell/agent.md")).unwrap_or_default();
-    let fresh=params["new_chat"].as_bool().unwrap_or(true);
-    if fresh && params["session"].is_string(){return Err(invalid("An expected session requires new_chat=false; no chat created or message sent"));}
-    let task=if params["image_task"]==true {format!("You are Sproket. This is one bounded image repair task. Native permissions allow reading images, skills and ONLY these shell commands: `{0} commands image.generate` and `{0} exec image.generate ...`. Use this exact installed CLI, not a relative executable. Do not call yourself, chat, OpenCode, subagents, scripts, or another harness. Inspect original references with native read; use existing image.generate with references and transparent_background=true, default model gpt-6-luna. After one job, inspect the returned draft image with native read, report observed defects, and STOP for review. Do not replace the original or regenerate a background.\n",image_task_cli()?.display())}else{String::new()};
-    let prompt=format!("{task}Freshness: discover current mc help, commands and actual project state before acting. Do not infer tools or project state from an earlier chat. Current project: {}.\n\n{instructions}\n\n{said}",s.project_path.as_deref().unwrap_or(&dir).display());
-    if agent=="opencode" {
-        if !selection["thinking"].as_str().unwrap_or_default().is_empty(){return Err(invalid("OpenCode reasoning variants are not wired to this setting; clear Thinking rather than silently ignoring it"));}
-        let prior=request_read(s);if matches!(prior["status"].as_str(),Some("queued"|"running"|"stalled")){return Err(invalid("A project chat request is still pending; read agent.log refresh=true before sending another message"));}
-        let model=model_ref(&dir,&selection,params["free_only"]==true)?;
-        let id=open_session(s,&model,fresh,params["image_task"]==true)?;
-        if params["session"].as_str().is_some_and(|expected|expected!=id){return Err(invalid("Project agent session changed; inspect agent.session before sending. No prompt sent"));}
-        let request_id=params["_request_id"].as_str().map(str::to_owned).unwrap_or_else(||format!("chat-{}",stamp()));
-        let mut receipt=json!({"request_id":request_id,"project":chat_identity(s)?,"session":id,"provider":model["providerID"],"model":model["id"],"model_ref":model,"status":"queued","image_task":params["image_task"]==true,"queued_at":stamp()});request_write(s,&receipt)?;
-        log_push(s,json!({"role":"user","text":said,"request_id":request_id,"project":receipt["project"],"session":id}))?;
-        let sent=match api(&dir,"session.prompt",Some(&id),Some(json!({"text":prompt}))){Ok(v)=>v,Err(e)=>{receipt["status"]=json!("error");receipt["error"]=json!(e.to_string());receipt["delivery"]=json!("uncertain; inspect existing native session before retry");request_write(s,&receipt)?;return Err(e);}};
-        let since=data(&sent)["time"]["created"].as_u64().ok_or_else(||invalid("OpenCode prompt receipt lacks creation time; pending request retained, do not resend"))?;
-        receipt["status"]=json!("running");receipt["sent_at"]=json!(since);receipt["native_message_id"]=data(&sent)["id"].clone();request_write(s,&receipt)?;
-        let wait=params["wait"].as_u64().unwrap_or(300).min(300);let start=Instant::now();
-        loop {
-            let r=if wait==0 {receipt.clone()}else{refresh_reply(s)?};
-            if wait==0 || matches!(r["status"].as_str(),Some("replied"|"stalled"|"error")) {
-                let mut result=r.clone();result["ok"]=json!(matches!(r["status"].as_str(),Some("running"|"replied")));result["fresh"]=json!(fresh);result["turns"]=log_read(s);result["next_command"]=json!("agent.log refresh=true; agent.session reports request state");return Ok(result);
-            }
-            if start.elapsed()>=Duration::from_secs(wait){return Err(invalid(format!("Reply still running after {wait}s; retrieve with agent.log refresh=true. Request {request_id}; no duplicate prompt sent")));}
-            std::thread::sleep(Duration::from_millis(500));
-        }
+    let instructions=fs::read_to_string(crate::workspace::workspace_root(s).join("apps/magicstudio-shell/agent.md"))
+        .map_err(|_|invalid("Cannot read apps/magicstudio-shell/agent.md; restore or edit the Markdown instructions before sending. No prompt sent"))?;
+    let fresh=params["new_chat"].as_bool().unwrap_or(false);
+    let task=if params["image_task"]==true {format!("You are Sproket, the bounded tasks, tools, and error-sniffing assistant (never image generation; Gaffer handles image_gen). Use `{0} exec` diagnostic commands to inspect project state and UI errors, and report concise findings.\n",bounded_task_cli()?.display())}else{String::new()};
+    let prompt=chat_prompt(s.project_path.as_deref().unwrap_or(&dir),&instructions,&task,&said);
+    let provider=selection["provider"].as_str().unwrap_or_default();
+    let chosen_model=selection["model"].as_str().unwrap_or_default();
+    let local_omp=agent=="omp"&&provider=="ollama";
+    if local_omp && !omp_local_models(&dir)?.iter().any(|m|m["id"]==chosen_model){return Err(invalid("Selected Ollama model is unavailable; choose an installed local model. No fallback or inference attempted"));}
+    if params["free_only"]==true && !is_local_provider(provider) && agent!="opencode" {
+        return Err(invalid("Free-only cost verification is unavailable for this agent; no inference attempted"));
     }
-    if params["free_only"]==true {return Err(invalid("Free-only cost verification is unavailable for this agent; no inference attempted"));}
-    if !selection["provider"].as_str().unwrap_or_default().is_empty(){return Err(invalid("Explicit provider selection is verified only for the OpenCode API route; no provider override attempted"));}
-    let model=selection["model"].as_str().unwrap_or_default();let thinking=selection["thinking"].as_str().unwrap_or_default();
-    let mut args=match agent {
-        "codex"=>vec!["exec".into(),"--skip-git-repo-check".into(),"-s".into(),"workspace-write".into(),"-C".into(),dir.to_string_lossy().into_owned()],
-        "omp"=>vec!["-p".into(),"--cwd".into(),dir.to_string_lossy().into_owned(),"--append-system-prompt".into(),instructions.clone()],
-        "claude"=>vec!["-p".into(),"--permission-mode".into(),"auto".into(),"--append-system-prompt".into(),instructions],
-        _=>return Err(invalid("Unsupported chat agent")),
+    let model=if (agent=="opencode" || local_omp) && !provider.is_empty() && !chosen_model.is_empty() && !chosen_model.contains('/') {
+        format!("{provider}/{chosen_model}")
+    } else {
+        chosen_model.to_owned()
     };
-    if !model.is_empty(){args.extend(["--model".into(),model.into()]);}
-    if !thinking.is_empty() {
+    let thinking=selection["thinking"].as_str().unwrap_or_default();
+    let mut args=chat_args(agent,&dir)?;
+    if !model.is_empty(){args.extend(["--model".into(),model.clone()]);}
+    if !thinking.is_empty() && thinking != "off" {
         match agent {"codex"=>args.extend(["-c".into(),format!("model_reasoning_effort={}",json!(thinking))]),"omp"=>args.extend(["--thinking".into(),thinking.into()]),_=>return Err(invalid("Thinking override is unsupported for this agent; no inference attempted"))}
     }
-    // No adapter implicitly resumes. OpenCode alone supports explicit continuation with model checks.
-    if !fresh{return Err(invalid("Explicit continuation is supported only for OpenCode; use a fresh chat"));}
-    args.push(prompt);let text=run(&dir,agent,&args)?;archive(s)?;
-    log_push(s,json!({"role":"user","text":said}))?;log_push(s,json!({"role":"assistant","text":text,"agent":agent}))?;
-    Ok(json!({"ok":true,"agent":agent,"provider":null,"model":if model.is_empty(){Value::Null}else{json!(model)},"selection_source":"app settings; inherited values unverified","fresh":true,"text":text,"turns":log_read(s)}))
+    if fresh { let _=archive(s); }
+    args.push(prompt);
+    let text=run(&dir,agent,&args)?;
+    log_push(s,json!({"role":"user","text":said}))?;
+    log_push(s,json!({"role":"assistant","text":text,"agent":agent,"provider":provider,"model":chosen_model}))?;
+    Ok(json!({"ok":true,"agent":agent,"provider":if provider.is_empty(){Value::Null}else{json!(provider)},"model":if model.is_empty(){Value::Null}else{json!(model)},"local":is_local_provider(provider),"fresh":fresh,"text":text,"turns":log_read(s)}))
 }

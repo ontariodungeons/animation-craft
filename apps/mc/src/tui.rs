@@ -1,343 +1,445 @@
 //! Local control of a specific live TUI. Replies are sent after the resulting frame is drawn.
-use serde_json::{Value,json};
-use std::{fs,io::{BufRead,BufReader,Read,Write},os::unix::{fs::{FileTypeExt,MetadataExt,PermissionsExt},net::{UnixListener,UnixStream}},path::PathBuf,time::Duration};
+use serde_json::{Value, json};
+use std::{
+    fs,
+    io::{BufRead, BufReader, Read, Write},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
+    },
+    path::PathBuf,
+    time::Duration,
+};
 
-fn root_directory()->Result<PathBuf,String>{
- let uid=fs::metadata("/proc/self").map_err(|e|e.to_string())?.uid();
- let root=std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(||std::env::temp_dir().join(format!("magicstudio-{uid}")));
- let dir=root.join("magicstudio-tui");
- fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
- let meta=fs::symlink_metadata(&dir).map_err(|e|e.to_string())?;
- if meta.file_type().is_symlink()||!meta.is_dir()||meta.uid()!=uid{return Err("TUI runtime directory must be an owned directory, not a symlink".into());}
- fs::set_permissions(&dir,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;
- Ok(dir)
-}
-
-fn private_directory(path:PathBuf)->Result<PathBuf,String>{
- match fs::create_dir(&path){Ok(())=>{},Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>{},Err(e)=>return Err(e.to_string())}
- let meta=fs::symlink_metadata(&path).map_err(|e|e.to_string())?;let uid=fs::metadata("/proc/self").map_err(|e|e.to_string())?.uid();
- if !meta.is_dir()||meta.file_type().is_symlink()||meta.uid()!=uid{return Err("TUI scope directory must be owned and not a symlink".into());}
- fs::set_permissions(&path,fs::Permissions::from_mode(0o700)).map_err(|e|e.to_string())?;Ok(path)
-}
-fn directory()->Result<PathBuf,String>{
- let root=root_directory()?;if let Some(scope)=crate::scope::current()?{let booths=private_directory(root.join("booths"))?;private_directory(booths.join(scope.key()))}else{Ok(root)}
-}
-fn sockets(directory:&std::path::Path)->Vec<PathBuf>{
- fs::read_dir(directory).into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.extension().is_some_and(|e|e=="sock"))
- .filter(|p|p.file_stem().and_then(|v|v.to_str()).and_then(|v|v.parse::<u32>().ok()).is_some_and(|pid|std::path::Path::new(&format!("/proc/{pid}")).exists())).collect()
-}
-
-pub struct Server{listener:UnixListener,path:PathBuf,pub generation:u128}
-pub struct Pending{pub stream:UnixStream,pub request:Value}
-impl Server{
- pub fn bind()->Result<Self,String>{
-  let path=directory()?.join(format!("{}.sock",std::process::id()));
-  if let Ok(meta)=fs::symlink_metadata(&path){if !meta.file_type().is_socket(){return Err("TUI endpoint exists and is not a socket".into());}fs::remove_file(&path).map_err(|e|e.to_string())?;}
-  let listener=UnixListener::bind(&path).map_err(|e|e.to_string())?;
-  fs::set_permissions(&path,fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?;
-  listener.set_nonblocking(true).map_err(|e|e.to_string())?;
-  Ok(Self{listener,path,generation:std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_micros()).unwrap_or(0)})
- }
- pub fn receive(&self)->Vec<Pending>{
-  let mut pending=Vec::new();
-  for _ in 0..1{
-   let Ok((mut stream,_))=self.listener.accept()else{break;};
-   let _=stream.set_read_timeout(Some(Duration::from_millis(150)));
-   let _=stream.set_write_timeout(Some(Duration::from_secs(2)));
-   let mut text=String::new();
-   let read=BufReader::new((&mut stream).take(65537)).read_line(&mut text);
-   match read.and_then(|_|if text.len()>65536{Err(std::io::Error::other("request exceeds 64KiB"))}else{serde_json::from_str(&text).map_err(std::io::Error::other)}){
-    Ok(request)=>pending.push(Pending{stream,request}),
-    Err(error)=>{let _=writeln!(stream,"{}",json!({"ok":false,"error":error.to_string()}));}
-   }
-  }
-  pending
- }
- pub fn endpoint(&self)->String{self.path.to_string_lossy().into_owned()}
-}
-impl Drop for Server{fn drop(&mut self){let _=fs::remove_file(&self.path);}}
-impl Pending{pub fn reply(mut self,value:&Value){let _=writeln!(self.stream,"{value}");}}
-
-fn request(path:&std::path::Path,action:&str,params:&Value)->Result<Value,String>{
- let mut stream=UnixStream::connect(path).map_err(|e|format!("{}: {e}",path.display()))?;
- stream.set_read_timeout(Some(Duration::from_secs(30))).map_err(|e|e.to_string())?;
- stream.set_write_timeout(Some(Duration::from_secs(3))).map_err(|e|e.to_string())?;
- writeln!(stream,"{}",json!({"action":action,"params":params})).map_err(|e|e.to_string())?;
- let mut text=String::new();
- BufReader::new(stream.take(8*1024*1024)).read_line(&mut text).map_err(|e|format!("Live TUI did not reply: {e}. Nothing was resent; use look before retrying a mutation."))?;
- serde_json::from_str(&text).map_err(|e|format!("Invalid live TUI reply: {e}"))
-}
-pub fn call(action:&str,params:&Value)->Result<Value,String>{
- if params.get("section").is_some()&&!matches!(action,"look"|"read"|"status"|"controls"){return Err("section= filters observations only; read the resulting frame with tui look".into());}
- let dir=directory()?;
- let mut endpoints=sockets(&dir);
- if crate::scope::current()?.is_none(){
-  let booths=dir.join("booths");
-  for entry in fs::read_dir(booths).into_iter().flatten().filter_map(Result::ok){if entry.file_type().is_ok_and(|t|t.is_dir()){endpoints.extend(sockets(&entry.path()));}}
- }
- endpoints.sort();
- if action=="instances"{
-  let values:Vec<_>=endpoints.iter().map(|path|match request(path,"look",&json!({})){Ok(v)=>json!({"instance":v["instance"],"view":v["view"],"project":v["project"],"role":v["access"]["role"],"endpoint":path}),Err(e)=>json!({"endpoint":path,"error":e})}).collect();
-  return Ok(json!({"ok":true,"instances":values}));
- }
- let selected=params["instance"].as_u64().map(|v|v.to_string()).or_else(||params["instance"].as_str().map(str::to_owned));
- if params.get("instance").is_some()&&selected.is_none(){return Err("instance= must be a TUI process ID".into());}
- let path=if let Some(pid)=selected{
-  if pid.parse::<u32>().is_err(){return Err("instance must be a TUI process ID".into());}
-  endpoints.iter().find(|p|p.file_stem().and_then(|s|s.to_str())==Some(pid.as_str())).cloned().ok_or_else(||format!("TUI {pid} is outside this context or not running; use mc tui instances"))?
- }else{let masters:Vec<_>=endpoints.iter().filter(|p|p.parent()==Some(dir.as_path())).cloned().collect();let choices=if masters.is_empty(){&endpoints}else{&masters};match choices.as_slice(){[one]=>one.clone(),[]=>return Err("No controllable TUI is running. Start the updated mc booth in your terminal.".into()),_=>return Err("Several TUIs are running. Use mc tui instances, then instance=<pid>. Nothing was changed.".into())}};
- let mut value=request(&path,action,params)?;
- if action=="reload"&&value["ok"]==true{
-  let old=value["generation"].clone();
-  let until=std::time::Instant::now()+Duration::from_secs(30);
-  loop{
-   if let Ok(mut fresh)=request(&path,"look",&json!({})){
-    if fresh["generation"]!=old{fresh["reloaded"]=json!(true);value=fresh;break;}
-   }
-   if std::time::Instant::now()>=until{return Err("Reload accepted, but a fresh TUI frame was not observed within 30 seconds".into());}
-   std::thread::sleep(Duration::from_millis(100));
-  }
- }
- if let Some(section)=params["section"].as_str().or(if action=="controls"{Some("controls")}else{None}){
-  let selected=value.get(section).cloned().ok_or_else(||format!("Unknown look section {section}"))?;
-  let mut reply=json!({"ok":value["ok"],"error":value["error"],"instance":value["instance"],"frame":value["frame"],"generation":value["generation"],"view":value["view"],"project":value["project"]});
-  reply[section]=selected;return Ok(reply);
- }
- Ok(value)
+fn root_directory() -> Result<PathBuf, String> {
+    let uid = fs::metadata("/proc/self").map_err(|e| e.to_string())?.uid();
+    let root = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("magicstudio-{uid}")));
+    let dir = root.join("magicstudio-tui");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let meta = fs::symlink_metadata(&dir).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() || meta.uid() != uid {
+        return Err("TUI runtime directory must be an owned directory, not a symlink".into());
+    }
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
 
-pub const WATCH_SCHEMA:&str="mc.tui.watch/1";
+fn private_directory(path: PathBuf) -> Result<PathBuf, String> {
+    match fs::create_dir(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+    let uid = fs::metadata("/proc/self").map_err(|e| e.to_string())?.uid();
+    if !meta.is_dir() || meta.file_type().is_symlink() || meta.uid() != uid {
+        return Err("TUI scope directory must be owned and not a symlink".into());
+    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+fn directory() -> Result<PathBuf, String> {
+    let root = root_directory()?;
+    if let Some(scope) = crate::scope::current()? {
+        let booths = private_directory(root.join("booths"))?;
+        private_directory(booths.join(scope.key()))
+    } else {
+        Ok(root)
+    }
+}
+fn sockets(directory: &std::path::Path) -> Vec<PathBuf> {
+    fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "sock"))
+        .filter(|p| {
+            p.file_stem()
+                .and_then(|v| v.to_str())
+                .and_then(|v| v.parse::<u32>().ok())
+                .is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
+        })
+        .collect()
+}
+
+pub struct Server {
+    listener: UnixListener,
+    path: PathBuf,
+    pub generation: u128,
+}
+pub struct Pending {
+    pub stream: UnixStream,
+    pub request: Value,
+}
+impl Server {
+    pub fn bind() -> Result<Self, String> {
+        let path = directory()?.join(format!("{}.sock", std::process::id()));
+        if let Ok(meta) = fs::symlink_metadata(&path) {
+            if !meta.file_type().is_socket() {
+                return Err("TUI endpoint exists and is not a socket".into());
+            }
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        let listener = UnixListener::bind(&path).map_err(|e| e.to_string())?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        Ok(Self {
+            listener,
+            path,
+            generation: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|v| v.as_micros())
+                .unwrap_or(0),
+        })
+    }
+    pub fn receive(&self) -> Vec<Pending> {
+        let mut pending = Vec::new();
+        for _ in 0..1 {
+            let Ok((mut stream, _)) = self.listener.accept() else {
+                break;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(150)));
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+            let mut text = String::new();
+            let read = BufReader::new((&mut stream).take(65537)).read_line(&mut text);
+            match read.and_then(|_| {
+                if text.len() > 65536 {
+                    Err(std::io::Error::other("request exceeds 64KiB"))
+                } else {
+                    serde_json::from_str(&text).map_err(std::io::Error::other)
+                }
+            }) {
+                Ok(request) => pending.push(Pending { stream, request }),
+                Err(error) => {
+                    let _ = writeln!(stream, "{}", json!({"ok":false,"error":error.to_string()}));
+                }
+            }
+        }
+        pending
+    }
+    pub fn endpoint(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+}
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+impl Pending {
+    pub fn reply(mut self, value: &Value) {
+        let _ = writeln!(self.stream, "{value}");
+    }
+}
+
+fn request(path: &std::path::Path, action: &str, params: &Value) -> Result<Value, String> {
+    let mut stream = UnixStream::connect(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .map_err(|e| e.to_string())?;
+    writeln!(stream, "{}", json!({"action":action,"params":params})).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    BufReader::new(stream.take(8*1024*1024)).read_line(&mut text).map_err(|e|format!("Live TUI did not reply: {e}. Nothing was resent; use look before retrying a mutation."))?;
+    serde_json::from_str(&text).map_err(|e| format!("Invalid live TUI reply: {e}"))
+}
+pub fn call(action: &str, params: &Value) -> Result<Value, String> {
+    if params.get("section").is_some() && !matches!(action, "look" | "read" | "status" | "controls")
+    {
+        return Err(
+            "section= filters observations only; read the resulting frame with tui look".into(),
+        );
+    }
+    let dir = directory()?;
+    let mut endpoints = sockets(&dir);
+    if crate::scope::current()?.is_none() {
+        let booths = dir.join("booths");
+        for entry in fs::read_dir(booths)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+        {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                endpoints.extend(sockets(&entry.path()));
+            }
+        }
+    }
+    endpoints.sort();
+    if action == "instances" {
+        let values:Vec<_>=endpoints.iter().map(|path|match request(path,"look",&json!({})){Ok(v)=>json!({"instance":v["instance"],"view":v["view"],"project":v["project"],"role":v["access"]["role"],"endpoint":path}),Err(e)=>json!({"endpoint":path,"error":e})}).collect();
+        return Ok(json!({"ok":true,"instances":values}));
+    }
+    let selected = params["instance"]
+        .as_u64()
+        .map(|v| v.to_string())
+        .or_else(|| params["instance"].as_str().map(str::to_owned));
+    if params.get("instance").is_some() && selected.is_none() {
+        return Err("instance= must be a TUI process ID".into());
+    }
+    let path = if let Some(pid) = selected {
+        if pid.parse::<u32>().is_err() {
+            return Err("instance must be a TUI process ID".into());
+        }
+        endpoints
+            .iter()
+            .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(pid.as_str()))
+            .cloned()
+            .ok_or_else(|| {
+                format!("TUI {pid} is outside this context or not running; use mc tui instances")
+            })?
+    } else {
+        let masters: Vec<_> = endpoints
+            .iter()
+            .filter(|p| p.parent() == Some(dir.as_path()))
+            .cloned()
+            .collect();
+        let choices = if masters.is_empty() {
+            &endpoints
+        } else {
+            &masters
+        };
+        match choices.as_slice(){[one]=>one.clone(),[]=>return Err("No controllable TUI is running. Start the updated mc booth in your terminal.".into()),_=>return Err("Several TUIs are running. Use mc tui instances, then instance=<pid>. Nothing was changed.".into())}
+    };
+    let mut value = request(&path, action, params)?;
+    if action == "reload" && value["ok"] == true {
+        let old = value["generation"].clone();
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(mut fresh) = request(&path, "look", &json!({})) {
+                if fresh["generation"] != old {
+                    fresh["reloaded"] = json!(true);
+                    value = fresh;
+                    break;
+                }
+            }
+            if std::time::Instant::now() >= until {
+                return Err(
+                    "Reload accepted, but a fresh TUI frame was not observed within 30 seconds"
+                        .into(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    if let Some(section) = params["section"].as_str().or(if action == "controls" {
+        Some("controls")
+    } else {
+        None
+    }) {
+        let selected = value
+            .get(section)
+            .cloned()
+            .ok_or_else(|| format!("Unknown look section {section}"))?;
+        let mut reply = json!({"ok":value["ok"],"error":value["error"],"instance":value["instance"],"frame":value["frame"],"generation":value["generation"],"view":value["view"],"project":value["project"]});
+        reply[section] = selected;
+        return Ok(reply);
+    }
+    Ok(value)
+}
+
+pub const WATCH_SCHEMA: &str = "mc.tui.watch/1";
 
 /// `mc tui watch`: follow the typed events of the selected project's TUI. It reads that TUI's own
-/// event list, writes nothing and keeps no second journal. The first reply is only a watermark, so
-/// history is never replayed; a failure already reported stays muted until that command and control
-/// report a later success.
-pub fn watch(params:&Value,out:&mut dyn FnMut(&Value))->Result<Value,String>{
- watch_with(params,&mut |p|call("look",p),out,&mut prompt_agent)
+/// event list, writes nothing, keeps no second journal, and never sends data to agents.
+pub fn watch(params: &Value, out: &mut dyn FnMut(&Value)) -> Result<Value, String> {
+    watch_with(params, &mut |p| call("look", p), out)
 }
 
-fn watch_with(params:&Value,poll:&mut dyn FnMut(&Value)->Result<Value,String>,out:&mut dyn FnMut(&Value),prompt:&mut dyn FnMut(&str,&str)->Result<(),String>)->Result<Value,String>{
- if params.get("notify").is_some()&&params["notify"].as_str().is_none(){return Err("notify= must be an agent name or pane ID".into());}
- if params.get("count").is_some()&&params["count"].as_u64().is_none(){return Err("count= must be a nonnegative integer".into());}
- let notify=params["notify"].as_str().filter(|v|!v.is_empty()).map(str::to_owned);
- let count=params["count"].as_u64();
- let interval=params["interval_ms"].as_u64().unwrap_or(700).min(10_000);
- // One TUI for the whole watch: following another subject mid-stream would mislabel events.
- let first=poll(&json!({}))?;
- let instance=first["instance"].clone();
- let mut project=first["project"].clone();
- let mut watch=Watch::default();
- let _history=watch.observe(&first);
- out(&json!({"schema":WATCH_SCHEMA,"kind":"watching","instance":instance,"project":project,"notify":notify,"source":"selected TUI event list; no second journal","replay":"none; events already on screen start behind the watermark"}));
- let mut streamed=0u64;
- while count.is_none_or(|n|streamed<n){
-  std::thread::sleep(Duration::from_millis(interval));
-  let look=poll(&json!({"instance":instance}))?;
-  project=look["project"].clone();
-  for event in watch.observe(&look){
-   out(&json!({"schema":WATCH_SCHEMA,"kind":"event","event":event}));
-   streamed+=1;
-   // One prompt per new failed row: never for progress, status or a repeat of the same refusal.
-   if let Some(target)=notify.as_deref().filter(|_|event["ok"]==false&&event["type"]=="error"){
-    let delivery=match prompt(target,&Watch::prompt(&event,&look["project"])){
-     Ok(())=>json!({"accepted":true,"agent_acknowledgement":"not observed"}),
-     Err(error)=>json!({"accepted":false,"error":error,"retried":false}),
-    };
-    out(&json!({"schema":WATCH_SCHEMA,"kind":"notification","target":target,"command":event["command"],"control":event["control"],"request":event["request_id"],"delivery":delivery}));
-   }
-   if count.is_some_and(|n|streamed>=n){break;}
-  }
- }
- Ok(json!({"schema":WATCH_SCHEMA,"ok":true,"instance":instance,"project":project,"streamed":streamed,"stopped":"count reached","notify":notify}))
+fn watch_with(
+    params: &Value,
+    poll: &mut dyn FnMut(&Value) -> Result<Value, String>,
+    out: &mut dyn FnMut(&Value),
+) -> Result<Value, String> {
+    if params.get("notify").is_some() {
+        return Err("TUI watch can poll data, it cannot send notifications or prompts to agents.".into());
+    }
+    if params.get("count").is_some() && params["count"].as_u64().is_none() {
+        return Err("count= must be a nonnegative integer".into());
+    }
+    let count = params["count"].as_u64();
+    let interval = params["interval_ms"].as_u64().unwrap_or(700).min(10_000);
+    // One TUI for the whole watch: following another subject mid-stream would mislabel events.
+    let first = poll(&json!({}))?;
+    let instance = first["instance"].clone();
+    let mut project = first["project"].clone();
+    let mut watch = Watch::default();
+    let _history = watch.observe(&first);
+    out(
+        &json!({"schema":WATCH_SCHEMA,"kind":"watching","instance":instance,"project":project,"source":"selected TUI event list; no second journal","replay":"none; events already on screen start behind the watermark"}),
+    );
+    let mut streamed = 0u64;
+    while count.is_none_or(|n| streamed < n) {
+        std::thread::sleep(Duration::from_millis(interval));
+        let look = poll(&json!({"instance":instance}))?;
+        project = look["project"].clone();
+        for event in watch.observe(&look) {
+            out(&json!({"schema":WATCH_SCHEMA,"kind":"event","event":event}));
+            streamed += 1;
+            if count.is_some_and(|n| streamed >= n) {
+                break;
+            }
+        }
+    }
+    Ok(
+        json!({"schema":WATCH_SCHEMA,"ok":true,"instance":instance,"project":project,"streamed":streamed,"stopped":"count reached"}),
+    )
 }
 
 /// New events from one TUI event list: the watermark drops history, a failed command stays muted
 /// until it succeeds, and one journal row that expands into several typed events is judged once.
 #[derive(Default)]
-struct Watch{water:Option<u64>,muted:std::collections::HashSet<(String,String,String)>}
-
-impl Watch{
- fn observe(&mut self,look:&Value)->Vec<Value>{
-  let events:Vec<&Value>=look["events"].as_array().into_iter().flatten().collect();
-  let newest=events.iter().filter_map(|e|e["sequence"].as_u64()).max();
-  let Some(water)=self.water else{self.water=newest;return Vec::new();};
-  let(mut fresh,mut before,mut included)=(Vec::new(),None,false);
-  for event in events{
-   let Some(sequence)=event["sequence"].as_u64() else{continue};
-   if sequence<=water{continue;}
-   if before!=Some(sequence){included=self.classify(event);before=Some(sequence);}
-   if included{fresh.push(event.clone());}
-  }
-  self.water=Some(newest.unwrap_or(water).max(water));
-  fresh
- }
- /// Keyed by command, control and error so an identical refusal is not news twice. A success for
- /// the same command and control re-arms it; so does anything that is not a failure.
- fn classify(&mut self,event:&Value)->bool{
-  let(command,control,error)=(field(event,"command"),field(event,"control"),field(event,"error"));
-  if event["ok"].as_bool()!=Some(false){
-   // Only a completed row re-arms a refusal: a retry's start row must not re-alert by itself.
-   if !event["type"].as_str().unwrap_or_default().ends_with("_started"){self.muted.retain(|(c,n,_)|*c!=command||*n!=control);}
-   return true;
-  }
-  self.muted.insert((command,control,error))
- }
- fn prompt(event:&Value,project:&Value)->String{
-  let project=project.as_str().or_else(||event["project"].as_str()).unwrap_or("no project");
-  format!("Magic Studio TUI failure · {} · control {} · project {project} · request {} · {}. No automatic retry; inspect it in the Booth.",
-   field(event,"command"),field(event,"control"),field(event,"request_id"),field(event,"error"))
- }
+struct Watch {
+    water: Option<u64>,
+    muted: std::collections::HashSet<(String, String, String)>,
 }
 
-fn field(event:&Value,name:&str)->String{
- event[name].as_str().filter(|v|!v.is_empty()).map(|v|v.chars().take(300).collect()).unwrap_or_else(||"-".into())
+impl Watch {
+    fn observe(&mut self, look: &Value) -> Vec<Value> {
+        let events: Vec<&Value> = look["events"].as_array().into_iter().flatten().collect();
+        let newest = events.iter().filter_map(|e| e["sequence"].as_u64()).max();
+        let Some(water) = self.water else {
+            self.water = newest;
+            return Vec::new();
+        };
+        let (mut fresh, mut before, mut included) = (Vec::new(), None, false);
+        for event in events {
+            let Some(sequence) = event["sequence"].as_u64() else {
+                continue;
+            };
+            if sequence <= water {
+                continue;
+            };
+            if before != Some(sequence) {
+                included = self.classify(event);
+                before = Some(sequence);
+            }
+            if included {
+                fresh.push(event.clone());
+            }
+        }
+        self.water = Some(newest.unwrap_or(water).max(water));
+        fresh
+    }
+    /// Keyed by command, control and error so an identical refusal is not news twice. A success for
+    /// the same command and control re-arms it; so does anything that is not a failure.
+    fn classify(&mut self, event: &Value) -> bool {
+        let (command, control, error) = (
+            field(event, "command"),
+            field(event, "control"),
+            field(event, "error"),
+        );
+        if event["ok"].as_bool() != Some(false) {
+            // Only a completed row re-arms a refusal: a retry's start row must not re-alert by itself.
+            if !event["type"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with("_started")
+            {
+                self.muted
+                    .retain(|(c, n, _)| *c != command || *n != control);
+            }
+            return true;
+        }
+        self.muted.insert((command, control, error))
+    }
 }
 
-/// Ask one agent to look at a failure. Herdr decides whether the prompt is accepted; a refusal is
-/// reported as it happened and never retried.
-fn prompt_agent(target:&str,text:&str)->Result<(),String>{
- match std::process::Command::new("herdr").args(["agent","prompt",target,text]).output(){
-  Ok(output)=>{
-   let said=String::from_utf8_lossy(&output.stdout).trim().to_owned();
-   let error=serde_json::from_str::<Value>(&said).ok().and_then(|v|v.get("error").or_else(||v["result"].get("error")).cloned()).filter(|v|!v.is_null());
-   if let Some(error)=error{return Err(error.to_string());}
-   if !output.status.success(){
-    let said=String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    return Err(if said.is_empty(){format!("herdr exited {}",output.status)}else{said});
-   }
-   Ok(())
-  }
-  Err(error)=>Err(error.to_string()),
- }
+fn field(event: &Value, name: &str) -> String {
+    event[name]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .map(|v| v.chars().take(300).collect())
+        .unwrap_or_else(|| "-".into())
 }
 
-pub const CONTROLS:&[(&str,&str)]=&[
- ("look","Rendered terminal text, structured state and this control list"),
- ("watch [notify=<agent>] [count=<n>]","CLI only: stream the selected project's new typed events; prompt the named agent once per distinct new failure"),
- ("click id=<visible control id>","Click a visible button using the same hit target as the mouse; look section=elements lists IDs and rectangles"),
- ("view name=workshop|booth|mops|animal","F1/F2/F3/F4"),
- ("agent pane=<id> | name=<name> | index=<n>","Select an agent and show MOPS; G opens MOPS, 1–9/0 select, left/right cycle"),
- ("booth.prepare [project=<file>] [pane=<id> name=<name> task=<text>] [allow=<command IDs>]","Master only: prepare an assignment and onboarding command (B in Workshop); never launches or messages an agent"),
- ("project.select path=<file> | index=<n>","Select a Workshop card without attaching; arrows/j/k move, Enter/Open enters Booth"),
- ("project.open-selected","Open the selected Workshop project in Booth; does not switch a Studio"),
- ("project.inactive [show=true|false]","Show/hide inactive project cards (I)"),
- ("project path=<file> | index=<n>","Choose a catalog project and observe it in Booth"),
- ("stage name=<label> | index=<n>","Select a project stage"),
- ("event sequence=<id> | index=<n>","Select and inspect an event"),
- ("events","Focus the event list (E)"),
- ("agent.next | agent.previous","Cycle the selected agent (, / .)"),
- ("remind [pane=<id> | name=<name>]","Request status from an available agent; refuse working agents (P)"),
- ("command index=<n>","Select an offered command"),
- ("copy","Copy the selected literal command; never execute it"),
- ("note text=<text> [append=true]","Compose a note; does not send"),
- ("note.send","Submit the current note if the recipient is available"),
- ("note.cancel","Cancel the note composer"),
- ("chat [text=<text>] [append=true]","Open F9 Sproket project chat; typing does not send"),
- ("chat.close","Close F9 Sproket chat and retain its draft (F9/Esc)"),
- ("chat.send","Submit project chat"),
- ("input field=<name> value=<text>","Edit an intake field"),
- ("intake.open | intake.new | intake.create | intake.resume","F6 / form F2 / F5 / F6"),
- ("project.open | project.save | storyboard.open","Form F3 / Ctrl+S / form F7"),
- ("doctor | details | refresh","F10 / D / F8"),
- ("scroll rows=<signed count>","Scroll the current panel"),
- ("key key=<key>","Any keyboard control: F1–F12, ctrl+s, arrows, enter, esc, tab, pageup/pagedown, or one character"),
- ("text text=<text>","Type into the active composer or intake field without submitting"),
- ("cancel | submit","Escape / Enter in the current context"),
- ("reload | quit","Reload this exact TUI / close it; drafts must be resolved first"),
+pub const CONTROLS: &[(&str, &str)] = &[
+    (
+        "look",
+        "Rendered terminal text, structured state and this control list",
+    ),
+    (
+        "watch [count=<n>]",
+        "CLI only: stream the selected project's new typed events (read-only)",
+    ),
+    (
+        "click id=<visible control id>",
+        "Click a visible button using the same hit target as the mouse; look section=elements lists IDs and rectangles",
+    ),
+    ("view name=workshop|booth|mops|animal", "F1/F2/F3/F4"),
+    (
+        "agent pane=<id> | name=<name> | index=<n>",
+        "Select an agent and show MOPS; G opens MOPS, 1–9/0 select, left/right cycle",
+    ),
+    (
+        "booth.prepare [project=<file>] [pane=<id> name=<name> task=<text>] [allow=<command IDs>]",
+        "Master only: prepare an assignment and onboarding command (B in Workshop); never launches or messages an agent",
+    ),
+    (
+        "project.select path=<file> | index=<n>",
+        "Select a Workshop card without attaching; arrows/j/k move, Enter/Open enters Booth",
+    ),
+    (
+        "project.open-selected",
+        "Open the selected Workshop project in Booth; does not switch a Studio",
+    ),
+    (
+        "project.inactive [show=true|false]",
+        "Show/hide inactive project cards (I)",
+    ),
+    (
+        "project path=<file> | index=<n>",
+        "Choose a catalog project and observe it in Booth",
+    ),
+    ("stage name=<label> | index=<n>", "Select a project stage"),
+    (
+        "event sequence=<id> | index=<n>",
+        "Select and inspect an event",
+    ),
+    ("events", "Focus the event list (E)"),
+    (
+        "agent.next | agent.previous",
+        "Cycle the selected agent (, / .)",
+    ),
+    ("command index=<n>", "Select an offered command"),
+    (
+        "copy",
+        "Copy the selected literal command; never execute it",
+    ),
+    (
+        "chat",
+        "Open F9 Sproket static chat log viewer",
+    ),
+    (
+        "chat.close",
+        "Close F9 Sproket chat log viewer (F9/Esc)",
+    ),
+    ("input field=<name> value=<text>", "Edit an intake field"),
+    (
+        "intake.open | intake.new | intake.create | intake.resume",
+        "F6 / form F2 / F5 / F6",
+    ),
+    (
+        "project.open | project.save | storyboard.open",
+        "Form F3 / Ctrl+S / form F7",
+    ),
+    ("doctor | details | refresh", "F10 / D / F8"),
+    ("scroll rows=<signed count>", "Scroll the current panel"),
+    (
+        "key key=<key>",
+        "Any keyboard control: F1–F12, ctrl+s, arrows, enter, esc, tab, pageup/pagedown, or one character",
+    ),
+    (
+        "text text=<text>",
+        "Type into the active intake field without submitting",
+    ),
+    ("cancel | submit", "Escape / Enter in the current context"),
+    (
+        "reload | quit",
+        "Reload this exact TUI / close it; drafts must be resolved first",
+    ),
 ];
-
-#[cfg(test)]
-mod watch_tests{
- use super::*;
- use std::collections::VecDeque;
- /// Native typed events, not hand-written ones: the watch is driven by what the tail emits.
- fn typed(rows:&[Value])->Vec<Value>{crate::snapshot::tail(&json!({"events":rows}),Some("/p.magic"))}
- fn look(rows:&[Value])->Value{json!({"ok":true,"instance":4242,"project":"/p.magic","events":typed(rows)})}
- fn dispatch(sequence:u64,command:&str,control:&str)->Value{
-  json!({"sequence":sequence,"stage":"dispatch_running","command":command,"request_id":format!("{command}-{sequence}"),"control":control,"project":"/p.magic"})
- }
- fn success(sequence:u64,command:&str,control:&str)->Value{
-  json!({"sequence":sequence,"stage":"engine_success","command":command,"request_id":format!("{command}-{sequence}"),"control":control,"project":"/p.magic"})
- }
- fn failure(sequence:u64,command:&str,control:&str,error:&str)->Value{
-  json!({"sequence":sequence,"stage":"engine_error","command":command,"request_id":format!("{command}-{sequence}"),"control":control,"error":error,"project":"/p.magic"})
- }
- /// Drive one watch against fake TUI replies and a fake herdr.
- fn run(replies:Vec<Value>,params:Value,prompt_reply:Result<(),String>)->(Result<Value,String>,Vec<Value>,Vec<(String,String)>){
-  let mut queue:VecDeque<Value>=replies.into();
-  let mut out=Vec::new();let mut prompts=Vec::new();
-  let result=watch_with(&params,&mut |_|Ok(queue.pop_front().expect("the watch polled more than the fixture offered")),&mut |value|out.push(value.clone()),
-   &mut |target,text|{prompts.push((target.to_owned(),text.to_owned()));prompt_reply.clone()});
-  (result,out,prompts)
- }
-
- #[test]
- fn watch_replays_no_history_and_prompts_once_per_distinct_failure(){
-  // The live TUI already shows a refused recipe when the watch starts: history, not news.
-  let mut rows=vec![dispatch(11,"motion.recipe","motion-recipe"),failure(12,"motion.recipe","motion-recipe","recipe needs a rig")];
-  let first=look(&rows);
-  rows.push(dispatch(13,"video.place_track","place-track"));
-  rows.push(failure(14,"video.place_track","place-track","no rendered clip"));
-  let second=look(&rows);
-  let repeated=look(&rows);
-  rows.push(success(15,"video.place_track","place-track"));
-  rows.push(dispatch(16,"video.place_track","place-track"));
-  rows.push(failure(17,"video.place_track","place-track","no rendered clip"));
-  let fourth=look(&rows);
-  let(result,out,prompts)=run(vec![first,second,repeated,fourth],json!({"count":7,"interval_ms":0,"notify":"beaker"}),Ok(()));
-  let summary=result.expect("the count ends the watch");
-  assert_eq!(summary["streamed"],7);
-  assert_eq!(out[0]["kind"],"watching");
-  let kinds:Vec<_>=out[1..].iter().filter(|v|v["kind"]=="event").map(|v|format!("event:{}",v["event"]["type"].as_str().unwrap_or(""))).collect();
-  // The repeated poll streams nothing, and the identical refusal after a success is news again.
-  assert_eq!(kinds,["event:place_track_started","event:place_track_finished","event:error","event:place_track_finished","event:place_track_started","event:place_track_finished","event:error"]);
-  assert_eq!(prompts.len(),2,"one prompt per distinct failure, none for history or repeats");
-  let(target,text)=&prompts[0];
-  assert_eq!(target,"beaker");
-  for expected in ["video.place_track","place-track","/p.magic","no rendered clip","video.place_track-14"]{
-   assert!(text.contains(expected),"prompt names {expected}: {text}");
-  }
-  assert!(text.contains("No automatic retry"));
- }
-
- #[test]
- fn watch_keeps_a_refusal_muted_across_a_retry_that_fails_again(){
-  let rows=vec![dispatch(11,"motion.recipe","motion-recipe"),failure(12,"motion.recipe","motion-recipe","photocraft refused the source")];
-  let first=look(&rows);
-  let second=first.clone();
-  let mut retry=rows.clone();
-  retry.push(dispatch(13,"motion.recipe","motion-recipe"));
-  retry.push(failure(14,"motion.recipe","motion-recipe","photocraft refused the source"));
-  let third=look(&retry);
-  let(result,out,prompts)=run(vec![first,second,third],json!({"count":1,"interval_ms":0,"notify":"beaker"}),Ok(()));
-  assert_eq!(result.expect("the count ends the watch")["streamed"],1);
-  let kinds:Vec<_>=out[1..].iter().filter(|v|v["kind"]=="event").map(|v|v["event"]["type"].as_str().unwrap_or("").to_owned()).collect();
-  assert_eq!(kinds,["motion_recipe_started"],"the retry's start is news; its identical refusal is not");
-  assert!(prompts.is_empty(),"a failing retry does not repeat the alert");
- }
-
- #[test]
- fn watch_reports_a_refused_notification_without_retrying_it(){
-  let mut rows=vec![json!({"sequence":10,"stage":"saved_state","command":"project.save","project":"/p.magic"})];
-  let first=look(&rows);
-  rows.push(dispatch(11,"motion.recipe","motion-recipe"));
-  rows.push(failure(12,"motion.recipe","motion-recipe","photocraft refused the source"));
-  let second=look(&rows);
-  let repeated=look(&rows);
-  let(result,out,prompts)=run(vec![first,second,repeated],json!({"count":3,"interval_ms":0,"notify":"beaker"}),Err("agent beaker is busy".into()));
-  assert_eq!(result.expect("the count ends the watch")["streamed"],3);
-  let refusal=out.iter().find(|v|v["kind"]=="notification").expect("a refusal is reported");
-  assert_eq!(refusal["delivery"]["accepted"],false);
-  assert_eq!(refusal["delivery"]["error"],"agent beaker is busy");
-  assert_eq!(refusal["delivery"]["retried"],false);
-  assert_eq!(prompts.len(),1,"a refused prompt is not retried");
- }
-
- #[test]
- fn watch_refuses_invalid_parameters(){
-  for params in [json!({"notify":true}),json!({"count":-1})]{
-   let result=watch_with(&params,&mut |_|unreachable!(),&mut |_|{},&mut |_,_|Ok(()));
-   assert!(result.is_err(),"{params} is refused before polling");
-  }
- }
-}

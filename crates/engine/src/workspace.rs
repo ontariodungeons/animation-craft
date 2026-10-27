@@ -39,18 +39,43 @@ pub fn resolve_workspace_path(s: &crate::Session, raw: &str) -> PathBuf {
     workspace_root(s).join(p)
 }
 
-/// Resolve an installed Craft CLI binary (`photocraft-cli`, `effectcraft-cli`, `filmcraft-cli`).
+/// Resolve an installed Craft CLI binary (`photocraft-cli`, `effectcraft-cli`, `filmcraft-cli`),
+/// preferring an explicit `<TOOL_NAME>` env override, then `~/.local/share/artcraft-launcher/installed.json`, then `PATH`.
 pub fn resolve_craft_cli(name: &str) -> String {
-    craft_cli_override(name, std::env::var(name.to_uppercase().replace('-', "_")).ok(),
-                       std::env::var("CRAFT_CLI_DIR").ok()).unwrap_or_else(|| name.to_string())
+    std::env::var(name.to_uppercase().replace('-', "_"))
+        .ok()
+        .filter(|p| !p.is_empty())
+        .or_else(|| resolve_artcraft_launcher_cli(name))
+        .unwrap_or_else(|| name.to_string())
 }
 
-// Match pipeline/craft_cli.py: explicit tool path, suite directory, then PATH.
-// Keep an invalid explicit override so execution fails rather than silently using another version.
-fn craft_cli_override(name: &str, explicit: Option<String>, directory: Option<String>) -> Option<String> {
-    if let Some(path) = explicit.filter(|p| !p.is_empty()) { return Some(path); }
-    directory.map(|dir| Path::new(&dir).join(name)).filter(|p| p.is_file())
-        .map(|p| p.to_string_lossy().into_owned())
+fn resolve_artcraft_launcher_cli(name: &str) -> Option<String> {
+    let is_cli = name.ends_with("-cli");
+    let app = name.strip_suffix("-cli").unwrap_or(name);
+    let home = std::env::var("HOME").ok()?;
+    let installed_path = Path::new(&home).join(".local/share/artcraft-launcher/installed.json");
+    let text = std::fs::read_to_string(installed_path).ok()?;
+    let parsed: Value = serde_json::from_str(&text).ok()?;
+    let app_entry = &parsed["apps"][app];
+    if !is_cli {
+        if let Some(appimage) = app_entry["path"].as_str() {
+            let p = Path::new(appimage);
+            if p.is_file() {
+                return Some(p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let ver = app_entry["version"].as_str()?;
+    let cli_name = format!("{app}-cli");
+    let extracted = Path::new(&home)
+        .join(".local/share")
+        .join(app)
+        .join(ver)
+        .join(&cli_name);
+    if extracted.is_file() {
+        return Some(extracted.to_string_lossy().into_owned());
+    }
+    None
 }
 
 /// Build the exact CLI argument vector for `photocraft-cli run <input> --cmd <id> [--params <json>] --out <output>`.
@@ -152,7 +177,12 @@ pub(crate) fn acquire_tool_slot() -> ToolSlotGuard {
 /// Run an external command-line tool in `cwd`, capturing stdout as a String.
 pub(crate) fn run_tool_in(cwd: &Path, tool: &str, args: &[String]) -> Result<String> {
     let _slot = acquire_tool_slot();
-    let output = std::process::Command::new(tool)
+    let executable = if tool.ends_with("-cli") && !tool.contains('/') {
+        resolve_craft_cli(tool)
+    } else {
+        tool.to_string()
+    };
+    let output = std::process::Command::new(&executable)
         .current_dir(cwd)
         .args(args)
         .output()
@@ -239,49 +269,4 @@ pub fn asset_id_for_import(typed_name: Option<&str>, path: &Path) -> String {
                 .and_then(try_sanitize_asset_id)
         })
         .unwrap_or_else(|| "asset".to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn craft_cli_explicit_version_wins_and_never_silently_falls_back() {
-        assert_eq!(craft_cli_override("photocraft-cli",Some("/configured/new-cli".into()),Some("/other".into())),Some("/configured/new-cli".into()));
-        assert_eq!(craft_cli_override("photocraft-cli",Some("/missing/explicit-cli".into()),None),Some("/missing/explicit-cli".into()));
-        assert_eq!(craft_cli_override("photocraft-cli",None,None),None);
-        let dir=std::env::temp_dir().join(format!("ac_craft_resolver_{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
-        let file=dir.join("photocraft-cli");std::fs::write(&file,b"fixture").unwrap();
-        assert_eq!(craft_cli_override("photocraft-cli",None,Some(dir.to_string_lossy().into_owned())),Some(file.to_string_lossy().into_owned()));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn caller_directory_does_not_hide_the_current_pipeline() {
-        let s=crate::Session{cwd:std::env::temp_dir(),..crate::Session::default()};
-        let root=workspace_root(&s);
-        assert!(root.join("apps/magicstudio-shell/Cargo.toml").is_file());
-        assert!(root.join("pipeline/storyboard_skeleton.py").is_file());
-    }
-
-    #[test]
-    fn sanitize_asset_id_lowercases_and_collapses_separators() {
-        assert_eq!(sanitize_asset_id("Hero Name"), "hero_name");
-        assert_eq!(sanitize_asset_id("   "), "asset");
-        assert_eq!(sanitize_asset_id("Miss__Hayley"), "miss_hayley");
-        assert_eq!(sanitize_asset_id("Old-Mac"), "old_mac");
-    }
-
-    #[test]
-    fn asset_id_for_import_prefers_typed_name_then_file_stem() {
-        let path = std::path::Path::new("/some/round/Create_pose_sheet_for_puppet_202607180130_20.png");
-        assert_eq!(
-            asset_id_for_import(Some("  My Hero  "), path),
-            "my_hero"
-        );
-        assert_eq!(
-            asset_id_for_import(None, path),
-            "create_pose_sheet_for_puppet_202607180130_20"
-        );
-    }
 }

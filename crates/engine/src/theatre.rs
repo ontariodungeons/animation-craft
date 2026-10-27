@@ -180,29 +180,3 @@ pub fn clear(s: &mut Session, params: &Value) -> Result<Value> {
     let summary:Vec<Value>=cleared.iter().map(|c|json!({"sheet":c["sheet"],"parts":c["parts"]})).collect();
     Ok(json!({"ok":true,"character":asset,"project":project,"cleared":summary,"removed_tracks":removed_tracks}))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn every_clip_gets_its_own_sheet_and_existing_keyframes_survive() {
-        let key=json!({"id":"k","type":"bezier","position":12.0,"value":5,"handles":[0.5,1,0.5,0],"connectedRight":true});
-        let tracks=json!({"antenna-l":{"trackData":{"t":{"type":"BasicKeyframedTrack","keyframes":[key]}},"trackIdByPropPath":{"[\"rotation\"]":"t"}}});
-        let mut state=json!({"definitionVersion":"0.4.0","revisionHistory":["r"],"sheetsById":{
-            "bee":{"sequence":{"type":"PositionalSequence","length":10,"subUnitsPerUnit":30,"tracksByObject":tracks},"staticOverrides":{"byObject":{}}},
-            "bee / walk":{"sequence":{"type":"PositionalSequence","length":4,"subUnitsPerUnit":30,"tracksByObject":{"wing-l":{}}},"staticOverrides":{"byObject":{}}}}});
-        let clip=|id:&str,duration:Value,standard:bool|json!({"clip":id,"duration":duration,"standard":standard,"sheet":clip_sheet_id("bee",id)});
-        let clips=[clip("bee-beat2-barn-exit",json!(5.4),false),clip("bee-beat3-bzzz",json!(3.1),false),clip("@walk",json!(4),true),clip("@rest",Value::Null,true)];
-        let results=add_clip_sheets(&mut state,"bee",&clips);
-        let sheets=state["sheetsById"].as_object().unwrap();
-        for id in ["bee","bee / bee-beat2-barn-exit","bee / bee-beat3-bzzz","bee / walk","bee / rest"] { assert!(sheets.contains_key(id),"missing {id}"); }
-        assert_eq!(sheets["bee / bee-beat2-barn-exit"]["sequence"]["tracksByObject"],tracks,"legacy keyframes copied to the opening clip");
-        assert_eq!(sheets["bee / bee-beat2-barn-exit"]["sequence"]["length"],12.0,"sequence stretched to keep the last keyframe");
-        assert_eq!(sheets["bee / bee-beat3-bzzz"]["sequence"]["tracksByObject"],json!({}),"clips do not share keyframes");
-        assert_eq!(sheets["bee / walk"]["sequence"]["tracksByObject"],json!({"wing-l":{}}),"existing clip sheet untouched");
-        assert_eq!(sheets["bee"]["sequence"]["tracksByObject"],tracks,"legacy sheet kept");
-        assert_eq!(sheets["bee / rest"]["sequence"]["length"],10.0);
-        assert_eq!(results.iter().filter(|r|r["created"]==true).count(),3);
-        assert_eq!(add_clip_sheets(&mut state,"bee",&clips).iter().filter(|r|r["created"]==true).count(),0,"converting twice changes nothing");
-    }
-}

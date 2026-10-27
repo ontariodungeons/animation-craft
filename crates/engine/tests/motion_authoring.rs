@@ -170,7 +170,7 @@ fn exact_field_reset_and_action_metadata_keep_stable_ids_and_guards() {
     undo["character"] = json!("other");
     assert!(s.execute("motion.edit.undo", undo).is_err());
     s.theatre_state =
-        Some(json!({"sheetsById":{"subject / move":{"sequence":{"tracksByObject":{"body":{}}}}}}));
+        Some(json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{"subject / move":{"sequence":{"tracksByObject":{"body":{}}}}}}));
     let read = s
         .execute("motion.tracks", json!({"character":"subject"}))
         .unwrap();
@@ -180,11 +180,11 @@ fn exact_field_reset_and_action_metadata_keep_stable_ids_and_guards() {
         .iter()
         .find(|t| t["id"] == "move")
         .unwrap();
-    assert_eq!(track["authoring"]["part_set"], false);
+    assert_eq!(track["authoring"]["part_set"], true);
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
-fn untouched_empty_theatre_mount_exports_but_seeded_rotation_refuses() {
+fn untouched_empty_theatre_mount_and_saved_theatre_keyframes_sample_and_export() {
     let (mut s, root, rig) = fixture();
     let mut p = params(&s, &rig);
     p["time"] = json!(0.5);
@@ -199,7 +199,7 @@ fn untouched_empty_theatre_mount_exports_but_seeded_rotation_refuses() {
         json!({"rotation":0});
     assert!(
         s.execute("motion.pose.export", p).is_err(),
-        "even identity-looking actual overrides must not be discarded"
+        "unsaved Theatre edits that differ from disk must be refused until saved"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -305,32 +305,21 @@ fn stacking_order_changes_pixels_not_parent_transforms_and_has_guarded_undo() {
 }
 
 #[test]
-fn action_export_refuses_saved_theatre_before_sampling_or_renderer_work() {
-    let (mut s,root,_)=fixture();
-    let state=json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{
-        "subject / move":{"sequence":{"tracksByObject":{"body":{"trackData":{"rotation":{"keyframes":[{"position":0,"value":15}]}}}}},"staticOverrides":{"byObject":{}}}
-    }});
-    fs::write(s.project_path.as_ref().unwrap(),json!({"theatre":state}).to_string()).unwrap();
-    s.theatre_state=Some(state);
-    // Invalid duration guarantees the old path cannot launch a renderer during this regression.
-    let error=s.execute("motion.export_track",json!({"character":"subject","track":"move","rest":true,"duration":0})).unwrap_err().to_string();
-    assert!(error.contains("Relevant Theatre edits"),"must refuse the unsupported preview before export processing: {error}");
-    assert!(!root.join("tracks").exists());
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn blender_migration_refuses_saved_theatre_before_loading_or_submission() {
+fn saved_theatre_keyframes_evaluate_in_shared_sampler_and_retime_with_duration() {
     let (mut s,root,rig)=fixture();
-    let state=json!({"definitionVersion":"0.4.0","revisionHistory":[],"sheetsById":{
-        "subject / move":{"sequence":{"tracksByObject":{"body":{"trackData":{"rotation":{"keyframes":[{"position":0,"value":15}]}}}}},"staticOverrides":{"byObject":{}}}
+    let state=json!({"definitionVersion":"0.4.0","revisionHistory":["r1"],"sheetsById":{
+        "subject / move":{"sequence":{"type":"PositionalSequence","length":1.0,"subUnitsPerUnit":30,"tracksByObject":{"body":{"trackData":{"rotation":{"keyframes":[{"position":0.0,"value":0.0},{"position":1.0,"value":20.0}]}}}}},"staticOverrides":{"byObject":{}}}
     }});
     fs::write(s.project_path.as_ref().unwrap(),json!({"theatre":state}).to_string()).unwrap();
     s.theatre_state=Some(state);
-    // Missing rig guarantees this regression cannot submit a real worker on the old path.
-    fs::rename(&rig,root.join("preserved-rig.json")).unwrap();
-    let error=s.execute("blender.start",json!({"character":"subject","track":"move"})).unwrap_err().to_string();
-    assert!(error.contains("Relevant Theatre edits"),"must refuse silently omitted saved animation: {error}");
-    assert!(!root.join("animation").exists());
+    let sample=s.execute("motion.sample",json!({"character":"subject","track":"move","time":0.5})).unwrap();
+    assert_eq!(sample["frames"][0]["layers"][0]["rotation"],json!(10.0));
+    let mut edit=params(&s,&rig);
+    edit["duration"]=json!(4.0);
+    let res=s.execute("motion.action.set",edit).unwrap();
+    assert_eq!(res["ok"],true);
+    let sample2=s.execute("motion.sample",json!({"character":"subject","track":"move","time":2.0})).unwrap();
+    assert_eq!(sample2["duration"],json!(4.0));
+    assert_eq!(sample2["frames"][0]["layers"][0]["rotation"],json!(10.0));
     fs::remove_dir_all(root).unwrap();
 }

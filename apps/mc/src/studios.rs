@@ -42,9 +42,17 @@ pub fn pin(endpoint: &str) -> Result<PathBuf, String> {
 
 /// Open and attach this caller to the returned instance; no port choices are needed.
 pub fn open(project: Option<&str>) -> Result<Value, String> {
+    open_with_options(project, false, None)
+}
+
+pub fn open_with_options(
+    project: Option<&str>,
+    animate_only: bool,
+    character: Option<&str>,
+) -> Result<Value, String> {
     let exe=std::env::current_exe().map_err(|e|e.to_string())?;
     let shell=exe.parent().ok_or("CLI directory missing")?.join("magicstudio-shell");
-    let live=magicstudio_engine::studio_sessions::open(&shell,project)?;
+    let live=magicstudio_engine::studio_sessions::open_with_options(&shell,project,animate_only,character)?;
     pin(live["endpoint"].as_str().ok_or("Opened Studio has no endpoint")?)?;
     Ok(live)
 }

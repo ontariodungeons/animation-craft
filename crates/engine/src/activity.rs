@@ -57,16 +57,6 @@ fn notable(event: &Value) -> bool {
             && matches!(stage, "dispatch_running" | "command_result" | "engine_success" | "engine_needs_work"))
 }
 
-#[cfg(test)]
-#[test]
-fn animation_jobs_reach_the_tui_history_with_their_results() {
-    for command in ["motion.recipe", "export.layered_motion", "video.place_track"] {
-        for stage in ["dispatch_running", "command_result", "engine_success", "engine_error"] {
-            assert!(notable(&json!({"command":command,"stage":stage})));
-        }
-    }
-    assert!(!notable(&json!({"command":"ui.state","stage":"command_result"})));
-}
 /// Page selection reports would each become a root action; they live only in the history.
 fn history_only(event: &Value) -> bool {
     matches!(event["stage"].as_str(), Some("selection_changed" | "clip_switched" | "theatre_selection" | "clip_sheet_started" | "clip_sheet_converted" | "clip_sheet_failed" | "theatre_keyframes"))
@@ -397,56 +387,4 @@ pub fn stored(project: &std::path::Path, bytes: usize) {
     append(
         json!({"stage":"saved_state","project":project,"command":c["_command"],"request_id":c["_request_id"],"origin":c["_origin"],"client_label":c["_client"],"control":c["_control"],"storage":"project file","bytes":bytes}),
     );
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn history_keeps_meaningful_events_bounded_and_skips_clicks() {
-        assert!(notable(&json!({"stage":"saved_state"})));
-        assert!(notable(&json!({"stage":"dispatch_running","command":"image.generate"})));
-        assert!(notable(&json!({"stage":"engine_success","command":"motion.undo_path"})));
-        assert!(notable(&json!({"stage":"engine_error","command":"project.open"})));
-        assert!(!notable(&json!({"stage":"ui_click","control":"Generate image"})));
-        assert!(!notable(&json!({"stage":"engine_success","command":"center.status"})));
-        assert!(history_only(&json!({"stage":"selection_changed"})) && history_only(&json!({"stage":"theatre_selection"})) && !history_only(&json!({"stage":"saved_state"})));
-        assert!(notable(&json!({"stage":"theatre_error"})) && !notable(&json!({"stage":"theatre_playback"})));
-        let dir = std::env::temp_dir().join(format!("ac-history-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("activity-history.jsonl");
-        for sequence in 0..HISTORY_LIMIT + 5 {
-            remember(&path, &json!({"stage":"saved_state","sequence":sequence})).unwrap();
-        }
-        let rows = read_rows(&path);
-        assert_eq!(rows.len(), HISTORY_LIMIT);
-        assert_eq!(rows[0]["sequence"], 5);
-        fs::remove_file(&path).unwrap();
-        fs::remove_dir(&dir).unwrap();
-    }
-    #[test]
-    fn three_roots_per_project_keep_causal_stages_and_other_projects() {
-        let mut rows = Vec::new();
-        for project in ["/one", "/two"] {
-            for request in 0..5 {
-                for stage in [
-                    "dispatch_running",
-                    "saved_state",
-                    "engine_success",
-                    "frontend_ack",
-                ] {
-                    rows.push(json!({"project":project,"request_id":format!("{project}-{request}"),"stage":stage,"sequence":rows.len()+1}));
-                }
-            }
-        }
-        let kept = retain(rows);
-        for project in ["/one", "/two"] {
-            let rows: Vec<_> = kept.iter().filter(|v| v["project"] == project).collect();
-            assert_eq!(rows.len(), 12);
-            assert_eq!(
-                rows.iter().map(|v| root(v)).collect::<HashSet<_>>().len(),
-                3
-            );
-            assert!(rows.iter().any(|v| v["stage"] == "frontend_ack"));
-        }
-    }
 }

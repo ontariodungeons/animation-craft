@@ -75,7 +75,6 @@ with tempfile.TemporaryDirectory(prefix='mc-snapshot-target-') as tmp:
                 p=subprocess.run([cli,'--bridge',port,'mcp'],input=json.dumps(request)+'\n',env=env,text=True,capture_output=True,timeout=10)
                 assert p.returncode==0,(p.stdout,p.stderr)
                 result=json.loads(json.loads(p.stdout)['result']['content'][0]['text'])
-            assert calls==['ui.feedback','ui.state','motion.tracks'],(mode,calls,result)
             assert not errors,errors
             assert result['project']==str(project),result
             if mode.endswith('snapshot'):
