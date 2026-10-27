@@ -1,12 +1,12 @@
-//! `doctor` subcommand (`mc doctor [--clean]` and `app.doctor` command):
-//! checks for lingering Magic Studio/Craft processes, stale bridge/dev-server ports,
-//! external tool availability, and source code smells worth running `/ponytail-review` on.
+//! `doctor` subcommand (`mc doctor` / `app.doctor`):
+//! lightweight local check of external CLI tool availability and stale `.video-server.json` state.
+//! Never scans `/proc` to police or kill external processes.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::workspace::{resolve_craft_cli, workspace_root};
+use crate::workspace::resolve_craft_cli;
 use crate::{Result, Session};
 
 pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
@@ -14,150 +14,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
         .get("clean")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let keep_port = params
-        .get("keep_port")
-        .and_then(Value::as_u64)
-        .map(|p| p as u16);
-    let my_pid = std::process::id();
-    let mc_program = std::env::current_exe().ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("mc")))
-        .and_then(|exe| std::fs::canonicalize(exe).ok());
 
-    let mut processes = Vec::new();
-    let mut cleaned_pids = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc") {
-        for entry in entries.flatten() {
-            let Some(pid) = entry
-                .file_name()
-                .to_str()
-                .and_then(|n| n.parse::<u32>().ok())
-            else {
-                continue;
-            };
-            if pid == my_pid {
-                continue;
-            }
-            let Ok(raw_cmd) = std::fs::read(entry.path().join("cmdline")) else {
-                continue;
-            };
-            if raw_cmd.is_empty() {
-                continue;
-            }
-            let args: Vec<String> = raw_cmd
-                .split(|&b| b == 0)
-                .filter(|s| !s.is_empty())
-                .map(|s| String::from_utf8_lossy(s).into_owned())
-                .collect();
-            let Some(exe) = args.first() else { continue };
-            let exe_name = Path::new(exe)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(exe);
-            // A short executable name can belong to an unrelated program. Match the actual
-            // kernel executable against this installation before listing or stopping mc.
-            if exe_name == "mc" && !matching_mc_process(&entry.path().join("exe"), mc_program.as_deref()) {
-                continue;
-            }
-            // Magic Studio is the app being audited. The Craft CLIs are the strangers it hosts.
-            // Both are reported; only the Craft strangers are ever stopped by `--clean`.
-            let is_studio = matches!(exe_name, "magicstudio" | "magicstudio-shell" | "mc");
-            let is_craft = matches!(
-                exe_name,
-                "photocraft-cli"
-                    | "effectcraft-cli"
-                    | "filmcraft-cli"
-                    | "pdfcraft-cli"
-                    | "vectorcraft-cli"
-                    | "figcraft-cli"
-                    | "cadcraft-cli"
-                    | "deckcraft-cli"
-                    | "gridcraft-cli"
-            );
-            if !is_studio && !is_craft {
-                continue;
-            }
-            let control_port = args
-                .windows(2)
-                .find(|w| w[0] == "--control")
-                .and_then(|w| w[1].parse::<u16>().ok());
-            let bridge_alive = control_port.map(port_open);
-            let is_mcp = args.iter().any(|a| a == "mcp");
-            let is_gui = matches!(exe_name, "magicstudio" | "magicstudio-shell");
-            let kind = if is_gui {
-                "gui"
-            } else if is_mcp {
-                "mcp_server"
-            } else {
-                "cli_worker"
-            };
-            let (rss_mb, ppid) = read_proc_status(pid);
-            // Only the Craft strangers are swept. The Studio app and its own CLI are audited,
-            // never stopped by a blanket clean — an agent may be driving them.
-            let should_clean = clean
-                && is_craft
-                && (is_mcp || keep_port.is_none_or(|kp| control_port != Some(kp)));
-            let mut action = "running";
-            if should_clean {
-                action = if stop_process(pid, control_port) {
-                    cleaned_pids.push(pid);
-                    "stopped"
-                } else {
-                    "stop_failed"
-                };
-            }
-            processes.push(json!({
-                "pid": pid,
-                "ppid": ppid,
-                "exe": exe_name,
-                "kind": kind,
-                "rss_mb": rss_mb,
-                "control_port": control_port,
-                "bridge_alive": bridge_alive,
-                "cmdline": args.join(" "),
-                "status": action,
-            }));
-        }
-    }
-
-    // Identify duplicate MCP server instances per executable (keep the newest PID per exe).
-    let mut newest_mcp_by_exe = std::collections::HashMap::<String, u32>::new();
-    for p in &processes {
-        if p["kind"] == "mcp_server" && p["status"] == "running" {
-            if let (Some(exe), Some(pid)) = (p["exe"].as_str(), p["pid"].as_u64()) {
-                let pid = pid as u32;
-                newest_mcp_by_exe
-                    .entry(exe.to_string())
-                    .and_modify(|max_pid| *max_pid = (*max_pid).max(pid))
-                    .or_insert(pid);
-            }
-        }
-    }
-    let mut duplicate_mcp_count = 0usize;
-    for p in &mut processes {
-        if p["kind"] == "mcp_server" && p["status"] == "running" {
-            let exe = p["exe"].as_str().unwrap_or_default().to_string();
-            let pid = p["pid"].as_u64().unwrap_or(0) as u32;
-            let ppid = p["ppid"].as_u64().unwrap_or(0) as u32;
-            let is_dup = newest_mcp_by_exe.get(&exe).is_some_and(|&newest| pid < newest) || ppid == 1;
-            // The Studio's own `mc mcp` server is the one agents talk to; a duplicate of it is
-            // still a stray, but the newest one is kept and the older ones are reported.
-            if is_dup {
-                duplicate_mcp_count += 1;
-                if clean {
-                    if stop_process(pid, None) {
-                        cleaned_pids.push(pid);
-                        p["status"] = json!("stopped_duplicate");
-                    } else {
-                        p["status"] = json!("stop_failed");
-                    }
-                } else {
-                    p["duplicate"] = json!(true);
-                }
-            }
-        }
-    }
-
-    // Check stale `.video-server.json` in the open project or current directory.
     let mut cleaned_files = Vec::new();
     let project_dir = s
         .project_path
@@ -167,28 +24,22 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or_else(|| s.cwd.clone());
     let server_file = project_dir.join(".video-server.json");
     let mut video_server_state = json!("none");
-    if let Ok(raw) = std::fs::read_to_string(&server_file)
-        && let Ok(saved) = serde_json::from_str::<Value>(&raw)
-    {
-        let port = saved.get("port").and_then(Value::as_u64).map(|p| p as u16);
-        let alive = port.is_some_and(port_open);
-        if !alive && clean {
+    if server_file.is_file() {
+        if clean {
             let _ = std::fs::remove_file(&server_file);
             cleaned_files.push(server_file.display().to_string());
             video_server_state = json!("removed_stale_lock");
-        } else if !alive {
-            video_server_state = json!({"stale": true, "file": server_file, "port": port});
         } else {
-            video_server_state = json!({"running": true, "port": port, "pid": saved.get("pid")});
+            video_server_state = json!({"file": server_file});
         }
     }
 
-    // Check external Craft CLI tools.
     let tools: Vec<Value> = [
         "photocraft-cli",
         "effectcraft-cli",
         "filmcraft-cli",
         "pdfcraft-cli",
+        "cli-anything-blender",
         "ffmpeg",
         "ffprobe",
     ]
@@ -200,229 +51,296 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     })
     .collect();
 
-    // Scan workspace Rust sources for Ponytail review candidates (oversized files, UI-thread I/O smells).
-    let root = workspace_root(s);
-    let ponytail_suggestions = scan_ponytail_candidates(&root);
-
-    let lingering_gui_count = processes
-        .iter()
-        .filter(|p| p["kind"] == "gui" && p["status"] == "running")
-        .count();
-    let mut recommendations = Vec::new();
-    if lingering_gui_count > 1 {
-        recommendations.push(format!(
-            "{lingering_gui_count} Magic Studio GUI instances are running concurrently; run `mc doctor --clean` to close lingering instances."
-        ));
-    } else if lingering_gui_count == 1 && !clean {
-        if let Some(p) = processes.iter().find(|p| p["kind"] == "gui") {
-            let port_hint = p["control_port"]
-                .as_u64()
-                .map(|port| format!(" (`mc --bridge {port} app.quit`)"))
-                .unwrap_or_default();
-            recommendations.push(format!(
-                "1 Magic Studio GUI instance is running (pid {}){port_hint}. Pass `--clean` to close it.",
-                p["pid"]
-            ));
-        }
-    }
-    if duplicate_mcp_count > 0 && !clean {
-        recommendations.push(format!(
-            "{duplicate_mcp_count} duplicate Craft MCP server processes are running; run `mc doctor --clean` to stop duplicates."
-        ));
-    }
-    if video_server_state.get("stale") == Some(&json!(true)) {
-        recommendations.push(
-            "Stale `.video-server.json` found for a stopped dev server; run `mc doctor --clean`."
-                .into(),
-        );
-    }
-    for item in ponytail_suggestions.iter().take(3) {
-        if let Some(cmd) = item.get("ponytail_cmd").and_then(Value::as_str) {
-            recommendations.push(format!(
-                "Run `{cmd}` ({})",
-                item["reason"].as_str().unwrap_or("large module")
-            ));
-        }
-    }
-
     Ok(json!({
         "ok": true,
         "cleaned": {
-            "stopped_pids": cleaned_pids,
+            "stopped_pids": [],
             "removed_files": cleaned_files,
         },
-        "processes": processes,
+        "processes": [],
         "video_server": video_server_state,
         "tools": tools,
-        "ponytail_candidates": ponytail_suggestions,
-        "recommendations": recommendations,
+        "ponytail_candidates": [],
+        "recommendations": [],
     }))
 }
 
-fn matching_mc_process(executable_link: &Path, expected: Option<&Path>) -> bool {
-    expected.is_some_and(|expected| {
-        std::fs::canonicalize(executable_link).ok().as_deref() == Some(expected)
+pub fn cmd_app_analytics(s: &mut Session, params: &Value) -> Result<Value> {
+    let scan = params
+        .get("scan")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let doctor = cmd_app_doctor(s, &json!({ "clean": false }))?;
+    let host = read_host_telemetry();
+    let usage = read_omarchy_usage();
+    let project = read_project_analytics(s);
+    let root = crate::workspace::workspace_root(s);
+    let complexity = read_complexity(&root, scan);
+
+    Ok(json!({
+        "ok": true,
+        "host": host,
+        "tools": doctor["tools"],
+        "video_server": doctor["video_server"],
+        "usage": usage,
+        "project": project,
+        "complexity": complexity,
+    }))
+}
+
+fn read_host_telemetry() -> Value {
+    let pid = std::process::id();
+    let self_rss_kb = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .unwrap_or(0);
+    let load = std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.split_whitespace().take(3).collect::<Vec<_>>().join(" ").into())
+        .unwrap_or_default();
+    let mut mem_total_kb = 0u64;
+    let mut mem_avail_kb = 0u64;
+    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        for line in meminfo.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                mem_total_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
+                mem_avail_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+        }
+    }
+    json!({
+        "pid": pid,
+        "self_rss_kb": self_rss_kb,
+        "load": load,
+        "mem_total_kb": mem_total_kb,
+        "mem_used_kb": mem_total_kb.saturating_sub(mem_avail_kb),
     })
 }
 
-#[cfg(test)]
-mod mc_process_tests {
-    use super::*;
-    #[test]
-    #[cfg(unix)]
-    fn unrelated_mc_and_unavailable_executables_are_not_owned() {
-        let root = std::env::temp_dir().join(format!("mc-doctor-{}", std::process::id()));
-        std::fs::create_dir_all(root.join("ours")).unwrap();
-        std::fs::create_dir_all(root.join("other")).unwrap();
-        let ours = root.join("ours/mc");
-        let other = root.join("other/mc");
-        std::fs::write(&ours, b"own executable fixture").unwrap();
-        std::fs::write(&other, b"unrelated executable fixture").unwrap();
-        let link = root.join("exe");
-        std::os::unix::fs::symlink(&other, &link).unwrap();
-        let expected = ours.canonicalize().unwrap();
-        assert!(!matching_mc_process(&link, Some(&expected)));
-        assert!(!matching_mc_process(&link, None));
-        std::fs::remove_file(&link).unwrap();
-        std::os::unix::fs::symlink(&ours, &link).unwrap();
-        assert!(matching_mc_process(&link, Some(&expected)));
-        std::fs::remove_file(&ours).unwrap();
-        assert!(!matching_mc_process(&link, Some(&expected)));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-}
-
-fn read_proc_status(pid: u32) -> (Option<u64>, Option<u32>) {
-    let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
-        return (None, None);
+fn read_omarchy_usage() -> Value {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")));
+    let Some(dir) = base.map(|b| b.join("omarchy/agents/usage")) else {
+        return json!({ "available": false, "agents": [], "totals": {} });
     };
-    let mut rss_mb = None;
-    let mut ppid = None;
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("VmRSS:") {
-            let kb = rest
-                .split_whitespace()
-                .next()
-                .and_then(|v| v.parse::<u64>().ok());
-            rss_mb = kb.map(|v| (v + 512) / 1024);
-        } else if let Some(rest) = line.strip_prefix("PPid:") {
-            ppid = rest
-                .split_whitespace()
-                .next()
-                .and_then(|v| v.parse::<u32>().ok());
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return json!({ "available": false, "agents": [], "totals": {} });
+    };
+    let mut agents = Vec::new();
+    let mut today_tokens_total = 0u64;
+    let mut today_prompts_total = 0u64;
+    let mut all_time_input = 0u64;
+    let mut all_time_output = 0u64;
+    let mut all_time_cache_read = 0u64;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
         }
-    }
-    (rss_mb, ppid)
-}
-
-fn port_open(port: u16) -> bool {
-    use std::net::{SocketAddr, TcpStream};
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(15)).is_ok()
-}
-
-fn stop_process(pid: u32, control_port: Option<u16>) -> bool {
-    // Try graceful bridge `app.quit` first when a control port is known.
-    if let Some(port) = control_port {
-        use std::io::Write;
-        use std::net::{SocketAddr, TcpStream};
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        if let Ok(mut stream) =
-            TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(40))
-        {
-            let _ = writeln!(stream, "{{\"id\":\"app.quit\",\"params\":{{}}}}");
-            let _ = stream.flush();
-            for _ in 0..8 {
-                std::thread::sleep(std::time::Duration::from_millis(30));
-                if !Path::new(&format!("/proc/{pid}")).exists() {
-                    return true;
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { continue };
+        let today_tokens = v["todayTotalTokens"].as_u64().unwrap_or(0);
+        let today_prompts = v["todayPrompts"].as_u64().unwrap_or(0);
+        let total_prompts = v["totalPrompts"].as_u64().unwrap_or(0);
+        let total_sessions = v["totalSessions"].as_u64().unwrap_or(0);
+        let mut input_sum = 0u64;
+        let mut output_sum = 0u64;
+        let mut cache_sum = 0u64;
+        let mut models = Vec::new();
+        if let Some(map) = v["modelUsage"].as_object() {
+            for (m_id, mv) in map {
+                let inp = mv["inputTokens"].as_u64().unwrap_or(0);
+                let out = mv["outputTokens"].as_u64().unwrap_or(0);
+                let cr = mv["cacheReadInputTokens"].as_u64().unwrap_or(0);
+                input_sum = input_sum.saturating_add(inp);
+                output_sum = output_sum.saturating_add(out);
+                cache_sum = cache_sum.saturating_add(cr);
+                if inp + out + cr > 0 {
+                    models.push(json!({
+                        "model": m_id,
+                        "input_tokens": inp,
+                        "output_tokens": out,
+                        "cache_read_tokens": cr,
+                        "total_tokens": inp.saturating_add(out).saturating_add(cr),
+                    }));
                 }
             }
         }
+        models.sort_by_key(|m| std::cmp::Reverse(m["total_tokens"].as_u64().unwrap_or(0)));
+        let total_agent_tokens = input_sum.saturating_add(output_sum).saturating_add(cache_sum);
+        if today_tokens == 0 && total_prompts == 0 && total_agent_tokens == 0 {
+            continue;
+        }
+        today_tokens_total = today_tokens_total.saturating_add(today_tokens);
+        today_prompts_total = today_prompts_total.saturating_add(today_prompts);
+        all_time_input = all_time_input.saturating_add(input_sum);
+        all_time_output = all_time_output.saturating_add(output_sum);
+        all_time_cache_read = all_time_cache_read.saturating_add(cache_sum);
+        agents.push(json!({
+            "id": v["id"].as_str().unwrap_or_default(),
+            "name": v["name"].as_str().unwrap_or_default(),
+            "tier": v["tierLabel"].as_str().unwrap_or_default(),
+            "today_tokens": today_tokens,
+            "today_prompts": today_prompts,
+            "total_prompts": total_prompts,
+            "total_sessions": total_sessions,
+            "input_tokens": input_sum,
+            "output_tokens": output_sum,
+            "cache_read_tokens": cache_sum,
+            "total_tokens": total_agent_tokens,
+            "limits": v["limits"],
+            "models": models,
+        }));
     }
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status();
-    for _ in 0..8 {
-        std::thread::sleep(std::time::Duration::from_millis(25));
-        if !Path::new(&format!("/proc/{pid}")).exists() {
-            return true;
+    agents.sort_by_key(|a| std::cmp::Reverse(a["today_tokens"].as_u64().unwrap_or(0).max(a["total_tokens"].as_u64().unwrap_or(0) / 100)));
+    json!({
+        "available": true,
+        "agents": agents,
+        "totals": {
+            "today_tokens": today_tokens_total,
+            "today_prompts": today_prompts_total,
+            "input_tokens": all_time_input,
+            "output_tokens": all_time_output,
+            "cache_read_tokens": all_time_cache_read,
+            "total_tokens": all_time_input.saturating_add(all_time_output).saturating_add(all_time_cache_read),
+        }
+    })
+}
+
+fn read_project_analytics(s: &Session) -> Value {
+    let turns = crate::agent::log_read(s);
+    let list = turns.as_array().cloned().unwrap_or_default();
+    let mut user_turns = 0usize;
+    let mut assistant_turns = 0usize;
+    let mut total_chars = 0usize;
+    for item in &list {
+        let role = item["role"].as_str().unwrap_or_default();
+        if role == "user" {
+            user_turns += 1;
+        } else if role == "assistant" {
+            assistant_turns += 1;
+        }
+        total_chars += item["text"].as_str().map(str::len).unwrap_or(0);
+    }
+    let estimated_tokens = (total_chars / 4) as u64;
+    json!({
+        "project": s.project_path,
+        "assets_count": s.project_assets.len(),
+        "user_turns": user_turns,
+        "assistant_turns": assistant_turns,
+        "total_turns": list.len(),
+        "total_chars": total_chars,
+        "estimated_tokens": estimated_tokens,
+    })
+}
+
+fn read_complexity(root: &Path, scan: bool) -> Value {
+    if !scan {
+        return json!({ "available": false, "reason": "Scan disabled" });
+    }
+    let lizard_bin = resolve_craft_cli("lizard");
+    let output = std::process::Command::new(&lizard_bin)
+        .current_dir(root)
+        .args([
+            "--csv",
+            "-l",
+            "rust",
+            "-l",
+            "python",
+            "crates/engine/src",
+            "apps/mc/src",
+            "apps/magicstudio-shell/src",
+            "pipeline",
+            "scripts",
+        ])
+        .output();
+    let Ok(out) = output else {
+        return json!({ "available": false, "reason": "lizard CLI not found on PATH" });
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut functions = Vec::new();
+    let mut files = std::collections::HashSet::new();
+    let mut total_nloc = 0u64;
+    let mut total_tokens = 0u64;
+    let mut over_15 = 0usize;
+    let mut max_ccn = 0u64;
+
+    for line in stdout.lines() {
+        let fields = parse_csv_line(line);
+        if fields.len() < 11 {
+            continue;
+        }
+        let Ok(nloc) = fields[0].parse::<u64>() else { continue };
+        let Ok(ccn) = fields[1].parse::<u64>() else { continue };
+        let Ok(tokens) = fields[2].parse::<u64>() else { continue };
+        let Ok(params) = fields[3].parse::<u64>() else { continue };
+        let file = fields[6].clone();
+        let name = fields[7].clone();
+        let start_line = fields[9].parse::<u64>().unwrap_or(1);
+        let end_line = fields[10].parse::<u64>().unwrap_or(start_line);
+
+        files.insert(file.clone());
+        total_nloc = total_nloc.saturating_add(nloc);
+        total_tokens = total_tokens.saturating_add(tokens);
+        if ccn > 15 {
+            over_15 += 1;
+        }
+        if ccn > max_ccn {
+            max_ccn = ccn;
+        }
+        functions.push(json!({
+            "name": name,
+            "file": file,
+            "start_line": start_line,
+            "end_line": end_line,
+            "nloc": nloc,
+            "ccn": ccn,
+            "tokens": tokens,
+            "params": params,
+        }));
+    }
+    functions.sort_by_key(|f| (std::cmp::Reverse(f["ccn"].as_u64().unwrap_or(0)), std::cmp::Reverse(f["nloc"].as_u64().unwrap_or(0))));
+    let hotspots: Vec<Value> = functions.iter().take(25).cloned().collect();
+    json!({
+        "available": !functions.is_empty(),
+        "tool": "lizard",
+        "files_analyzed": files.len(),
+        "functions_analyzed": functions.len(),
+        "total_nloc": total_nloc,
+        "total_code_tokens": total_tokens,
+        "functions_over_ccn_15": over_15,
+        "max_ccn": max_ccn,
+        "hotspots": hotspots,
+    })
+}
+
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut res = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    for ch in line.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                res.push(std::mem::take(&mut cur));
+            }
+            _ => cur.push(ch),
         }
     }
-    !Path::new(&format!("/proc/{pid}")).exists()
+    res.push(cur);
+    res
 }
 
 fn which_in_path(bin: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file()))
-        .unwrap_or(false)
-}
-
-fn scan_ponytail_candidates(root: &Path) -> Vec<Value> {
-    let mut files: Vec<(PathBuf, usize, Vec<&'static str>)> = Vec::new();
-    for rel_dir in ["crates/engine/src", "crates/ui-egui/src", "apps/mc/src"] {
-        collect_rs_files(&root.join(rel_dir), &mut files);
-    }
-    files.sort_by(|a, b| b.2.len().cmp(&a.2.len()).then_with(|| b.1.cmp(&a.1)));
-    files
-        .into_iter()
-        .filter(|(_, lines, smells)| *lines > 950 || !smells.is_empty())
-        .take(6)
-        .map(|(path, lines, smells)| {
-            let rel = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
-            let reason = if smells.is_empty() {
-                format!("{lines} lines — split by job")
-            } else {
-                format!("{lines} lines; {}", smells.join(", "))
-            };
-            json!({
-                "file": rel,
-                "lines": lines,
-                "smells": smells,
-                "reason": reason,
-                "ponytail_cmd": format!("/ponytail-review {rel}"),
-            })
-        })
-        .collect()
-}
-
-fn collect_rs_files(dir: &Path, out: &mut Vec<(PathBuf, usize, Vec<&'static str>)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_rs_files(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
-            && let Ok(text) = std::fs::read_to_string(&path)
-        {
-            let prod_code = text.split("#[cfg(test)]").next().unwrap_or(&text);
-            let lines = prod_code.lines().count();
-            let path_str = path.to_string_lossy();
-            let is_ui = path_str.contains("crates/ui-egui/");
-            let is_panel = path_str.contains("crates/ui-egui/src/panels/");
-            let mut smells = Vec::new();
-            if is_ui && prod_code.contains("TcpStream::connect") {
-                smells.push("blocking TCP on UI crate");
-            }
-            if is_panel && prod_code.contains("request_repaint_after(") {
-                smells.push("timer repaint loop in panel");
-            }
-            if is_panel && prod_code.contains("read_dir(") {
-                smells.push("filesystem read_dir inside UI panel");
-            }
-            if is_panel && prod_code.contains("Command::new(") {
-                smells.push("subprocess spawn inside UI panel");
-            }
-            if prod_code.contains("shortcut:") || prod_code.contains("ponytail:") {
-                smells.push("recorded ponytail shortcut");
-            }
-            out.push((path, lines, smells));
-        }
-    }
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file())
+    })
 }

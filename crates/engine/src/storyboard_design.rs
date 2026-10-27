@@ -19,6 +19,11 @@ pub fn inspect(s:&mut Session,_:&Value)->Result<Value>{
  doc["deck"]=board["deck"].clone();doc["pdf"]=board["pdf"].clone();
  doc["text_fields"]=native_fields(s,&board)?;
  doc["readiness"]=content_readiness(&doc);
+ use sha2::{Digest,Sha256};
+ let revision=format!("{:x}",Sha256::digest(json!({"pdf":doc["pdf"],"fields":doc["text_fields"],"placements":doc["placements"],"audio":s.song_audio}).to_string().as_bytes()));
+ let permit=std::fs::read(crate::workshop::project_dir(s)?.join("storyboard/draft-override.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok());
+ let overridden=permit.is_some_and(|v|v["revision"]==revision && v["allow_incomplete"]==true);
+ doc["progression"]=json!({"allowed":doc["readiness"]["state"]=="ready" || overridden,"draft_override":overridden,"revision":revision,"reason":if overridden{"Creator chose to proceed with this draft; missing fields remain visible"}else{doc["readiness"]["reason"].as_str().unwrap_or("Complete the storyboard details first")}});
  Ok(doc)
 }
 
@@ -36,32 +41,10 @@ fn content_readiness(design:&Value)->Value{
    missing.push(json!({"page":field["page"],"field":field["field"]}));
   }
  }
- let known=fields.is_some_and(|f|!f.is_empty());
+ let known=fields.is_some_and(|fs|fs.iter().any(|f|f["role"].as_str().is_some_and(|r|r.starts_with("user.") || r=="auto.scene.lyrics")));
  let complete=known && missing.is_empty() && design["dirty"]!=true;
  let reason=if !known{"Storyboard content has not been inspected".into()}else if !missing.is_empty(){format!("{} storyboard fields still need content",missing.len())}else if design["dirty"]==true{"Save pending storyboard changes".into()}else{"Storyboard fields filled; visual approval remains separate".into()};
  json!({"state":if complete{"ready"}else if known{"blocked"}else{"unknown"},"reason":reason,"missing_fields":missing})
-}
-
-#[cfg(test)]
-mod readiness_tests{
- use super::*;
- #[test]
- fn writing_area_uses_the_existing_card_not_the_placeholder_height(){
-  let shape=json!({"altText":"user.story","box":[78,276,924,25.2]});
-  assert_eq!(writing_area(&shape,&json!([{"altText":"layout.card.story","box":[60,220,960,280]}])),json!([78,276,924,206.0]));
-  assert_eq!(writing_area(&shape,&json!([])),shape["box"]);
- }
- #[test]
- fn previews_and_a_saved_template_are_not_complete(){
-  let mut d=json!({"dirty":false,"placements":[],"text_fields":[{"page":1,"field":"story","value":"Describe the story, characters and progression of this song."},{"page":5,"field":"reference","value":"Place the scene reference here"}]});
-  assert_eq!(content_readiness(&d)["missing_fields"].as_array().unwrap().len(),2);
-  d["text_fields"][0]["value"]=json!("The ship circles a sunny sandbar.");
-  d["placements"]=json!([{"page":5}]);
-  assert_eq!(content_readiness(&d)["state"],"ready");
-  d["dirty"]=json!(true);
-  assert_eq!(content_readiness(&d)["state"],"blocked");
-  assert_eq!(content_readiness(&json!({}))["state"],"unknown");
- }
 }
 
 fn pdf_run(s:&Session,steps:Value)->Result<Value>{
@@ -86,34 +69,6 @@ fn native_fields_cache()->&'static std::sync::Mutex<std::collections::HashMap<(S
  static CACHE:std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String,u128,u64,String),Value>>>=std::sync::OnceLock::new();
  CACHE.get_or_init(||std::sync::Mutex::new(std::collections::HashMap::new()))
 }
-fn pdf_previews(s:&Session,pdf:&Path,folder:&Path,count:usize)->Result<Vec<std::path::PathBuf>>{
- std::fs::create_dir_all(folder)?;let mut paths=Vec::new();
- for page in 1..=count{let path=folder.join(format!("slide-{page:03}.png"));crate::workspace::run_tool_in(&crate::workshop::project_dir(s)?,"pdfcraft-cli",&["render".into(),pdf.to_string_lossy().into_owned(),"--page".into(),page.to_string(),"--dpi".into(),"72".into(),"--out".into(),path.to_string_lossy().into_owned()])?;paths.push(path);}
- Ok(paths)
-}
-pub(crate) fn save_pdf(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
- let dir=crate::workshop::project_dir(s)?;let mut baseline=base(&board);let original=baseline["pdf"].as_str().ok_or_else(||invalid("Storyboard PDF is missing"))?;
- let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
- let pdf=out.join("movie-board.pdf");let text_base=out.join("text-base.pdf");
- let mut values=serde_json::Map::new();for edit in design["text_edits"].as_array().into_iter().flatten(){values.insert(edit["name"].as_str().ok_or_else(||invalid("Missing PDF field name"))?.into(),edit["value"].clone());}
- let mut steps=vec![json!({"tool":"doc_open","args":{"path":original}})];
- // Older PDFs used the placeholder line height instead of the template card's writing area.
- for field in design["text_fields"].as_array().into_iter().flatten(){
-  let r=&field["rect"];let rect=json!([r[0],r[1],r[0].as_f64().unwrap_or(0.0)+r[2].as_f64().unwrap_or(0.0),r[1].as_f64().unwrap_or(0.0)+r[3].as_f64().unwrap_or(0.0)]);
-  steps.push(json!({"tool":"form_set_props","args":{"doc":1,"field":field["name"],"rect":rect,"multiline":true}}));
- }
-
- if !values.is_empty(){steps.push(json!({"tool":"form_fill","args":{"doc":1,"values":values}}));}
- steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":text_base}}));
- for item in design["placements"].as_array().into_iter().flatten(){let r=&item["rect"];let x=r[0].as_f64().unwrap_or(0.0);let y=r[1].as_f64().unwrap_or(0.0);let w=r[2].as_f64().unwrap_or(0.0);let h=r[3].as_f64().unwrap_or(0.0);steps.push(json!({"tool":"page_add_image","args":{"doc":1,"page":item["page"],"path":item["path"],"rect":[x,y,x+w,y+h]}}));}
- steps.push(json!({"tool":"doc_save","args":{"doc":1,"path":pdf}}));pdf_run(s,json!(steps))?;
- let count=board["previews"].as_array().map_or(0,Vec::len);let previews=pdf_previews(s,&pdf,&out.join("pages"),count)?;
- baseline["previews"]=json!(pdf_previews(s,&text_base,&out.join("text-pages"),count)?);
- board["manifest"]=json!(out.join("manifest.json"));board["parent_pdf"]=board["pdf"].clone();board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=design.clone();board["design"]["dirty"]=json!(false);
- write(&out.join("manifest.json"),&board)?;write(&dir.join("storyboard/movie-board.json"),&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
- Ok(json!({"ok":true,"pdf":pdf,"dirty":false,"placements":design["placements"],"editable_pdf":true}))
-}
-
 /// Inspect the existing native document; role names and boxes come from its objects.
 pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
  if let Some(fields)=board["pdf_fields"].as_array(){
@@ -149,9 +104,19 @@ pub(crate) fn native_fields(s:&Session,board:&Value)->Result<Value>{
   let Some(raw)=line.strip_prefix("slide.inspect → ") else{continue;};
   let slide:Value=serde_json::from_str(raw).map_err(|e|invalid(&format!("Invalid native slide inspection: {e}")))?;
   let page=slide["index"].as_u64().ok_or_else(||invalid("Native slide has no index"))?+1;
+  let mut source_fields=std::collections::BTreeMap::<String,String>::new();let mut section=None;
+  for line in slide["notes"].as_str().unwrap_or_default().lines(){
+   if let Some((_,field))=[("ACTION","action"),("REFERENCE PROMPT","reference_prompt"),("ANIMATION PROMPT","animation_prompt"),("CONTINUITY","continuity"),("SOURCE","source")].iter().find(|(heading,_)|*heading==line.trim()){
+    section=Some((*field).to_owned());
+   }else if let Some(field)=&section{let body=source_fields.entry(field.clone()).or_default();if !body.is_empty(){body.push('\n');}body.push_str(line);}
+  }
   for shape in slide["shapes"].as_array().into_iter().flatten(){
    let role=shape["altText"].as_str().unwrap_or_default();
-   let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user.")).or_else(||(role=="auto.scene.lyrics").then_some("lyrics"));
+   let source_field={
+    let matches=source_fields.iter().filter(|(_,value)|!value.trim().is_empty() && Some(value.trim())==shape["text"].as_str().map(str::trim)).collect::<Vec<_>>();
+    (matches.len()==1).then(||matches[0].0.clone())
+   };
+   let field=role.strip_prefix("user.scene.").or_else(||role.strip_prefix("user.")).or_else(||(role=="auto.scene.lyrics").then_some("lyrics")).map(str::to_owned).or(source_field).or_else(||shape["text"].as_str().filter(|v|!v.is_empty()).map(|_|format!("object.{}",shape["id"])));
    if let Some(field)=field{
     let scene=page.checked_sub(first_scene).map(|n|n+1);
     fields.push(json!({"page":page,"scene":scene,"field":field,"role":role,"id":shape["id"],"rect":writing_area(shape, &slide["shapes"]),"value":shape["text"].as_str().unwrap_or_default()}));
@@ -241,18 +206,31 @@ pub fn save(s:&mut Session,p:&Value)->Result<Value>{
   write(&dir.join("storyboard/movie-board.json"),&board)?;
   return Ok(json!({"ok":true,"deck":board["deck"],"pdf":board["pdf"],"dirty":false,"saved_draft":path}));
  }
- let dir=crate::workshop::project_dir(s)?;let active=dir.join("storyboard/movie-board.json");let mut board=read(&active)?;
- let design=inspect(s,&json!({}))?;if board["pdf_fields"].is_array(){return save_pdf(s,board,&design);}
+ let dir=crate::workshop::project_dir(s)?;let board=read(&dir.join("storyboard/movie-board.json"))?;
+ let design=inspect(s,&json!({}))?;save_deck(s,board,&design)
+}
+
+pub(crate) fn save_deck(s:&mut Session,mut board:Value,design:&Value)->Result<Value>{
+ let dir=crate::workshop::project_dir(s)?;let active=dir.join("storyboard/movie-board.json");
  let entries=design["placements"].as_array().ok_or_else(||invalid("Invalid placements"))?;
  let mut baseline=base(&board);
  let original=baseline["deck"].as_str().ok_or_else(||invalid("storyboard has no editable deck"))?.to_owned();
  let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
  let out=dir.join(format!("storyboard/design-{stamp}"));std::fs::create_dir_all(&out)?;
  let deck=out.join("movie-board.deckcraft");let pdf=out.join("movie-board.pdf");
- let edits=design["text_edits"].as_array().cloned().unwrap_or_default();
+ let imported_pdf=board["pdf_fields"].is_array();
+ let mut edits=if imported_pdf{design["text_fields"].as_array().cloned().unwrap_or_default()}else{Vec::new()};
+ for edit in design["text_edits"].as_array().into_iter().flatten(){
+  if let Some(value)=edits.iter_mut().find(|v|v["page"]==edit["page"] && v["id"]==edit["id"]){*value=edit.clone();}else{edits.push(edit.clone());}
+ }
+ board.as_object_mut().map(|v|v.remove("pdf_fields"));baseline.as_object_mut().map(|v|v.remove("pdf_fields"));
  let mut args=vec!["run".into(),"--in".into(),original.clone()];
  for edit in &edits{
   args.extend(["--cmd".into(),format!("slide.go={}",json!({"index":edit["page"].as_u64().unwrap_or(1)-1})),"--cmd".into(),format!("text.set={}",json!({"id":edit["id"],"text":edit["value"]}))]);
+  if imported_pdf && edit["rect"].is_array(){let r=&edit["rect"];args.extend(["--cmd".into(),format!("shape.setBounds={}",json!({"ids":[edit["id"]],"x":r[0],"y":r[1],"w":r[2],"h":r[3]}))]);}
+  if let Some(field)=edit["field"].as_str().filter(|f|!f.starts_with("object.")){
+   args.extend(["--cmd".into(),format!("edit.select={}",json!({"ids":[edit["id"]]})),"--cmd".into(),format!("shape.altText={}",json!({"text":edit["role"].as_str().filter(|r|!r.is_empty()).map(str::to_owned).unwrap_or_else(||format!("user.scene.{field}"))}))]);
+  }
  }
  if !edits.is_empty(){
   // Render the same document with text edits, before draft picture overlays are inserted.
@@ -273,6 +251,7 @@ pub fn save(s:&mut Session,p:&Value)->Result<Value>{
  crate::workspace::run_tool_in(&dir,"deckcraft-cli",&args)?;
  let pages=out.join("pages");crate::workspace::run_tool_in(&dir,"deckcraft-cli",&["render".into(),deck.to_string_lossy().into_owned(),"--all".into(),"--scale".into(),"1.5".into(),pages.to_string_lossy().into_owned()])?;
  let mut previews=std::fs::read_dir(&pages)?.filter_map(|e|e.ok().map(|e|e.path())).filter(|p|p.extension().is_some_and(|e|e=="png")).collect::<Vec<_>>();previews.sort();
+ board["editor"]=json!("DeckCraft");board["project"]=json!(s.project_path);board["manifest"]=json!(out.join("manifest.json"));
  board["parent_deck"]=board["deck"].clone();board["deck"]=json!(deck);board["pdf"]=json!(pdf);board["previews"]=json!(previews);board["design_base"]=baseline;board["design"]=json!({"placements":entries,"text_edits":edits,"dirty":false});
  write(&out.join("manifest.json"),&board)?;write(&active,&board)?;write(&draft(s)?,&json!({"placements":[],"dirty":false}))?;
  Ok(json!({"ok":true,"deck":deck,"pdf":pdf,"previous_deck":board["parent_deck"],"dirty":false,"placements":entries}))

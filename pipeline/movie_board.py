@@ -165,7 +165,7 @@ def doctor(manifest,source):
     return result
 
 
-def build(transcript, source, out, title, scene_map, allow_timing_overrun=False, panels=None):
+def build(transcript, source, out, title, scene_map, allow_timing_overrun=False, panels=None, template=None):
     # The transcript is already the CLI schema. No lyric reformatting or second editable document.
     from deckcraft_template import generate, SIZE, SCENE_ART_REGION
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
@@ -188,7 +188,8 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
             for panel in group['panels']:panel['line_id']=next((l['id'] for l in group['lyric_lines'] if set(panel['word_ids'])<=set(l['word_ids'])),None)
         groups.append(group)
     config=dict(title=title,transcript=str(transcript),captions=metadata.get('captions'),allow_timing_overrun=allow_timing_overrun,duration_sec=metadata['duration_sec'],recording_duration_verified=metadata.get('recording_duration_verified',False),audio=metadata.get('audio'),project=metadata.get('project'),scene_content={p['id']:dict(sections=p.get('sections',{}),notes=p.get('notes',[]),source=p.get('source'),lines=p.get('lines',[])) for p in packets})
-    template=Path(__file__).parent/'templates/studio-template.deckcraft'
+    if not template: raise ValueError('Select a DeckCraft storyboard template first')
+    template=Path(template).resolve()
     schema=template_schema(template,out)
     config['scene_content'],mapping=normalize_scene_content(packets,[f['role'] for f in schema['scene']])
     # Actual saved user fields take precedence over imported notes; lyrics remain native words.
@@ -231,7 +232,6 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
     (out/'mapping.json').write_text(json.dumps(mapping,indent=2))
     config_path=out/'template-inputs.json';config_path.write_text(json.dumps(config,indent=2))
     grouping=out/'scene-map-input.json';grouping.write_text(json.dumps(dict(groups=groups),indent=2))
-    template=Path(__file__).parent/'templates/studio-template.deckcraft'
     deck=out/'movie-board.deckcraft'
     try:result=generate(template,config_path,deck,grouping)
     except Exception as error:
@@ -244,10 +244,10 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
     validation=result['validation'];page_list=validation['pages']
     first_scene=next(i for i,page in enumerate(page_list) if page['kind']=='scene')
     links=validation['link_regions']
-    result.update(mapping=mapping,template='backlot',template_file=str(template),scene_map=str(scene_map),scene_targets=[p['id'] for p in packets],scene_count=len(packets),first_scene_page=first_scene+1,
+    result.update(mapping=mapping,template='deckcraft',template_file=str(template),scene_map=str(scene_map),scene_targets=[p['id'] for p in packets],scene_count=len(packets),first_scene_page=first_scene+1,
         scene_titles=[f'{p["id"]} · {p["start_seconds"]:.3f}–{p["end_seconds"]:.3f}' for p in packets],
         previews=[str(p) for p in sorted(pages.glob('slide-*.png'))],page_size=SIZE,stage_rect=SCENE_ART_REGION,links=links,page_titles=[p['title'] for p in result['page_plan']],title=title,
-        editor='Editable PDF / native PDFCraft fields; existing Studio picture placement and Save',source_transcript=str(transcript),source_transcript_sha256=hashlib.sha256(Path(transcript).read_bytes()).hexdigest(),source_producer_label=Path(transcript).parent.name,producer_executable_version='not recorded by native array',source_words=len(words),timing_valid=overrun<=.001,timing_warning=config.get('timing_warning'),
+        editor='DeckCraft native document; PDF export',source_transcript=str(transcript),source_transcript_sha256=hashlib.sha256(Path(transcript).read_bytes()).hexdigest(),source_producer_label=Path(transcript).parent.name,producer_executable_version='not recorded by native array',source_words=len(words),timing_valid=overrun<=.001,timing_warning=config.get('timing_warning'),
         next_commands=[shlex.join(['deckcraft-cli','info',str(deck)]),shlex.join(['deckcraft-cli','run','--in',str(deck),'--print','--cmd','slide.inspect={"index":'+str(first_scene)+'}'])])
     # Keep saved placements linked; remap only a full-frame overlay on a newly panelled scene.
     from deckcraft_template import fit_rect,panel_region,SCENE_ART_REGION
@@ -273,6 +273,6 @@ if __name__=='__main__':
     if '--doctor' in sys.argv:
         p=argparse.ArgumentParser(description='Read-only source section boundary check');p.add_argument('--doctor',required=True);p.add_argument('--source',required=True);a=p.parse_args()
         print(json.dumps(doctor(a.doctor,a.source)));raise SystemExit(0)
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--allow-timing-overrun',action='store_true');p.add_argument('--transcript',required=True);p.add_argument('--scene-map',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);p.add_argument('--panels');a=p.parse_args()
-    try: print(json.dumps(build(a.transcript,a.source,a.out,a.title,a.scene_map,a.allow_timing_overrun,a.panels)))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--allow-timing-overrun',action='store_true');p.add_argument('--transcript',required=True);p.add_argument('--template',required=True);p.add_argument('--scene-map',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);p.add_argument('--panels');a=p.parse_args()
+    try: print(json.dumps(build(a.transcript,a.source,a.out,a.title,a.scene_map,a.allow_timing_overrun,a.panels,a.template)))
     except subprocess.CalledProcessError as e: raise SystemExit(e.stderr or e.stdout or str(e))

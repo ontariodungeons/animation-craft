@@ -59,7 +59,10 @@ def propose_groups(words,duration):
         key=' '.join(norm(t) for t in g['text'].split());g['repeat_occurrences']=counts.get(key,0)
     validate_groups(groups,words,duration);return groups
 def read_inputs(config,grouping=None):
-    c=json.loads(Path(config).read_text());words=json.loads(Path(c['transcript']).read_text());words=words if isinstance(words,list) else words['words']
+    c=json.loads(Path(config).read_text())
+    if c.get('empty_template'):
+        return c,[],[],[],float(c.get('duration_sec') or 0)
+    words=json.loads(Path(c['transcript']).read_text());words=words if isinstance(words,list) else words['words']
     words=[dict(w,id=w.get('id',f'w{i}')) for i,w in enumerate(words)]
     duration=float(c['duration_sec']) if c.get('duration_sec') is not None else float(json.loads(Path(c['audiomap']).read_text())['audio']['duration_sec']);validate_words(words,duration,c.get('allow_timing_overrun',False))
     cues=[]
@@ -255,7 +258,8 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
     if kind=='overview':
         if c.get('story'):fill('user.story',c['story'],24)
         warning='\nTIMING WARNING: '+c['timing_warning'] if c.get('timing_warning') else ''
-        fill('user.source',f'{duration_label}: {clock(duration)}\n{len(words)} timed words / {len(groups)} scenes\nExisting transcript words/timing consumed unchanged.'+warning,22)
+        source_note='Audio linked; lyrics, scene structure and artwork await your choices.' if c.get('empty_template') else 'Existing transcript words/timing consumed unchanged.'
+        fill('user.source',f'{duration_label}: {clock(duration)}\n{len(words)} timed words / {len(groups)} scenes\n'+source_note+warning,22)
         links=[('Audio',c.get('audio')),('Transcript',c['transcript']),('Captions',c.get('captions')),('Project',c.get('project'))]
         for i,(label,path) in enumerate(links):
             if path and Path(path).exists():d.text(label+' ↗',[60+i*240,1470,220,30],18,TEAL,True,'source.'+str(i));d.q('insert.hyperlink',url=Path(path).resolve().as_uri(),tooltip=label)
@@ -314,7 +318,7 @@ def fill_page(d,slide,page,c,words,cues,groups,duration,all_pages,representative
     if reference:meta['reference_image']=reference
     d.q('slide.notes',text=json.dumps(meta,indent=2));d.q('slide.rename',name=page['key']);d.flush()
 
-def validate_deck(d,pages,words,cues,groups,duration,representative=False):
+def validate_deck(d,pages,words,cues,groups,duration,representative=False,empty_template=False):
     slides=inspect_pages(d);assert len(slides)==len(pages),'Page count mismatch'
     keys=[note(s).get('page_key') for s in slides];assert keys==[p['key'] for p in pages],'Page mapping mismatch'
     overflow=[];links=0;file_links=0;actual_cues=[];creative_instructions=0;link_regions=[]
@@ -347,41 +351,11 @@ def validate_deck(d,pages,words,cues,groups,duration,representative=False):
         if page['kind']=='scene':actual_cues.extend(page['group']['word_ids'])
     if not representative:
         assert actual_cues==[w['id'] for w in words],'Original word occurrence lost from scenes'
-        assert {'toc','overview','assets','locations','scene'}.issubset({x['kind'] for x in pages})
+        required={'toc','overview','assets','locations'} | (set() if empty_template else {'scene'})
+        assert required.issubset({x['kind'] for x in pages})
         assert not {'lyrics','qc'}.intersection(x['kind'] for x in pages)
-    validate_groups(groups,words,duration)
+    if not empty_template:validate_groups(groups,words,duration)
     return dict(ok=not overflow,slides=len(slides),native_links=links,link_regions=link_regions,resolving_source_links=file_links,caption_occurrences=len(actual_cues),source_words=len(words),scene_spans=len(groups),duration=duration,source_sequence_preserved=True,provisional_grouping=True,overflow=overflow,editable_fields=creative_instructions,approval='needs review',pages=[dict(key=p['key'],id=s['id'],kind=p['kind']) for p,s in zip(pages,slides)])
-
-def pdf_fields(slides,pages):
-    """Use existing template objects as PDF field geometry; no second layout."""
-    fields=[];scene=0
-    for i,(slide,page) in enumerate(zip(slides,pages)):
-        if page['kind']=='scene':scene+=1
-        for sh in slide['shapes']:
-            role=sh.get('altText','')
-            if not (role.startswith('user.') or role=='auto.scene.lyrics') or role.startswith('user.picture.') or 'text' not in sh:continue
-            if role=='user.scene.reference' and not sh['text']:continue
-            field=role.removeprefix('user.scene.').removeprefix('user.') if role!='auto.scene.lyrics' else 'lyrics'
-            x,y,w,h=sh['box']
-            card=next((s for s in slide['shapes'] if s.get('altText')=='layout.card.'+field),None)
-            if card:h=max(h,card['box'][1]+card['box'][3]-18-y)
-            name=f'page_{i+1}_'+re.sub(r'[^a-zA-Z0-9_]', '_',role)
-            fields.append(dict(name=name,id=sh['id'],page=i+1,scene=scene if page['kind']=='scene' else None,field=field,role=role,rect=[x,y,w,h],value=sh['text'],font_size=27 if field=='lyrics' else 14 if role.startswith('user.scene.panel.') else 18 if role.startswith('user.sheet.') else 12 if len(sh['text'])>100 else 21,fill='#F3ECD7' if field=='lyrics' else '#08090C' if role=='user.scene.reference' else '#1B1D22',text_color='#211E18' if field=='lyrics' else MUTED))
-    return fields
-
-def make_pdf_editable(pdf,fields):
-    steps=[dict(tool='doc_open',args=dict(path=str(pdf)))]
-    for f in fields:
-        x,y,w,h=f['rect']
-        steps.extend([dict(tool='form_add_field',args=dict(doc=1,page=f['page'],type='text',name=f['name'],rect=[x,y,x+w,y+h],multiline=True)),dict(tool='form_set_props',args=dict(doc=1,field=f['name'],font_size=f['font_size'],appearance=dict(border='none',fill=f['fill'],text_color=f['text_color'],width=0,font='helvetica')))])
-    steps.extend([dict(tool='form_fill',args=dict(doc=1,values={f['name']:f['value'] for f in fields})),dict(tool='doc_save',args=dict(doc=1)),dict(tool='form_fields',args=dict(doc=1))])
-    script=pdf.with_suffix('.pdfcraft.json');dump(script,steps)
-    result=subprocess.run([shutil.which('pdfcraft-cli') or 'pdfcraft-cli','run','--script',str(script),'--report'],capture_output=True,text=True)
-    if result.returncode:raise RuntimeError('Editable PDF insertion failed: '+result.stderr)
-    report=json.loads(result.stdout);dump(pdf.with_suffix('.pdfcraft-result.json'),report)
-    actual=report['steps'][-1]['result'][0]['fields']
-    if {f['name']:f['value'] for f in actual}!={f['name']:f['value'] for f in fields}:raise ValueError('PDF fields did not preserve the source text')
-    return fields
 
 def generate(template,config,output,grouping=None,representative=False):
     template=Path(template).resolve();output=Path(output).resolve();output.parent.mkdir(parents=True,exist_ok=True)
@@ -410,7 +384,7 @@ def generate(template,config,output,grouping=None,representative=False):
             for i in reversed(range(len(originals))):d.cmd('slide.delete',index=i)
             for i,page in enumerate(pages):d.cmd('slide.go',index=i);fill_page(d,d.cmd('slide.inspect',index=i),page,c,words,cues,groups,duration,pages,representative)
             before=None
-        validation=validate_deck(d,pages,words,cues,groups,duration,representative)
+        validation=validate_deck(d,pages,words,cues,groups,duration,representative,c.get('empty_template',False))
         if not validation['ok']:raise ValueError('Layout overflow: '+json.dumps(validation['overflow']))
         if before is not None:assert snapshot(d)==before,'Regeneration altered authored objects'
         if output.exists() and sha(output)!=previous_hash:raise ValueError('Concurrent disk edit detected; refusing to replace current deck')
@@ -421,16 +395,14 @@ def generate(template,config,output,grouping=None,representative=False):
         dump(state,dict(version=VERSION,fingerprint=fingerprint,template=str(template),template_sha256=sha(template),source_config=str(Path(config).resolve()),representative=representative))
         dump(output.with_suffix('.grouping.json'),dict(status='provisional / editable',groups=groups))
         dump(output.with_suffix('.validation.json'),validation)
-        fields=pdf_fields(inspect_pages(d),pages)
         if before is None or not output.with_suffix('.pdf').is_file():
             d.cmd('file.export',path=str(output.with_suffix('.pdf')),format='pdf')
-            make_pdf_editable(output.with_suffix('.pdf'),fields)
-        scene=next(i for i,p in enumerate(pages) if p['kind']=='scene');d.cmd('file.export',path=str(output.with_name(output.stem+'-scene.png')),format='png',slide=scene,scale=1)
+        scene=next((i for i,p in enumerate(pages) if p['kind']=='scene'),0);d.cmd('file.export',path=str(output.with_name(output.stem+'-scene.png')),format='png',slide=scene,scale=1)
         if not representative:
             for kind in ['toc','overview','assets','locations']:
                 i=next(i for i,p in enumerate(pages) if p['kind']==kind);d.cmd('file.export',path=str(output.with_name(output.stem+'-'+kind+'.png')),format='png',slide=i,scale=1)
         validation['authored_edits_preserved']=before is not None;dump(output.with_suffix('.validation.json'),validation)
-        return dict(ok=True,pdf_fields=fields,page_plan=pages,deck=str(output),pdf=str(output.with_suffix('.pdf')),proof=str(output.with_name(output.stem+'-scene.png')),reopened_existing=before is not None,validation=validation)
+        return dict(ok=True,page_plan=pages,deck=str(output),pdf=str(output.with_suffix('.pdf')),proof=str(output.with_name(output.stem+'-scene.png')),reopened_existing=before is not None,validation=validation)
     finally:
         if d:d.close()
         lock.unlink(missing_ok=True)
