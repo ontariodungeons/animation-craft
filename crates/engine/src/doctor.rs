@@ -15,7 +15,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let mut cleaned_files = Vec::new();
+    let cleaned_files: Vec<String> = Vec::new();
     let project_dir = s
         .project_path
         .as_ref()
@@ -26,15 +26,14 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     let mut video_server_state = json!("none");
     if server_file.is_file() {
         if clean {
-            let _ = std::fs::remove_file(&server_file);
-            cleaned_files.push(server_file.display().to_string());
-            video_server_state = json!("removed_stale_lock");
+            video_server_state = json!({"file": server_file, "clean_requested": true, "removed": false, "note": "ownership/staleness not verified; not deleted"});
         } else {
             video_server_state = json!({"file": server_file});
         }
     }
 
     let tools: Vec<Value> = [
+        "hyperframes",
         "photocraft-cli",
         "effectcraft-cli",
         "filmcraft-cli",
@@ -54,13 +53,14 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({
         "ok": true,
         "cleaned": {
-            "stopped_pids": [],
+            "stopped_pids": null,
             "removed_files": cleaned_files,
+            "note": "processes are not scanned or killed; .video-server.json is reported but not verified or deleted"
         },
-        "processes": [],
+        "processes": null,
         "video_server": video_server_state,
         "tools": tools,
-        "ponytail_candidates": [],
+        "ponytail_candidates": null,
         "recommendations": [],
     }))
 }

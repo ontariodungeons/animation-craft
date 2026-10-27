@@ -29,7 +29,7 @@ than binding a project folder. Do not create a headless session when the user ex
 their open window. Never start a video studio server merely to animate.
 
 The native computer-use surface is `ui.look`, `ui.state`, `ui.elements`, `ui.click`, `ui.set`,
-`ui.key`, and engine commands. Use stable IDs and typed parameters. Read back changed state and
+`ui.key`, and engine commands. Use stable IDs and typed parameters. For a numbered `@...` target returned by `ui.components`, pass its `component_instance` as `instance` to `ui.click` or `ui.set`. Read back changed state and
 pixels; a delivered click or successful command alone is not proof. Use `ui.eval` for diagnostics,
 not as a substitute for missing product commands. Avoid global mouse/focus automation.
 

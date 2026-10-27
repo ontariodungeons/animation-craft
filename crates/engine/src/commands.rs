@@ -515,7 +515,7 @@ pub fn build() -> Vec<CommandSpec> {
             "{\"path\": \"existing project folder\", \"overwrite\": false}", always, cmd_storyboard_import_openmontage),
         cmd!("storyboard.approve", "Approve Scene", ["Storyboard"], None, "{\"scene\": 1, \"approved\": true}", always, cmd_storyboard_approve),
         cmd!("workshop.set_audio", "Set Song Audio", ["Workshop"], None,
-            "{\"path\": \"song audio file (referenced, not copied)\"}", always, cmd_workshop_set_audio),
+            "{\"path\": \"song audio file; creates the HyperFrames project and starts Studio\", \"hyperframes_cli\": \"optional absolute executable\"}", always, cmd_workshop_set_audio),
         cmd!("video.place_track", "Place a rendered track in HyperFrames", ["Video"], None, "{\"id\":\"clip id\",\"path\":\"video file; omit with blender_job\",\"animation_job\":\"optional completed native animation job id\",\"blender_job\":\"optional completed full Blender job id; uses its verified clip, maps rect (the original canvas) to the rendered frame and keeps its frozen provenance\",\"start\":0,\"duration\":2,\"rect\":[0,0,300,500],\"scene\":14,\"generation_receipt\":\"optional native image generation.json; links source poses and character\",\"character\":\"optional registered source motion asset; requires track\",\"track\":\"optional source motion track; requires character\",\"playback_rate\":1}", always, crate::video_target::cmd_video_place_track),
         cmd!("workshop.set_target", "Set Video Target", ["Workshop"], None,
             "{\"target\": \"hyperframes\"}", always, cmd_workshop_set_target),
@@ -741,13 +741,13 @@ pub fn build() -> Vec<CommandSpec> {
         query!(
             "app.analytics",
             "Analytics: Code Complexity & Status",
-            "{}",
+            "{\"scan\": true}",
             cmd_app_analytics
         ),
         query!(
             "app.doctor",
-            "Doctor: Lingering Processes, Cleanup & Ponytail Smells",
-            "{\"clean\": false, \"keep_port\": 0}",
+            "Doctor: CLI Availability and Video Server Metadata",
+            "{\"clean\": false}",
             cmd_app_doctor
         ),
         query!("command.list", "List Commands", "{\"filter\":\"optional command ID or search text\"}", cmd_query_list),

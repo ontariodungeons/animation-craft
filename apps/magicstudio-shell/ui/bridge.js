@@ -42,7 +42,8 @@ function find(target, instance = null) {
 
 window.magicBridge = {
   controls(params = {}) {
-    return window.uiRegistry.inspect({ ...params, root: regionNode(params.region) });
+    const report = window.uiRegistry.inspect({ ...params, root: regionNode(params.region) });
+    return { ...report, component_instance: report.instance };
   },
   attention(params = {}) {
     if (params.project !== state.project) throw new Error("Attention project does not match this Studio");

@@ -145,7 +145,7 @@ SUBCOMMANDS
   commands [filter] [--group]         list commands (id, label, shortcut, params);
                                       --group by menu, read-only commands last
   find [words] [project=<file>] [--json]  ranked commands, project objects and visible controls; no words suggests likely reads
-  doctor [--clean] [keep_port=N]      check lingering Craft processes, clean stale servers, & flag Ponytail code smells
+  doctor [--clean]      check external Craft CLI availability and .video-server.json (not verified; not auto-deleted)
   storyboard --doctor                read-only section-boundary task list for the selected Studio project
                                       exit 0: no supported issue; 1: findings; 2: insufficient evidence
   storyboard create|read|update|delete [key=value ...]  shared native storyboard CRUD
@@ -155,7 +155,7 @@ SUBCOMMANDS
                                       register an image; outside files are copied into project assets
   <project> <subcommand | command id> [ARGS]
                                       run against one project: an .magic, or a folder with exactly
-                                      one (a song's hyperframes/ or remotion/ folder finds its song);
+                                      one (a song's hyperframes/ folder finds its song);
                                       same as project=<file> _expected_project=<file>, e.g.
                                       mc \"Bumble Bee.magic\" center.snapshot
   clips [character=<id>] [project=<file>] [--convert]
@@ -870,7 +870,7 @@ fn friendly_argument(mut raw: Vec<String>) -> Result<Vec<String>,String> {
 }
 
 /// An .magic file, or the one .magic in a folder. A song project's video-target folder
-/// (hyperframes/, remotion/, filmcraft/, or one level inside it) resolves to that song project.
+/// (hyperframes/, or one level inside it) resolves to that song project.
 fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     if path.is_file() {
         if path.extension().is_some_and(|e| e == "magic") {
@@ -897,7 +897,7 @@ fn resolve_project(path: &std::path::Path) -> Result<std::path::PathBuf, String>
             many => return Err(format!("{} has {} .magic files; pass the one you mean", dir.display(), many.len())),
         }
     }
-    Err(format!("no .magic in {} (or above it, from a hyperframes/remotion/filmcraft folder); pass the project file", path.display()))
+    Err(format!("no .magic in {} (or above it, from a hyperframes folder); pass the project file", path.display()))
 }
 
 fn main() {
