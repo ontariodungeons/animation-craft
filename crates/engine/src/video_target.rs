@@ -78,7 +78,7 @@ pub(crate) fn hyperframes_cli(explicit: Option<&str>, project: Option<&Path>) ->
         let npx=PathBuf::from(std::env::var_os("HOME")?).join(".npm/_npx");
         pinned_cli(dir,&npx,version)
     });
-    let path=configured.or_else(on_path).or_else(cached).ok_or_else(||EngineError::InvalidParams(match &pinned {
+    let path=configured.or_else(cached).or_else(on_path).ok_or_else(||EngineError::InvalidParams(match &pinned {
         Some((dir,version))=>format!("HyperFrames {version} not found. This project pins it in {}. Install it with `npm i -g hyperframes@{version}`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.",dir.join("package.json").display()),
         None=>"HyperFrames executable not found on PATH. Install it with `npm i -g hyperframes`, or set HYPERFRAMES_CLI=/absolute/path/to/hyperframes (or pass hyperframes_cli=...). Nothing was installed.".into(),
     }))?;
@@ -89,9 +89,9 @@ pub(crate) fn hyperframes_cli(explicit: Option<&str>, project: Option<&Path>) ->
 fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>) -> Result<PathBuf> {
     let project=dir.join("hyperframes");
     let cli=hyperframes_cli(executable,Some(&project))?;
-    let mut args=vec!["init".to_string(),project.to_string_lossy().into_owned(),"--non-interactive".into(),"--example".into(),"blank".into(),"--skill".into(),"music-to-video".into(),"--skip-transcribe".into()];
+    let mut args=vec!["init".to_string(),project.to_string_lossy().into_owned(),"--non-interactive".into(),"--example".into(),"blank".into(),"--skill".into(),"hyperframes".into(),"--skip-transcribe".into()];
     if let Some(audio)=&s.song_audio {args.extend(["--audio".into(),audio.to_string_lossy().into_owned()]);}
-    let output=std::process::Command::new(&cli).args(&args).current_dir(dir).env("HYPERFRAMES_SKIP_SKILLS","1").output()
+    let output=std::process::Command::new(&cli).args(&args).current_dir(dir).output()
         .map_err(|e|EngineError::ExternalTool(cli.display().to_string(),e.to_string()))?;
     if !output.status.success(){return Err(EngineError::ExternalTool(cli.display().to_string(),String::from_utf8_lossy(&output.stderr).into_owned()));}
     target_project_path(s,dir,"hyperframes").ok_or_else(||EngineError::InvalidParams("HyperFrames init did not produce its project files".into()))
@@ -173,6 +173,9 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         .unwrap_or(&s.video_target)
         .to_string();
     if target!="hyperframes" {return Err(EngineError::InvalidParams("Magic Studio uses HyperFrames".into()));}
+    if params["assemble"]==true {
+        return Err(EngineError::InvalidParams("The installed HyperFrames workflow retired the music-to-video assembler. Existing project files were preserved. Author the contained HyperFrames compositions with the current /hyperframes skill; video.init only creates or reopens the project.".into()));
+    }
     let existed=target_project_path(s,&dir,&target).is_some();
     if params["replace_scaffold"]==true {return Err(EngineError::InvalidParams("Existing projects are edited by HyperFrames; init does not replace them".into()));}
     let reused=existed;
@@ -182,37 +185,23 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
             "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
         )));
     }
-    let mut assembly=Value::Null;
-    if params["assemble"]==true {
-        let hf=dir.join("hyperframes");let plan=hf.join("STORYBOARD.md");
-        if !plan.is_file(){return Err(EngineError::InvalidParams("Music-to-video assembly requires derived STORYBOARD.md and completed frame files from the native storyboard; no replacement plan was invented".into()));}
-        let map=params["audiomap"].as_str().map(|p|resolve_workspace_path(s,p)).unwrap_or_else(||hf.join("audiomap.json"));
-        let data:Value=serde_json::from_slice(&std::fs::read(&map)?).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
-        let audio=data["audio"]["path"].as_str().map(PathBuf::from).filter(|p|p.is_file()).ok_or_else(||EngineError::InvalidParams("Existing audiomap audio.path must identify the already processed BGM; no new analysis/transcode was attempted".into()))?;
-        for (source,dest) in [(audio,hf.join("assets/bgm.mp3")),(map.clone(),hf.join("audiomap.json"))] {
-            if dest.is_file()&&std::fs::read(&source)?!=std::fs::read(&dest)?{return Err(EngineError::InvalidParams(format!("Existing {} differs; no overwrite performed",dest.display())));}
-            if !dest.exists(){std::fs::create_dir_all(dest.parent().ok_or_else(||EngineError::InvalidParams("Input destination has no parent".into()))?)?;std::fs::copy(source,dest)?;}
-        }
-        let skill=std::env::var_os("HOME").map(PathBuf::from).ok_or_else(||EngineError::InvalidParams("HOME unavailable for installed music-to-video skill".into()))?.join(".agents/skills/music-to-video");
-        let arg=|p:&Path|p.to_string_lossy().into_owned();
-        let validate=skill.join("scripts/validate-plan.mjs");let assemble=skill.join("scripts/assemble-index.mjs");
-        let validation=run_tool_in(&hf,"node",&[arg(&validate),"--storyboard".into(),arg(&plan),"--audiomap".into(),arg(&hf.join("audiomap.json")),"--templates".into(),arg(&skill.join("references/templates"))])?;
-        // Preserve the previous composition before the owning workflow's deterministic assembler writes it.
-        let backup=hf.join(".magicstudio-history/assembled-before.html");
-        if hf.join("index.html").is_file()&&!backup.exists(){std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Assembly backup has no parent".into()))?)?;std::fs::copy(hf.join("index.html"),&backup)?;}
-        let result=run_tool_in(&hf,"node",&[arg(&assemble),"--storyboard".into(),arg(&plan),"--hyperframes".into(),arg(&hf),"--audiomap".into(),arg(&hf.join("audiomap.json"))])?;
-        if result.contains("anomalies") {return Err(EngineError::InvalidParams(format!("Music-to-video assembler reported incomplete inputs: {result}")));}
-        assembly=json!({"workflow":"music-to-video","validation_script":validate,"assembly_script":assemble,"validation":validation,"result":result,"storyboard":plan,"audiomap":hf.join("audiomap.json"),"bgm":hf.join("assets/bgm.mp3")});
-    }
     let runtime=hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?;
     let native=run_tool_in(&dir,runtime.to_str().ok_or_else(||EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?,&["timeline".into(),dir.join("hyperframes").to_string_lossy().into_owned(),"--json".into()])?;
     let native:Value=serde_json::from_str(&native).map_err(|e|EngineError::InvalidParams(format!("HyperFrames timeline: {e}")))?;
     if s.song_audio.is_some() && !native["timeline"]["tracks"].as_array().into_iter().flatten().any(|t|t["kind"]=="audio" && t["rows"].as_array().is_some_and(|rows|!rows.is_empty())) {
         return Err(EngineError::InvalidParams("HyperFrames project has no audio track; upload was not completed".into()));
     }
+    if !reused && s.song_audio.is_some() {
+        let copied=native["timeline"]["tracks"].as_array().into_iter().flatten()
+            .filter(|track|track["kind"]=="audio").flat_map(|track|track["rows"].as_array().into_iter().flatten())
+            .filter_map(|row|row["src"].as_str()).map(|src|dir.join("hyperframes").join(src))
+            .find(|path|path.is_file() && path.canonicalize().ok().is_some_and(|p|dir.join("hyperframes").canonicalize().ok().is_some_and(|root|p.starts_with(root))))
+            .ok_or_else(||EngineError::InvalidParams("HyperFrames did not return a contained copy of the uploaded recording; project was not marked imported".into()))?;
+        s.song_audio=Some(copied);
+    }
     let mut status = workshop_status(s)?;
     status["native_timeline"]=native;
-    status["music_assembly"]=assembly;
+    status["music_assembly"]=Value::Null;
     status["captions"]=if params["captions"]!=false {ensure_native_captions(s,&dir)?}else{Value::Null};
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
@@ -220,7 +209,7 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     status["song_imported"]=json!(!reused&&s.song_audio.is_some());
     s.video_project_path = target_project_path(s, &dir, &target);
     status["video_project_path"]=json!(s.video_project_path);
-    if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
+    if s.project_path.is_some() { crate::project::write_project_file(s)?; }
     status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
     if !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?);}
     Ok(status)

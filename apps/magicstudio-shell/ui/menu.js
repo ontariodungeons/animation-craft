@@ -45,6 +45,7 @@ window.studioMenu=async id=>{
       case 'file.open': await openDialog(); break;
       case 'file.save':
         if(!state.project){toast('Open or create a project before saving');break;}
+        if(projectView.textDrafts.size || state.data?.design?.dirty)await saveStoryboard();
         await designCommand('project.save');toast('Project saved');break;
       case 'file.close': await showHome(); break;
       case 'app.settings': await showApplicationSettings(); break;

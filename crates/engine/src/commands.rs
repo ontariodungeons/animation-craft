@@ -532,7 +532,7 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("workshop.remove", "Remove Workshop File", ["Workshop"], None,
             "{\"path\": \"file in the project folder (moved to trash), or the song audio (unlinked only)\"}", always, cmd_workshop_remove),
         cmd!("video.init", "Initialize Target Video Project", ["Workshop"], None,
-            "{\"target\": \"optional hyperframes\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH, no npx install\", \"captions\": true, \"assemble\": false, \"audiomap\": \"existing music-to-video audiomap for derived plan/completed frames; no analysis rerun\"}", always, cmd_video_init),
+            "{\"target\": \"optional hyperframes\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH, no npx install\", \"captions\": true, \"assemble\": false, \"audiomap\": \"legacy parameter; retired assembly is rejected without changing the project\"}", always, cmd_video_init),
         cmd!("video.server_start", "Start Video Editor Web Server", ["Workshop"], None,
             "{\"target\": \"optional hyperframes\", \"port\": \"optional; HyperFrames selects an available port by default\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, cmd_video_server_start),
         cmd!("video.server_stop", "Stop Video Editor Web Server", ["Workshop"], None,
@@ -546,7 +546,7 @@ pub fn build() -> Vec<CommandSpec> {
             "Analyze Song (HyperFrames)",
             ["File"],
             None,
-            "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false, \"analyze_beats\": true, \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH; no npx install\"}",
+            "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false, \"analyze_beats\": true, \"model\": \"large-v3\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH; no npx install\"}",
             always,
             cmd_audio_analyze
         ),

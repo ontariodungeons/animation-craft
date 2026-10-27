@@ -106,16 +106,7 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
                 .map(|doc| {
-                    let mut assets = s.project_assets.clone();
-                    for a in &mut assets {
-                        if let Some(loaded) = s.assets.get(&a.id) {
-                            a.parts = loaded.parts.clone();
-                        }
-                    }
-                    serde_json::to_value(assets).ok().as_ref() != Some(&doc["assets"])
-                        || doc["workshop"]["audio"] != json!(s.song_audio)
-                        || doc["workshop"]["target"] != json!(s.video_target)
-                        || doc["workshop"]["draft_approved"] != json!(s.draft_approved)
+                    magicstudio_engine::project::project_is_dirty(&s, &doc)
                 })
         } else {
             Some(false)

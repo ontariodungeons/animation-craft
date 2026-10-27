@@ -220,8 +220,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
     }
 
     let valid_transcript = || crate::workshop::transcript_files(dir).iter().any(|f| {
-        fs::read(f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .is_some_and(|v| crate::workshop::transcript_problems(&v).is_empty())
+        crate::workshop::transcript_document(f).ok().is_some_and(|v|crate::workshop::transcript_problems(&v).is_empty())
     });
     let mut valid = valid_transcript();
     let mut next_commands = Vec::<Value>::new();
@@ -297,14 +296,8 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let board=dir.and_then(|d|fs::read(d.join("storyboard/movie-board.json")).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
     let board_transcript = board["source_transcript"].as_str().map(PathBuf::from).filter(|p|p.is_file());
     let root_transcript = dir.and_then(|d| crate::workshop::transcript_files(d).into_iter().next());
-    // Prefer a project-root transcript that passes validation; fall back to the board's source transcript.
-    let transcript = root_transcript.clone().filter(|p| {
-        fs::read(p).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).map(|v| {
-            let v = if v.is_array() { json!({"words":v,"paragraphs":v}) } else { v };
-            crate::workshop::transcript_problems(&v).is_empty()
-        }).unwrap_or(false)
-    }).or(root_transcript).or(board_transcript);
-    let parsed = transcript.as_ref().and_then(|f|fs::read(f).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).map(|v|if v.is_array(){json!({"words":v,"paragraphs":v,"recording_duration_sec":board["validation"]["duration"]})}else{v});
+    let transcript = root_transcript.or(board_transcript);
+    let parsed = transcript.as_ref().and_then(|path|crate::workshop::transcript_document(path).ok());
     let valid = parsed
         .as_ref()
         .is_some_and(|v| crate::workshop::transcript_problems(v).is_empty())

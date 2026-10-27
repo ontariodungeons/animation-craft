@@ -94,7 +94,7 @@ const CAPTION_GAP: f64 = 1.0;
 
 /// The video target's own caption file (`<target>/transcript.srt`), when it has one.
 pub(crate) fn caption_file(dir: &Path) -> Option<PathBuf> {
-    ["hyperframes", "remotion", "filmcraft"].iter().map(|t| dir.join(t).join("transcript.srt")).find(|p| p.is_file())
+    Some(dir.join("hyperframes/transcript.srt")).filter(|p|p.is_file())
 }
 
 /// Scenes from the video target's own captions (`<target>/transcript.srt`): one scene per
@@ -169,7 +169,7 @@ pub(crate) fn storyboard_timing(dir: &Path, panels: usize) -> Option<(Vec<Value>
         Some(list) => list,
         None => {
             let transcript = transcript_files(dir).into_iter().next()?;
-            let doc: Value = serde_json::from_str(&std::fs::read_to_string(transcript).ok()?).ok()?;
+            let doc = crate::workshop::transcript_document(&transcript).ok()?;
             scenes(&doc, song_seconds(dir))
         }
     };
@@ -299,8 +299,7 @@ pub(crate) fn storyboard_scenes(dir: &Path) -> Result<Vec<Value>> {
             let transcript = transcript_files(dir).into_iter().next().ok_or_else(|| {
                 EngineError::InvalidParams("transcribe or import the transcript first: scenes come from it".into())
             })?;
-            serde_json::from_str(&std::fs::read_to_string(transcript)?)
-                .map_err(|e| EngineError::InvalidParams(format!("invalid transcript: {e}")))?
+            crate::workshop::transcript_document(&transcript)?
         }
     };
     let mut list = if let (Some(list), false) = (captions, explicit) {
@@ -446,7 +445,7 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let selected=cmd_storyboard_template(s,&json!({}))?;
         let template=params["template"].as_str().or(selected["path"].as_str()).or(active_board["template_file"].as_str()).ok_or_else(||EngineError::InvalidParams("Choose a DeckCraft template with storyboard.template path=<file>".into()))?;
         let template=resolve_workspace_path(s,template).canonicalize()?;
-        let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file()).or_else(||transcript_files(&dir).into_iter().next()).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
+        let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{transcript_files(&dir).into_iter().next().or_else(||std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file())).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
         let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
         let out=if let Some(resume)=params["resume"].as_str(){

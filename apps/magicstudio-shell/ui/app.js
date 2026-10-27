@@ -29,7 +29,7 @@ const ICONS = {
   pause: '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
 };
 
-let state = { project: null, studioUrl: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
+let state = { project: null, data: null, page: 0, open: "song", view: "project", blocksCollapsed: false };
 
 function updateMagicSelection() {
   const layer = motion?.meta?.layers?.find((part) => part.id === motion.selected);
@@ -62,7 +62,7 @@ const FOOTER_STAGES = [['song', 'Song'], ['lyrics', 'Lyrics'], ['transcript', 'T
 
 function footerStageState(id) {
   if (id === 'studio') return serverUrl() ? 'ok' : videoProject() ? 'warn' : 'idle';
-  const seen = state.data?.monitoring?.prerequisites?.find((p) => p.id === id)?.state;
+  const seen = projectView.prerequisite(id).state;
   return seen === 'ready' ? 'ok' : seen ? 'warn' : 'idle';
 }
 
@@ -104,11 +104,14 @@ function renderAppFooter() {
     return el('button', { class: 'footer-stage', id: `footer-stage-${id}`, title: `${label} · ${tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs work' : 'not started'}`,
       onclick: () => footerGo(id).catch((e) => toast(String(e))) }, window.companionBoxes.dot(tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs-attention' : 'idle', '', `footer-stage-${id}`), label);
   }));
+  updateStoryboardSaveControls();
   const context = footerContext();
   $('footer-context').textContent = context; $('footer-context').title = context;
-  const unsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
-  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready', '', 'footer-save-state'), unsaved ? 'Unsaved edits' : state.project ? 'Saved' : 'Not saved');
-  $('footer-save-state').title = unsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : 'No unsaved motion';
+  const motionUnsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
+  const unsaved = motionUnsaved || state.data?.design?.dirty === true || projectView.textDrafts.size > 0;
+  const saving = projectView.pending > 0;
+  $('footer-save-state').replaceChildren(window.companionBoxes.dot(saving ? 'working' : unsaved ? 'needs-attention' : state.project ? 'ready' : 'idle', '', 'footer-save-state'), saving ? 'Saving…' : unsaved ? 'Unsaved edits' : state.project ? 'Project saved' : 'Not saved');
+  $('footer-save-state').title = motionUnsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : unsaved ? 'Storyboard changes need saving' : 'Magic Studio project state; HyperFrames saves composition edits in its own editor';
   const url = serverUrl();
   // A Studio that is off is simply idle: grey, never a red problem.
   $('footer-server').replaceChildren(window.companionBoxes.dot(url ? 'ready' : 'idle', '', 'target'), url ? `Studio · ${url.replace(/^https?:\/\//, '').replace(/\/$/, '')}` : 'Studio off');
@@ -224,420 +227,6 @@ async function openPath(path) {
 
 const SONG_SECTIONS = ['lyrics', 'transcript'];
 
-function songSection(id, title, meta, done, sectionState, body) {
-  const head = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", `song-${id}`);
-  head.title = done ? "Ready" : "Needs work";
-  return el("div", { class: "song-section", id: `song-${id}`, "data-section": id, "data-state": sectionState },
-    el("div", { class: "panel-head" },
-      head,
-      el("span", { class: "title" }, title), el("span", { class: "meta" }, meta || "")),
-    ...body);
-}
-
-function transcriptSummary(doc, ok) {
-  const words = doc?.words || [];
-  if (!words.length) return "No timed words yet";
-  const end = doc.recording_duration_sec ?? words.at(-1).end;
-  return `${words.length} words · ${clockTime(end)} · ${ok ? "timing ok" : "timing needs review"}`;
-}
-
-function clockTime(seconds) {
-  const s = Math.max(0, Math.floor(seconds || 0));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-// ---- Song playback: one audio element per project, shared by the Song header and the reader ----
-const songPlayer = { audio: null, path: null };
-
-function songAudio(path) {
-  if (songPlayer.path !== path) {
-    songPlayer.audio?.pause();
-    songPlayer.audio = new Audio(convertFileSrc(path));
-    songPlayer.path = path;
-    for (const type of ["play", "pause", "ended"]) songPlayer.audio.addEventListener(type, renderSongPlay);
-    songPlayer.audio.addEventListener("timeupdate", readerFollow);
-  }
-  return songPlayer.audio;
-}
-
-function songStop() { songPlayer.audio?.pause(); songPlayer.audio = null; songPlayer.path = null; }
-
-function songPlayButton(path) {
-  const button = el("button", { class: "icon song-play", id: "song-play", "data-path": path,
-    onclick: (e) => {
-      e.stopPropagation(); // play/pause never opens or closes the Song section
-      const audio = songAudio(path);
-      if (audio.paused) audio.play().catch((error) => toast(`Cannot play the song: ${error.message || error}`));
-      else audio.pause();
-    } });
-  renderSongPlay(button);
-  return button;
-}
-
-function renderSongPlay(button = $("song-play")) {
-  if (!button?.dataset) return;
-  const playing = songPlayer.path === button.dataset.path && songPlayer.audio && !songPlayer.audio.paused;
-  const label = playing ? "Pause song" : "Play song";
-  button.setAttribute("aria-label", label); button.title = label; button.setAttribute("aria-pressed", String(!!playing));
-  button.innerHTML = playing ? ICONS.pause : ICONS.play;
-}
-
-// ---- Lyrics: the artist's sheet when the project has one, otherwise the transcript as heard ----
-// One model feeds both the Song sheet and the reader, so they always show the same words.
-function lyricModel(lyrics, doc, asHeard = false) {
-  if (!asHeard && lyrics?.source === "canonical") return { canonical: true, sections: (lyrics.sections || []).map((s) => ({ label: s.label,
-    lines: s.lines.map((l) => ({ text: l.text, start: l.start ?? null, words: l.words || [] })) })) };
-  const words = (doc?.words || []).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end));
-  const lines = [];
-  let line = [];
-  words.forEach((w, i) => {
-    if (line.length && (w.start - words[i - 1].end >= 0.6 || line.length >= 10)) { lines.push(line); line = []; }
-    line.push(w);
-  });
-  if (line.length) lines.push(line);
-  return { canonical: false, sections: [{ label: null, lines: lines.map((l) => ({ text: l.map((w) => w.text).join(" "), start: l[0].start, words: l })) }] };
-}
-
-async function loadSongLyrics() {
-  const project = state.project;
-  try {
-    const lyrics = await invoke("engine_command", { id: "song.lyrics", params: {} });
-    if (state.project === project) { state.lyrics = lyrics; renderBlocks(); }
-  } catch (error) { if (state.project === project) state.lyrics = null; }
-}
-
-async function attachOriginal(event) {
-  const path = event?.currentTarget?.uiFiles?.[0] || await dialog.open({ title: "Attach the artist's original lyrics or liner notes" });
-  if (!path) return;
-  try {
-    await designCommand("workshop.add", { kind: "liner_notes", paths: [path] });
-    await loadSongLyrics();
-    toast("Attached to liner notes; the original file is unchanged");
-  } catch (error) { toast(String(error)); }
-}
-
-async function importProjectTranscript(event) {
-  const path=event?.currentTarget?.uiFiles?.[0] || await dialog.open({title:'Import existing timed lyrics',filters:[{name:'Transcript JSON',extensions:['json']}]});
-  if(!path)return;
-  try{await designCommand('workshop.import_transcript',{path});toast('Timed lyrics imported. Review the words before creating scene pages.');}catch(error){toast(String(error));}
-}
-
-function lyricSheet(model) {
-  return el("div", { class: "lyric-sheet" }, ...model.sections.map((section) => el("div", { class: "lyric-stanza" },
-    section.label ? el("div", { class: "stanza-label" }, section.label) : null,
-    ...section.lines.map((line) => el("div", { class: "lyric-line" }, el("span", { class: "lyric-text" }, line.text),
-      line.start != null ? el("span", { class: "cue", title: "Sung at" }, clockTime(line.start)) : null)))));
-}
-
-function lyricsBody(lyrics, doc, liner, songPath) {
-  const model = lyricModel(lyrics, doc);
-  const original = lyrics?.original;
-  const name = (path) => String(path).split("/").pop();
-  return [
-    el("p", { class: "lyric-source" }, model.canonical
-      ? `${lyrics.artist ? `${lyrics.artist} · ` : ""}the artist's lyric sheet${lyrics.timing ? " · timing from the recording" : ""}`
-      : "From the transcript, as heard and not corrected · no artist lyric sheet attached"),
-    model.canonical && lyrics.artist_note ? el("blockquote", { class: "artist-note" }, el("p", {}, lyrics.artist_note), el("cite", {}, lyrics.artist || "The artist")) : null,
-    el("div", { class: "lyric-actions" },
-      original?.exists
-        ? el("button", { id: "song-open-original", title: original.path, onclick: () => openPath(original.path) }, `Open artist's original · ${name(original.path)}`)
-        : [el("span", { class: "not-linked" }, original ? `Original not found: ${name(original.path)}` : "Original not linked"),
-           el("button", { id: "song-attach-original", class: "ghost", onclick: attachOriginal }, "Attach original…")],
-      model.sections.some((s) => s.lines.length) ? el("button", { id: "song-read-along", onclick: () => lyricReaderOpen(lyrics, doc, songPath) }, "Read along") : null),
-    lyricSheet(model),
-    el("div", { class: "group-label" }, "Liner notes"),
-    liner.length ? liner.map(fileButton) : el("div", { class: "why" }, "None attached yet."),
-  ];
-}
-
-// ---- Reader: the same lyric model in the right workstation; read only, follows the song ----
-const lyricReader = { words: [] };
-
-function lyricReaderOpen(lyrics, doc, songPath, asHeard = false) {
-  const model = lyricModel(lyrics, doc, asHeard);
-  const seek = (t) => { if (songPath && t != null) songAudio(songPath).currentTime = t; };
-  const words = [];
-  const body = el("div", { class: "reader-body" }, ...model.sections.map((section) => el("div", { class: "lyric-stanza" },
-    section.label ? el("div", { class: "stanza-label" }, section.label) : null,
-    ...section.lines.map((line) => el("p", { class: "reader-line" },
-      line.start != null ? el("button", { class: "reader-time", title: songPath ? "Play from here" : "", "aria-label": `Seek to ${clockTime(line.start)}`, onclick: () => seek(line.start) }, clockTime(line.start)) : null,
-      ...(line.words.length
-        ? line.words.map((w) => { words.push(w); return el("span", { class: "reader-word", "data-index": String(words.length - 1), title: `${(+w.start).toFixed(2)}–${(+w.end).toFixed(2)} s` }, `${w.text} `); })
-        : [el("span", {}, line.text)]))))));
-  const title = model.canonical ? "Lyrics" : "Transcript";
-  const pane = el("section", { id: "magic-reader", "data-drawer":"reader", "aria-label": `${title}, read only` },
-    el("div", { id: "magic-reader-head" }, el("span", {}, title),
-      el("span", { class: "magic-target" }, model.canonical ? "artist's sheet · read only" : "as heard · read only"),
-      el("button", { id: "magic-reader-close", "aria-label": `Close the ${title.toLowerCase()}`, onclick: transcriptReaderClose }, "Close")),
-    body);
-  $("magic-reader")?.remove();
-  $("magic-workstation")?.append(pane);
-  window.workshopDrawers?.open("reader");
-  lyricReader.words = words;
-  readerFollow();
-}
-
-function transcriptReaderClose() { if(window.workshopDrawers?.active==="reader")window.workshopDrawers.close(); $("magic-reader")?.remove(); lyricReader.words = []; }
-
-function readerFollow() {
-  const pane = $("magic-reader");
-  if (!pane || !songPlayer.audio) return;
-  const t = songPlayer.audio.currentTime;
-  const index = lyricReader.words.findIndex((w) => t >= w.start && t < w.end);
-  pane.querySelector(".reader-word.now")?.classList.remove("now");
-  if (index >= 0) pane.querySelector(`.reader-word[data-index="${index}"]`)?.classList.add("now");
-}
-
-// A block is a shared UI box: it has a stable id, and its header row is a
-// slot on the rail so a companion can enter the block. The header is the
-// stable surface -- the body expands and collapses, so nothing there can
-// hold a position.
-//
-// The body is wrapped, never rewritten: the same DOM arrives, and a block
-// that does not care about companions inherits the contract for free.
-function block(id, icon, title, meta, done, body, blockState, action) {
-  const open = state.open === id;
-  const dot = window.companionBoxes.dot(done ? "ready" : "needs-attention", "", id);
-  dot.title = done ? "Ready" : "Needs work";
-  const head = el("button", { class: "panel-head", id: `block-${id}`, "aria-label":title, "aria-expanded": String(open), title: `${title}${meta ? ` · ${meta}` : ""}`,
-      onclick: () => {
-        const narrow = getComputedStyle(document.documentElement).getPropertyValue("--workspace-narrow").trim() === "1";
-        if (narrow && agent.open) { agentToggle(false); state.open = id; } else state.open = open ? null : id;
-        renderBlocks();
-      } },
-    dot,
-    el("span", { class: "ico", html: icon }),
-    el("span", { class: "title" }, title),
-    el("span", { class: "meta" }, meta || ""),
-    el("span", { class: "chev", html: ICONS.chev }));
-  // The header row carries the slot. It sits on the block's own edge, outside
-  // the clickable head button, so a companion never covers a control.
-  // Readiness informs a prerequisite status. An empty block is not an error.
-  if (window.companionBoxes) window.companionBoxes.readiness(id, { state: blockState, reason: done ? "Ready" : "Needs work" });
-  return el("section", { box: id, class: `block${open ? " open" : ""}`, "data-state": blockState, "data-block": id, "data-box-id": id },
-    action ? el("div", { class: "block-headrow" }, head, action) : head,
-    el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
-}
-
-function objectsFrom(files) {
-  const groups = new Map();
-  for (const f of files) {
-    const m = f.path.match(/\/assets\/(characters|backgrounds)\/([^/]+)\//);
-    const key = m ? (m[1] === "characters" ? m[2] : "backgrounds") : "loose";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(f);
-  }
-  return groups;
-}
-
-function objectCard(name, layers, stacked) {
-  const stack = el("div", { class: "stack" });
-  const img = el("img", { src: convertFileSrc(layers[0].path), alt: "", loading: "lazy" });
-  stack.append(img);
-  // An object shows all its layers assembled, cropped to the drawing (from the engine).
-  if (stacked) invoke("object_preview", { project: state.project, name, layers: layers.map((l) => l.path) })
-    .then((p) => { img.src = convertFileSrc(p) + `?v=${Date.now()}`; }).catch((e) => toast(String(e)));
-  return el("button", { class: "object", title: `${name}: ${layers.map((l) => l.name).join(", ")}`, "aria-label": `${name}, ${layers.length} layers`,
-      onclick: () => openAnimation(name) },
-    stack, el("span", { class: "label" }, name), el("span", { class: "count" }, `${layers.length} layer${layers.length === 1 ? "" : "s"}`));
-}
-
-async function chooseStoryboardTemplate() {
-  const path=await dialog.open({title:"Choose your storyboard template",filters:[{name:"DeckCraft template",extensions:["deckcraft","pptx"]}]});
-  if(!path)return;
-  await designCommand('storyboard.template',{path});
-  if(!state.data?.storyboard?.deck)await designCommand('storyboard.init',{empty:true});
-}
-
-function renderBlocks() {
-  updateAppFooter();
-  updateStoryboardAccess();
-  const s = state.data?.status;
-  const box = $("blocks");
-  box.replaceChildren();
-  if (!s) { if (state.creating) renderNewProjectBlocks(box); return; }
-  const receipt=state.projectReceipt;
-  if(receipt?.project===state.project && (receipt.problems?.length || receipt.warnings?.length)){
-    box.append(el('div',{class:'why',id:'project-intake-problems',role:'status'},
-      el('strong',{},receipt.intake_ready===false?'Intake needs attention':'Project notices'),
-      el('p',{},receipt.project),
-      ...(receipt.problems||[]).map(problem=>el('p',{},String(problem))),
-      ...(receipt.warnings||[]).map(warning=>el('p',{},warning.error||warning.effect||warning.code||String(warning)))));
-  }
-  // Collapse/expand toggle for the blocks rail
-  box.append(el("button", {
-    class: `icon rail-toggle${state.blocksCollapsed ? "" : " open"}`,
-    title: state.blocksCollapsed ? "Expand blocks rail" : "Collapse blocks rail",
-    "aria-label": state.blocksCollapsed ? "Expand blocks rail" : "Collapse blocks rail",
-    onclick: () => { state.blocksCollapsed = !state.blocksCollapsed; box.classList.toggle("collapsed", state.blocksCollapsed); renderBlocks(); }
-  }, el("span", { html: state.blocksCollapsed ? '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 9l6 6 6-6"/><path d="M18 3H6c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM6 13l6-6-6-6zM12 15l-6 6 6 6z"/></svg>' : '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 9l6 6 6-6"/><path d="M18 3H6c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM6 13l6-6-6-6zM12 15l-6 6 6 6z"/></svg>' })));
-  const stage = (id) => s.stages.find((x) => x.id === id) || { inputs: [], outputs: [] };
-  const song = stage("song"), transcript = stage("transcript"), animate = stage("animate");
-  const audio = song.inputs?.[0];
-  const liner = (song.inputs || []).slice(1);
-
-  const observed=id=>state.data?.monitoring?.prerequisites?.find(p=>p.id===id);
-  const ready=id=>observed(id)?.state==='ready';
-  // Song holds its lyrics and transcription; each keeps its own readiness light and state.
-  const songState = observed("song")?.state || "unknown";
-  const lyricsState = observed("lyrics")?.state || "unknown";
-  const outputs = (transcript.outputs || []).filter((c) => c.exists !== false && c.path !== audio?.path);
-  const transcriptState = observed("transcript")?.state || "unknown";
-  const doc = transcript.document;
-  box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
-    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null,
-     el('button',{id:'song-upload','data-commands':'workshop.set_audio',onclick:async()=>{
-       const path=await dialog.open({title:'Choose song audio',filters:[{name:'Audio',extensions:['wav','mp3','flac','m4a','aac','ogg']}]});
-       if(path)try{await designCommand('workshop.set_audio',{path});toast('Audio link saved; review timing and storyboard for this recording.');}catch(error){toast(String(error));}
-     }},audio?'Change audio…':'Upload audio…'),
-     songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
-       ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
-     songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
-       [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
-        el('button',{id:'song-import-transcript','data-commands':'workshop.import_transcript',onclick:importProjectTranscript},'Import timed lyrics…'),
-        !doc?.words?.length && audio ? el('button',{id:'song-transcribe','data-commands':'audio.analyze',onclick:()=>designCommand('audio.analyze',{analyze_beats:false}).catch(error=>toast(String(error)))},'Transcribe this recording') : null,
-        el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
-    songState, audio ? songPlayButton(audio.path) : null));
-
-  const template=state.data?.storyboard_template?.path||state.data?.storyboard?.template_file;
-  const sb = state.data?.storyboard;
-  const content = state.data?.design?.readiness;
-  const missing = content?.missing_fields || [];
-  const openPage = page => showPage(page - 1);
-  const contents = state.data?.storyboard_contents;
-  const scenes = contents?.chapters || [];
-  const scene = scenes.find(s=>s.target===state.storyboardScene) || scenes.find(s=>s.page===state.page+1) || scenes[0];
-  const scenePicker = el('select',{id:'storyboard-scene','aria-label':'Storyboard scene',onchange:event=>{state.storyboardScene=event.target.value; const selected=scenes.find(s=>s.target===state.storyboardScene); if(selected)showPage(selected.page-1); renderBlocks();}},
-    ...scenes.map(s=>el('option',{value:s.target,selected:s.target===scene?.target},`${s.scene} · ${s.title}`)));
-  const wordPicker = el('select',{id:'storyboard-word','aria-label':'Recorded word at the scene cut'},
-    ...scenes.filter(s=>Math.abs(s.scene-(scene?.scene || 1))<=1).flatMap(s=>s.words || []).map(w=>el('option',{value:w.id,selected:w.id===scene?.words?.[1]?.id},`${Number(w.start).toFixed(2)} · ${w.text}`)));
-  const sceneAction = (id,label,command,params,disabled=false) => el('button',{id,disabled:disabled || !scene,'data-commands':command,onclick:async()=>{
-    try{const result=await designCommand(command,{scene:scene.target,expected_revision:contents.revision,...params(),word:wordPicker.value});
-      if(result.previous_version)state.storyboardUndo=result.previous_version;
-      toast('Storyboard saved · lyric timing unchanged');renderBlocks();
-    }catch(error){toast(String(error));}
-  }},label);
-  box.append(block('storyboard',ICONS.animate,'Storyboard',content?.state==='ready'?'Content filled':'Needs work',ready('storyboard'),[
-    el('div',{class:'field-row'},
-      el('button',{id:'storyboard-template-pick',class:'ghost',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…'),
-      el('button',{id:'storyboard-template-open',class:'icon',disabled:!template,'aria-label':'Open template',title:template||'Choose a template first',html:$('sb-open-deck').innerHTML,onclick:()=>invoke('open_path',{path:template})})),
-    el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
-    el('button',{id:'storyboard-discuss','data-drawer-toggle':'sproket',title:'Open Sproket to discuss the missing storyboard details',onclick:async()=>{
-      const input=$('agent-input');
-      if(!input.value.trim())input.value='Help me develop this storyboard. Read center.status creative_followup and the existing project assets. Ask me about the missing creative details before proposing placements or generating artwork.';
-      input.focus();
-    }},'Discuss with Sproket'),
-    el('button',{id:'storyboard-check','data-commands':'storyboard.design',onclick:()=>designCommand('storyboard.design').catch(error=>toast(String(error)))},'Check storyboard details'),
-    sb?.exists && content?.state!=='ready' ? el('button',{id:'storyboard-draft-override','data-commands':'workshop.approve_draft',title:'Allow Animation and Lyrics for this draft while keeping missing details visible',onclick:()=>designCommand('workshop.approve_draft',{approved:!state.data?.design?.progression?.draft_override,allow_incomplete:true}).catch(error=>toast(String(error)))},state.data?.design?.progression?.draft_override?'Turn off draft access':'Proceed with this draft') : null,
-    sb?.deck && sb.empty_template && ready('transcript') ? el('button',{id:'storyboard-create-scenes','data-commands':'storyboard.init',onclick:()=>designCommand('storyboard.init').catch(error=>toast(String(error)))},'Create scene pages from timing') : null,
-    sb?.previews?.length ? el('button',{id:'storyboard-overview',onclick:()=>openPage(1)},sb.page_titles?.[0] || 'First page') : null,
-    el('p',{class:'why'},`${sb?.previews?.length || 0} pages · ${(sb?.page_size || []).join(' × ')} · Edit text on the page; drag assets onto it.`),
-    ...missing.map(item=>el('button',{'aria-label':`Edit page ${item.page} ${item.field}`,onclick:()=>openPage(item.page)},`Page ${item.page} · ${item.field}`)),
-    ...(scenes.length ? [el('p',{class:'why'},`${scenes.length} scenes · Project creation owns lyric timing.`),scenePicker,wordPicker,
-    sceneAction('storyboard-add','Add scene before word','storyboard.create',()=>({}),(scene?.words?.length || 0)<2),
-    sceneAction('storyboard-trim-start','Start scene at word','storyboard.update',()=>({edge:'start'}),scene?.scene===1),
-    sceneAction('storyboard-trim-end','End scene at word','storyboard.update',()=>({edge:'end'}),scene?.scene===scenes.length),
-    sceneAction('storyboard-delete','Combine with previous','storyboard.delete',()=>({into:'previous'}),scene?.scene===1),
-    sceneAction('storyboard-delete-next','Combine with next','storyboard.delete',()=>({into:'next'}),scene?.scene===scenes.length),
-    el('button',{id:'storyboard-undo',disabled:!state.storyboardUndo,'data-commands':'storyboard.update',onclick:async()=>{try{await designCommand('storyboard.update',{restore:state.storyboardUndo,expected_revision:contents.revision});state.storyboardUndo=null;renderBlocks();toast('Previous storyboard restored');}catch(error){toast(String(error));}}},'Undo scene change')] : []),
-    sb?.deck ? el('button',{id:'storyboard-save',disabled:!state.data?.design?.dirty,'data-commands':'storyboard.save_version',onclick:()=>$('sb-save-version').click()},'Save new version') : null
-  ],observed('storyboard')?.state || 'unknown'));
-
-  const assets=state.data?.assets?.assets||[];
-  const assetsState = observed("assets")?.state || "unknown";
-  const assetFiles = (s.asset_files||[]);
-  const assetsBody=[el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),projectAssetGrid(assets,{prefix:'asset'}),
-    el('p',{class:'why'},state.data?.design?.progression?.allowed?'Click an asset to animate it, or drag it onto a storyboard page.':'Drag assets onto the storyboard where you choose. Complete the storyboard details or proceed with a draft before animation.'),
-    assetFiles.length?el('details',{},el('summary',{},`Project files (${assetFiles.length})`),...assetFiles.map(fileButton)):null];
-  box.append(block('assets',ICONS.animate,'Assets',`${assets.length} assets`,ready("assets"),assetsBody, assetsState));
-  box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),
-    el('p',{class:'why'},'Choose an asset above to animate it.'),observed('animate')?.state||'unknown'));
-  if (typeof imagePromptBlock === 'function') $('magic-image-tools')?.replaceChildren(imagePromptBlock());
-  if (state.view === 'design' && typeof wordsStatusRefresh === 'function') wordsStatusRefresh();
-}
-
-// ---- Storyboard: title cards ------------------------------------------------------------
-
-function renderStoryboard() {
-  updateAppFooter();
-  const sb = state.data?.storyboard;
-  document.body.classList.toggle("movie-document",!!sb?.deck);
-  const pages = sb?.previews || [];
-  const chips = $("sb-chips");
-  chips.replaceChildren();
-  const cards = $("sb-cards");
-  cards.replaceChildren();
-  $("sb-empty")?.remove();
-  if(sb?.deck){
-    cards.append(el('div',{class:'why'},el('strong',{},sb.pdf_fields?'Saved PDF edits awaiting DeckCraft save':'Editable DeckCraft storyboard'),
-      el('p',{},sb.pdf_fields?sb.pdf:sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Text fields can be edited on the page and save when you finish typing. Pictures keep the existing Save new version action.'),
-      ...(sb.next_commands||[]).map(command=>el('pre',{},command))));
-  }
-
-  for (const id of ["sb-prev", "sb-next", "sb-open-deck", "sb-save-version"]) $(id).disabled = !pages.length;
-  if (!pages.length) {
-    $("sb-page").textContent = "no storyboard yet";
-    cards.append(el('div',{id:'sb-empty',class:'panel-empty'},
-      el('strong',{},'Your storyboard template'),
-      el('p',{},'Choose a DeckCraft template to start your storyboard.'),
-      el('button',{id:'sb-choose-template',class:'start',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…')));
-    return;
-  }
-  state.page = Math.max(0, Math.min(state.page, pages.length - 1));
-  const first = (sb.first_scene_page || 2) - 1;
-  const nav=pages.map((_,i)=>[sb.page_titles?.[i]||sb.scene_titles?.[i-first]||`Page ${i+1}`,i]);
-  state.pageTitles=Object.fromEntries(nav.map(([label,page])=>[page,label]));
-  for (const [i, [label, page]] of nav.entries()) {
-    const active = page === state.page;
-    const isChapter = i < first;
-    chips.append(el("button", { class: `chip${active ? " active" : ""}${isChapter ? " chapter" : " scene"}`, role: "tab", "aria-selected": String(active), title: label,
-      onclick: () => showPage(page) }, label));
-  }
-  chips.querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
-  $("sb-page").textContent = `${state.page + 1} / ${pages.length}`;
-
-  const wrap=cards;
-  const key=JSON.stringify([state.project,pages,sb.layout]);
-  {
-    wrap.dataset.document=key;wrap.replaceChildren();wrap.classList.add("sb-page-wrap","document-pages");
-    const size=sb.layout?.page_size||[595,842];
-    pages.forEach((path,i)=>{
-      const page=el("div",{id:`sb-sheet-${i}`,class:"sb-sheet"});
-      page.style.setProperty('--ar',`${size[0]}/${size[1]}`);
-      page.append(el("img",{src:convertFileSrc(path),alt:`Storyboard page ${i+1}`,loading:"lazy"}));
-      for(const [j,link] of (sb.layout?.links||[]).entries())if(link.page===i+1){
-        const [x,y,r,b]=link.rect;
-        const linkButton=el("button",{id:`sb-link-${i}-${j}`,class:"sb-link",title:`Go to page ${link.to_page}`,"aria-label":`Go to page ${link.to_page}`,onclick:()=>showPage(link.to_page-1)});
-        linkButton.style.setProperty('--x',`${x/size[0]*100}%`);
-        linkButton.style.setProperty('--y',`${y/size[1]*100}%`);
-        linkButton.style.setProperty('--w',`${(r-x)/size[0]*100}%`);
-        linkButton.style.setProperty('--h',`${(b-y)/size[1]*100}%`);
-        page.append(linkButton);
-      }
-      page.addEventListener('dragover',e=>{e.preventDefault();page.classList.add('drop-target');e.dataTransfer.dropEffect='copy';});
-      page.addEventListener('dragleave',()=>page.classList.remove('drop-target'));
-      page.addEventListener('drop',async e=>{
-        e.preventDefault();page.classList.remove('drop-target');
-        const id=e.dataTransfer.getData('application/x-magicstudio-asset');if(!id)return;
-        const r=page.getBoundingClientRect();
-        try{await designCommand('storyboard.place_asset',{asset:id,page:i+1,x:(e.clientX-r.left)/r.width*size[0]-80,y:(e.clientY-r.top)/r.height*size[1]-80,width:160});}catch(error){toast(String(error));}
-      });
-      wrap.append(page);
-    });
-    wrap.onscroll=()=>{let current=0;const top=wrap.getBoundingClientRect().top;[...wrap.children].forEach((p,i)=>{if(p.getBoundingClientRect().top<=top+wrap.clientHeight*.35)current=i;});state.page=current;$("sb-page").textContent=`${current+1} / ${pages.length}`;updateAppFooter();};
-  }
-
-  renderStoryboardText();
-  renderDesignPlacements();
-  $(`sb-sheet-${state.page}`)?.scrollIntoView({block:"start",behavior:"instant"});
-}
-
-function showPage(n) {
-  const total = state.data?.storyboard?.previews?.length || 0;
-  state.page = Math.max(0, Math.min(total - 1, n));
-  renderStoryboard();
-}
-
 // ---- Tabs and the studio webview ----------------------------------------------------------
 
 function placeInk() {
@@ -657,11 +246,7 @@ async function showStudio() {
 
 async function setView(view, action) {
   const errors = acFeedback.errors.length;
-  if (view === 'design' && !state.data?.design?.progression?.allowed) {
-    toast(state.data?.design?.progression?.reason || 'Complete the storyboard details or choose Proceed with this draft.');
-    return false;
-  }
-  if (view === 'animation' && !state.data?.design?.progression?.allowed) {
+  if (['design','animation'].includes(view) && !state.data?.design?.progression?.allowed) {
     toast(state.data?.design?.progression?.reason || 'Complete the storyboard details or choose Proceed with this draft.');
     return false;
   }
@@ -710,7 +295,7 @@ function updateStoryboardAccess() {
 
 function serverUrl() {
   const server = state.data?.status?.video_server || {};
-  return state.studioUrl || (server.running ? server.url : null);
+  return server.running === true ? server.url : null;
 }
 
 // The video project lives in the engine session (workshop.status / video.init); the UI keeps no copy.
@@ -741,11 +326,9 @@ async function toggleServer() {
   try {
     // A target without its project gets one from the engine first (video.init reuses an existing one).
     if (on && state.data?.status?.video_target && !state.data.status.video_project_path) {
-      await motionCommand("video.init", {});
-      state.data = await invoke("project_state", { path: state.project });
+      await designCommand("video.init", {});
     }
-    state.data = await invoke("studio_server", { path: state.project, on });
-    if (!on) state.studioUrl = null;
+    await designCommand(on ? "video.server_start" : "video.server_stop");
     toast(on ? "Studio started" : "Studio stopped");
   } catch (e) { toast(String(e)); }
   renderTarget();
@@ -762,7 +345,6 @@ async function load() {
   const identity=start.identity||{},port=identity.control_port;
   $('footer-instance').textContent=`Port ${port??'unavailable'} · ${identity.branch||'unknown build'}`;
   $('footer-instance').title=`${identity.build_id||'Unknown build'} · PID ${identity.pid??'?'} · ${identity.executable||''} · Click to copy the CLI command`;
-  state.studioUrl = start.studio || null;
   if (start.new_project) return beginNewProject();
   if (!start.project) return showHome();
   await openProject(start.project, start);
@@ -781,7 +363,7 @@ async function applyOpenedProject(opened, start = {}) {
   if(!path)throw new Error('Project command did not return its canonical location');
   state.data=opened;
   state.projectReceipt=opened;
-  if (state.project !== path) { animationReset(); songStop(); transcriptReaderClose(); }
+  if (state.project !== path) { animationReset(); songStop(); transcriptReaderClose(); projectView.textDrafts.clear(); projectView.error=null; state.storyboardScene=null; state.storyboardUndo=null; }
   state.project = path;
   state.lyrics = null;
   loadSongLyrics();
@@ -802,123 +384,10 @@ async function applyOpenedProject(opened, start = {}) {
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setView(t.dataset.view, acFeedback.actions.get(t))));
 
-// The frame between the project view and the studio: drag to move, double-click for half,
-// buttons collapse either side (studio only / project only).
-(() => {
-  const handle = $("frame-handle");
-  if (!handle) return; // The current layout has no legacy splitter; continue startup.
-  let total = 0, frame = null;
-  handle.addEventListener("pointerdown", async (e) => {
-    if (e.target.closest("button")) return;
-    handle.setPointerCapture(e.pointerId);
-    handle.classList.add("dragging");
-    total = await invoke("window_height");
-  });
-  handle.addEventListener("pointermove", (e) => {
-    if (!handle.classList.contains("dragging") || !total) return;
-    const ratio = e.clientY / total;
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => invoke("set_split", { ratio }));
-  });
-  handle.addEventListener("pointerup", () => handle.classList.remove("dragging"));
-  handle.addEventListener("dblclick", () => invoke("set_split", { ratio: 0.5 }));
-  $("collapse-top").addEventListener("click", () => setView("studio"));
-  $("collapse-bottom").addEventListener("click", () => setView("project"));
-})();
 $("target").addEventListener("click", toggleServer);
 $("footer-server").addEventListener("click", toggleServer);
 $("footer-instance").addEventListener("click",async()=>{const port=state.identity?.control_port;if(!port)return;try{await navigator.clipboard.writeText(`mc --bridge ${port} exec ui.feedback`);toast(`Copied Studio port ${port}`);}catch{toast(`Studio control port ${port}`);}});
 $("studio-start").addEventListener("click", toggleServer);
-$("sb-prev").addEventListener("click", () => showPage(state.page - 1));
-$("sb-next").addEventListener("click", () => showPage(state.page + 1));
-$("sb-open-deck").addEventListener("click", () => state.data?.storyboard?.deck && openPath(state.data.storyboard.deck));
-window.addEventListener("keydown", (e) => {
-  if (state.view !== "project" || e.target.closest("input, textarea")) return;
-  if (e.key === "ArrowRight") showPage(state.page + 1);
-  if (e.key === "ArrowLeft") showPage(state.page - 1);
-});
 window.addEventListener("resize", placeInk);
 placeInk();
-load().catch(e=>{toast(String(e));acFeedback.errors.push({message:String(e).slice(0,300)});acFeedback.report('error');});
-
-
-function renderStoryboardText(){
- document.querySelectorAll('.sb-text').forEach(node=>node.remove());
- const size=state.data?.storyboard?.page_size||[960,540];
- for(const field of state.data?.design?.text_fields||[]){
-  const page=$(`sb-sheet-${field.page-1}`);if(!page)continue;
-  const [x,y,w,h]=field.rect;
-  const node=el('textarea',{id:`sb-text-${field.page}-${field.id}`,class:'sb-text',
-   title:`Edit ${field.field.replaceAll('_',' ')} · saved when you finish typing`,
-   'aria-label':`Scene ${field.scene||'page '+field.page} ${field.field.replaceAll('_',' ')}`,
-   'data-commands':'storyboard.edit',spellcheck:'true'});
-  // Page geometry and the field's own colours are data; .sb-text turns them into layout.
-  const put=(k,v)=>node.style.setProperty(k,v);
-  put('--x',`${x/size[0]*100}%`);put('--y',`${y/size[1]*100}%`);put('--w',`${w/size[0]*100}%`);put('--h',`${(field.name?h:Math.max(h,50))/size[1]*100}%`);
-  put('--font',`${(field.name?(field.font_size||12):(field.field==='lyrics'?27:21))/size[0]*100}cqw`);
-  if(field.name){node.dataset.named='';put('--pad',`${2/size[0]*100}cqw`);put('--field-fill',field.fill);put('--field-ink',field.text_color);}
-  node.value=node.defaultValue=field.value;
-  node.addEventListener('change',async()=>{
-   if(node.value===node.defaultValue)return;
-   node.disabled=true;
-   try{await designCommand('storyboard.edit',{page:field.page,field:field.field,value:node.value});toast('Storyboard text saved');}
-   catch(error){node.disabled=false;toast(String(error));}
-  });
-  page.append(node);
- }
-}
-
-async function designCommand(id,params={}){
- const result=await invoke('project_command',{project:state.project,id,params});
- state.data=result;renderBlocks();renderStoryboard();
- if(result?._ui_engine_revision)await acFeedback.acknowledge(result._ui_engine_revision,state.project);
- return result;
-}
-async function importProjectAsset(event){
- const supplied=event?.currentTarget?.uiFiles;
- const selected=supplied || await dialog.open({title:'Add artwork',multiple:true,filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});if(!selected)return;
- const paths=Array.isArray(selected)?selected:[selected];
- try{
-  for(const path of paths){const name=path.split('/').pop().replace(/\.[^.]+$/,'');await designCommand('project.add_asset',{path,kind:'image',name,image:name,load:false});}
-  state.open='assets';renderBlocks();toast('Assets saved · choose where to place them');
- }catch(e){toast(String(e));}
-}
-let selectedPlacement=null;
-function renderDesignPlacements(){
- const entries=state.data?.design?.placements||[];const size=state.data?.storyboard?.page_size||[960,540];
- document.querySelectorAll('.design-placement,.design-remove').forEach(n=>n.remove());
- $('sb-save-version').hidden=!(state.data?.storyboard?.pdf_fields||state.data?.storyboard?.deck);
- if(!entries.some(p=>p.id===selectedPlacement))selectedPlacement=entries.at(-1)?.id||null;
-
- for(const item of entries){
-  const page=$(`sb-sheet-${item.page-1}`);if(!page)continue;
-  const [x,y,w,h]=item.rect;
-  const node=el('div',{id:item.id,class:'design-placement',title:'Drag to move · grab an edge to scale'});
-  const place=(px,py,pw,ph)=>{node.style.setProperty('--x',`${100*px/size[0]}%`);node.style.setProperty('--y',`${100*py/size[1]}%`);if(pw!=null){node.style.setProperty('--w',`${100*pw/size[0]}%`);node.style.setProperty('--h',`${100*ph/size[1]}%`);}};
-  place(x,y,w,h);
-  node.append(el('img',{src:convertFileSrc(item.path),alt:'Placed design asset',draggable:'false'}));
-  for(const [hx,hy] of [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]]){
-   const handle=el('button',{class:'design-handle',title:'Drag to scale', 'aria-label':'Scale placed image','data-hx':hx,'data-hy':hy});
-   handle.addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();selectedPlacement=item.id;handle.setPointerCapture(e.pointerId);
-    const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let rect=[x,y,w,h];
-    handle.onpointermove=event=>{
-     const dx=(event.clientX-start[0])*size[0]/r.width,dy=(event.clientY-start[1])*size[1]/r.height;
-     const factor=hx===0?1+hy*dy/h:hy===0?1+hx*dx/w:1+(hx*dx/w+hy*dy/h)/2;
-     const nw=Math.max(20,Math.min(size[0],w*factor)),nh=nw*h/w;
-     rect=[hx<0?x+w-nw:hx===0?x+(w-nw)/2:x,hy<0?y+h-nh:hy===0?y+(h-nh)/2:y,nw,nh];
-     place(rect[0],rect[1],nw,nh);
-    };
-    handle.onpointerup=async()=>{handle.onpointermove=null;handle.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,placement:item.id,x:rect[0],y:rect[1],width:rect[2]});}catch(error){toast(String(error));}};
-   });node.append(handle);
-  }
-  node.addEventListener('pointerdown',e=>{
-   selectedPlacement=item.id;
-   e.preventDefault();node.setPointerCapture(e.pointerId);const r=page.getBoundingClientRect(),start=[e.clientX,e.clientY];let nx=x,ny=y;
-   node.onpointermove=event=>{nx=x+(event.clientX-start[0])*size[0]/r.width;ny=y+(event.clientY-start[1])*size[1]/r.height;place(nx,ny);};
-   node.onpointerup=async()=>{node.onpointermove=null;node.onpointerup=null;try{await designCommand('storyboard.place_asset',{asset:item.asset,page:item.page,x:nx,y:ny,width:w,placement:item.id});}catch(error){toast(String(error));}};
-  });const remove=el('button',{class:'design-remove',title:'Remove this placement','aria-label':'Remove this placement',onclick:()=>designCommand('storyboard.remove_placement',{placement:item.id}).catch(e=>toast(String(e)))},'×');
-  remove.style.setProperty('--x',`${100*(x+w)/size[0]}%`);remove.style.setProperty('--y',`${100*y/size[1]}%`);page.append(node,remove);
- }
-}
-$('sb-save-version').addEventListener('click',async()=>{const button=$('sb-save-version');button.disabled=true;button.setAttribute('aria-busy','true');try{await designCommand('storyboard.save_version',state.data?.storyboard?.draft?{draft:state.data.storyboard.manifest}:{});toast('Saved a new editable storyboard version');}catch(e){toast(String(e));}finally{button.disabled=false;button.removeAttribute('aria-busy');}});
+window.addEventListener('DOMContentLoaded',()=>load().catch(e=>{toast(String(e));acFeedback.errors.push({message:String(e).slice(0,300)});acFeedback.report('error');}));

@@ -34,11 +34,11 @@ pub struct Session {
     pub agent_selection: Option<Value>,
     /// Exclusive writer lease on the canonical project file for the live Studio session.
     pub project_owner: Option<std::sync::Arc<std::fs::File>>,
-    /// The song this project animates, referenced in place (never copied).
+    /// The selected recording; uploads use the copy inside the contained HyperFrames project.
     pub song_audio: Option<PathBuf>,
     /// Whether the user approved the workshop draft PDF.
     pub draft_approved: bool,
-    /// Where the song is edited: `remotion` (default), `filmcraft` or `hyperframes`.
+    /// The contained HyperFrames video project.
     pub video_target: String,
     /// Currently active asset id in the session.
     pub active_asset: Option<String>,
@@ -74,7 +74,7 @@ impl Default for Session {
             project_owner: None,
             song_audio: None,
             draft_approved: false,
-            video_target: "remotion".into(),
+            video_target: "hyperframes".into(),
             active_asset: None,
             preview_mode: "walk".to_string(),
             preview_speed: 1.0,

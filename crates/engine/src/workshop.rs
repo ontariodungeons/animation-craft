@@ -190,6 +190,8 @@ pub(crate) fn files_in(dir: &Path, only: Option<&[&str]>) -> Vec<PathBuf> {
 }
 
 pub(crate) fn transcript_files(dir: &Path) -> Vec<PathBuf> {
+    let native = dir.join("hyperframes/transcript.json");
+    if native.is_file() { return vec![native]; }
     files_in(dir, Some(&["json"]))
         .into_iter()
         .filter(|p| {
@@ -198,6 +200,20 @@ pub(crate) fn transcript_files(dir: &Path) -> Vec<PathBuf> {
                 .is_some_and(|n| n.ends_with(".transcript.json"))
         })
         .collect()
+}
+
+pub(crate) fn transcript_document(path: &Path) -> Result<Value> {
+    let mut doc: Value = serde_json::from_slice(&std::fs::read(path)?)
+        .map_err(|e| EngineError::InvalidParams(format!("Invalid transcript {}: {e}", path.display())))?;
+    if doc.is_array() { doc = json!({"words":doc}); }
+    if !doc.is_object() { return Err(EngineError::InvalidParams("Transcript must be a word array or object with words".into())); }
+    if !doc["paragraphs"].is_array() {
+        let captions = path.with_file_name("transcript.srt");
+        doc["paragraphs"] = if captions.is_file() {
+            json!(import_caption_paragraphs(&std::fs::read_to_string(captions)?)?)
+        } else { doc["words"].clone() };
+    }
+    Ok(doc)
 }
 
 /// Storyboard panels, in order: `storyboard/panel-NN.`.
@@ -323,8 +339,7 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         };
     let panel_timing = transcript_files(&dir)
         .first()
-        .and_then(|t| std::fs::read_to_string(t).ok())
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|t| transcript_document(t).ok())
         .map(|t| panel_spans(&scenes(&t, None), panels.len()));
 
     let song_why = match (audio_ok, liner.is_empty()) {
@@ -357,9 +372,7 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
     });
     let supplied_transcript = transcript_source
         .as_ref()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .map(|v| if v.is_array() { json!({"words":v,"paragraphs":v}) } else { v })
+        .and_then(|p| transcript_document(p).ok())
         .unwrap_or(Value::Null);
     let mut transcript_errors = transcript_problems(&supplied_transcript);
     if loaded_board["timing_valid"] == false {
@@ -1001,21 +1014,22 @@ fn import_transcript_inner(s: &mut Session, params: &Value) -> Result<Value> {
             .unwrap_or("song"),
     );
     for old in transcript_files(&dir) {
-        if old != dir.join(format!("{stem}.transcript.json")) {
+        if old != dir.join(format!("{stem}.transcript.json")) && old != dir.join("hyperframes/transcript.json") {
             return Err(EngineError::InvalidParams(format!(
                 "project already has a transcript: {} (remove it first)",
                 old.display()
             )));
         }
     }
-    let dest = dir.join(format!("{stem}.transcript.json"));
-    let serialized=serde_json::to_vec_pretty(&doc).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
+    let dest = dir.join("hyperframes/transcript.json");
+    let serialized=serde_json::to_vec_pretty(&doc["words"]).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
     if dest.is_file() && !params["replace"].as_bool().unwrap_or(false) {
-        let old:Value=serde_json::from_slice(&std::fs::read(&dest)?).unwrap_or(Value::Null);
+        let old=transcript_document(&dest)?;
         if old["words"]!=doc["words"] || old["paragraphs"]!=doc["paragraphs"] {
             return Err(EngineError::InvalidParams("Transcript differs from existing authored data. Inspect received files; pass replace=true only to replace explicitly.".into()));
         }
     }
+    std::fs::create_dir_all(dest.parent().unwrap())?;
     std::fs::write(&dest, serialized)?;
     let mut copied = vec![dest];
     if let Some(text)=caption_text {
@@ -1578,75 +1592,55 @@ fn file_entry(group: &str, path: &Path, removable: bool) -> Value {
 
 // ━━━ Audio transcription ━━━
 
-/// Transcribes a song with FilmCraft's speech-to-text (headless `filmcraft-cli`).
-/// The song analysis for the HyperFrames target in one call, using that target's own tools:
-/// copy the song to `hyperframes/assets/bgm.mp3`, transcribe it with `hyperframes transcribe`
-/// (`transcript.json`, words; `transcript.srt`, its caption lines), and map its structure with the music-to-video skill's
-/// `analyze-beatgrid.py` (`audiomap.json`), then write the STORYBOARD.md skeleton from the
-/// captions with `pipeline/storyboard_skeleton.py`. Steps whose output exists are skipped.
+/// Use HyperFrames transcription and music analysis on the selected original recording.
 pub fn cmd_audio_analyze(s: &mut Session, params: &Value) -> Result<Value> {
     if s.video_target != "hyperframes" {
-        return Err(EngineError::InvalidParams(format!(
-            "audio.analyze runs the HyperFrames tools; this project's target is '{}' \
-             (use that target's own transcription and analysis)",
-            s.video_target
-        )));
+        return Err(EngineError::InvalidParams("Magic Studio uses HyperFrames for song analysis".into()));
     }
-    let audio = params
-        .get("audio")
-        .and_then(Value::as_str)
-        .map(|p| resolve_workspace_path(s, p))
-        .or_else(|| s.song_audio.clone())
-        .filter(|p| p.is_file())
+    let audio = params["audio"].as_str().map(|p| resolve_workspace_path(s, p))
+        .or_else(|| s.song_audio.clone()).filter(|p| p.is_file())
         .ok_or_else(|| EngineError::InvalidParams("no song audio: pass audio=<file> or workshop.set_audio".into()))?;
-    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str(), project_dir(s).ok().map(|d| d.join("hyperframes")).as_deref())?;
+    let dir = project_dir(s)?;
+    let hf = dir.join("hyperframes");
+    let runtime = crate::video_target::hyperframes_cli(params["hyperframes_cli"].as_str(), Some(&hf))?;
     let runtime = runtime.to_str().ok_or_else(|| EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?;
-    let overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
-    let hf = project_dir(s)?.join("hyperframes");
-    std::fs::create_dir_all(hf.join("assets"))?;
-    let bgm = hf.join("assets/bgm.mp3");
+    let overwrite = params["overwrite"].as_bool().unwrap_or(false);
+    let model = params["model"].as_str().unwrap_or("large-v3");
+    std::fs::create_dir_all(&hf)?;
     let transcript = hf.join("transcript.json");
-    let audiomap = hf.join("audiomap.json");
-    let analyzer = std::env::var_os("HOME")
-        .map(|h| PathBuf::from(h).join(".agents/skills/music-to-video/scripts/analyze-beatgrid.py"))
-        .filter(|p| p.is_file())
-        .ok_or_else(|| {
-            EngineError::InvalidParams(
-                "music-to-video skill not installed (~/.agents/skills/music-to-video); install the HyperFrames skills".into(),
-            )
-        })?;
-    let arg = |p: &Path| p.to_string_lossy().into_owned();
-    let mut ran = Vec::new();
-    let mut trace=crate::audio_trace::AudioTrace::new(&project_dir(s)?,&audio,params)?;
-    if trace.run("audio_conversion",overwrite||!bgm.is_file(),&hf,"ffmpeg",&["-v", "error", "-y", "-i", &arg(&audio),
-            "-codec:a", "libmp3lame", "-q:a", "2", &arg(&bgm)].map(String::from),&[bgm.clone()])?.is_some(){ran.push("ffmpeg → assets/bgm.mp3");}
-    if trace.run("transcription",overwrite||!transcript.is_file(),&hf,runtime,&["transcribe", &arg(&bgm), "-d", &arg(&hf), "--json", "--no-runtime-install"]
-            .map(String::from),&[transcript.clone()])?.is_some(){ran.push("hyperframes transcribe → transcript.json");}
     let srt = hf.join("transcript.srt");
-    // Existing JSON -> SRT conversion never runs ASR.
-    if trace.run("caption_export",overwrite||!srt.is_file(),&hf,runtime,&["transcribe", &arg(&transcript), "--to", "srt",
-            "-o", &arg(&srt)].map(String::from),&[srt.clone()])?.is_some(){ran.push("hyperframes transcribe --to srt → transcript.srt");}
-    if params["analyze_beats"]==false {
-        trace.import(s,json!({"path":transcript,"captions":srt,"replace":overwrite}))?;
-        return Ok(json!({"ok":true,"target":"hyperframes","ran":ran,"analysis_attempt":trace.data,"files":{"audio":bgm,"transcript":transcript,"captions":srt},"beat_analysis":"not requested; not required for native captions"}));
+    let arg = |p: &Path| p.to_string_lossy().into_owned();
+    let mut trace = crate::audio_trace::AudioTrace::new(&dir, &audio, params)?;
+    let mut ran = Vec::new();
+    if trace.run("transcription", overwrite || !transcript.is_file(), &hf, runtime,
+        &["transcribe".into(), arg(&audio), "-d".into(), arg(&hf), "--json".into(), "--model".into(), model.into()], &[transcript.clone()])?.is_some() {
+        ran.push("hyperframes transcribe original recording → transcript.json");
     }
-    if trace.run("beatgrid",overwrite||!audiomap.is_file(),&hf,"python3",&[arg(&analyzer), arg(&bgm), "-o".into(), arg(&audiomap)],&[audiomap.clone()])?.is_some(){ran.push("analyze-beatgrid.py → audiomap.json");}
-    let storyboard = hf.join("STORYBOARD.md");
-    let script = super::workspace::workspace_root(s).join("pipeline/storyboard_skeleton.py");
-    if trace.run("storyboard_skeleton",overwrite||!storyboard.is_file(),&hf,"python3",&[arg(&script), "--srt".into(), arg(&srt),
-            "--audiomap".into(), arg(&audiomap), "--out".into(), arg(&storyboard)],&[storyboard.clone()])?.is_some(){ran.push("storyboard_skeleton.py → STORYBOARD.md");}
-    let map=trace.read_json("read_audiomap",&audiomap)?;
-    let words=trace.read_json("read_transcript",&transcript)?;
-    let words = words.as_array().or_else(|| words["words"].as_array()).cloned().unwrap_or_default();
-    trace.import(s,json!({"path":transcript,"captions":srt,"audiomap":audiomap,"replace":overwrite}))?;
-    Ok(json!({"ok": true, "target": "hyperframes", "ran": ran,"analysis_attempt":trace.data,"provenance_receipt":project_dir(s)?.join("transcript-provenance.json"),
-        "files": {"audio": bgm, "transcript": transcript, "captions": srt, "audiomap": audiomap, "storyboard": storyboard},
-        "duration_sec": map["audio"]["duration_sec"], "summary": map["summary"],
-        "silences": map["silences"], "phrases": map["phrases"], "words": words.len(),
-        "next": [
-            "Review hyperframes/STORYBOARD.md: one frame per caption (number, time, words) plus instrumental frames for gaps of 1 s or more; then fill each frame's groups (music-to-video Step 3)."
-        ]}))
+    if trace.run("caption_export", overwrite || !srt.is_file(), &hf, runtime,
+        &["transcribe".into(), arg(&transcript), "--to".into(), "srt".into(), "-o".into(), arg(&srt)], &[srt.clone()])?.is_some() {
+        ran.push("hyperframes transcribe --to srt → transcript.srt");
+    }
+    let words = trace.read_json("read_transcript", &transcript)?;
+    let word_count = words.as_array().or_else(|| words["words"].as_array()).map_or(0, Vec::len);
+    let mut analysis = Value::Null;
+    if params["analyze_beats"] != false {
+        let output = trace.run("music_analysis", true, &hf, runtime,
+            &["audio".into(), arg(&audio), "--only".into(), "sections,onsets,moments".into(), "--json".into()], &[])?;
+        analysis = serde_json::from_str(output.as_deref().unwrap_or_default())
+            .map_err(|e| EngineError::InvalidParams(format!("HyperFrames audio returned invalid JSON: {e}")))?;
+        if analysis["items"].as_array().is_none_or(Vec::is_empty) {
+            return Err(EngineError::InvalidParams(format!("HyperFrames audio returned no recording analysis: {analysis}")));
+        }
+        std::fs::write(hf.join("audio-analysis.json"), serde_json::to_vec_pretty(&analysis).map_err(|e| EngineError::InvalidParams(e.to_string()))?)?;
+        ran.push("hyperframes audio → audio-analysis.json");
+    }
+    trace.import(s, json!({"path":transcript,"captions":srt,"replace":overwrite}))?;
+    Ok(json!({"ok":true,"target":"hyperframes","ran":ran,"analysis_attempt":trace.data,
+        "provenance_receipt":dir.join("transcript-provenance.json"),"words":word_count,
+        "files":{"audio":audio,"transcript":transcript,"captions":srt},"music_analysis":analysis,
+        "next":["Review the words against the recording, then create scene pages from the selected storyboard template"]}))
 }
+
 #[cfg(test)]
 mod tests {
     use super::smear_band;

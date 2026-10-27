@@ -9,9 +9,18 @@ use crate::{EngineError, Result, Session};
 /// Identifies a Magic Studio project file (`.magic`, JSON).
 const PROJECT_FORMAT: &str = "magicstudio.project";
 
-/// Writes the open project's asset connections to its `.magic` file.
-pub fn write_project_file(s: &Session) -> Result<()> {
-    let Some(path) = &s.project_path else { return Ok(()) };
+fn saved_path(path: &Path, project: &Path) -> PathBuf {
+    path.strip_prefix(project.parent().unwrap_or(Path::new("."))).unwrap_or(path).to_path_buf()
+}
+
+fn opened_path(path: &str, project: &Path) -> PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() { path.to_path_buf() } else { project.parent().unwrap_or(Path::new(".")).join(path) }
+}
+
+/// The persisted project state, shared by Save and unsaved-change detection.
+pub fn project_document(s: &Session) -> Value {
+    let Some(path) = &s.project_path else { return Value::Null };
     let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Untitled");
     // Loaded assets save their current part states; unloaded ones keep what was saved before.
     let assets: Vec<crate::ProjectAsset> = s
@@ -29,6 +38,30 @@ pub fn write_project_file(s: &Session) -> Result<()> {
         "workshop": {"audio": s.song_audio, "draft_approved": s.draft_approved, "target": s.video_target, "video_project": s.video_project_path}});
     if let Some(state) = &s.theatre_state { doc["theatre"] = state.clone(); }
     if !s.animation_sources.is_empty() { doc["animation_sources"] = json!(s.animation_sources); }
+    normalize_connections(&mut doc, path);
+    doc
+}
+
+fn normalize_connections(doc: &mut Value, project: &Path) {
+    for asset in doc["assets"].as_array_mut().into_iter().flatten() {
+        if let Some(path) = asset["path"].as_str() { asset["path"] = json!(saved_path(Path::new(path), project)); }
+    }
+    for key in ["audio", "video_project"] {
+        if let Some(path) = doc["workshop"][key].as_str() { doc["workshop"][key] = json!(saved_path(Path::new(path), project)); }
+    }
+}
+
+pub fn project_is_dirty(s: &Session, saved: &Value) -> bool {
+    let mut saved = saved.clone();
+    if let Some(path) = &s.project_path { normalize_connections(&mut saved, path); }
+    let current = project_document(s);
+    ["assets", "workshop", "theatre", "animation_sources"].iter().any(|key| saved[*key] != current[*key])
+}
+
+/// Writes the open project's asset connections to its `.magic` file.
+pub fn write_project_file(s: &Session) -> Result<()> {
+    let Some(path) = &s.project_path else { return Ok(()) };
+    let doc = project_document(s);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -184,9 +217,12 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
             path.display()
         )));
     }
-    let assets: Vec<crate::ProjectAsset> =
+    let mut assets: Vec<crate::ProjectAsset> =
         serde_json::from_value(doc.get("assets").cloned().unwrap_or_else(|| json!([])))
             .map_err(|e| EngineError::InvalidParams(format!("invalid project assets: {e}")))?;
+    for asset in &mut assets {
+        asset.path = asset.path.as_ref().map(|source| if source.is_absolute() { source.clone() } else { path.parent().unwrap().join(source) });
+    }
     let animation_sources = serde_json::from_value(doc.get("animation_sources").filter(|v|!v.is_null()).cloned().unwrap_or_else(||json!({})))
         .map_err(|e|EngineError::InvalidParams(format!("invalid animation sources: {e}")))?;
     // Report connections whose source files have moved instead of dropping them.
@@ -200,12 +236,12 @@ pub fn cmd_project_open(s: &mut Session, params: &Value) -> Result<Value> {
     if let Some(owner)=owner{s.project_owner=Some(owner);}
     s.theatre_state = doc.get("theatre").filter(|state| !state.is_null()).cloned();
     s.animation_sources = animation_sources;
-    s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(PathBuf::from);
+    s.song_audio = doc.pointer("/workshop/audio").and_then(Value::as_str).map(|source| opened_path(source, &path));
     s.draft_approved = doc.pointer("/workshop/draft_approved").and_then(Value::as_bool).unwrap_or(false);
     if let Some(target) = doc.pointer("/workshop/target").and_then(Value::as_str).filter(|t| super::workshop::VIDEO_TARGETS.contains(t)) {
         s.video_target = target.into();
     }
-    s.video_project_path = doc.pointer("/workshop/video_project").and_then(Value::as_str).map(PathBuf::from);
+    s.video_project_path = doc.pointer("/workshop/video_project").and_then(Value::as_str).map(|source| opened_path(source, &path));
     let warnings=recent_warning(s,&path,params["record_recent"]!=false);
     Ok(json!({"ok": true, "project": path,"warnings":warnings,"assets": s.project_assets, "missing": missing, "workshop": super::workshop::workshop_status(s)?}))
 }

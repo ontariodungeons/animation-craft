@@ -194,7 +194,8 @@ impl Session {
             }
         }
         // Keep the open project file in step with its asset connections.
-        if self.project_path.is_some()
+        if spec.journal && !matches!(id, "project.open" | "project.new" | "project.close")
+            && self.project_path.is_some()
             && serde_json::to_value(&self.project_assets).ok() != assets_before
         {
             commands::write_project_file(self)?;

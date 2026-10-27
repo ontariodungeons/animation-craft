@@ -13,7 +13,8 @@ fn board(s: &Session) -> Result<Value> {
 pub(crate) fn words(board: &Value) -> Result<Vec<Value>> {
     if board["empty_template"]==true { return Ok(Vec::new()); }
     let path = board["source_transcript"].as_str().ok_or_else(|| invalid("Storyboard has no project timing source"))?;
-    let doc = load(Path::new(path))?;
+    let native = board["project"].as_str().and_then(|project|Path::new(project).parent()).map(|dir|dir.join("hyperframes/transcript.json")).filter(|p|p.is_file());
+    let doc = crate::workshop::transcript_document(native.as_deref().unwrap_or(Path::new(path)))?;
     let source = doc.as_array().or_else(|| doc["words"].as_array()).ok_or_else(|| invalid("Project timing has no words"))?;
     let mut ids = std::collections::HashSet::new();
     source.iter().enumerate().map(|(i, word)| {

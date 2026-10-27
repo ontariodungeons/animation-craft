@@ -161,19 +161,6 @@ async fn engine_command(app:tauri::AppHandle,id:String,mut params:Value)->Result
     Ok(result)
 }
 
-/// An object's layers stacked and cropped to what is drawn, cached in the project's
-/// `storyboard/.theme/` (the engine's own assembler, also used for the PDF's cast cards).
-#[tauri::command]
-fn object_preview(project: String, name: String, layers: Vec<String>) -> Result<String, String> {
-    let dir = std::path::Path::new(&project).parent().ok_or("bad project path")?.join("storyboard").join(".theme");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let out = dir.join(format!("object-{name}.png"));
-    let parts: Vec<std::path::PathBuf> = layers.iter().map(std::path::PathBuf::from).collect();
-    magicstudio_engine::storyboard::assembled_parts(&parts, &out)
-        .map(|p| p.to_string_lossy().into_owned())
-        .ok_or_else(|| format!("{name}: its layers do not share one canvas"))
-}
-
 /// Recent projects are navigation only; they never select the production root.
 #[tauri::command]
 fn recent_projects(engine:tauri::State<Engine>)->Result<Value,String>{engine.with(None,|s|s.execute("project.catalog",json!({})).map(|v|v["projects"].clone()).map_err(|e|e.to_string()))}
@@ -225,26 +212,17 @@ async fn project_command(app:tauri::AppHandle, project:String, id:String, mut pa
  params["_client"]=json!("Studio project workflow");
  tauri::async_runtime::spawn_blocking(move || {
   let mut result=project_cli::execute(&app,&id,params)?;
-  if id!="project.save" && magicstudio_engine::find_command(&id).is_some_and(|c|c.journal) {
+  let dirty=app.state::<Engine>().with(Some(&project),|session|{
+   let path=session.project_path.as_ref().ok_or("No project is open")?;
+   let saved:Value=serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+   Ok(magicstudio_engine::project::project_is_dirty(session,&saved))
+  })?;
+  if id!="project.save" && dirty && magicstudio_engine::find_command(&id).is_some_and(|c|c.journal) {
    let saved=project_cli::execute(&app,"project.save",json!({"_client":"Studio project workflow"}))?;
    result["_ui_engine_revision"]=saved["_ui_engine_revision"].clone();
   }
   result["project"]=json!(project);Ok(result)
  }).await.map_err(|e|e.to_string())?
-}
-
-/// Starts (`on`) or stops the project's studio server with the engine's own commands
-/// (`video.server_start` / `video.server_stop`), then returns the project's fresh state.
-/// Nothing starts a server on its own: quick one-off work costs no memory.
-/// Starting a server can take seconds, so it runs off the window's main thread.
-#[tauri::command]
-async fn studio_server(app: tauri::AppHandle, path: String, on: bool) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Engine>().with(Some(&path), |_| Ok(()))?;
-        project_cli::execute(&app,if on {"video.server_start"} else {"video.server_stop"},json!({"_client":"Studio server control"}))
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// The project folder of a `.magic` path.
@@ -365,7 +343,7 @@ async fn snapshot(app: tauri::AppHandle, project: String, rect: [f64; 4]) -> Res
 /// WebKit's picture of the project view, cropped to `rect` (CSS px; None = all of it), as PNG.
 pub fn snapshot_to(app: &tauri::AppHandle, rect: Option<[f64; 4]>, out: &std::path::Path) -> Result<(), String> {
     capture_view(app, "project", None, out)?;
-    let studio_visible = app.state::<View>().0.lock().map(|v|v.0=="studio" || v.0=="split").unwrap_or(false);
+    let studio_visible = app.state::<View>().0.lock().map(|v|*v=="studio").unwrap_or(false);
     #[cfg(target_os="linux")]
     if studio_visible && app.get_webview("studio").is_some() {
         let studio_path=out.with_extension("studio.png");
@@ -471,13 +449,12 @@ const BAR: f64 = 48.0;
 /// Height of the shell's unified footer, kept clear below the Studio webview (logical px).
 const FOOTER: f64 = 30.0;
 
-/// Which view is showing (`project`, `split` or `studio`) and, for split, the share of the
-/// window the project view takes (the frame between them is dragged in the project view).
-struct View(std::sync::Mutex<(String, f64)>);
+/// Which native view is showing.
+struct View(std::sync::Mutex<String>);
 
 impl Default for View {
     fn default() -> Self {
-        Self(std::sync::Mutex::new(("project".into(), 0.5)))
+        Self(std::sync::Mutex::new("project".into()))
     }
 }
 
@@ -521,13 +498,13 @@ fn layout(app: &tauri::AppHandle) {
     let (Some(window), Some(project)) = (app.get_window("main"), app.get_webview("project")) else { return };
     let (Ok(physical), Ok(scale)) = (window.inner_size(), window.scale_factor()) else { return };
     let size = physical.to_logical::<f64>(scale);
-    let (view, _) = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or(("project".into(),0.5));
+    let view = app.state::<View>().0.lock().map(|v|v.clone()).unwrap_or_else(|_|"project".into());
     let top=BAR+app.state::<DrawerHeight>().0.lock().map(|v|*v).unwrap_or(0.0).min((size.height-BAR-FOOTER).max(0.0));
     place_webview(&project,0,0,0,false);
     #[cfg(not(target_os="linux"))]
     { let _=project.set_position(LogicalPosition::new(0.0,0.0)); let _=project.set_size(size); }
     if let Some(studio)=app.get_webview("studio") {
-        if view=="studio" || view=="split" {
+        if view=="studio" {
             place_webview(&studio,top.round() as i32,0,FOOTER as i32,true);
             #[cfg(not(target_os="linux"))]
             { let _=studio.set_position(LogicalPosition::new(0.0,top)); let _=studio.set_size(LogicalSize::new(size.width,(size.height-top-FOOTER).max(0.0))); }
@@ -536,25 +513,7 @@ fn layout(app: &tauri::AppHandle) {
     }
 }
 
-/// Moves the frame between the project view and the studio (share of the window, top part).
-#[tauri::command]
-fn set_split(app: tauri::AppHandle, ratio: f64) -> Result<(), String> {
-    let state = app.state::<View>();
-    *state.0.lock().map_err(|e| e.to_string())? = ("split".into(), ratio.clamp(0.15, 0.9));
-    layout(&app);
-    Ok(())
-}
-
-/// The window's height in logical px (for dragging the frame).
-#[tauri::command]
-fn window_height(app: tauri::AppHandle) -> Result<f64, String> {
-    let window = app.get_window("main").ok_or("no main window")?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    Ok(window.inner_size().map_err(|e| e.to_string())?.to_logical::<f64>(scale).height)
-}
-
-/// Shows the studio on `url` as `split` (under the project view) or `studio` (full), creating
-/// its webview on first use.
+/// Shows the contained project in HyperFrames Studio, creating its webview on first use.
 #[tauri::command]
 fn studio_show(app: tauri::AppHandle, url: String, mode: String) -> Result<(), String> {
     let window = app.get_window("main").ok_or("no main window")?;
@@ -572,7 +531,8 @@ fn studio_show(app: tauri::AppHandle, url: String, mode: String) -> Result<(), S
         }
     }
     let state = app.state::<View>();
-    state.0.lock().map_err(|e| e.to_string())?.0 = if mode == "split" { "split".into() } else { "studio".into() };
+    if !matches!(mode.as_str(),"studio"|"split"){return Err("Studio view requires mode=studio".into());}
+    *state.0.lock().map_err(|e| e.to_string())? = "studio".into();
     layout(&app);
     Ok(())
 }
@@ -581,7 +541,7 @@ fn studio_show(app: tauri::AppHandle, url: String, mode: String) -> Result<(), S
 #[tauri::command]
 fn studio_hide(app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<View>();
-    state.0.lock().map_err(|e| e.to_string())?.0 = "project".into();
+    *state.0.lock().map_err(|e| e.to_string())? = "project".into();
     layout(&app);
     Ok(())
 }
@@ -596,7 +556,7 @@ fn main() {
         .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, new_window, project_create, project_command, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, new_window, project_create, project_command, agent_config, agent_config_save, snapshot, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout])
         .setup(|app| {
             #[cfg(unix)]
             if let Some(path)=launch_options()["project"].as_str() {
