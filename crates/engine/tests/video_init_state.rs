@@ -19,54 +19,11 @@ fn runtime(dir:&std::path::Path,body:&str)->std::path::PathBuf {
 }
 #[test]
 #[cfg(unix)]
-fn official_initializer_outputs_are_merged_without_overwriting_existing_material() {
- let dir=std::env::temp_dir().join(format!("ac-video-official-{}",std::process::id()));std::fs::create_dir_all(dir.join("hyperframes")).unwrap();
- let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.magic")})).unwrap();
- let captions=dir.join("hyperframes/transcript.srt");std::fs::write(&captions,"Keep original timing").unwrap();
- let cli=runtime(&dir,"[ \"$1\" = init ] && [ \"$3\" = --non-interactive ] && [ \"$4\" = --skip-transcribe ] && [ \"$HYPERFRAMES_SKIP_SKILLS\" = 1 ] || exit 9\nmkdir -p \"$2\"\nprintf '%s' '{}' > \"$2/hyperframes.json\"\nprintf '%s' '<div data-composition-id=fixture></div>' > \"$2/index.html\"");
- let r=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();
- assert!(std::path::Path::new(r["initialized"].as_str().unwrap()).is_file());assert!(dir.join("hyperframes/index.html").is_file());
- assert_eq!(r["video_complete"],false);assert_eq!(std::fs::read_to_string(captions).unwrap(),"Keep original timing");
- // Idempotency must not reinitialize or modify the existing document.
- std::fs::write(&cli,"#!/bin/sh\nexit 9\n").unwrap();
- let repeated=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();assert_eq!(repeated["reused_existing_project"],true);
- std::fs::remove_dir_all(dir).unwrap();
-}
-#[test]
-#[cfg(unix)]
 fn initializer_success_without_files_is_failure_and_existing_files_survive() {
  let dir=std::env::temp_dir().join(format!("ac-video-empty-{}",std::process::id()));std::fs::create_dir_all(dir.join("hyperframes")).unwrap();
  let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.magic")})).unwrap();
  let captions=dir.join("hyperframes/transcript.srt");std::fs::write(&captions,"Keep").unwrap();let cli=runtime(&dir,"exit 0");
  let r=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli}));assert!(r.is_err(),"exit0 alone is not initialization");assert_eq!(std::fs::read_to_string(captions).unwrap(),"Keep");
- std::fs::remove_dir_all(dir).unwrap();
-}
-#[test]
-#[cfg(unix)]
-fn initialization_imports_existing_song_and_native_timing_without_asr() {
- let dir=std::env::temp_dir().join(format!("ac-video-song-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
- let mut s=Session::default();s.execute("project.new",json!({"path":dir.join("Fixture.magic")})).unwrap();
- let audio=dir.join("song.wav");std::fs::write(&audio,b"synthetic audio fixture").unwrap();s.song_audio=Some(audio.clone());
- let words=json!([{"text":"hello","start":0.2,"end":1.0}]);let transcript=dir.join("fixture.transcript.json");std::fs::write(&transcript,words.to_string()).unwrap();
- let cli=runtime(&dir,r#"case "$1" in
- init) [ "$4" = --skip-transcribe ] && [ "$5" = --audio ] && [ "$6" = "$(dirname "$0")/song.wav" ] || exit 9
- mkdir -p "$2";printf '%s' '{}' > "$2/hyperframes.json";printf '%s' '<html><body><div data-composition-id="main"><audio id="song"></audio></div></body></html>' > "$2/index.html";;
- transcribe) [ "$3" = --dir ] && [ "$5" = --json ] && [ "$6" = --no-runtime-install ] || exit 8
- cp "$2" "$4/transcript.json";printf '%s' '{"ok":true,"wordCount":1}';;
- *) exit 7;;
-esac"#);
- let result=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();
- assert_eq!(result["captions"]["ready"],true);
- let native=dir.join("hyperframes/compositions/captions.html");let caption=std::fs::read_to_string(&native).unwrap();
- assert!(caption.contains("const TRANSCRIPT = [{\"end\":1.0,\"start\":0.2,\"text\":\"hello\"}];"));assert!(caption.contains("hl-group caption-group"));
- let edited=caption+"\n<!-- saved creative/style edit -->";std::fs::write(&native,&edited).unwrap();
- let overrides=dir.join("hyperframes/caption-overrides.json");std::fs::write(&overrides,"{\"saved\":true}").unwrap();
- let repeated=s.execute("video.init",json!({"target":"hyperframes","hyperframes_cli":cli})).unwrap();assert_eq!(repeated["captions"]["reused_existing_source"],true);
- assert_eq!(std::fs::read_to_string(&native).unwrap(),edited);assert_eq!(std::fs::read_to_string(overrides).unwrap(),"{\"saved\":true}");
- assert_eq!(std::fs::read_to_string(dir.join("hyperframes/index.html")).unwrap().matches("data-track-kind=\"captions\"").count(),1);
- assert_eq!(result["song_imported"],true);
- let imported:serde_json::Value=serde_json::from_slice(&std::fs::read(dir.join("hyperframes/transcript.json")).unwrap()).unwrap();assert_eq!(imported,words);
- assert_eq!(std::fs::read(&audio).unwrap(),b"synthetic audio fixture");assert_eq!(std::fs::read_to_string(transcript).unwrap(),words.to_string());
  std::fs::remove_dir_all(dir).unwrap();
 }
 #[test]

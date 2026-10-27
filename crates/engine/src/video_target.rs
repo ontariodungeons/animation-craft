@@ -1,159 +1,44 @@
-//! Target video project scaffolding (Remotion, FilmCraft, HyperFrames), web dev server
+//! Official HyperFrames project creation, live Studio server
 //! management (`video.server_start` / `video.server_stop`), and reference placement.
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{EngineError, Result, Session};
-use crate::storyboard::{clock, storyboard_timing};
 use crate::workshop::{
-    FILMCRAFT_TICKS_PER_SECOND, panel_files, project_dir, video_project_path, workshop_status,
+    project_dir, workshop_status,
 };
-use crate::workspace::{resolve_workspace_path, run_tool_in, sanitize_asset_id};
+use crate::workspace::{resolve_workspace_path, run_tool_in};
 
-pub(crate) fn remotion_composer_dir(dir: &Path) -> Option<PathBuf> {
-    for ancestor in dir.ancestors().skip(1).take(3) {
-        let candidate = ancestor.join("remotion-composer");
-        if candidate.join("package.json").is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-pub(crate) fn remotion_track_slug(s: &Session, dir: &Path) -> String {
-    let folder = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    if let Some(num) = folder.strip_prefix("kathy-cd-track-") {
-        return format!("track{}", num.replace('-', ""));
-    }
-    let stem = s
-        .project_path
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .and_then(|n| n.to_str())
-        .unwrap_or(if folder.is_empty() { "song" } else { folder });
-    sanitize_asset_id(stem)
-}
-
-pub(crate) fn target_project_path(s: &Session, dir: &Path, target: &str) -> Option<PathBuf> {
-    match target {
-        "filmcraft" => video_project_path(dir),
-        "hyperframes" => {
-            let hf_json = dir.join("hyperframes/hyperframes.json");
-            let hf_html = dir.join("hyperframes/index.html");
-            if hf_json.is_file() {
-                Some(hf_json)
-            } else if hf_html.is_file() {
-                Some(hf_html)
-            } else {
-                None
-            }
-        }
-        "remotion" => {
-            let local_pkg = dir.join("remotion/package.json");
-            if local_pkg.is_file() {
-                return Some(local_pkg);
-            }
-            if let Some(composer) = remotion_composer_dir(dir) {
-                let slug = remotion_track_slug(s, dir);
-                let comp_dir = composer.join("src").join(&slug);
-                if comp_dir.is_dir() {
-                    return Some(comp_dir);
-                }
-                let folder_slug = sanitize_asset_id(
-                    dir.file_name().and_then(|n| n.to_str()).unwrap_or("song"),
-                );
-                let alt_dir = composer.join("src").join(&folder_slug);
-                if alt_dir.is_dir() {
-                    return Some(alt_dir);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+pub(crate) fn target_project_path(_: &Session, dir: &Path, target: &str) -> Option<PathBuf> {
+    let config=dir.join("hyperframes/hyperframes.json");
+    (target=="hyperframes" && config.is_file() && dir.join("hyperframes/index.html").is_file()).then_some(config)
 }
 
 pub(crate) fn target_project_chip(s: &Session, dir: &Path, target: &str) -> Value {
-    if let Some(path) = target_project_path(s, dir, target) {
-        let label = match target {
-            "remotion" => format!(
-                "remotion/{}",
-                path.file_name().and_then(|n| n.to_str()).unwrap_or("remotion")
-            ),
-            "hyperframes" => "hyperframes/hyperframes.json".to_string(),
-            _ => path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("project.fcproj")
-                .to_string(),
-        };
-        json!({"name": label, "path": path, "exists": true, "target": target})
-    } else {
-        let expected = match target {
-            "remotion" => {
-                let slug = remotion_track_slug(s, dir);
-                let path = remotion_composer_dir(dir)
-                    .map(|c| c.join("src").join(&slug))
-                    .unwrap_or_else(|| dir.join("remotion"));
-                (format!("remotion/{slug}"), path)
-            }
-            "hyperframes" => (
-                "hyperframes/hyperframes.json".to_string(),
-                dir.join("hyperframes/hyperframes.json"),
-            ),
-            _ => {
-                let stem = sanitize_asset_id(
-                    s.project_path
-                        .as_ref()
-                        .and_then(|p| p.file_stem())
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("song"),
-                );
-                (format!("{stem}.fcproj"), dir.join(format!("{stem}.fcproj")))
-            }
-        };
-        json!({"name": expected.0, "path": expected.1, "exists": false, "target": target})
-    }
+    let path=dir.join("hyperframes/hyperframes.json");
+    json!({"name":"hyperframes/hyperframes.json","path":path,"exists":target_project_path(s,dir,target).is_some(),"target":"hyperframes"})
 }
 
-fn port_open(port: u16) -> bool {
-    use std::net::{SocketAddr, TcpStream};
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(5)).is_ok()
+fn native_preview(dir: &Path, flags: &[String], executable: Option<&str>) -> Result<Value> {
+    let project=dir.join("hyperframes");
+    let runtime=hyperframes_cli(executable,Some(&project))?;
+    let mut args=vec!["preview".into(),project.to_string_lossy().into_owned(),"--json".into()];
+    args.extend_from_slice(flags);
+    let output=run_tool_in(dir,runtime.to_str().ok_or_else(||EngineError::InvalidParams("HyperFrames path must be UTF-8".into()))?,&args)?;
+    let reply:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(format!("HyperFrames preview: {e}")))?;
+    if reply["ok"]!=true {return Err(EngineError::ExternalTool("hyperframes preview".into(),reply.to_string()));}
+    Ok(reply["result"].clone())
 }
 
-pub(crate) fn video_server_info(dir: &Path, target: &str) -> Value {
-    let state_file = dir.join(".video-server.json");
-    if let Ok(raw) = std::fs::read_to_string(&state_file)
-        && let Ok(saved) = serde_json::from_str::<Value>(&raw)
-        && saved.get("target").and_then(Value::as_str) == Some(target)
-        && let Some(port) = saved.get("port").and_then(Value::as_u64).map(|p| p as u16)
-        && port_open(port)
-    {
-        return json!({
-            "running": true,
-            "target": target,
-            "port": port,
-            "url": if target=="hyperframes"{format!("http://localhost:{port}/#project/hyperframes")}else{format!("http://localhost:{port}")},
-            "pid": saved.get("pid"),
-            "managed": true,
-        });
+pub(crate) fn video_server_info(dir: &Path, _: &str) -> Value {
+    if !dir.join("hyperframes/hyperframes.json").is_file(){return json!({"running":false,"target":"hyperframes","state":"not-created"});}
+    match native_preview(dir,&["--status".into()],None) {
+        Ok(native)=>json!({"running":native["state"]=="running" && native["ready"]==true,"target":"hyperframes","port":native["port"],"url":native["studioUrl"],"pid":native["pid"],"managed":true,"native":native}),
+        Err(error)=>json!({"running":null,"target":"hyperframes","state":"unavailable","error":error.to_string()})
     }
-    // Only the server this project started counts: a studio on some other port may belong to
-    // another project or another person.
-    json!({
-        "running": false,
-        "target": target,
-        "port": null,
-        "url": null,
-        "pid": null,
-        "managed": false,
-    })
 }
 
 /// The HyperFrames version a video project pins (`hyperframes@X` in its package.json scripts,
@@ -201,114 +86,20 @@ pub(crate) fn hyperframes_cli(explicit: Option<&str>, project: Option<&Path>) ->
     Ok(path)
 }
 
-fn generated_files(root:&Path, relative:&Path, files:&mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(root.join(relative))? {
-        let entry=entry?;let path=relative.join(entry.file_name());let kind=entry.file_type()?;
-        if kind.is_dir(){generated_files(root,&path,files)?;}else if kind.is_file(){files.push(path);}else{return Err(EngineError::InvalidParams("Official initializer produced an unsupported symlink; generated files retained for inspection".into()));}
-    }
-    Ok(())
-}
-
-fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>, replace_scaffold:bool) -> Result<PathBuf> {
-    let cli=hyperframes_cli(executable,Some(&dir.join("hyperframes")))?;
-    let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|EngineError::InvalidParams(e.to_string()))?.as_nanos();
-    let stage=dir.join(format!(".hyperframes-init-{}-{stamp}",std::process::id()));
-    let mut args=vec!["init".to_string(),stage.to_string_lossy().into_owned(),"--non-interactive".into(),"--skip-transcribe".into()];
+fn init_hyperframes(s:&Session, dir:&Path, executable:Option<&str>) -> Result<PathBuf> {
+    let project=dir.join("hyperframes");
+    let cli=hyperframes_cli(executable,Some(&project))?;
+    let mut args=vec!["init".to_string(),project.to_string_lossy().into_owned(),"--non-interactive".into(),"--example".into(),"blank".into(),"--skill".into(),"music-to-video".into(),"--skip-transcribe".into()];
     if let Some(audio)=&s.song_audio {args.extend(["--audio".into(),audio.to_string_lossy().into_owned()]);}
     let output=std::process::Command::new(&cli).args(&args).current_dir(dir).env("HYPERFRAMES_SKIP_SKILLS","1").output()
         .map_err(|e|EngineError::ExternalTool(cli.display().to_string(),e.to_string()))?;
-    if !output.status.success(){return Err(EngineError::ExternalTool(cli.display().to_string(),format!("official init exited {:?}: {}. Partial output retained at {}",output.status.code(),String::from_utf8_lossy(&output.stderr),stage.display())));}
-    if let Some(transcript)=crate::workshop::transcript_files(dir).into_iter().next() {
-        let imported=run_tool_in(dir,cli.to_str().ok_or_else(||EngineError::InvalidParams("Runtime path must be UTF-8".into()))?,&["transcribe".into(),transcript.to_string_lossy().into_owned(),"--dir".into(),stage.to_string_lossy().into_owned(),"--json".into(),"--no-runtime-install".into()])?;
-        let result:Value=serde_json::from_str(&imported).map_err(|e|EngineError::InvalidParams(format!("Official existing-transcript import returned invalid JSON: {e}")))?;
-        if result["ok"]!=true || !stage.join("transcript.json").is_file(){return Err(EngineError::InvalidParams(format!("Official existing-transcript import failed: {imported}; staged files retained at {}",stage.display())));}
-    }
-    let config=stage.join("hyperframes.json");let entry=stage.join("index.html");
-    if !entry.is_file() || !std::fs::read(&config).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).is_some_and(|v|v.is_object()) {
-        return Err(EngineError::InvalidParams(format!("Official HyperFrames init did not create a valid hyperframes.json and index.html; output retained at {}",stage.display())));
-    }
-    let dest=dir.join("hyperframes");let mut files=Vec::new();generated_files(&stage,Path::new(""),&mut files)?;
-    // Replacement is explicit and backed up; captions, artwork and other files cannot be overwritten.
-    let replaceable=|p:&Path|replace_scaffold&&matches!(p.to_str(),Some("index.html"|"hyperframes.json"|"package.json"|"meta.json"));
-    for relative in &files {
-        let target=dest.join(relative);
-        let same=target.is_file()&&std::fs::read(&target)?==std::fs::read(stage.join(relative))?;
-        if (target.exists()&&!same&&!replaceable(relative)) || target.ancestors().skip(1).take_while(|p|p.starts_with(&dest)).any(|p|p.exists()&&!p.is_dir()) {
-            return Err(EngineError::InvalidParams(format!("Official init conflicts with existing {}; no existing file overwritten. Generated output retained at {}",target.display(),stage.display())));
-        }
-    }
-    for relative in files {
-        let target=dest.join(&relative);
-        if target.is_file() {
-            if std::fs::read(&target)?==std::fs::read(stage.join(&relative))?{continue;}
-            let backup=dest.join(".magicstudio-history").join(format!("init-{stamp}")).join(&relative);
-            std::fs::create_dir_all(backup.parent().ok_or_else(||EngineError::InvalidParams("Backup has no parent".into()))?)?;std::fs::copy(&target,backup)?;
-        }
-        std::fs::create_dir_all(target.parent().ok_or_else(||EngineError::InvalidParams("Generated file has no parent".into()))?)?;
-        std::fs::rename(stage.join(relative),target)?;
-    }
-    std::fs::remove_dir_all(&stage)?;
-    Ok(dest.join("hyperframes.json"))
+    if !output.status.success(){return Err(EngineError::ExternalTool(cli.display().to_string(),String::from_utf8_lossy(&output.stderr).into_owned()));}
+    target_project_path(s,dir,"hyperframes").ok_or_else(||EngineError::InvalidParams("HyperFrames init did not produce its project files".into()))
 }
 
-/// Ensure a video target project exists for the song folder, creating scaffolding when missing.
+/// Existing native project only; all creation goes through the official init command.
 pub(crate) fn ensure_video_target_project(s: &Session, dir: &Path, target: &str) -> Result<PathBuf> {
-    if let Some(existing) = target_project_path(s, dir, target) {
-        return Ok(existing);
-    }
-    let title = s
-        .project_path
-        .as_ref()
-        .and_then(|p| p.file_stem())
-        .and_then(|n| n.to_str())
-        .unwrap_or("Song")
-        .to_string();
-    let _duration_secs = probe_audio_duration(s.song_audio.as_deref());
-    match target {
-        "remotion" => {
-            let slug = remotion_track_slug(s, dir);
-            let comp_dir = if let Some(composer) = remotion_composer_dir(dir) {
-                composer.join("src").join(&slug)
-            } else {
-                let remotion_root = dir.join("remotion");
-                std::fs::create_dir_all(remotion_root.join("src"))?;
-                let pkg_json = remotion_root.join("package.json");
-                if !pkg_json.exists() {
-                    std::fs::write(
-                        &pkg_json,
-                        serde_json::to_string_pretty(&json!({
-                            "name": format!("remotion-{slug}"),
-                            "private": true,
-                            "scripts": {
-                                "dev": "npx remotion studio src/index.ts",
-                                "render": format!("npx remotion render src/index.ts {slug}")
-                            }
-                        }))
-                        .unwrap_or_default(),
-                    )?;
-                }
-                let index_ts = remotion_root.join("src/index.ts");
-                if !index_ts.exists() {
-                    std::fs::write(
-                        &index_ts,
-                        "// Remotion project scaffolded by Magic Studio\n",
-                    )?;
-                }
-                remotion_root.join("src").join(&slug)
-            };
-            Ok(comp_dir)
-        }
-        "filmcraft" => {
-            let fcproj = dir.join(format!("{title}.fcproj"));
-            std::fs::create_dir_all(dir)?;
-            if !fcproj.is_file() {
-                std::fs::write(&fcproj, "{}")?;
-            }
-            Ok(fcproj)
-        }
-        "hyperframes" => Err(EngineError::InvalidParams("HyperFrames project missing; use video.init with an existing official executable".into())),
-        _ => Err(EngineError::InvalidParams(format!("unknown video target '{target}'"))),
-    }
+    target_project_path(s,dir,target).ok_or_else(||EngineError::InvalidParams("No HyperFrames project; upload audio or run video.init".into()))
 }
 
 pub(crate) fn probe_audio_duration(audio: Option<&Path>) -> f64 {
@@ -327,23 +118,6 @@ pub(crate) fn probe_audio_duration(audio: Option<&Path>) -> f64 {
         return secs;
     }
     30.0
-}
-
-fn find_free_port(preferred: u16) -> u16 {
-    for port in preferred..(preferred + 25) {
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return port;
-        }
-    }
-    preferred
-}
-
-fn is_managed_video_server_pid(pid: u64) -> bool {
-    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&cmdline).to_ascii_lowercase();
-    text.contains("remotion") || text.contains("http.server") || text.contains("hyperframes")
 }
 
 /// The official caption component bound to timed words (`{text,start,end}`) shown in the given index groups.
@@ -398,10 +172,11 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .unwrap_or(&s.video_target)
         .to_string();
+    if target!="hyperframes" {return Err(EngineError::InvalidParams("Magic Studio uses HyperFrames".into()));}
     let existed=target_project_path(s,&dir,&target).is_some();
-    let replace=params["replace_scaffold"]==true;
-    let reused=existed&&!replace;
-    let created = if target=="hyperframes" && !reused {init_hyperframes(s,&dir,params["hyperframes_cli"].as_str(),replace)?}else{ensure_video_target_project(s, &dir, &target)?};
+    if params["replace_scaffold"]==true {return Err(EngineError::InvalidParams("Existing projects are edited by HyperFrames; init does not replace them".into()));}
+    let reused=existed;
+    let created = if target=="hyperframes" && !reused {init_hyperframes(s,&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
     if target == "hyperframes" && !created.is_file() {
         return Err(EngineError::InvalidParams(format!(
             "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
@@ -430,15 +205,20 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
         if result.contains("anomalies") {return Err(EngineError::InvalidParams(format!("Music-to-video assembler reported incomplete inputs: {result}")));}
         assembly=json!({"workflow":"music-to-video","validation_script":validate,"assembly_script":assemble,"validation":validation,"result":result,"storyboard":plan,"audiomap":hf.join("audiomap.json"),"bgm":hf.join("assets/bgm.mp3")});
     }
+    let runtime=hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?;
+    let native=run_tool_in(&dir,runtime.to_str().ok_or_else(||EngineError::InvalidParams("HyperFrames executable path must be UTF-8".into()))?,&["timeline".into(),dir.join("hyperframes").to_string_lossy().into_owned(),"--json".into()])?;
+    let native:Value=serde_json::from_str(&native).map_err(|e|EngineError::InvalidParams(format!("HyperFrames timeline: {e}")))?;
+    if s.song_audio.is_some() && !native["timeline"]["tracks"].as_array().into_iter().flatten().any(|t|t["kind"]=="audio" && t["rows"].as_array().is_some_and(|rows|!rows.is_empty())) {
+        return Err(EngineError::InvalidParams("HyperFrames project has no audio track; upload was not completed".into()));
+    }
     let mut status = workshop_status(s)?;
+    status["native_timeline"]=native;
     status["music_assembly"]=assembly;
     status["captions"]=if target=="hyperframes" && params["captions"]!=false {ensure_native_captions(s,&dir)?}else{Value::Null};
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
     status["video_complete"]=json!(false);
     status["song_imported"]=json!(target=="hyperframes"&&!reused&&s.song_audio.is_some());
-    status["existing_timing_imported"]=json!(target=="hyperframes"&&!reused&&!crate::workshop::transcript_files(&dir).is_empty());
-    status["replaced_existing_scaffold"]=json!(existed&&replace);
     s.video_project_path = target_project_path(s, &dir, &target);
     status["video_project_path"]=json!(s.video_project_path);
     if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
@@ -448,175 +228,84 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 pub fn cmd_video_server_start(s: &mut Session, params: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let target = params
-        .get("target")
-        .and_then(Value::as_str)
-        .unwrap_or(&s.video_target)
-        .to_string();
-    let current = video_server_info(&dir, &target);
-    if current["running"] == json!(true) {
-        return workshop_status(s);
-    }
-    let _ = if target=="hyperframes" && target_project_path(s,&dir,&target).is_none(){init_hyperframes(s,&dir,params["hyperframes_cli"].as_str(),false)?}else{ensure_video_target_project(s, &dir, &target)?};
-    let preferred_port = params
-        .get("port")
-        .and_then(Value::as_u64)
-        .map(|p| p as u16)
-        .unwrap_or(if target == "hyperframes" { 3058 } else { 3057 });
-    let port = find_free_port(preferred_port);
-    let log_file = std::fs::File::create(dir.join(".video-server.log"))?;
-    let err_file = log_file.try_clone()?;
-
-    let mut child = match target.as_str() {
-        "remotion" => {
-            let work_dir = remotion_composer_dir(&dir).unwrap_or_else(|| dir.join("remotion"));
-            std::process::Command::new("npx")
-                .args(["remotion", "studio", "--port", &port.to_string(), "--no-open"])
-                .current_dir(&work_dir)
-                .process_group(0)
-                .stdout(log_file)
-                .stderr(err_file)
-                .spawn()
-                .map_err(|e| EngineError::ExternalTool("remotion".into(), e.to_string()))?
-        }
-        "hyperframes" => {
-            let work_dir = dir.join("hyperframes");
-            // HyperFrames Studio itself (not a plain file server): timeline, preview, lint, and
-            // `hyperframes preview --context/--selection` for agents. Foreground keeps the pid ours.
-            std::process::Command::new(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&work_dir))?)
-                .args(["preview", "--port", &port.to_string(), "--no-open", "--foreground", "--force-new", &work_dir.to_string_lossy()])
-                .current_dir(&work_dir)
-                .env("PWD", &work_dir)
-                .process_group(0)
-                .stdout(log_file)
-                .stderr(err_file)
-                .spawn()
-                .map_err(|e| EngineError::ExternalTool("hyperframes-server".into(), e.to_string()))?
-        }
-        other => {
-            return Err(EngineError::InvalidParams(format!(
-                "target '{other}' does not use a web dev server"
-            )));
-        }
-    };
-    let pid = child.id();
-    let state = json!({
-        "target": target,
-        "port": port,
-        "pid": pid,
-        "url": if target=="hyperframes"{format!("http://localhost:{port}/#project/hyperframes")}else{format!("http://localhost:{port}")},
-    });
-    std::fs::write(
-        dir.join(".video-server.json"),
-        serde_json::to_string_pretty(&state).unwrap_or_default(),
-    )?;
-    // npx resolves and boots the studio first; give it up to 30 s.
-    for _ in 0..200 {
-        if port_open(port) {
-            break;
-        }
-        // A studio that quits at once (no composition yet, bad config) reports why, right away.
-        if let Ok(Some(status)) = child.try_wait() {
-            let _ = std::fs::remove_file(dir.join(".video-server.json"));
-            let log = std::fs::read_to_string(dir.join(".video-server.log")).unwrap_or_default();
-            let tail: Vec<&str> = log.lines().map(str::trim).filter(|l| !l.is_empty() && !l.chars().all(|c| !c.is_alphanumeric())).collect();
-            return Err(EngineError::ExternalTool(
-                format!("{target} studio"),
-                format!("exited ({status}): {}", tail[tail.len().saturating_sub(4)..].join(" · ")),
-            ));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(150));
-    }
-    workshop_status(s)
+    let dir=project_dir(s)?;
+    ensure_video_target_project(s,&dir,"hyperframes")?;
+    let mut flags=vec!["--background".into(),"--no-open".into()];
+    if let Some(port)=params["port"].as_u64(){flags.extend(["--port".into(),port.to_string()]);}
+    let native=native_preview(&dir,&flags,params["hyperframes_cli"].as_str())?;
+    if native["ready"]!=true {return Err(EngineError::ExternalTool("HyperFrames Studio".into(),native.to_string()));}
+    let mut status=workshop_status(s)?;status["native_preview"]=native;Ok(status)
 }
 
 pub fn cmd_video_server_stop(s: &mut Session, _: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let state_path = dir.join(".video-server.json");
-    if let Ok(raw) = std::fs::read_to_string(&state_path)
-        && let Ok(saved) = serde_json::from_str::<Value>(&raw)
-        && let Some(pid) = saved.get("pid").and_then(Value::as_u64)
-        && is_managed_video_server_pid(pid)
-    {
-        // The studio runs in its own process group (npx and the node server it starts).
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", "--", &format!("-{pid}")])
-            .status();
-    }
-    let _ = std::fs::remove_file(&state_path);
+    let dir=project_dir(s)?;
+    native_preview(&dir,&["--stop".into()],None)?;
     workshop_status(s)
 }
 
-/// Puts the storyboard panels on the song's FilmCraft sequence as placeholders.
-pub fn cmd_video_place_references(s: &mut Session, params: &Value) -> Result<Value> {
-    let dir = project_dir(s)?;
-    let fcproj = match params.get("project").and_then(Value::as_str) {
-        Some(p) => resolve_workspace_path(s, p),
-        None => video_project_path(&dir).ok_or_else(|| {
-            EngineError::InvalidParams("no FilmCraft project yet: run audio.transcribe first".into())
-        })?,
+pub fn read_placed_tracks(dir: &Path) -> Vec<Value> {
+    let folder = dir.join("hyperframes/assets/animation");
+    let Ok(entries) = std::fs::read_dir(&folder) else {
+        return Vec::new();
     };
-    let images: Vec<PathBuf> = match params.get("images").and_then(Value::as_array) {
-        Some(list) => list.iter().filter_map(Value::as_str).map(|p| resolve_workspace_path(s, p)).collect(),
-        None => panel_files(&dir),
-    };
-    if images.is_empty() {
-        return Err(EngineError::InvalidParams("no storyboard panels to place (workshop.add kind=panels first)".into()));
-    }
-    let track = params.get("track").and_then(Value::as_str).unwrap_or("V1");
-    let tool = "filmcraft-cli";
-    let failed = |what: &str, detail: String| EngineError::ExternalTool(tool.into(), format!("{what}: {detail}"));
-    let project_arg = fcproj.to_string_lossy().into_owned();
-    let sequence: Value = serde_json::from_str(&run_tool_in(&dir, tool, &["--project".into(), project_arg.clone(), "inspect".into(), "sequence".into()])?)
-        .map_err(|e| failed("inspect", e.to_string()))?;
-    let duration = sequence
-        .get("duration")
-        .and_then(Value::as_u64)
-        .filter(|d| *d > 0)
-        .ok_or_else(|| failed("inspect", "the FilmCraft project has no sequence with a length".into()))?;
-    let imported: Value = serde_json::from_str(&run_tool_in(
-        &dir,
-        tool,
-        &["--project".into(), project_arg.clone(), "--save".into(), "exec".into(), "file.import".into(), json!({"paths": images}).to_string()],
-    )?)
-    .map_err(|e| failed("file.import", e.to_string()))?;
-    let items: Vec<u64> = imported.get("items").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
-    if items.len() != images.len() {
-        return Err(failed("file.import", format!("imported {} of {} images: {imported}", items.len(), images.len())));
-    }
-    let (_, spans) = storyboard_timing(&dir, items.len()).ok_or_else(|| {
-        EngineError::InvalidParams("transcribe the song first: panel times come from the transcript".into())
-    })?;
-    let ticks = |seconds: f64| ((seconds * FILMCRAFT_TICKS_PER_SECOND) as u64).min(duration);
-    let lines: Vec<String> = items
-        .iter()
-        .zip(&spans)
-        .flat_map(|(item, item_spans)| {
-            item_spans.iter().map(move |(a, b)| (item, *a, *b))
-        })
-        .filter(|(_, a, b)| b > a)
-        .map(|(item, a, b)| {
-            json!({"id": "timeline.place", "params": {"item": item, "track": track, "time": ticks(a), "duration": ticks(b) - ticks(a), "insert": false}}).to_string()
-        })
-        .collect();
-    if lines.is_empty() {
-        return Err(EngineError::InvalidParams("no panel lines up with a sung line in the transcript".into()));
-    }
-    let script = dir.join(".place_references.jsonl");
-    std::fs::write(&script, lines.join("\n"))?;
-    let run = run_tool_in(&dir, tool, &["--project".into(), project_arg, "--save".into(), "--compact".into(), "run".into(), script.to_string_lossy().into_owned()]);
-    let _ = std::fs::remove_file(&script);
-    let mut clips = Vec::new();
-    for line in run?.lines().filter(|l| l.trim_start().starts_with('{')) {
-        let entry: Value = serde_json::from_str(line).map_err(|e| failed("run", e.to_string()))?;
-        if entry.get("ok").and_then(Value::as_bool) != Some(true) {
-            return Err(failed("timeline.place", entry.to_string()));
+    let mut tracks = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("json")
+            && let Ok(bytes) = std::fs::read(&path)
+            && let Ok(val) = serde_json::from_slice::<Value>(&bytes)
+        {
+            tracks.push(val);
         }
-        clips.extend(entry.pointer("/result/clips").and_then(Value::as_array).cloned().unwrap_or_default());
     }
-    let timing: Vec<Value> = images.iter().zip(&spans).map(|(img, sp)| json!({"panel": img, "begins": sp.iter().map(|(a, _)| clock(*a)).collect::<Vec<_>>()})).collect();
-    Ok(json!({"ok": true, "filmcraft_project": fcproj, "track": track, "clips": clips, "timing": timing}))
+    tracks.sort_by_key(|v| v["track_index"].as_i64().unwrap_or(0));
+    tracks
+}
+
+pub fn sync_placed_tracks_media_and_duration(
+    s: &mut Session,
+    character: &str,
+    track: &str,
+    new_media: Option<&str>,
+    new_duration: Option<f64>,
+) -> Result<Value> {
+    let dir = project_dir(s)?;
+    let existing = read_placed_tracks(&dir);
+    let mut updated = Vec::new();
+    let clean_track = track.trim_start_matches('@');
+    for item in existing {
+        let item_char = item["character"].as_str().unwrap_or("");
+        let item_track = item["track"].as_str().unwrap_or("").trim_start_matches('@');
+        if item_char == character && item_track == clean_track {
+            if let Some(id) = item["id"].as_str() {
+                let mut req = json!({
+                    "id": id,
+                    "start": item["start"].as_f64().unwrap_or(0.0),
+                    "duration": new_duration.unwrap_or_else(|| item["duration"].as_f64().unwrap_or(1.0)),
+                    "playback_rate": item["playback_rate"].as_f64().unwrap_or(1.0),
+                    "rect": item["rect"].clone(),
+                    "character": character,
+                    "track": track,
+                });
+                if let Some(p) = new_media.or_else(|| item["media"].as_str()).or_else(|| item["path"].as_str()) {
+                    req["path"] = json!(p);
+                }
+                if let Ok(placed) = cmd_video_place_track(s, &req) {
+                    updated.push(placed["id"].clone());
+                }
+            }
+        }
+    }
+    Ok(json!(updated))
+}
+
+pub fn sync_placed_tracks_duration(
+    s: &mut Session,
+    character: &str,
+    track: &str,
+    new_duration: f64,
+) -> Result<Value> {
+    sync_placed_tracks_media_and_duration(s, character, track, None, Some(new_duration))
 }
 
 /// Place a rendered track in HyperFrames without recreating the composition.

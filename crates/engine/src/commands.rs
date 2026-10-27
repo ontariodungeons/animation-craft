@@ -16,6 +16,7 @@
 //! This file keeps only the `CommandSpec` registry, `command_specs()`, `find()`,
 //! `check_param_types()`, and the `build()` array wiring every id to its handler.
 
+use crate::storyboard::cmd_storyboard_template;
 use std::sync::OnceLock;
 
 use serde_json::Value;
@@ -56,14 +57,13 @@ use crate::exports::{
     cmd_export_character_iteration, cmd_scene_farm_school_lineup, cmd_validate_motion,
 };
 use crate::vision::cmd_vision_analyze;
-use crate::doctor::cmd_app_doctor;
+use crate::doctor::{cmd_app_analytics, cmd_app_doctor};
 use crate::workshop::{
-    cmd_audio_analyze, cmd_audio_transcribe, cmd_assets_assess, cmd_assets_fixlist, cmd_assets_fixlist_add,
+    cmd_audio_analyze, cmd_assets_assess, cmd_assets_fixlist, cmd_assets_fixlist_add,
     cmd_assets_request_sheet, cmd_project_search, cmd_query_list, cmd_storyboard_approve,
     cmd_storyboard_edit, cmd_storyboard_import_openmontage, cmd_storyboard_init,
     cmd_storyboard_toc,
-    cmd_video_init, cmd_video_place_references,
-    cmd_video_server_start, cmd_video_server_stop,
+    cmd_video_init, cmd_video_server_start, cmd_video_server_stop,
     cmd_workshop_add, cmd_workshop_approve_draft, cmd_workshop_build_storyboard,
     cmd_workshop_files, cmd_workshop_import_transcript,
     cmd_workshop_remove, cmd_workshop_set_audio, cmd_workshop_set_target, cmd_workshop_split_panels,
@@ -123,11 +123,9 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"export.cutout_mp4"
             | b"export.layered_motion"
             | b"validate.motion"
-            | b"audio.transcribe"
             | b"audio.analyze"
             | b"workshop.build_storyboard"
             | b"workshop.split_panels"
-            | b"video.place_references"
             | b"video.snapshot"
             | b"video.render"
             | b"image.generate"
@@ -501,7 +499,8 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("storyboard.create", "Create Storyboard / Split Scene", ["Storyboard"], None, "{\"scene\":\"optional existing scene number or ID to split\",\"word\":\"recorded word ID; new scene starts here\",\"expected_revision\":\"revision returned by storyboard.read; required for scene changes\"}", always, crate::storyboard_crud::create),
         cmd!("storyboard.update", "Update Storyboard", ["Storyboard"], None, "{\"scene\":\"scene number or ID\",\"page\":\"alternative document page\",\"field\":\"native text field\",\"value\":\"text\",\"edge\":\"optional start|end: move a scene cut, without retiming lyrics\",\"word\":\"existing recorded word ID\",\"expected_revision\":\"required for grouping or restore\",\"restore\":\"optional saved manifest.json\",\"backgrounds\":[\"optional registered image IDs to assign to the Backgrounds & locations section\"]}", always, crate::storyboard_crud::update),
         cmd!("storyboard.delete", "Remove Scene Page / Combine Coverage", ["Storyboard"], None, "{\"scene\":\"scene number or ID\",\"into\":\"previous|next; preserves lyric timing and coverage\",\"expected_revision\":\"revision returned by storyboard.read\"}", always, crate::storyboard_crud::delete),
-        cmd!("storyboard.init", "Create Storyboard Template", ["Storyboard"], None, "{}", always, cmd_storyboard_init),
+        cmd!("storyboard.template", "Choose Storyboard Template", ["Storyboard"], None, "{\"path\":\"optional native .deckcraft or .pptx template; omit to read selection\"}", always, cmd_storyboard_template),
+        cmd!("storyboard.init", "Create Storyboard From Selected Template", ["Storyboard"], None, "{\"empty\":false}", always, cmd_storyboard_init),
         query!("storyboard.backgrounds", "Storyboard Background Section Images", "{}", crate::storyboard_crud::backgrounds),
         query!("storyboard.design", "Inspect storyboard placements", "{}", crate::storyboard_design::inspect),
         cmd!("storyboard.place_asset", "Place an asset on a storyboard page", ["Storyboard"], None, "{\"asset\":\"id\",\"page\":1,\"x\":100,\"y\":100,\"width\":160,\"placement\":\"optional existing placement id\"}", always, crate::storyboard_design::place),
@@ -538,8 +537,6 @@ pub fn build() -> Vec<CommandSpec> {
             "{\"target\": \"optional remotion|hyperframes\", \"port\": 3057, \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, cmd_video_server_start),
         cmd!("video.server_stop", "Stop Video Editor Web Server", ["Workshop"], None,
             "{}", always, cmd_video_server_stop),
-        cmd!("video.place_references", "Place Storyboard Panels in FilmCraft", ["Workshop"], None,
-            "{\"project\": \"optional .fcproj, default the song's\", \"images\": [\"optional, default the storyboard panels\"], \"track\": \"V1\"}", always, cmd_video_place_references),
         cmd!("video.snapshot", "Take one exact frame from HyperFrames", ["Video"], None,
             "{\"target\": \"optional hyperframes\", \"at\": \"seconds or array of seconds\", \"out\": \"output PNG path for one time; directory for multiple times\", \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::video_target::cmd_video_snapshot),
         cmd!("video.render", "Render HyperFrames composition", ["Video"], None,
@@ -552,15 +549,6 @@ pub fn build() -> Vec<CommandSpec> {
             "{\"audio\": \"optional, default: the project's song\", \"overwrite\": false, \"analyze_beats\": true, \"hyperframes_cli\": \"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH; no npx install\"}",
             always,
             cmd_audio_analyze
-        ),
-        cmd!(
-            "audio.transcribe",
-            "Transcribe Song (FilmCraft)",
-            ["File"],
-            None,
-            "{\"audio\": \"path\", \"out_dir\": \"optional, default: the open project's folder\", \"name\": \"optional\", \"model\": \"whisper-small\", \"language\": \"en\", \"diarize\": false, \"overwrite\": false}",
-            always,
-            cmd_audio_transcribe
         ),
         cmd!(
             "intake.validate",
@@ -749,6 +737,12 @@ pub fn build() -> Vec<CommandSpec> {
             "Direct Pixel Vision Analysis",
             "{\"character\": \"optional_slug\", \"image\": \"optional_path\"}",
             cmd_vision_analyze
+        ),
+        query!(
+            "app.analytics",
+            "Analytics: Code Complexity & Status",
+            "{}",
+            cmd_app_analytics
         ),
         query!(
             "app.doctor",
