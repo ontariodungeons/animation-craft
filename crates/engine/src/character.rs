@@ -87,6 +87,18 @@ pub fn load_character_config(s: &Session, id: &str, project_root: Option<&Path>)
     doc
 }
 
+pub(crate) fn animation_panel(cfg: &Value) -> Value {
+    if cfg.is_null() { return Value::Null; }
+    json!({"name":cfg["name"],"active_angle":cfg["active_angle"].as_str().unwrap_or("front"),
+        "direction":cfg["direction"].as_str().unwrap_or("right"),"sheets":cfg["sheets"],
+        "angles":cfg["angles"].as_object().map(|m| m.values().cloned().collect::<Vec<_>>()).unwrap_or_default(),
+        "poses":cfg["poses"].as_object().map(|m| m.values().cloned().map(|mut p| {
+            let id = p["id"].as_str().unwrap_or("").to_owned();
+            p["track_ids"] = json!([id, format!("@{id}")]);
+            p
+        }).collect::<Vec<_>>()).unwrap_or_default()})
+}
+
 pub fn cmd_character_assets(s: &mut Session, params: &Value) -> Result<Value> {
     let project_root = s
         .project_path
@@ -103,6 +115,7 @@ pub fn cmd_character_assets(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({
         "ok": true,
         "character": id,
+        "character_panel": animation_panel(&cfg),
         "character_config": cfg,
     }))
 }

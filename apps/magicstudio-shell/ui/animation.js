@@ -116,6 +116,10 @@ function animationShell(){
  setupPathPen($('motion-canvas'));
  $('motion-canvas').addEventListener('keydown',e=>{if(e.key===' '){e.preventDefault();animationPlay();}});
 }
+async function animationApplyMetadata(meta){
+ const images=await Promise.all(meta.layers.map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+ Object.assign(motion,{meta,images,sample:null});
+}
 async function animationLoad(){
  animationPause();const request=++motion.request,resume=motion.resume;motion.resume=null;motion.loading=true;
  try{
@@ -123,8 +127,8 @@ async function animationLoad(){
   motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=resume&&meta.tracks?.some(t=>t.id===resume.track)?resume.track:meta.tracks?.[0]?.id||'';motion.time=resume?.time||0;
   motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));if(request!==motion.request)return;
   // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
-  const opening=!resume&&motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
-  if(opening){motion.track=opening.id;motion.rest=false;}
+  const opening=!resume&&motion.rest&&meta.opening_track;
+  if(opening){motion.track=opening;motion.rest=false;}
   animationControls();await animationSample();refreshPartDrafts();
   if(opening&&motion.meta===meta&&!motion.playing)await animationPlay();
  }catch(e){animationEmpty('Artwork needs preparation',String(e));}finally{motion.loading=false;}
@@ -164,39 +168,23 @@ function animationControls(){
  $('motion-asset-browser').replaceChildren(el('div',{class:'panel-head inline'},artworkDot,picker,removeCharacterBtn),rebuildRigBtn,motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),true));
  box.append(authoring.status);
  updateMagicSelection();
- const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
- const pickActionTrack=async(actionKey,fallbackId)=>{
+ const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;
+ const pickActionTrack=async(action,overrides={},play=true)=>{
   if(!theatreCanLeave())return;
   animationPause();
-  const cfg=meta.character_config;
-  const poseCfg=cfg?.poses?.[actionKey];
-  if(cfg&&poseCfg?.angle&&poseCfg.angle!==cfg.active_angle){
-   try{
-    const updated=await motionCommand('character.configure',{character:motion.character,pose:actionKey});
-    if(updated?.layers){
-     motion.meta=updated;
-     motion.images=await Promise.all((updated.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
-    }
-   }catch(err){console.warn(err);}
-  }
-  const activeMeta=motion.meta||meta;
-  const authored=(activeMeta.tracks||[]).find(tr=>!tr.standard&&tr.id===actionKey);
-  const chosenId=authored?authored.id:fallbackId;
-  motion.track=chosenId;
-  motion.previewLoop=null;
-  acFeedback.report(null,null,{stage:'clip_switched',clip:chosenId});
-  motion.rest=(actionKey==='rest'&&!authored);
-  motion.time=0;
-  animationControls();
-  await animationSample();
-  await animationPlay();
+  try{
+   const updated=await motionCommand('motion.action_track',{character:motion.character,action,...overrides});
+   await animationApplyMetadata(updated);
+   motion.track=updated.track;motion.rest=updated.rest;motion.time=0;motion.previewLoop=null;
+   acFeedback.report(null,null,{stage:'clip_switched',clip:updated.track});
+   animationControls();await animationSample();
+   if(play)await animationPlay();
+  }catch(err){toast(String(err));}
  };
- const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard&&t.id!=='@rest').map(t=>{
-  const key=t.id.slice(1);
-  const authored=(meta.tracks||[]).find(tr=>!tr.standard&&tr.id===key);
-  const active=!motion.rest&&(motion.track===t.id||motion.track===key);
-  return el('button',{id:`motion-action-${key}`,class:'motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[key] || MOTION_ICONS.play}</svg><span class="motion-action-word">${t.label}</span>`,'aria-pressed':String(active),title:`${t.label} · ${authored?'single character animation':'scripted motion'}`,onclick:()=>pickActionTrack(key,t.id)});
- }),el('button',{id:'motion-action-rest',class:'motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg><span class="motion-action-word">Rest</span>`,'aria-pressed':String(motion.rest||motion.track==='rest'),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}}));
+ const actions=el('div',{class:'motion-actions-grid'},(meta.actions||[]).map(t=>{
+  const key=t.action;
+  return el('button',{id:`motion-action-${key}`,class:'motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[key] || MOTION_ICONS.play}</svg><span class="motion-action-word">${t.label}</span>`,'aria-pressed':String(!motion.rest&&motion.track===t.track),title:`${t.label} · ${t.standard?'scripted motion':'single character animation'}`,onclick:()=>pickActionTrack(key)});
+ }),el('button',{id:'motion-action-rest',class:'motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg><span class="motion-action-word">Rest</span>`,'aria-pressed':String(motion.rest),title:'Rest pose',onclick:()=>pickActionTrack('rest',{track:motion.track,rest:true},false)}));
  const genMissingPosesBtn=el('button',{id:'btn-generate-missing-poses',class:'ghost','data-commands':'assets.agent_sheets',title:'Generate missing or asymmetric directional pose sheets on demand',onclick:async()=>{if(!motion.character)return;try{toast(`Generating missing poses for ${motion.character}…`);await motionCommand('assets.agent_sheets',{character:motion.character,kinds:['poses'],run:true});await animationRefresh();}catch(err){toast(String(err));}}},'+ Missing Poses');
  const charMagicPanel=renderCharacterMagicPanel(meta,pickActionTrack);
  box.append(motionSection('Action',[actions,charMagicPanel,genMissingPosesBtn,el('span',{class:'group-label'},'Custom tracks'),tracks,authoring.action],true));
@@ -289,19 +277,16 @@ function motionExportControl(){
  return {button,status};
 }
 function renderCharacterMagicPanel(meta,pickActionTrack){
- const cfg=meta?.character_config;
+ const cfg=meta?.character_panel;
  if(!cfg||typeof cfg!=='object')return el('div',{class:'char-magic-panel',hidden:''});
- const angleEntries=Object.values(cfg.angles||{});
- const poseEntries=Object.values(cfg.poses||{});
+ const angleEntries=cfg.angles;
+ const poseEntries=cfg.poses;
  const switchAngle=async(angleId)=>{
   if(!theatreCanLeave())return;
   animationPause();
   try{
    const updated=await motionCommand('character.configure',{character:motion.character,angle:angleId});
-   if(updated?.layers){
-    motion.meta=updated;
-    motion.images=await Promise.all((updated.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
-   }
+   await animationApplyMetadata(updated);
    animationControls();
    await animationSample();
   }catch(err){toast(String(err));}
@@ -315,10 +300,10 @@ function renderCharacterMagicPanel(meta,pickActionTrack){
  },a.image_path?el('img',{src:motionAssetUrl(a.image_path,meta.rig_sha256),alt:a.label}):null,el('span',{},a.label))));
  const poseCards=el('div',{class:'char-pose-grid','aria-label':'Generated pose & sprite frames'},...poseEntries.map(p=>el('button',{
   id:`char-pose-${p.id}`,
-  class:`char-thumb-card${(!motion.rest&&(motion.track===p.id||motion.track===`@${p.id}`))?' active':''}`,
-  'aria-pressed':String(!motion.rest&&(motion.track===p.id||motion.track===`@${p.id}`)),
+  class:`char-thumb-card${(!motion.rest&&p.track_ids.includes(motion.track))?' active':''}`,
+  'aria-pressed':String(!motion.rest&&p.track_ids.includes(motion.track)),
   title:`${p.word} single animation (${p.angle||'front'}) · ${p.image||''}`,
-  onclick:()=>pickActionTrack(p.id,`@${p.id}`)
+  onclick:()=>pickActionTrack(p.id)
  },p.image_path?el('img',{src:motionAssetUrl(p.image_path,meta.rig_sha256),alt:p.word}):null,el('span',{},p.word))));
  const sheetsRow=el('div',{class:'char-sheets-row'});
  for(const [k,label] of [['turnaround','Turnaround Sheet'],['poses','Pose Sheet'],['skeleton','Limb Sheet']]){
@@ -332,7 +317,7 @@ function renderCharacterMagicPanel(meta,pickActionTrack){
  return el('div',{class:'char-magic-panel',id:'char-magic-panel'},
   el('div',{class:'char-magic-header'},
    el('strong',{},`${cfg.name||motion.character}.character.magic`),
-   el('span',{class:'muted'},`Angle: ${cfg.active_angle||'front'} · Dir: ${cfg.direction||'right'}`)),
+   el('span',{class:'muted'},`Angle: ${cfg.active_angle} · Dir: ${cfg.direction}`)),
   el('span',{class:'group-label'},'Turnaround Angles (turn model slightly for Left / Right)'),
   angleCards,
   el('span',{class:'group-label'},'Single Animation Pose Sheets (matches UI actions)'),
@@ -434,10 +419,7 @@ async function animationRefresh(){
  // Publish metadata and clear its previous sample together; controls can render curves immediately.
  Object.assign(motion,{character,meta,images,sample:null});
  if(changed||!meta.layers?.some(l=>l.id===motion.selected))motion.selected=null;
- const cfgPose=meta.character_config?.active_pose;
- const cfgTrack=cfgPose&&(meta.tracks?.find(t=>t.id===cfgPose||t.id===`@${cfgPose}`)?.id||null);
- if(cfgTrack&&cfgPose!=='rest'){motion.track=cfgTrack;motion.rest=false;}
- else if(cfgPose==='rest'){motion.rest=true;}
+ if(meta.configured_action){motion.track=meta.configured_action.track;motion.rest=meta.configured_action.rest;}
  else if(changed||!meta.tracks?.some(t=>t.id===motion.track)){motion.track=meta.tracks?.[0]?.id||'';motion.time=0;motion.rest=true;}
  animationControls();await animationSample();await refreshPartDrafts();
 }

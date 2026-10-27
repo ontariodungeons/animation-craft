@@ -722,6 +722,35 @@ fn summarize_track_channels(
 }
 
 
+// Action identity and rest semantics are shared by inspection and playback.
+fn action_track(tracks: &[Value], action: &str, params: &Value) -> Result<Value> {
+    let standard_id = format!("@{action}");
+    let requested = params.get("track").and_then(Value::as_str);
+    let track = tracks.iter().find(|t| match requested {
+        Some(id) => t["id"] == id,
+        None => t["id"] == action && t["standard"] == false,
+    }).or_else(|| requested.is_none().then(|| tracks.iter().find(|t| t["id"] == standard_id)).flatten())
+        .ok_or_else(|| invalid(format!("No playable track for action '{action}'")))?;
+    Ok(json!({"action":action,"track":track["id"],"standard":track["standard"],
+        "rest":params.get("rest").and_then(Value::as_bool).unwrap_or(action == "rest" && track["standard"] == true)}))
+}
+
+pub fn cmd_motion_action_track(s: &mut Session, params: &Value) -> Result<Value> {
+    let action = params["action"].as_str().filter(|v| !v.is_empty())
+        .ok_or_else(|| invalid("Specify action=<id>"))?;
+    let id = load_character(s, params)?;
+    let cfg = crate::character::cmd_character_assets(s, &json!({"character":id}))?["character_config"].clone();
+    let mut meta = if cfg["poses"][action]["angle"].as_str()
+        .is_some_and(|angle| cfg["active_angle"] != angle) {
+        crate::character::cmd_character_configure(s, &json!({"character":id,"pose":action}))?
+    } else {
+        cmd_motion_tracks(s, &json!({"character":id}))?
+    };
+    let resolved = action_track(meta["tracks"].as_array().unwrap(), action, params)?;
+    meta.as_object_mut().unwrap().extend(resolved.as_object().unwrap().clone());
+    Ok(meta)
+}
+
 pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let id = load_character(s, params)?;
     let asset = s
@@ -823,13 +852,24 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     }).collect();
     let preflight = crate::character::preflight_rig_summary(rig);
     let character_config = crate::character::load_character_config(s, &id, project_root.as_deref());
+    let actions: Vec<_> = tracks.iter().filter(|t| t["standard"] == true && t["id"] != "@rest").map(|t| {
+        let action = t["id"].as_str().unwrap().trim_start_matches('@');
+        let mut resolved = action_track(&tracks, action, &Value::Null).unwrap();
+        resolved["label"] = t["label"].clone();
+        resolved
+    }).collect();
+    let panel = crate::character::animation_panel(&character_config);
+    let configured = character_config["active_pose"].as_str()
+        .and_then(|pose| action_track(&tracks, pose, &Value::Null).ok());
+    let opening = tracks.iter().find(|t| t["standard"] == false)
+        .or_else(|| tracks.iter().find(|t| t["id"] == "@sway")).map(|t| &t["id"]);
     Ok(
         json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"source_image":rig.source_image,"original_reference":original_reference,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,
         "rig_sha256":metadata.as_ref().map(|(_,hash,_)|hash),"image_revision":metadata.as_ref().and_then(|(_,_,revision)|*revision),
         "layer_order":rig.parts.iter().map(|p|&p.id).collect::<Vec<_>>(),"layer_authoring":crate::motion_authoring::layer_capabilities(s,&id,&rig.plan_path,metadata.as_ref().map(|(raw,_,_)|raw).unwrap_or(&Value::Null)),
         "placed_tracks":project_root.as_deref().map(crate::video_target::read_placed_tracks).unwrap_or_default(),
         "preflight":preflight,
-        "character_config":character_config,
+        "character_config":character_config,"character_panel":panel,"actions":actions,"configured_action":configured,"opening_track":opening,
         "controls":rig.control_bindings,"audio":s.song_audio}),
     )
 }
