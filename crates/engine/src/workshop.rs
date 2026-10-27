@@ -160,7 +160,7 @@ pub(crate) fn stage_body(s: &Session, dir: &Path, stage: &str) -> String {
         ),
         "reference" => format!(
             "Stage 3 — Reference art. Template: {STORYBOARD_DIR}/panel-NN.png (+ panel-NN.prompt.md with the exact prompt), {STORYBOARD_DIR}/{STORYBOARD_PDF}, {ASSETS_DIR}/<name>.png (static, transparent).\nPanel N illustrates line N of each verse. Follow the studio intent above for style and image rules.\n  mc exec workshop.split_panels image=<grid.png> columns=3 rows=2 prompts=<prompt.md>\n  mc exec workshop.build_storyboard\nCut-outs with PhotoCraft only: mc exec intake.validate image=<panel> asset=<name>{}",
-            skill_hints(s, dir, &["backlot"])
+            skill_hints(s, dir, &["storyboard"])
         ),
         _ => format!(
             "Stage 4 — Animate assets. One animated subject at a time over its background; not every asset animates.\nExport layered files for the video target ({target}); never render or encode video.{}",

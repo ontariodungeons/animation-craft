@@ -106,7 +106,7 @@ Never put test text in the user's storyboard. Import approved transcript word ar
 authored SRT via `workshop.import_transcript path=… captions=…`; preserve both wording and timings.
 
 Every new UI operation must invoke a shared command with CLI and MCP access. Do not implement a
-second behavior in a button handler. Use `workshop.build_storyboard template=backlot source=<folder>`
+second behavior in a button handler. Use `workshop.build_storyboard template=magic-studio source=<folder>`
 for the visual movie document; it produces an editable DeckCraft deck, linked PDF and previews.
 Use `agent.new_chat` to start fresh while preserving previous history. A prepared transparent image
 is not evidence of successful extraction, joint detection or articulated animation: report the actual

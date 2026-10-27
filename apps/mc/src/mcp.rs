@@ -63,7 +63,7 @@ fn command_input_schema(id: &str) -> Value {
         }
         "workshop.build_storyboard" => {
             let mut schema = schema_from_description(id);
-            schema["properties"]["template"] = json!({"type":"string","enum":["backlot"]});
+            schema["properties"]["template"] = json!({"type":"string","enum":["magic-studio"]});
             schema
         }
         "image.break_apart" => json!({

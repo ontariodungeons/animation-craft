@@ -258,7 +258,7 @@ Source CLI preparation audit remains work to do; no new Nelly segmentation or ar
 User rejected the form-packet template and asked for the prior Backlot movie design. Built and
 visually inspected an editable DeckCraft landscape document (38 slides: 3 contents + 35 scenes),
 with existing revision-03 reference art, approved transcript lyrics and script enhancement cues.
-`workshop.build_storyboard template=backlot source=<OpenMontage folder>` reproduces it through
+`workshop.build_storyboard template=magic-studio source=<OpenMontage folder>` reproduces it through
 `pipeline/movie_board.py`. `.storyboard/movie-board.json` is actually `storyboard/movie-board.json`
 in the song folder and selects the preview document; previous files are preserved in revision folders.
 PDF link_list verified 70 real links. The shell continuously scrolls pages, follows contents/return

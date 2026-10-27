@@ -1,5 +1,5 @@
 //! Storyboard chapters, scene packets (`storyboard/scene-N.md`), PDF builder (`pdfcraft-cli`),
-//! and OpenMontage backlot mirror.
+//! and OpenMontage storyboard mirror.
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,24 @@ use crate::workshop::{
     transcript_files,
 };
 use crate::workspace::{resolve_workspace_path, run_tool_in};
+
+/// Named storyboard templates: friendly name -> repo-relative DeckCraft template.
+pub(crate) const NAMED_STORYBOARD_TEMPLATES: &[(&str, &str)] = &[
+    ("magic-studio", "pipeline/templates/studio-template.deckcraft"),
+];
+/// Default storyboard template: Magic Studio.
+pub(crate) const DEFAULT_STORYBOARD_TEMPLATE: &str = "magic-studio";
+
+/// Resolve a named storyboard template (for example `magic-studio`) or an explicit
+/// DeckCraft template path to a canonical file. Magic Studio is the default.
+pub(crate) fn resolve_storyboard_template(s: &Session, raw: &str) -> Result<PathBuf> {
+    for (name, rel) in NAMED_STORYBOARD_TEMPLATES {
+        if *name == raw {
+            return Ok(crate::workspace::workspace_root(s).join(rel).canonicalize()?);
+        }
+    }
+    Ok(resolve_workspace_path(s, raw).canonicalize()?)
+}
 
 /// A scene's packet sections, in the order they print.
 pub(crate) const SCENE_SECTIONS: &[(&str, &str)] = &[
@@ -443,8 +461,8 @@ pub fn cmd_workshop_build_storyboard(s: &mut Session, params: &Value) -> Result<
         let dir=project_dir(s)?;
         let active_board=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
         let selected=cmd_storyboard_template(s,&json!({}))?;
-        let template=params["template"].as_str().or(selected["path"].as_str()).or(active_board["template_file"].as_str()).ok_or_else(||EngineError::InvalidParams("Choose a DeckCraft template with storyboard.template path=<file>".into()))?;
-        let template=resolve_workspace_path(s,template).canonicalize()?;
+        let raw_template=params["template"].as_str().or(selected["path"].as_str()).or(active_board["template_file"].as_str()).unwrap_or(DEFAULT_STORYBOARD_TEMPLATE);
+        let template=resolve_storyboard_template(s,raw_template)?;
         let transcript=if let Some(path)=params["transcript"].as_str(){if params["draft"]!=true{return Err(EngineError::InvalidParams("An explicit source transcript requires draft=true; active data is preserved".into()));}resolve_workspace_path(s,path).canonicalize()?}else{transcript_files(&dir).into_iter().next().or_else(||std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|v|v["source_transcript"].as_str().map(PathBuf::from)).filter(|p|p.is_file())).ok_or_else(||EngineError::InvalidParams("Import the existing transcript first".into()))?};
         let title=s.project_path.as_ref().and_then(|p|p.file_stem()).and_then(|n|n.to_str()).unwrap_or("Movie board");
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
@@ -517,16 +535,24 @@ pub fn cmd_workshop_storyboard(s: &mut Session, _: &Value) -> Result<Value> {
 /// The creator owns this native template file; selecting it does not rewrite an existing storyboard.
 pub fn cmd_storyboard_template(s:&mut Session,p:&Value)->Result<Value>{
     let dir=project_dir(s)?;let setting=dir.join("storyboard/template.json");
-    if let Some(raw)=p["path"].as_str(){
-        let path=resolve_workspace_path(s,raw).canonicalize()?;
+    let mut raw: Option<String> = None;
+    if let Some(r)=p["path"].as_str(){ raw=Some(r.to_string()); }
+    else if let Some(r)=p["name"].as_str(){ raw=Some(r.to_string()); }
+    else if let Some(r)=p["template"].as_str(){ raw=Some(r.to_string()); }
+    let chosen: Option<String> = if let Some(raw)=raw.clone() {
+        let path=resolve_storyboard_template(s,&raw)?.canonicalize()?;
         let output=run_tool_in(&dir,"deckcraft-cli",&["info".into(),path.to_string_lossy().into_owned()])?;
         let info:Value=serde_json::from_str(&output).map_err(|e|EngineError::InvalidParams(e.to_string()))?;
-        if info["slides"].as_array().is_none_or(|pages|pages.is_empty()){return Err(EngineError::InvalidParams("Choose a native DeckCraft template with at least one page".into()));}
+        if info["slides"].as_array().is_none_or(|pages|pages.is_empty()){return Err(EngineError::InvalidParams("Choose a DeckCraft template with at least one page".into()));}
         std::fs::create_dir_all(setting.parent().ok_or_else(||EngineError::InvalidParams("Template setting has no parent".into()))?)?;
         std::fs::write(&setting,json!({"path":path}).to_string())?;
-    }
-    let selected=std::fs::read(&setting).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
-    Ok(json!({"ok":true,"path":selected["path"],"editor":"DeckCraft","selected":selected["path"].is_string()}))
+        Some(path.to_string_lossy().to_string())
+    } else { None };
+    let selected_path: String = chosen.clone().unwrap_or_else(|| {
+        std::fs::read(&setting).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).and_then(|b| b["path"].as_str().map(|p| p.to_string())).unwrap_or_else(|| DEFAULT_STORYBOARD_TEMPLATE.to_string())
+    });
+    let path=resolve_storyboard_template(s,&selected_path)?.canonicalize()?;
+    Ok(json!({"ok":true,"path":path,"editor":"DeckCraft","selected":selected_path}))
 }
 
 pub fn cmd_storyboard_init(s: &mut Session, params: &Value) -> Result<Value> {

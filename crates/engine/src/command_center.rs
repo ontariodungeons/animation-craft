@@ -142,7 +142,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
             }
         } else {
             next_commands.extend([
-                json!({"command":"storyboard.template","params":{"path":"<your DeckCraft template>"},"reason":"Choose your storyboard template"}),
+                json!({"command":"storyboard.template","params":{"path":"<your DeckCraft template or magic-studio>"},"reason":"Choose your storyboard template"}),
                 json!({"command":"storyboard.init","params":{"empty":true},"reason":"Create a storyboard from the selected template"}),
                 json!({"command":"project.add_asset","params":{"path":"<your image>"},"reason":"Add artwork to the project without placing it"}),
                 json!({"command":"workshop.import_transcript","params":{"path":"<timed transcript JSON>"},"reason":"Import timed lyrics when you have them"}),
