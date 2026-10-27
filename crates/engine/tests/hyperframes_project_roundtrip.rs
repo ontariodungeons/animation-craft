@@ -92,6 +92,49 @@ fn project_and_storyboard_read_the_contained_transcript_and_preserve_legacy_file
 }
 
 #[test]
+fn imported_timing_refreshes_only_unedited_generated_caption_sources() {
+    let root = fixture("caption-handoff");
+    let mut session = Session::default();
+    session.execute("project.new", json!({"path":root.join("Song.magic")})).unwrap();
+    let hf=root.join("hyperframes");fs::create_dir_all(&hf).unwrap();
+    fs::write(hf.join("hyperframes.json"), "{}").unwrap();
+    fs::write(hf.join("index.html"), "<body><div data-composition-id=\"main\"></div></body>").unwrap();
+    let supplied=root.join("words.json");
+    fs::write(&supplied,json!([{"text":"First","start":0.1,"end":0.5}]).to_string()).unwrap();
+    let result=session.execute("workshop.import_transcript",json!({"path":supplied})).unwrap();
+    assert_eq!(result["captions"]["ready"],true);
+    let caption=hf.join("compositions/captions.html");
+    assert!(fs::read_to_string(&caption).unwrap().contains("First"));
+    fs::write(&supplied,json!([{"text":"Second","start":0.2,"end":0.7}]).to_string()).unwrap();
+    session.execute("workshop.import_transcript",json!({"path":supplied,"replace":true})).unwrap();
+    assert!(fs::read_to_string(&caption).unwrap().contains("Second"));
+    fs::write(&caption,"Authored caption source must survive").unwrap();
+    fs::write(&supplied,json!([{"text":"Third","start":0.3,"end":0.8}]).to_string()).unwrap();
+    assert!(session.execute("workshop.import_transcript",json!({"path":supplied,"replace":true})).is_err());
+    assert_eq!(fs::read_to_string(caption).unwrap(),"Authored caption source must survive");
+    assert!(!root.join("song.transcript.json").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_project_file_alone_does_not_prove_audio_and_captions_are_synchronized() {
+    let root=fixture("readiness");
+    let mut session=Session::default();
+    session.execute("project.new",json!({"path":root.join("Song.magic")})).unwrap();
+    let hf=root.join("hyperframes");fs::create_dir_all(&hf).unwrap();
+    fs::write(hf.join("hyperframes.json"),"{}").unwrap();
+    fs::write(hf.join("index.html"),"<div>No captions</div>").unwrap();
+    fs::write(hf.join("audiomap.json"),"{}").unwrap();
+    fs::write(hf.join("transcript.json"),json!([{"text":"Word","start":0.1,"end":0.5}]).to_string()).unwrap();
+    let audio=root.join("audio.wav");fs::write(&audio,b"fixture").unwrap();
+    session.song_audio=Some(audio);session.video_project_path=Some(hf.join("hyperframes.json"));
+    let status=session.execute("center.status",json!({})).unwrap();
+    let caption_status=status["prerequisites"].as_array().unwrap().iter().find(|p|p["id"]=="hyperframes").unwrap();
+    assert_ne!(caption_status["state"],"ready","{caption_status}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 #[cfg(unix)]
 fn transcription_uses_original_audio_and_requested_model_without_retired_skill() {
     use std::os::unix::fs::PermissionsExt;

@@ -705,13 +705,14 @@ pub fn cmd_workshop_set_audio(s: &mut Session, params: &Value) -> Result<Value> 
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::InvalidParams("missing audio 'path'".into()))?;
     let audio = song_audio_path(s, raw)?;
-    if ensure_video_target_project(s, &dir, "hyperframes").is_ok()
-        && s.song_audio.as_ref().is_none_or(|old| old != &audio)
-    {
+    let exists=ensure_video_target_project(s, &dir, "hyperframes").is_ok();
+    let connected=s.song_audio.clone().filter(|path|path.is_file()).or_else(||audio.file_name().map(|name|dir.join("hyperframes").join(name)).filter(|path|path.is_file()));
+    let unchanged=connected.as_ref().is_some_and(|old|old==&audio || std::fs::read(old).ok().zip(std::fs::read(&audio).ok()).is_some_and(|(old,new)|old==new));
+    if exists && !unchanged {
         return Err(EngineError::InvalidParams("This HyperFrames project already has a timeline. Update its audio in HyperFrames before relinking the recording; the existing project was preserved".into()));
     }
     let previous = (s.song_audio.clone(), s.video_target.clone(), s.video_project_path.clone());
-    s.song_audio = Some(audio);
+    s.song_audio = Some(if exists && unchanged { connected.unwrap() } else { audio });
     s.video_target = "hyperframes".into();
     let setup = (|| {
         let video = crate::video_target::cmd_video_init(s, &json!({"target":"hyperframes","captions":false,"hyperframes_cli":params["hyperframes_cli"]}))?;
@@ -1064,8 +1065,11 @@ fn import_transcript_inner(s: &mut Session, params: &Value) -> Result<Value> {
         }
     }
     std::fs::write(dir.join("transcript-provenance.json"),serde_json::to_vec_pretty(&provenance).map_err(|e|EngineError::InvalidParams(e.to_string()))?)?;
-    let _ = ensure_video_target_project(s, &dir, &s.video_target);
+    let captions = if ensure_video_target_project(s, &dir, &s.video_target).is_ok() {
+        crate::video_target::ensure_native_captions(s, &dir)?
+    } else { json!({"ready":false,"reason":"Create the contained HyperFrames project to display these timed lyrics"}) };
     let mut status = workshop_status(s)?;
+    status["captions"] = captions;
     status["imported"] = json!(copied);
     status["recording_duration_sec"]=json!(probed_duration);
     status["duration_warning"]=json!(duration_warning);

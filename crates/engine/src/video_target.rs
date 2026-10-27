@@ -129,7 +129,7 @@ pub(crate) fn write_caption_source(dest:&Path,words:&[Value],groups:&[[usize;2]]
 
 /// Deterministic binding of native timed words into the official reusable caption component.
 /// Existing edited caption sources/visual overrides are never replaced on unchanged input.
-fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
+pub(crate) fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
     use sha2::{Digest,Sha256};
     let hf=dir.join("hyperframes");
     let Some(transcript)=crate::workshop::transcript_files(dir).into_iter().next() else {return Ok(json!({"ready":false,"reason":"No timed transcript available"}));};
@@ -144,23 +144,28 @@ fn ensure_native_captions(s:&Session, dir:&Path) -> Result<Value> {
     let digest=format!("{:x}",Sha256::digest(serde_json::to_vec(words).map_err(|e|EngineError::InvalidParams(e.to_string()))?));
     let dest=hf.join("compositions/captions.html");let receipt=hf.join(".magicstudio-captions.json");let entry=hf.join("index.html");
     let mut host=std::fs::read_to_string(&entry)?;
-    if host.contains("data-track-kind=\"captions\"") && !host.contains("data-composition-src=\"compositions/captions.html\"") {return Ok(json!({"ready":true,"preserved_existing_caption_track":true,"word_count":words.len()}));}
+    if host.contains("data-track-kind=\"captions\"") && !host.contains("data-composition-src=\"compositions/captions.html\"") {return Ok(json!({"ready":false,"preserved_existing_caption_track":true,"reason":"Existing authored caption track preserved; synchronization with imported timing has not been verified","word_count":words.len()}));}
     let duration=probe_audio_duration(s.song_audio.as_deref()).max(words.iter().filter_map(|w|w["end"].as_f64()).fold(0.0,f64::max));
     let reused=dest.is_file();
+    let mut changed=!reused;
     if reused {
         let state:Value=std::fs::read(&receipt).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
-        if state["source_kind"]=="artist_lines" {return Ok(json!({"ready":true,"preserved_existing_caption_track":true,"source":dest,"provenance":receipt}));}
-        if state["input_sha256"]!=digest {return Err(EngineError::InvalidParams(format!("Existing caption source {} differs from this transcript or has no matching provenance; preserved without overwrite. Review that source before replacing timing",dest.display())));}
-    } else {
+        if state["source_kind"]=="artist_lines" {return Ok(json!({"ready":state["input_sha256"]==digest,"preserved_existing_caption_track":true,"reason":"Authored lyric track retained; changed timing requires review","source":dest,"provenance":receipt}));}
+        changed=state["input_sha256"]!=digest;
+        let actual=format!("{:x}",Sha256::digest(std::fs::read(&dest)?));
+        if changed && state["source_sha256"]!=actual {return Err(EngineError::InvalidParams(format!("Existing caption source {} was edited or has no source fingerprint; preserved without overwrite. Review it before replacing timing",dest.display())));}
+    }
+    if changed {
         let groups:Vec<[usize;2]>=(0..words.len()).step_by(5).map(|start|[start,(start+4).min(words.len()-1)]).collect();
         write_caption_source(&dest,words,&groups,duration)?;
-        std::fs::write(&receipt,serde_json::to_vec_pretty(&json!({"input_sha256":digest,"transcript":transcript,"word_count":words.len(),"duration":duration,"grouping":"provisional deterministic batches of five; no semantic or listening review claimed","source":"official caption-highlight; native caption-group classes"})).unwrap())?;
+        let source_hash=format!("{:x}",Sha256::digest(std::fs::read(&dest)?));
+        std::fs::write(&receipt,serde_json::to_vec_pretty(&json!({"input_sha256":digest,"source_sha256":source_hash,"transcript":transcript,"word_count":words.len(),"duration":duration,"grouping":"provisional deterministic batches of five; no semantic or listening review claimed","source":"official caption-highlight; native caption-group classes"})).unwrap())?;
     }
     let marker="data-composition-src=\"compositions/captions.html\"";
     if !host.contains(marker) {
         if !host.contains("</body>"){return Err(EngineError::InvalidParams("Official host has no closing body; caption source retained but no host edit performed".into()));}
         let end=host.rfind("</div>").ok_or_else(||EngineError::InvalidParams("Official host has no composition container; no host edit performed".into()))?;
-        host.insert_str(end,&format!("<div data-composition-id=\"caption-highlight\" {marker} data-track-kind=\"captions\" data-start=\"0\" data-duration=\"{duration}\" data-track-index=\"3\" data-width=\"1920\" data-height=\"1080\"></div>\n"));std::fs::write(&entry,host)?;
+        host.insert_str(end,&format!("<div id=\"caption-highlight\" class=\"clip\" data-composition-id=\"caption-highlight\" {marker} data-track-kind=\"captions\" data-start=\"0\" data-duration=\"{duration}\" data-track-index=\"3\" data-width=\"1920\" data-height=\"1080\"></div>\n"));std::fs::write(&entry,host)?;
     }
     Ok(json!({"ready":true,"source":dest,"provenance":receipt,"word_count":words.len(),"duration_sec":duration,"reused_existing_source":reused,"grouping_review":"provisional; native timing preserved; no semantic correction or auditory verification"}))
 }
