@@ -339,6 +339,25 @@ impl LoadedCutoutRigPlan {
         })
     }
 
+    pub fn resolve_paths(&mut self, base: &Path) {
+        let resolve = |p: &Path| {
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                base.join(p)
+            }
+        };
+        if !self.source_image.as_os_str().is_empty() {
+            self.source_image = resolve(&self.source_image);
+        }
+        self.cutout_asset_sheet = self.cutout_asset_sheet.as_deref().map(resolve);
+        self.photocraft_psd = self.photocraft_psd.as_deref().map(resolve);
+        for part in &mut self.parts {
+            part.cropped_path = resolve(&part.cropped_path);
+            part.full_layer_path = resolve(&part.full_layer_path);
+        }
+    }
+
     /// Older HyperFrames rigs store cropped PNGs as an explicitly ordered layer map.
     fn load_keyed_layers(path:&Path,raw:&Value,layers:&serde_json::Map<String,Value>)->Result<Self>{
         let invalid=|message:String|EngineError::InvalidParams(format!("Invalid keyed rig {}: {message}",path.display()));

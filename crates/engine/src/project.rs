@@ -513,20 +513,10 @@ pub fn cmd_project_load_asset(s: &mut Session, params: &Value) -> Result<Value> 
             {
                 let mut plan = crate::session::LoadedCutoutRigPlan::load_from_path(&manifest_path)?;
                 let base = manifest_path.parent().unwrap_or(Path::new("."));
-                let resolve = |p: &Path| {
-                    if p.is_absolute() {
-                        p.to_path_buf()
-                    } else {
-                        base.join(p)
-                    }
-                };
-                plan.source_image = resolve(&plan.source_image);
-                plan.cutout_asset_sheet = plan.cutout_asset_sheet.as_deref().map(resolve);
-                plan.photocraft_psd = plan.photocraft_psd.as_deref().map(resolve);
-                for part in &mut plan.parts {
-                    part.cropped_path = resolve(&part.cropped_path);
-                    part.full_layer_path = resolve(&part.full_layer_path);
+                if plan.source_image.as_os_str().is_empty() {
+                    plan.source_image = base.to_path_buf();
                 }
+                plan.resolve_paths(base);
                 let image = image::open(&plan.source_image)?;
                 let mut asset = staged.assets.remove(&entry.id).unwrap_or_default();
                 asset.id = entry.id.clone();
