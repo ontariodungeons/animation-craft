@@ -79,6 +79,8 @@ check_staged_paths() {
 run_step "staged-file policy" check_staged_paths || exit $?
 run_step "staged whitespace" git diff --cached --check || exit $?
 
+run_step "commit complexity analytics" python3 scripts/commit_complexity.py || exit $?
+
 CURRENT_STEP="all required checks"
 if ! record_status passed "$CURRENT_STEP" 0; then
     echo "[hook] $CURRENT_STEP: FAILED (could not persist passed status)" >&2
