@@ -1,10 +1,7 @@
 import json
 import os
+import shutil
 import subprocess
-
-from pipeline.craft_cli import require_craft_cli
-
-
 
 
 def load_animation_into_filmcraft(
@@ -29,8 +26,9 @@ def load_animation_into_filmcraft(
             if os.path.isfile(abs_extra) and abs_extra not in import_files:
                 import_files.append(abs_extra)
 
+    fc_bin = shutil.which("filmcraft-cli") or "filmcraft-cli"
     cmd_import = [
-        require_craft_cli("filmcraft-cli"),
+        fc_bin,
         "--save-as",
         abs_proj,
         "import",
@@ -41,7 +39,7 @@ def load_animation_into_filmcraft(
     # Create active timeline sequence from the imported clip so Program Monitor & timeline have the clip
     subprocess.run(
         [
-            require_craft_cli("filmcraft-cli"),
+            fc_bin,
             "--project",
             abs_proj,
             "--save",
@@ -57,14 +55,14 @@ def load_animation_into_filmcraft(
 
     # 2. Inspect the project & sequence
     inspect_raw = subprocess.check_output(
-        [require_craft_cli("filmcraft-cli"), "--project", abs_proj, "inspect"],
+        [fc_bin, "--project", abs_proj, "inspect"],
         stderr=subprocess.STDOUT,
         timeout=20,
     ).decode("utf-8")
 
     # 3. Render a verification frame from FilmCraft's Program Monitor (or probe the imported media)
     probe_raw = subprocess.check_output(
-        [require_craft_cli("filmcraft-cli"), "probe", abs_media],
+        [fc_bin, "probe", abs_media],
         stderr=subprocess.STDOUT,
         timeout=20,
     ).decode("utf-8")
@@ -72,7 +70,7 @@ def load_animation_into_filmcraft(
     try:
         subprocess.run(
             [
-                require_craft_cli("filmcraft-cli"),
+                fc_bin,
                 "--project",
                 abs_proj,
                 "render",
@@ -90,7 +88,7 @@ def load_animation_into_filmcraft(
         if not os.path.exists(abs_frame):
             subprocess.run(
                 [
-                    require_craft_cli("filmcraft-cli"),
+                    fc_bin,
                     "--project",
                     abs_proj,
                     "exec",

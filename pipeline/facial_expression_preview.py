@@ -17,9 +17,6 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pipeline.craft_cli import require_craft_cli  # noqa: E402
-
 try:
     import numpy as np
     from PIL import Image
@@ -304,7 +301,7 @@ def render(source, output_root, expression, opening, blink, gaze, face_json=None
     if not all(math.isfinite(v) for v in (opening, blink, gaze)):
         raise ValueError('Face controls must be finite')
     opening, blink, gaze = max(0, min(opening, 100)), max(0, min(blink, 100)), max(-45, min(gaze, 45))
-    binary = require_craft_cli('photocraft-cli')
+    binary = os.environ.get('PHOTOCRAFT_CLI') or shutil.which('photocraft-cli') or 'photocraft-cli'
     version = run_tool([binary, '--version'], deadline).strip()
     root = private_root(output_root)
     source_hash = sha(source.read_bytes())

@@ -91,12 +91,23 @@ def place(assembled: np.ndarray, part: np.ndarray, scales, fine=np.arange(0.95, 
     return match(assembled, part, s * np.asarray(fine), around=(x, y), radius=12)
 
 
-def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, places: dict | None = None,
-        order: list | None = None) -> dict:
-    layout = json.loads(receipt.read_text())['rig_sheet']
-    if not layout:
-        raise ValueError(f'{receipt} is not a rig sheet request')
-    cols, rows, parts = layout['columns'], layout['rows'], layout['parts']
+def run(sheet: Path, receipt: Path | None = None, out_dir: Path | None = None, pivots: dict | None = None,
+        places: dict | None = None, order: list | None = None, explicit_parts: list | None = None,
+        explicit_ref: Path | None = None) -> dict:
+    import math
+    if out_dir is None:
+        raise ValueError('out_dir is required')
+    receipt_data = json.loads(receipt.read_text()) if (receipt and receipt.is_file()) else {}
+    layout = receipt_data.get('rig_sheet')
+    if explicit_parts:
+        cells_count = len(explicit_parts) + 1
+        cols = int(math.ceil(math.sqrt(cells_count)))
+        rows = int(math.ceil(cells_count / cols))
+        parts = explicit_parts
+    elif layout:
+        cols, rows, parts = layout['columns'], layout['rows'], layout['parts']
+    else:
+        raise ValueError('Provide either --parts (for an existing user sheet) or a valid rig_sheet --receipt')
     # Pivots given now ([u, v] in the part, by id) correct a joint without drawing a new sheet.
     parts = [{**p, 'pivot': (pivots or {}).get(p['id'], p.get('pivot'))} for p in parts]
     with Image.open(sheet) as im:
@@ -119,10 +130,10 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, p
     if missing:
         raise ValueError(f'cells with nothing cut: {missing}')
 
-    # What the rig shows at rest comes from the asset's own image (the sheet's first reference) when it has
-    # transparency; otherwise from the sheet's redrawn assembled cell.
-    refs = [Path(r['path']) for r in json.loads(receipt.read_text()).get('references') or [] if r.get('path')]
-    use_ref = bool(refs) and refs[0].is_file() and Image.open(refs[0]).mode in ('RGBA', 'LA')
+    # What the rig shows at rest comes from the asset's own image (explicit_ref or the sheet's first reference)
+    # when it has transparency; otherwise from the sheet's redrawn assembled cell.
+    refs = [explicit_ref] if explicit_ref else [Path(r['path']) for r in receipt_data.get('references') or [] if r.get('path')]
+    use_ref = bool(refs) and refs[0] is not None and refs[0].is_file() and Image.open(refs[0]).mode in ('RGBA', 'LA')
     assembled = trimmed(refs[0] if use_ref else files['assembled'])
     ah, aw = assembled.shape[:2]
     mx, my = int(aw * MARGIN), int(ah * MARGIN)
@@ -289,7 +300,9 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, p
         cv2.putText(t, row['id'], (12, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255, 255), 2)
         tiles.append(t)
     Image.fromarray(np.concatenate(tiles, axis=1)).save(out_dir / 'layers.png')
-    result = {'ok': True, 'sheet': str(sheet), 'receipt': str(receipt), 'canvas': list(canvas), 'sheet_scale': round(sheet_scale, 3),
+    result = {'ok': True, 'sheet': str(sheet), 'receipt': str(receipt) if receipt and receipt.is_file() else None,
+              'provenance': 'generated_rig_sheet' if (receipt and receipt.is_file()) else 'existing_user_sheet',
+              'canvas': list(canvas), 'sheet_scale': round(sheet_scale, 3),
               'rest_pose_from': str(refs[0]) if use_ref else 'sheet assembled cell',
               'order': [p['id'] for p in parts], 'parts': report,
               'rebuild': {'silhouette_iou': round(iou, 4), 'mean_colour_difference': round(colour, 1)},
@@ -302,13 +315,24 @@ def run(sheet: Path, receipt: Path, out_dir: Path, pivots: dict | None = None, p
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--sheet', required=True, type=Path)
-    ap.add_argument('--receipt', required=True, type=Path, help="the sheet's generation.json")
+    ap.add_argument('--receipt', default=None, type=Path, help="optional generation.json for generated sheets")
+    ap.add_argument('--parts', type=json.loads, default=None, help='explicit JSON [{id, parent, pivot}] for existing user sheets without generation.json')
+    ap.add_argument('--reference', default=None, type=Path, help='optional assembled reference PNG for existing user sheets')
     ap.add_argument('--out-dir', required=True, type=Path)
     ap.add_argument('--pivots', type=json.loads, default=None, help='JSON {part id: [u, v]} joint corrections')
     ap.add_argument('--places', type=json.loads, default=None, help='JSON {part id: [cx, cy]} placement corrections in canvas pixels')
     ap.add_argument('--order', type=json.loads, default=None, help='JSON [part ids back to front]')
     a = ap.parse_args(argv)
-    print(json.dumps(run(a.sheet.resolve(), a.receipt.resolve(), a.out_dir.resolve(), a.pivots, a.places, a.order)))
+    print(json.dumps(run(
+        a.sheet.resolve(),
+        a.receipt.resolve() if a.receipt else None,
+        a.out_dir.resolve(),
+        a.pivots,
+        a.places,
+        a.order,
+        a.parts,
+        a.reference.resolve() if a.reference else None,
+    )))
     return 0
 
 

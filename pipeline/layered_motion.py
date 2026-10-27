@@ -31,7 +31,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pipeline.craft_cli import require_craft_cli  # noqa: E402
 from pipeline.motion_validate import analyze, contact_sheet, lint_spec  # noqa: E402
 
 try:
@@ -552,8 +551,8 @@ def run(spec_path, out_dir, only=None, stills=0, video=True, gpu=True, crf=24, r
     project = work / 'layered_motion.ecproj'
     script = work / 'layered_motion.jsx'
     script.write_text(build_jsx(spec, project, work, blur))
-    binary = require_craft_cli('effectcraft-cli')
-    ffmpeg = require_craft_cli('ffmpeg')
+    binary = shutil.which('effectcraft-cli') or 'effectcraft-cli'
+    ffmpeg = shutil.which('ffmpeg') or 'ffmpeg'
     gpu_flag = ['--gpu'] if gpu else []
     ec_env = gpu_env(gpu)
     run_script = subprocess.run([binary, 'script', str(script)], capture_output=True, text=True, timeout=600, env=ec_env)

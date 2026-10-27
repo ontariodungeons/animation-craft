@@ -63,9 +63,10 @@ def execute_archetype_in_blender53(
     motion_range_summary = None
     char_hint = os.path.splitext(os.path.basename(image_path or "hopper"))[0].lower()
     opt_slug = "whiskers" if ("whiskers" in char_hint or "20" in char_hint) else "hopper"
-    turnaround_cut_dir = os.path.join("/home/jesse/Work/omhas-animation/exports/pose_and_parts", f"{opt_slug}_turnaround")
-    poses_cut_dir = os.path.join("/home/jesse/Work/omhas-animation/exports/pose_and_parts", f"{opt_slug}_poses")
-    opt_out_dir = os.path.join("/home/jesse/Work/omhas-animation/exports/pose_and_parts", opt_slug)
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    turnaround_cut_dir = os.path.join(repo_root, "exports", "pose_and_parts", f"{opt_slug}_turnaround")
+    poses_cut_dir = os.path.join(repo_root, "exports", "pose_and_parts", f"{opt_slug}_poses")
+    opt_out_dir = os.path.join(repo_root, "exports", "pose_and_parts", opt_slug)
     if os.path.isdir(turnaround_cut_dir) and os.path.isdir(poses_cut_dir):
         try:
             from pipeline.codex_accuracy_optimizer import optimize, load_motion_range

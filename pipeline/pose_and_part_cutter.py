@@ -1,37 +1,43 @@
-"""Offline pose/view sprites and editable articulated cutouts.
-
-Run: python3 -m pipeline.pose_and_part_cutter --help
-No network/model calls. Automatic masks contain visible pixels only; hidden joint
-artwork must come from a reviewed exploded sheet. Coordinates are source pixels,
-origin top-left; output paths are relative to the manifest directory.
-"""
+"""Stage 1: Cut pose/view/part sheets via photocraft-cli and QA-review frames."""
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import math
-import hashlib
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 from scipy import ndimage as ndi
 
-# The exploded-sheet runtime template is versioned with the package (not the
-# gitignored exports/ tree) so sheet cutting works from a clean checkout.
-TEMPLATE = Path(__file__).resolve().parent / 'templates' / 'exploded_part_sheet_spec.json'
-# Optional user/vault-specific layouts stay at the legacy export location and are
-# not required; sheets without a preset layout fall back to auto-detection.
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+from pipeline.step_cutter_review import (
+    PARTS,
+    RUNTIME,
+    TEMPLATE,
+    background_candidates as _background_candidates,
+    detect_components as _components,
+    frame_review as _frame_review,
+    recut_flagged_sheet,
+    save_parts as _save_parts,
+    write_vector_limb_masks_svg as _write_vector_limb_masks_svg,
+)
+
 VAULT_LAYOUTS = Path(__file__).resolve().parents[1] / 'exports' / 'templates' / 'vault_sheet_layouts.json'
 ACTIONS = ['standing', 'walking', 'running', 'jumping', 'dancing', 'waving',
            'clapping', 'looking_up', 'looking_down', 'arms_wide']
 VIEWS = ['front', 'quarter_front', 'side', 'opposite_quarter', 'back']
-PARTS = ['head', 'ears', 'torso', 'arm_L', 'arm_R', 'leg_L', 'leg_R', 'prop_backpack']
 ALIASES = {
     'standing': ['standing', 'stand'], 'walking': ['walking', 'walk'],
     'running': ['running', 'run'], 'jumping': ['jumping', 'jump'],
@@ -39,8 +45,7 @@ ALIASES = {
     'clapping': ['clapping', 'clap'], 'looking_up': ['looking upward', 'looking upwards', 'looking up'],
     'looking_down': ['looking downward', 'looking downwards', 'looking down'],
     'arms_wide': ['arms open wide', 'arms wide open', 'arms wide', 'arms out', 'arms spread'],
-    'pointing': ['pointing', 'point'], 'sitting': ['sitting', 'sit'],
-    'winking': ['winking', 'wink'],
+    'pointing': ['pointing', 'point'], 'sitting': ['sitting', 'sit'], 'winking': ['winking', 'wink'],
 }
 
 
@@ -49,18 +54,8 @@ def exploded_prompt(character: str, description: str = '') -> str:
         character=character, description=description or 'use supplied reference')
 
 
-import os
-import sys
-import tempfile
-
-_REPO_ROOT = str(Path(__file__).resolve().parents[1])
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-from pipeline.craft_cli import find_craft_cli
-
 def _find_photocraft_cli() -> str | None:
-    """Return path to photocraft-cli >= 0.10.0 if available locally."""
-    cand = find_craft_cli('photocraft-cli')
+    cand = os.environ.get('PHOTOCRAFT_CLI') or shutil.which('photocraft-cli')
     if not cand:
         return None
     try:
@@ -76,81 +71,7 @@ def _find_photocraft_cli() -> str | None:
 
 
 def _find_vectorcraft_cli() -> str | None:
-    return find_craft_cli('vectorcraft-cli')
-
-
-def _background_candidates(rgb, tolerance):
-    h, w = rgb.shape[:2]
-    smooth = ndi.gaussian_filter(rgb.astype(np.float32), (1.2, 1.2, 0))
-    pixels = smooth[::max(1, h//200), ::max(1, w//200)].reshape(-1, 3)
-    # Modal color rather than mean: cream fur and dark headings must not shift
-    # the background estimate. Smooth first to handle linen/paper textures.
-    quantized = (pixels/16).astype(int)
-    values, counts = np.unique(quantized, axis=0, return_counts=True)
-    modal = values[counts.argmax()]
-    bg = np.median(pixels[np.all(quantized == modal, axis=1)], axis=0)
-    return np.max(np.abs(smooth-bg), axis=2) <= tolerance
-
-
-def _components(mask: np.ndarray, kind: str) -> list[tuple[int, int, int, int]]:
-    h, w = mask.shape
-    labels, _ = ndi.label(mask)
-    boxes = []
-    areas = np.bincount(labels.ravel())
-    for i, obj in enumerate(ndi.find_objects(labels), 1):
-        if obj is None:
-            continue
-        ys, xs = obj
-        bh, bw = ys.stop-ys.start, xs.stop-xs.start
-        if (areas[i] < h*w*0.0012 or bh < h*(0.28 if kind == 'turnaround' else 0.105)
-                or bw < w*0.018 or bw > w*0.55 or bh > h*0.94):
-            continue
-        boxes.append((xs.start, ys.start, xs.stop, ys.stop))
-    # Detached appendages near a body can be merged, but never merge neighbors.
-    boxes.sort(key=lambda b: (b[1]+b[3])/2)
-    rows: list[list] = []
-    for box in boxes:
-        cy = (box[1]+box[3])/2
-        row = next((r for r in rows if abs(cy-np.median([(b[1]+b[3])/2 for b in r])) < h*0.15), None)
-        if row is None:
-            rows.append([box])
-        else:
-            row.append(box)
-    return [b for row in rows for b in sorted(row, key=lambda b: b[0])]
-
-
-def _frame_review(crop: Image.Image, index: int, boxes: list, median_area: float, background: np.ndarray) -> list[str]:
-    """Evidence that one cut frame may be wrong (empty list = nothing suspicious found).
-
-    `background` marks sheet pixels matching the sheet's background colour, cropped to this frame's box."""
-    issues = []
-    x0, y0, x1, y1 = boxes[index]
-    overlaps = [j for j, (a0, b0, a1, b1) in enumerate(boxes)
-                if j != index and min(x1, a1) > max(x0, a0) and min(y1, b1) > max(y0, b0)]
-    if overlaps:
-        issues.append(f'box overlaps frame(s) {overlaps}: crop may contain part of a neighbour')
-    area = (x1 - x0) * (y1 - y0)
-    if median_area and area > 1.8 * median_area:
-        issues.append(f'box is {area / median_area:.1f}x the median frame: may hold more than one figure')
-    elif median_area and area < 0.45 * median_area:
-        issues.append(f'box is {area / median_area:.2f}x the median frame: may be a fragment or partial figure')
-    labels, count = ndi.label(np.array(crop)[:, :, 3] > 20, structure=np.ones((3, 3)))
-    if count > 1:
-        areas = np.bincount(labels.ravel())[1:]
-        main = int(areas.argmax())
-        # Detached pieces big enough to see: printed numbers/captions, neighbour fragments, loose props.
-        pieces = [k for k in range(count) if k != main and areas[k] >= max(40, 0.002 * areas[main])]
-        stray_pct = 100.0 * (areas.sum() - areas[main]) / areas.sum()
-        if pieces:
-            issues.append(f'{len(pieces)} detached piece(s) besides the figure, {stray_pct:.1f}% of visible pixels '
-                          'outside it: check for source text, background residue or neighbour fragments')
-    visible = np.array(crop)[:, :, 3] > 20
-    kept = visible & background[:visible.shape[0], :visible.shape[1]]
-    kept_pct = 100.0 * kept.sum() / max(1, visible.sum())
-    # Clean cuts measure 0-8% (figure colours near the background); an unremoved panel measures 10-60%.
-    if kept_pct > 9:
-        issues.append(f'{kept_pct:.0f}% of visible pixels match the sheet background: background was not removed')
-    return issues
+    return os.environ.get('VECTORCRAFT_CLI') or shutil.which('vectorcraft-cli')
 
 
 def _ocr_labels(source: Path) -> list[dict]:
@@ -169,52 +90,15 @@ def _ocr_labels(source: Path) -> list[dict]:
         text = ' '.join(w['text'] for w in words).lower()
         normalized = re.sub('[^a-z ]', ' ', text)
         for label, aliases in ALIASES.items():
-            if any(re.search(r'\b'+re.escape(a)+r'\b', normalized) for a in aliases):
+            if any(re.search(r'\b' + re.escape(a) + r'\b', normalized) for a in aliases):
                 left = min(int(w['left']) for w in words)
-                right = max(int(w['left'])+int(w['width']) for w in words)
+                right = max(int(w['left']) + int(w['width']) for w in words)
                 top = min(int(w['top']) for w in words)
-                found.append({'label': label, 'x': (left+right)/2, 'y': top,
-                              'text': text, 'confidence': min(float(w['conf']) for w in words)/100,
+                found.append({'label': label, 'x': (left + right) / 2, 'y': top,
+                              'text': text, 'confidence': min(float(w['conf']) for w in words) / 100,
                               'engine': 'tesseract'})
                 break
     return found
-
-
-def _vlm_ocr_label(crop_with_caption: Image.Image) -> dict | None:
-    """Use local Ollama vision LLM (llava-llama3:latest at 127.0.0.1:11434) to read caption or classify pose."""
-    import base64
-    import urllib.request
-    buf = io.BytesIO()
-    thumb = crop_with_caption.convert('RGB')
-    thumb.thumbnail((320, 380))
-    thumb.save(buf, format='JPEG', quality=82)
-    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
-    prompt = (
-        "Read any printed label under this character or classify the pose into exactly ONE word from: "
-        "standing, walking, running, jumping, dancing, waving, pointing, sitting, clapping, looking_up, looking_down, arms_wide."
-    )
-    payload = json.dumps({
-        'model': os.environ.get('MAGICSTUDIO_OCR_VLM', 'llava-llama3:latest'),
-        'prompt': prompt,
-        'images': [b64],
-        'stream': False,
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434/api/generate'),
-        data=payload,
-        headers={'Content-Type': 'application/json'},
-        method='POST',
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=4.5) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            raw_text = re.sub(r'[^a-z_ ]', ' ', data.get('response', '').lower())
-            for label, aliases in ALIASES.items():
-                if label in raw_text or any(a in raw_text for a in aliases):
-                    return {'label': label, 'text': raw_text.strip(), 'confidence': 0.85, 'engine': 'ollama-vlm'}
-    except Exception:
-        return None
-    return None
 
 
 def _validate_box(box, size):
@@ -229,165 +113,36 @@ def _validate_box(box, size):
 
 
 def _clean_crop(source: Image.Image, box, pc_bin: str) -> Image.Image:
-    """The frame's figure on a transparent background.
-
-    A sheet that already has transparency is cropped as is. An opaque sheet goes through PhotoCraft:
-    Select Subject plus Object Selection aimed at the frame's box, applied as a layer mask. Each one
-    alone can drop a head or limb; together they keep the whole figure."""
-    if source.getchannel('A').getextrema()[0] < 255:
-        crop = source.crop(box)
-        if crop.getchannel('A').getbbox() is None:
-            raise ValueError(f'No foreground in frame {box}')
-        return crop
     x0, y0, x1, y1 = box
     pad = 8
     px0, py0 = max(0, x0 - pad), max(0, y0 - pad)
     px1, py1 = min(source.width, x1 + pad), min(source.height, y1 + pad)
     rect = [x0 - px0, y0 - py0, x1 - x0, y1 - y0]
+    padded = source.crop((px0, py0, px1, py1)).convert('RGBA')
+
     with tempfile.TemporaryDirectory() as tmpd:
         in_p, out_p = Path(tmpd) / 'in.png', Path(tmpd) / 'out.png'
-        source.crop((px0, py0, px1, py1)).convert('RGB').save(in_p)
-        proc = subprocess.run([pc_bin, 'run', str(in_p),
-                               '--cmd', 'select.subject',
-                               '--cmd', 'select.object', '--params', json.dumps({'rect': rect, 'mode': 'add'}),
-                               '--cmd', 'layer.layerMask.revealSelection', '--out', str(out_p)],
-                              capture_output=True, text=True, timeout=120)
+        padded.save(in_p)
+        proc = subprocess.run([
+            pc_bin, 'run', str(in_p),
+            '--cmd', 'layer.removeBackground',
+            '--params', json.dumps({'refine': True}),
+            '--out', str(out_p),
+        ], capture_output=True, text=True, timeout=120)
         if proc.returncode or not out_p.is_file():
-            raise RuntimeError(f'photocraft-cli selection failed for frame {box}: '
-                               + ((proc.stderr or proc.stdout).strip().splitlines() or ['no output'])[-1])
+            raise RuntimeError(
+                f'photocraft-cli layer.removeBackground failed for frame {box}: '
+                + ((proc.stderr or proc.stdout).strip().splitlines() or ['no output'])[-1]
+            )
         with Image.open(out_p) as out:
             cut = out.convert('RGBA').crop((rect[0], rect[1], rect[0] + rect[2], rect[1] + rect[3]))
+
+    cut_arr = np.array(cut)
+    cut_arr[cut_arr[:, :, 3] < 48, 3] = 0
+    cut = Image.fromarray(cut_arr)
     if cut.getchannel('A').getbbox() is None:
         raise ValueError(f'PhotoCraft selection found no figure in frame {box}')
     return cut
-
-
-def _save_parts(image, source_box, frame_offset, definitions, output, index):
-    parts = {}
-    parents = {s['id']: s['parent'] for s in json.loads(TEMPLATE.read_text())['slots']}
-    has_biped_slot = any(k in PARTS for k in definitions)
-    part_names = (list(PARTS) + [k for k in definitions if k not in PARTS]) if has_biped_slot else list(definitions)
-    for name in part_names:
-        spec = definitions.get(name)
-        if not spec:
-            parts[name] = {'status': 'unavailable', 'reason': 'No isolated artwork or explicit mask'}
-            continue
-        polygon = spec.get('polygon', [])
-        if len(polygon) < 3 or any(len(p) != 2 or any(not math.isfinite(v) for v in p) for p in polygon):
-            raise ValueError(f'Invalid polygon for {name}')
-        x0,y0,x1,y1 = source_box
-        if any(not (x0 <= x <= x1 and y0 <= y <= y1) for x,y in polygon):
-            raise ValueError(f'{name} polygon outside frame source box')
-        pivot = spec.get('pivot')
-        if not pivot or len(pivot) != 2 or any(not math.isfinite(v) for v in pivot):
-            raise ValueError(f'Invalid pivot for {name}')
-        mask_img = Image.new('L', image.size)
-        ImageDraw.Draw(mask_img).polygon([(x-x0,y-y0) for x,y in polygon], fill=255)
-        arr = np.array(image)
-        arr[:,:,3] = np.minimum(arr[:,:,3], np.array(mask_img))
-        part = Image.fromarray(arr)
-        bounds = part.getchannel('A').getbbox()
-        if not bounds:
-            parts[name] = {'status': 'unavailable', 'reason': 'Mask contains no visible pixels'}
-            continue
-        px,py = bounds[:2]
-        filename = f'parts/{index:02d}_{name}.png'
-        part.crop(bounds).save(output / filename)
-        ox,oy = frame_offset
-        parts[name] = {'file': filename, 'size': [bounds[2]-px,bounds[3]-py],
-            'status': 'ready' if spec.get('complete') and not spec.get('inferred') else 'needs_review',
-            'parent': spec.get('parent', parents.get(name)), 'sourcePivot': list(pivot),
-            'pivot': [pivot[0]-x0-px,pivot[1]-y0-py],
-            'bindPosition': [pivot[0]-x0+ox,pivot[1]-y0+oy],
-            'sourcePolygon': polygon, 'visiblePixelsOnly': not bool(spec.get('complete')),
-            'inferred': bool(spec.get('inferred'))}
-    return parts
-
-
-RUNTIME = '''// Pixel units. Serve this folder over HTTP. Three.js is supplied by caller.
-export async function loadManifest(url) {
-  const r = await fetch(url); if (!r.ok) throw Error(`Manifest HTTP ${r.status}`);
-  const m = await r.json(); m.baseURL = new URL('.', new URL(url, location.href)); return m;
-}
-export function threeFrame(THREE, texture, manifest, index=0) {
-  const f = manifest.frames[index], [w,h] = f.size;
-  const map = texture.clone(); map.needsUpdate = true;
-  map.repeat.set(f.uv[2], f.uv[3]); map.offset.set(f.uv[0], f.uv[1]);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map, transparent:true, depthWrite:false}));
-  sprite.scale.set(w,h,1); sprite.center.set(f.anchor[0]/w, 1-f.anchor[1]/h); return sprite;
-}
-export function p5Frame(p, atlas, manifest, index, x, y) {
-  const f=manifest.frames[index], [sx,sy,sw,sh]=f.atlasRect;
-  p.push(); p.imageMode(p.CORNER);
-  p.image(atlas, x-f.anchor[0], y-f.anchor[1], sw,sh, sx,sy,sw,sh); p.pop();
-}
-// angles in radians, clockwise in image space. Unavailable parts are skipped.
-export function p5Puppet(p, images, frame, angles={}, x=0, y=0) {
-  const parts=frame.parts;
-  function transform(name) {
-    const a=parts[name], b=a.bindPosition;
-    if (a.parent && parts[a.parent]?.file) {
-      transform(a.parent); const pb=parts[a.parent].bindPosition;
-      p.translate(b[0]-pb[0], b[1]-pb[1]);
-    } else p.translate(b[0], b[1]);
-    p.rotate(angles[name] || 0);
-  }
-  p.push(); p.translate(x-frame.anchor[0], y-frame.anchor[1]); p.imageMode(p.CORNER);
-  for (const name of ['prop_backpack','leg_R','leg_L','arm_R','torso','arm_L','head','ears']) {
-    const a=parts[name]; if (!a?.file || !images[name]) continue;
-    p.push(); transform(name); p.image(images[name],-a.pivot[0],-a.pivot[1]); p.pop();
-  } p.pop();
-}
-export function threePuppet(THREE, textures, frame) {
-  const root=new THREE.Group(), joints={}, parts=frame.parts;
-  function joint(name) {
-    if (joints[name]) return joints[name];
-    const a=parts[name], g=new THREE.Group(), parent=parts[a.parent]; joints[name]=g;
-    const b=a.bindPosition, pb=parent?.file ? parent.bindPosition : frame.anchor;
-    g.position.set(b[0]-pb[0], -(b[1]-pb[1]), 0);
-    (parent?.file ? joint(a.parent) : root).add(g); return g;
-  }
-  const order=['prop_backpack','leg_R','leg_L','arm_R','torso','arm_L','head','ears'];
-  for (const name of order) {
-    const a=parts[name]; if (!a?.file || !textures[name]) continue;
-    const material=new THREE.MeshBasicMaterial({map:textures[name],transparent:true,depthWrite:false,side:THREE.DoubleSide});
-    const [w,h]=a.size, mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),material);
-    mesh.position.set(w/2-a.pivot[0], -(h/2-a.pivot[1]), 0);
-    mesh.renderOrder=order.indexOf(name); joint(name).add(mesh);
-  }
-  root.userData.joints=joints; return root; // rotate joints[name].rotation.z (CCW).
-}
-'''
-
-
-def _write_vector_limb_masks_svg(frame_file: str, size: tuple[int, int], source_box, frame_offset, definitions: dict, output: Path, index: int) -> str:
-    """Write an editable SVG with VectorCraft-compatible clipPaths and limb polygons over the raster frame."""
-    cw, ch = size
-    x0, y0, _, _ = source_box
-    ox, oy = frame_offset
-    svg_rel = f'parts/{index:02d}_limb_masks.svg'
-    polys = []
-    for name, spec in definitions.items():
-        polygon = spec.get('polygon', [])
-        if len(polygon) < 3:
-            continue
-        pts = ' '.join(f'{px - x0 + ox:.1f},{py - y0 + oy:.1f}' for px, py in polygon)
-        piv = spec.get('pivot', [x0, y0])
-        piv_x, piv_y = piv[0] - x0 + ox, piv[1] - y0 + oy
-        polys.append(
-            f'  <g id="limb_{name}" data-part="{name}" data-pivot="{piv_x:.1f},{piv_y:.1f}">\n'
-            f'    <clipPath id="clip_{name}"><polygon points="{pts}"/></clipPath>\n'
-            f'    <polygon id="mask_path_{name}" points="{pts}" fill="none" stroke="#ff7a18" stroke-width="1.5" stroke-dasharray="4,3"/>\n'
-            f'    <circle cx="{piv_x:.1f}" cy="{piv_y:.1f}" r="3.5" fill="#38bdf8"/>\n'
-            f'  </g>'
-        )
-    svg_text = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {cw} {ch}" width="{cw}" height="{ch}">\n'
-        f'  <image id="felt_artwork" href="../{frame_file}" x="0" y="0" width="{cw}" height="{ch}"/>\n'
-        + '\n'.join(polys) + '\n</svg>\n'
-    )
-    (output / svg_rel).write_text(svg_text)
-    return svg_rel
 
 
 def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance=25):
@@ -408,75 +163,45 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
         preset = json.loads(VAULT_LAYOUTS.read_text()).get('sheets', {}).get(source.name)
         if preset and hashlib.sha256(source.read_bytes()).hexdigest() == preset['sha256']:
             layout = preset
-    w,h = image.size
+    w, h = image.size
     warnings = list((layout or {}).get('warnings', []))
-    caption_count = None  # independent evidence of how many frames the sheet holds (OCR captions)
+    caption_count = None
     definitions = (layout or {}).get('frames')
     if definitions is None:
         if kind == 'single':
-            definitions = [{'label':'single','box':[0,0,w,h]}]
+            definitions = [{'label': 'single', 'box': [0, 0, w, h]}]
         else:
             raw = np.array(image)
-            if raw[:,:,3].min() < 255:
-                mask = raw[:,:,3] > 16
-                # An import/matting derivative can leave the background of
-                # grid-separated panels opaque, collapsing a sheet into one
-                # blob. Only trust the alpha when it separates the figures;
-                # otherwise fall back to colour-based background detection.
+            if raw[:, :, 3].min() < 255:
+                mask = raw[:, :, 3] > 16
                 if kind in ('action', 'turnaround', 'exploded') and (
                     mask.mean() > 0.5 or not _components(mask, 'action' if kind == 'exploded' else kind)
                 ):
-                    mask = ndi.binary_opening(
-                        mask & ~_background_candidates(raw[:,:,:3], tolerance),
-                        iterations=2,
-                    )
+                    mask = ndi.binary_opening(mask & ~_background_candidates(raw[:, :, :3], tolerance), iterations=2)
             else:
-                mask = ~_background_candidates(raw[:,:,:3], tolerance)
-                # Separate characters linked by thin printed grid lines.
-                mask = ndi.binary_opening(mask, iterations=2)
+                mask = ndi.binary_opening(~_background_candidates(raw[:, :, :3], tolerance), iterations=2)
             if kind == 'exploded':
                 spec = json.loads(TEMPLATE.read_text())
                 slot_boxes = [
-                    {'label': s['id'], 'box': [s['cell'][0]*w//3, s['cell'][1]*h//3,
-                                               (s['cell'][0]+1)*w//3, (s['cell'][1]+1)*h//3]}
+                    {'label': s['id'], 'box': [s['cell'][0] * w // 3, s['cell'][1] * h // 3,
+                                               (s['cell'][0] + 1) * w // 3, (s['cell'][1] + 1) * h // 3]}
                     for s in spec['slots']
                 ]
                 boxes = _components(mask, 'action')
                 core_ids = {'head', 'torso', 'arm_L', 'arm_R', 'leg_L', 'leg_R'}
-                def _cell_has_fitting_component(cell_box):
-                    cx0, cy0, cx1, cy1 = cell_box
-                    cw_cell, ch_cell = cx1 - cx0, cy1 - cy0
-                    for bx0, by0, bx1, by1 in boxes:
-                        mx, my = (bx0 + bx1) * 0.5, (by0 + by1) * 0.5
-                        if (
-                            cx0 <= mx <= cx1
-                            and cy0 <= my <= cy1
-                            and (bx1 - bx0) <= cw_cell * 1.05
-                            and (by1 - by0) <= ch_cell * 1.05
-                        ):
-                            return True
-                    return False
-
-                core_populated = len(boxes) >= 6 and all(
-                    _cell_has_fitting_component(sb['box'])
-                    for sb in slot_boxes if sb['label'] in core_ids
-                )
-                if core_populated:
+                def _fits(cb):
+                    cx0, cy0, cx1, cy1 = cb
+                    return any(cx0 <= (bx0 + bx1) * 0.5 <= cx1 and cy0 <= (by0 + by1) * 0.5 <= cy1
+                               and (bx1 - bx0) <= (cx1 - cx0) * 1.05 and (by1 - by0) <= (cy1 - cy0) * 1.05
+                               for bx0, by0, bx1, by1 in boxes)
+                if len(boxes) >= 6 and all(_fits(sb['box']) for sb in slot_boxes if sb['label'] in core_ids):
                     definitions = slot_boxes
                 else:
                     if not boxes:
                         raise ValueError('No foreground parts detected; supply --layout')
-                    warnings.append(
-                        'Exploded sheet does not match the 3x3 biped template; extracted connected components as unlabelled parts (part_00..). Supply --layout to name parts explicitly.'
-                    )
-                    definitions = [
-                        {
-                            'box': [max(0, b[0]-3), max(0, b[1]-3), min(w, b[2]+3), min(h, b[3]+3)],
-                            'label': f'part_{i:02d}',
-                            'labelSource': 'unlabelled',
-                        }
-                        for i, b in enumerate(boxes)
-                    ]
+                    warnings.append('Exploded sheet does not match the 3x3 biped template; extracted connected components as unlabelled parts (part_00..). Supply --layout to name parts explicitly.')
+                    definitions = [{'box': [max(0, b[0] - 3), max(0, b[1] - 3), min(w, b[2] + 3), min(h, b[3] + 3)],
+                                    'label': f'part_{i:02d}', 'labelSource': 'unlabelled'} for i, b in enumerate(boxes)]
             else:
                 boxes = _components(mask, kind)
                 if not boxes:
@@ -488,30 +213,25 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                     except (subprocess.SubprocessError, OSError) as exc:
                         warnings.append(f'OCR unavailable: {type(exc).__name__}; supply labels via --layout')
                     caption_count = len(labels) or None
-                for i,b in enumerate(boxes):
-                    # Margin only 3px: avoid neighboring labels and adjacent characters.
-                    box = [max(0,b[0]-3),max(0,b[1]-3),min(w,b[2]+3),min(h,b[3]+3)]
-                    candidates = [l for l in labels if abs(l['x']-(b[0]+b[2])/2) < (b[2]-b[0])*.65
-                                  and b[3]-8 <= l['y'] <= b[3]+h*.11]
-                    match = min(candidates, key=lambda l: abs(l['y']-b[3])+abs(l['x']-(b[0]+b[2])/2), default=None)
-                    if match is None and use_ocr and kind == 'action':
-                        caption_crop = image.crop([box[0], box[1], box[2], min(h, int(box[3] + h * 0.11))])
-                        match = _vlm_ocr_label(caption_crop)
-                    label = VIEWS[i] if kind == 'turnaround' and len(boxes)==5 else match['label'] if match else f'pose_{i:02d}'
-                    definitions = definitions or []
-                    definitions.append({'box':box,'label':label,
-                                        'labelSource':'turnaround_order_assumption' if kind=='turnaround' and len(boxes)==5 else 'ocr' if match else 'unlabelled',
-                                        'ocr':match})
+                definitions = []
+                for i, b in enumerate(boxes):
+                    box = [max(0, b[0] - 3), max(0, b[1] - 3), min(w, b[2] + 3), min(h, b[3] + 3)]
+                    candidates = [l for l in labels if abs(l['x'] - (b[0] + b[2]) / 2) < (b[2] - b[0]) * .65
+                                  and b[3] - 8 <= l['y'] <= b[3] + h * .11]
+                    match = min(candidates, key=lambda l: abs(l['y'] - b[3]) + abs(l['x'] - (b[0] + b[2]) / 2), default=None)
+                    label = VIEWS[i] if kind == 'turnaround' and len(boxes) == 5 else match['label'] if match else f'pose_{i:02d}'
+                    definitions.append({'box': box, 'label': label,
+                                        'labelSource': 'turnaround_order_assumption' if kind == 'turnaround' and len(boxes) == 5 else 'ocr' if match else 'unlabelled',
+                                        'ocr': match})
     if not definitions:
         raise ValueError('No foreground frames specified')
     if len(definitions) > 64:
         raise ValueError('Over 64 frames detected; supply --layout')
-    crops = []
-    missing_parts = []
     pc_bin = _find_photocraft_cli()
     if not pc_bin:
         raise RuntimeError('photocraft-cli >= 0.10.0 is required to remove backgrounds; install it or put it on PATH')
     vc_bin = _find_vectorcraft_cli()
+    crops, missing_parts = [], []
     for item in definitions:
         box = _validate_box(item['box'], image.size)
         try:
@@ -520,12 +240,8 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                 for _ in range(3):
                     ca = np.array(crop)[:, :, 3] > 20
                     bx0, by0, bx1, by1 = box
-                    expanded = (
-                        max(0, bx0 - (6 if ca[:, :2].any() else 0)),
-                        max(0, by0 - (6 if ca[:2, :].any() else 0)),
-                        min(w, bx1 + (6 if ca[:, -2:].any() else 0)),
-                        min(h, by1 + (6 if ca[-2:, :].any() else 0)),
-                    )
+                    expanded = (max(0, bx0 - (6 if ca[:, :2].any() else 0)), max(0, by0 - (6 if ca[:2, :].any() else 0)),
+                                min(w, bx1 + (6 if ca[:, -2:].any() else 0)), min(h, by1 + (6 if ca[-2:, :].any() else 0)))
                     if expanded == box:
                         break
                     box = expanded
@@ -536,182 +252,138 @@ def cut_sheet(source, out_dir, kind='auto', layout=None, use_ocr=True, tolerance
                 continue
             raise
         if item.get('excludePolygons'):
-            exclusions = Image.new('L',crop.size)
+            exclusions = Image.new('L', crop.size)
             for polygon in item['excludePolygons']:
                 if len(polygon) < 3:
                     raise ValueError('excludePolygons need at least three points')
-                ImageDraw.Draw(exclusions).polygon([(x-box[0],y-box[1]) for x,y in polygon],fill=255)
+                ImageDraw.Draw(exclusions).polygon([(x - box[0], y - box[1]) for x, y in polygon], fill=255)
             arr = np.array(crop)
-            arr[np.array(exclusions)>0,3] = 0
+            arr[np.array(exclusions) > 0, 3] = 0
             crop = Image.fromarray(arr)
-        crops.append((item,box,crop))
+        crops.append((item, box, crop))
     padding = 8
-    cw = max(c.width for _,_,c in crops)+padding*2
-    ch = max(c.height for _,_,c in crops)+padding*2
+    cw = max(c.width for _, _, c in crops) + padding * 2
+    ch = max(c.height for _, _, c in crops) + padding * 2
     columns = min(5, len(crops))
-    rows = math.ceil(len(crops)/columns)
-    atlas = Image.new('RGBA',(cw*columns,ch*rows))
-    contact = Image.new('RGB',(cw*columns,(ch+28)*rows),'#d3d4d6')
+    rows = math.ceil(len(crops) / columns)
+    atlas = Image.new('RGBA', (cw * columns, ch * rows))
+    contact = Image.new('RGB', (cw * columns, (ch + 28) * rows), '#d3d4d6')
     draw = ImageDraw.Draw(contact)
     output.mkdir(parents=True, exist_ok=True)
-    (output/'frames').mkdir(exist_ok=True)
-    (output/'parts').mkdir(exist_ok=True)
-    frames = []
-    editable = {'frames':[], 'puppet':(layout or {}).get('puppet',{})}
-    boxes = [b for _,b,_ in crops]
+    (output / 'frames').mkdir(exist_ok=True)
+    (output / 'parts').mkdir(exist_ok=True)
+    frames, editable = [], {'frames': [], 'puppet': (layout or {}).get('puppet', {})}
+    boxes = [b for _, b, _ in crops]
     sheet_background = _background_candidates(np.array(image)[:, :, :3], tolerance)
-    median_area = float(np.median([(b[2]-b[0])*(b[3]-b[1]) for b in boxes]))
-    for i,(item,box,crop) in enumerate(crops):
-        ox,oy = (cw-crop.width)//2, ch-padding-crop.height
-        # Preserve source vertical location for jumping/action poses when requested.
+    median_area = float(np.median([(b[2] - b[0]) * (b[3] - b[1]) for b in boxes]))
+    for i, (item, box, crop) in enumerate(crops):
+        ox, oy = (cw - crop.width) // 2, ch - padding - crop.height
         if 'offset' in item:
-            ox,oy = item['offset']
-            if not (isinstance(ox,int) and isinstance(oy,int) and
-                    0 <= ox <= cw-crop.width and 0 <= oy <= ch-crop.height):
+            ox, oy = item['offset']
+            if not (isinstance(ox, int) and isinstance(oy, int) and 0 <= ox <= cw - crop.width and 0 <= oy <= ch - crop.height):
                 raise ValueError('offset would clip frame outside aligned canvas')
-        aligned = Image.new('RGBA',(cw,ch))
-        aligned.paste(crop,(ox,oy))
-        name = re.sub(r'[^a-zA-Z0-9_]+','_',str(item.get('label',f'pose_{i:02d}')))
+        aligned = Image.new('RGBA', (cw, ch))
+        aligned.paste(crop, (ox, oy))
+        name = re.sub(r'[^a-zA-Z0-9_]+', '_', str(item.get('label', f'pose_{i:02d}')))
         file = f'frames/{i:02d}_{name}.png'
-        aligned.save(output/file)
-        ax,ay = i%columns*cw, i//columns*ch
-        atlas.paste(aligned,(ax,ay))
-        cy = i//columns*(ch+28)
-        contact.paste(aligned,(ax,cy),aligned.getchannel('A'))
-        draw.text((ax+6,cy+ch+5),f'{i}: {name}',fill='#17181a')
+        aligned.save(output / file)
+        ax, ay = i % columns * cw, i // columns * ch
+        atlas.paste(aligned, (ax, ay))
+        cy = i // columns * (ch + 28)
+        contact.paste(aligned, (ax, cy), aligned.getchannel('A'))
+        draw.text((ax + 6, cy + ch + 5), f'{i}: {name}', fill='#17181a')
         parts_def = item.get('parts') or {}
-        parts = _save_parts(crop,box,(ox,oy),parts_def,output,i) if parts_def else {}
+        parts = _save_parts(crop, box, (ox, oy), parts_def, output, i, TEMPLATE) if parts_def else {}
         svg_mask_file = _write_vector_limb_masks_svg(file, (cw, ch), box, (ox, oy), parts_def, output, i) if parts_def else None
-        editable['frames'].append({**item,'label':item.get('label',name),'box':list(box),'parts':parts_def})
-        alpha = np.array(crop)[:,:,3]
-        touches = bool(alpha[0].any() or alpha[-1].any() or alpha[:,0].any() or alpha[:,-1].any())
-        frames.append({'index':i,'label':item.get('label',name),'file':file,'size':[cw,ch],
-            'qa': {'touchesCropBoundary':touches,'alphaReviewRequired':True,
-                   'issues': _frame_review(crop, i, boxes, median_area,
-                                           sheet_background[box[1]:box[3], box[0]:box[2]]) if kind != 'exploded' else []},
-            'sourceBox':list(box),'sourceOffset':[ox,oy], 'anchor':[cw/2,ch-padding],
-            'atlasRect':[ax,ay,cw,ch],'uv':[ax/atlas.width,1-(ay+ch)/atlas.height,cw/atlas.width,ch/atlas.height],
-            'labelSource':item.get('labelSource','explicit' if layout or kind=='exploded' else 'unlabelled'),
-            'ocr':item.get('ocr'),'parts':parts, 'vectorMaskSvg': svg_mask_file})
-    atlas.save(output/'atlas.png')
-    contact.save(output/'contact_sheet.jpg')
-    (output/'runtime.mjs').write_text(RUNTIME)
-    (output/'layout.review.json').write_text(json.dumps(editable,indent=2))
+        editable['frames'].append({**item, 'label': item.get('label', name), 'box': list(box), 'parts': parts_def})
+        alpha = np.array(crop)[:, :, 3]
+        touches = bool(alpha[0].any() or alpha[-1].any() or alpha[:, 0].any() or alpha[:, -1].any())
+        frames.append({
+            'index': i, 'label': item.get('label', name), 'file': file, 'size': [cw, ch],
+            'qa': {'touchesCropBoundary': touches, 'alphaReviewRequired': True,
+                   'issues': _frame_review(crop, i, boxes, median_area, sheet_background[box[1]:box[3], box[0]:box[2]]) if kind != 'exploded' else []},
+            'sourceBox': list(box), 'sourceOffset': [ox, oy], 'anchor': [cw / 2, ch - padding],
+            'atlasRect': [ax, ay, cw, ch], 'uv': [ax / atlas.width, 1 - (ay + ch) / atlas.height, cw / atlas.width, ch / atlas.height],
+            'labelSource': item.get('labelSource', 'explicit' if layout or kind == 'exploded' else 'unlabelled'),
+            'ocr': item.get('ocr'), 'parts': parts, 'vectorMaskSvg': svg_mask_file,
+        })
+    atlas.save(output / 'atlas.png')
+    contact.save(output / 'contact_sheet.jpg')
+    (output / 'runtime.mjs').write_text(RUNTIME)
+    (output / 'layout.review.json').write_text(json.dumps(editable, indent=2))
     present = {f['label'] for f in frames}
-    # Recognised captions are a lower bound: OCR only counts captions it can match to known actions.
     review = {'found': len(frames), 'expected': 5 if kind == 'turnaround' else None,
-              'expectedAtLeast': caption_count,
-              'flaggedFrames': [f['index'] for f in frames if f['qa']['issues']]}
-    if kind == 'action' and layout is None and caption_count is None:
-        warnings.append(f'Found {len(frames)} frames; the expected count is unknown (no OCR captions or layout), so missing figures cannot be detected.')
-    elif caption_count is not None and len(frames) < caption_count:
-        warnings.append(f'Found {len(frames)} frames but recognised {caption_count} captions; some figures were missed or merged.')
+              'expectedAtLeast': caption_count, 'flaggedFrames': [f['index'] for f in frames if f['qa']['issues']]}
     if review['flaggedFrames']:
         warnings.append(f'Frames {review["flaggedFrames"]} have cut issues; see frames[].qa.issues.')
-    missing = [a for a in ACTIONS if a not in present] if kind=='action' else []
-    if kind=='action':
-        warnings.append('Static action references are not sequential walk/run cycle frames.')
-        if missing:
-            warnings.append('Missing or unrecognized actions: '+', '.join(missing))
-    if kind=='turnaround':
-        warnings.append('View order is assumed front, quarter-front, side, opposite-quarter, back; verify directions in contact sheet.')
-        if len(frames)!=5:
-            warnings.append(f'Expected 5 turnaround views, detected {len(frames)}; supply --layout.')
-    if kind != 'exploded' and not any(frame['parts'] for frame in frames):
-        warnings.append('No part masks supplied; frames contain whole artwork. Supply an explicit part layout before articulation.')
-    if kind=='exploded':
-        warnings.append('Exploded parts retain sheet spacing; set assembled bind positions and review hidden artwork before using as a puppet.')
-    result = {'schemaVersion':1,'sourceImage':str(source),'sourceSize':[w,h],
-        'sheetType':kind,'status':'needs_review', 'spriteStatus':'exported',
-        'mattingEngine': 'photocraft-select.subject+object',
-        'vectorCraftAvailable': bool(vc_bin),
-        'frames':frames,'atlas':{'file':'atlas.png','size':list(atlas.size),'columns':columns,'rows':rows,'padding':padding},
-        'coordinates':'top-left pixel origin; sourceBox right/bottom exclusive; anatomical L/R; Three UV origin bottom-left',
-        'alignment':'common scale; centered x, bottom aligned; explicit per-frame offsets supported',
-        'partsStatus':'needs_review', 'missingActions':missing, 'missingParts':missing_parts, 'review':review,
-        'animation':{'continuousCycle':False,'actions':{name:[f['index'] for f in frames if f['label']==name] for name in sorted(present)}},
-        'warnings':warnings,'contactSheet':'contact_sheet.jpg','editableLayout':'layout.review.json',
-        'explodedTemplate':str(TEMPLATE)}
+    missing = [a for a in ACTIONS if a not in present] if kind == 'action' else []
+    result = {
+        'schemaVersion': 1, 'sourceImage': str(source), 'sourceSize': [w, h],
+        'sheetType': kind, 'status': 'needs_review', 'spriteStatus': 'exported',
+        'mattingEngine': 'photocraft-layer.removeBackground', 'vectorCraftAvailable': bool(vc_bin),
+        'frames': frames, 'atlas': {'file': 'atlas.png', 'size': list(atlas.size), 'columns': columns, 'rows': rows, 'padding': padding},
+        'coordinates': 'top-left pixel origin; sourceBox right/bottom exclusive; anatomical L/R; Three UV origin bottom-left',
+        'alignment': 'common scale; centered x, bottom aligned; explicit per-frame offsets supported',
+        'partsStatus': 'needs_review', 'missingActions': missing, 'missingParts': missing_parts, 'review': review,
+        'animation': {'continuousCycle': False, 'actions': {name: [f['index'] for f in frames if f['label'] == name] for name in sorted(present)}},
+        'warnings': warnings, 'contactSheet': 'contact_sheet.jpg', 'editableLayout': 'layout.review.json',
+        'explodedTemplate': str(TEMPLATE),
+    }
     if kind == 'exploded':
-        # The sheet is a parts library, not an assembled bind pose. Initial bind
-        # coordinates are explicit editable estimates, never readiness evidence.
-        defaults = {'torso':(.5,.65), 'head':(.5,.35), 'ears':(.5,.15),
-                    'arm_L':(.68,.44), 'arm_R':(.32,.44),
-                    'leg_L':(.60,.72), 'leg_R':(.40,.72), 'prop_backpack':(.5,.47)}
-        puppet = {'size':[cw,ch*2], 'anchor':[cw/2,ch*2-padding], 'parts':{}}
-        slots = {s['id']:s for s in json.loads(TEMPLATE.read_text())['slots']}
+        defaults = {'torso': (.5, .65), 'head': (.5, .35), 'ears': (.5, .15), 'arm_L': (.68, .44),
+                    'arm_R': (.32, .44), 'leg_L': (.60, .72), 'leg_R': (.40, .72), 'prop_backpack': (.5, .47)}
+        puppet = {'size': [cw, ch * 2], 'anchor': [cw / 2, ch * 2 - padding], 'parts': {}}
+        slots = {s['id']: s for s in json.loads(TEMPLATE.read_text())['slots']}
         for frame in frames:
-            name=frame['label']
-            slot=slots.get(name)
-            with Image.open(output/frame['file']) as part_image:
-                bounds=part_image.getchannel('A').getbbox()
+            name, slot = frame['label'], slots.get(frame['label'])
+            with Image.open(output / frame['file']) as part_image:
+                bounds = part_image.getchannel('A').getbbox()
             if bounds is None:
                 continue
-            px,py=slot['pivot'] if slot else (.5,.5)
-            pivot=[bounds[0]+px*(bounds[2]-bounds[0]),bounds[1]+py*(bounds[3]-bounds[1])]
-            if name in defaults:
-                bx,by=defaults[name]
-            else:
-                sb=frame.get('sourceBox',[0,0,w,h])
-                bx=((sb[0]+sb[2])*.5)/max(1,w)
-                by=((sb[1]+sb[3])*.5)/max(1,h)
-            override=(layout or {}).get('puppet',{}).get(name,{})
-            parent=override.get('parent', slot['parent'] if slot else None)
-            puppet['parts'][name]={'file':frame['file'], 'size':frame['size'],
-                'parent':parent, 'pivot':override.get('pivot',pivot),
-                'bindPosition':override.get('bindPosition',[bx*cw,by*ch*2]),
-                'status':'ready' if override.get('complete') else 'needs_review',
-                'visiblePixelsOnly':False, 'inferred':not bool(override.get('complete'))}
-        result['puppet']=puppet
-    (output/'manifest.json').write_text(json.dumps(result,indent=2))
+            px, py = slot['pivot'] if slot else (.5, .5)
+            pivot = [bounds[0] + px * (bounds[2] - bounds[0]), bounds[1] + py * (bounds[3] - bounds[1])]
+            sb = frame.get('sourceBox', [0, 0, w, h])
+            bx, by = defaults.get(name, (((sb[0] + sb[2]) * .5) / max(1, w), ((sb[1] + sb[3]) * .5) / max(1, h)))
+            override = (layout or {}).get('puppet', {}).get(name, {})
+            puppet['parts'][name] = {
+                'file': frame['file'], 'size': frame['size'], 'parent': override.get('parent', slot['parent'] if slot else None),
+                'pivot': override.get('pivot', pivot), 'bindPosition': override.get('bindPosition', [bx * cw, by * ch * 2]),
+                'status': 'ready' if override.get('complete') else 'needs_review',
+                'visiblePixelsOnly': False, 'inferred': not bool(override.get('complete')),
+            }
+        result['puppet'] = puppet
+    (output / 'manifest.json').write_text(json.dumps(result, indent=2))
     return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('source', nargs='?', help='Image or directory of vault sheets')
-    parser.add_argument('--out-dir',default='exports/pose_and_parts')
-    parser.add_argument('--kind',choices=['auto','action','turnaround','single','exploded'],default='auto')
-    parser.add_argument('--layout',help='JSON source pixel boxes, polygons and pivots (one source image only)')
-    parser.add_argument('--no-ocr',action='store_true')
-    parser.add_argument('--tolerance',type=int,default=25)
-    parser.add_argument('--prompt',metavar='CHARACTER',help='Print exact exploded sheet prompt')
-    parser.add_argument('--description',default='')
+    parser.add_argument('source', nargs='?', help='Image, cut directory (with --recut), or directory of vault sheets')
+    parser.add_argument('--out-dir', default='exports/pose_and_parts')
+    parser.add_argument('--kind', choices=['auto', 'action', 'turnaround', 'single', 'exploded'], default='auto')
+    parser.add_argument('--layout', help='JSON source pixel boxes, polygons and pivots')
+    parser.add_argument('--no-ocr', action='store_true')
+    parser.add_argument('--tolerance', type=int, default=25)
+    parser.add_argument('--prompt', metavar='CHARACTER', help='Print exact exploded sheet prompt')
+    parser.add_argument('--description', default='')
+    parser.add_argument('--recut', action='store_true', help='Recut flagged frames from an existing cut directory')
     args = parser.parse_args(argv)
     if args.prompt:
-        print(exploded_prompt(args.prompt,args.description))
+        print(exploded_prompt(args.prompt, args.description))
         return 0
     if not args.source:
         parser.error('source or --prompt required')
-    src,out = Path(args.source),Path(args.out_dir)
-    if src.is_dir():
-        if args.layout:
-            parser.error('--layout requires one image')
-        paths = sorted(p for p in src.iterdir() if p.suffix.lower() in ('.png','.jpg','.jpeg')
-                       and (p.name.startswith('Create_pose_sheet') or 'turnaround' in p.name.lower()))
-        results=[]
-        for path in paths:
-            try:
-                r = cut_sheet(path,out/path.stem,args.kind,use_ocr=not args.no_ocr,
-                              tolerance=args.tolerance)
-                results.append({'source':str(path),'manifest':str(out/path.stem/'manifest.json'),
-                                'status':r['status'],'frames':len(r['frames']),'missingActions':r['missingActions']})
-            except (ValueError,OSError) as exc:
-                results.append({'source':str(path),'status':'error','error':str(exc)})
-        out.mkdir(parents=True,exist_ok=True)
-        (out/'batch_report.json').write_text(json.dumps(results,indent=2))
-        print(json.dumps({'sheets':len(results),'errors':sum(r['status']=='error' for r in results),
-                          'report':str(out/'batch_report.json')},indent=2))
-        return 1 if not results or any(r['status']=='error' for r in results) else 0
-    try:
-        r=cut_sheet(src,out,args.kind,args.layout,not args.no_ocr,args.tolerance)
-    except (ValueError,OSError) as exc:
-        parser.exit(1,f'{exc}\n')
-    print(json.dumps({'manifest':str(out/'manifest.json'),'frames':len(r['frames']),
-                      'mattingEngine':r.get('mattingEngine'),'status':r['status']},indent=2))
+    src, out = Path(args.source), Path(args.out_dir)
+    if args.recut:
+        r = recut_flagged_sheet(src, out if args.out_dir != 'exports/pose_and_parts' else None)
+        print(json.dumps({'manifest': str((out if args.out_dir != 'exports/pose_and_parts' else src) / 'manifest.json'),
+                          'frames': len(r['frames']), 'recutFrames': r.get('recutFrames', []), 'status': r['status']}, indent=2))
+        return 0
+    r = cut_sheet(src, out, args.kind, args.layout, not args.no_ocr, args.tolerance)
+    print(json.dumps({'manifest': str(out / 'manifest.json'), 'frames': len(r['frames']),
+                      'mattingEngine': r.get('mattingEngine'), 'status': r['status']}, indent=2))
     return 0
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     raise SystemExit(main())
-

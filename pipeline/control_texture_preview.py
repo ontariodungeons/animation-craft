@@ -3,11 +3,12 @@ import argparse
 import json
 import math
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pipeline.facial_expression_preview import Deadline, private_root, require_craft_cli, tool_call, rgba, render as render_face
+from pipeline.facial_expression_preview import Deadline, private_root, tool_call, rgba, render as render_face
 import numpy as np
 
 
@@ -41,7 +42,7 @@ def render(source, out_dir, recipe, expression='smile', opening=20, deadline_s=9
         result = {'frames': [str(source)], 'warnings': [], 'review_required': changed}
     if not changed:
         return result
-    binary = require_craft_cli('photocraft-cli')
+    binary = shutil.which('photocraft-cli') or 'photocraft-cli'
     work = Path(tempfile.mkdtemp(prefix='pins-', dir=root))
     frames = []
     for i, frame in enumerate(result['frames']):

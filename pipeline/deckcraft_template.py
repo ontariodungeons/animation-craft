@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Existing storyboard-kit template population via DeckCraft native commands; no alternate document editor."""
-import argparse, collections, contextlib, hashlib, json, math, os, re, select, shutil, subprocess, time
+import argparse, collections, contextlib, hashlib, json, math, os, re, select, shutil, subprocess, sys, time
 from pathlib import Path
 
 VERSION = '4.1'
@@ -86,7 +86,7 @@ def read_inputs(config,grouping=None):
 
 class Deck:
     def __init__(self,template_root,output_root):
-        self.p=subprocess.Popen(['deckcraft-cli','mcp','--automation-read-root',str(template_root),'--automation-write-root',str(output_root)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);self.serial=0;self.queue=[]
+        self.p=subprocess.Popen([shutil.which('deckcraft-cli') or 'deckcraft-cli','mcp','--automation-read-root',str(template_root),'--automation-write-root',str(output_root)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);self.serial=0;self.queue=[]
         self.rpc('initialize',dict(protocolVersion='2024-11-05',capabilities={},clientInfo=dict(name='project-local-storyboard',version=VERSION)))
     def rpc(self,method,params):
         self.serial+=1;req=dict(jsonrpc='2.0',id=self.serial,method=method,params=params);self.p.stdin.write(json.dumps(req)+'\n');self.p.stdin.flush()
@@ -376,7 +376,7 @@ def make_pdf_editable(pdf,fields):
         steps.extend([dict(tool='form_add_field',args=dict(doc=1,page=f['page'],type='text',name=f['name'],rect=[x,y,x+w,y+h],multiline=True)),dict(tool='form_set_props',args=dict(doc=1,field=f['name'],font_size=f['font_size'],appearance=dict(border='none',fill=f['fill'],text_color=f['text_color'],width=0,font='helvetica')))])
     steps.extend([dict(tool='form_fill',args=dict(doc=1,values={f['name']:f['value'] for f in fields})),dict(tool='doc_save',args=dict(doc=1)),dict(tool='form_fields',args=dict(doc=1))])
     script=pdf.with_suffix('.pdfcraft.json');dump(script,steps)
-    result=subprocess.run(['pdfcraft-cli','run','--script',str(script),'--report'],capture_output=True,text=True)
+    result=subprocess.run([shutil.which('pdfcraft-cli') or 'pdfcraft-cli','run','--script',str(script),'--report'],capture_output=True,text=True)
     if result.returncode:raise RuntimeError('Editable PDF insertion failed: '+result.stderr)
     report=json.loads(result.stdout);dump(pdf.with_suffix('.pdfcraft-result.json'),report)
     actual=report['steps'][-1]['result'][0]['fields']
@@ -435,3 +435,34 @@ def generate(template,config,output,grouping=None,representative=False):
         if d:d.close()
         lock.unlink(missing_ok=True)
 
+
+def build_character_qa_deck(slug: str, out_dir: str | Path | None = None) -> dict:
+    from pipeline.step_deckcraft_qa import build_character_qa_deck as _build
+    return _build(slug, out_dir)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--character", default=None, help="Build 5-slide QA review deck for character slug")
+    ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--revise-template", default=None)
+    ap.add_argument("--template", default=None)
+    ap.add_argument("--config", default=None)
+    ap.add_argument("--output", default=None)
+    ap.add_argument("--grouping", default=None)
+    ap.add_argument("--representative", action="store_true")
+    args = ap.parse_args(argv)
+    if args.character:
+        print(json.dumps(build_character_qa_deck(args.character, args.out_dir), indent=2))
+        return 0
+    if args.revise_template:
+        revise_template(args.revise_template)
+        return 0
+    if args.template and args.config and args.output:
+        print(json.dumps(generate(args.template, args.config, args.output, args.grouping, args.representative), indent=2))
+        return 0
+    ap.error("Provide --character <slug> or --template/--config/--output")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

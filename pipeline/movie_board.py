@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Build an editable Backlot-style scene document through DeckCraft, headlessly."""
-import argparse, json, math, subprocess, shlex, re, hashlib
+import argparse, json, math, shutil, subprocess, shlex, re, hashlib, sys
 from pathlib import Path
+
+_REPO_ROOT = str(Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 
 def canonical_scenes(scene_map):
@@ -234,8 +238,9 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
         return dict(ok=False,status='draft blocked; active storyboard unchanged',error=str(error),template_file=str(template),mapping=mapping,config=str(config_path),scene_map=str(scene_map),correction='Resolve the reported source/template mismatch, then rerun the same CLI command; original data is retained')
     pages=out/'pages'
     pages.mkdir(exist_ok=True)
+    pdf_bin = shutil.which('pdfcraft-cli') or 'pdfcraft-cli'
     for i in range(len(result['page_plan'])):
-        subprocess.run(['pdfcraft-cli','render',result['pdf'],'--page',str(i+1),'--dpi','72','--out',str(pages/f'slide-{i+1:03}.png')],check=True,capture_output=True,text=True)
+        subprocess.run([pdf_bin,'render',result['pdf'],'--page',str(i+1),'--dpi','72','--out',str(pages/f'slide-{i+1:03}.png')],check=True,capture_output=True,text=True)
     validation=result['validation'];page_list=validation['pages']
     first_scene=next(i for i,page in enumerate(page_list) if page['kind']=='scene')
     links=validation['link_regions']

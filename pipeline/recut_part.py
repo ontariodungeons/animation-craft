@@ -15,6 +15,7 @@ No pixels are edited outside PhotoCraft. Prints one JSON result.
 """
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -78,7 +79,7 @@ def main():
         ("layer.delete", {}),
         ("image.crop", {"x": x, "y": y, "width": w, "height": h}),
     ]
-    argv = ["photocraft-cli", "run", a.source]
+    argv = [shutil.which("photocraft-cli") or "photocraft-cli", "run", a.source]
     for cid, params in cmds:
         argv += ["--cmd", cid, "--params", json.dumps(params)]
     argv += ["--out", a.out]

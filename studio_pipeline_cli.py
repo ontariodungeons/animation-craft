@@ -12,7 +12,7 @@ from pipeline.intake_router import run_three_question_intake
 from pipeline.blender53_bridge import execute_archetype_in_blender53
 from pipeline.filmcraft_bridge import load_animation_into_filmcraft
 
-WORKDIR = "/home/jesse/Work/omhas-animation"
+WORKDIR = os.path.dirname(os.path.abspath(__file__))
 EXPORTS_DIR = os.path.join(WORKDIR, "exports")
 
 Q1_TO_ARCHETYPE = {
@@ -90,7 +90,7 @@ def cmd_blender_check(args):
     out_mp4 = args.out_mp4 or os.path.join(EXPORTS_DIR, f"{args.archetype}_{args.verb}_blender53.mp4")
     out_png = args.out_png or os.path.join(EXPORTS_DIR, f"{args.archetype}_{args.verb}_blender53_preview.png")
     glb_path = args.glb or os.path.join(EXPORTS_DIR, "felt_bunny_explorer_blender.glb")
-    known_cast = ("miss_hayley", "old_mac", "hopper", "whiskers", "puddles", "rusty")
+    known_cast = ("miss_hayley", "old_mac", "hopper", "whiskers", "puddles", "rusty", "jenny")
     use_cast_builder = (
         char_slug
         and char_slug.lower() in known_cast

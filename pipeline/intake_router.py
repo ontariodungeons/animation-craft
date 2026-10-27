@@ -1,9 +1,8 @@
 import json
 import os
+import shutil
 import subprocess
 import urllib.request
-
-from pipeline.craft_cli import require_craft_cli
 
 
 def classify_archetype_from_hint(hint_name: str = "", aspect: float = 1.0) -> dict:
@@ -36,7 +35,7 @@ def classify_archetype_from_hint(hint_name: str = "", aspect: float = 1.0) -> di
 def inspect_image_with_photocraft(image_path: str) -> dict:
     if not image_path or not os.path.exists(image_path):
         return {"width": 512, "height": 512, "aspect": 1.0, "exists": False}
-    photocraft = require_craft_cli("photocraft-cli")
+    photocraft = shutil.which("photocraft-cli") or "photocraft-cli"
     try:
         out = subprocess.check_output(
             [photocraft, "info", image_path, "--json"],
