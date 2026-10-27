@@ -35,13 +35,12 @@ fn content_readiness(design:&Value)->Value{
  for field in fields.into_iter().flatten(){
   if field["field"]=="source" || field["field"]=="lyrics"{continue;}
   let value=field["value"].as_str().unwrap_or("").trim();
-  let placed=design["placements"].as_array().into_iter().flatten().any(|p|p["page"]==field["page"]);
-  let instruction=value.starts_with("Describe the story, characters") || value.starts_with("Name this location and place") || value.starts_with("Name the cast and reusable props") || value.starts_with("Register existing artwork") || value.contains("\nRegister existing artwork") || value.starts_with("Place the scene reference") || (value.starts_with("See the four panels") && !placed);
-  if (value.is_empty() || instruction) && !(field["field"]=="reference" && placed){
+  let instruction=value.starts_with("Describe the story, characters") || value.starts_with("Name this location and place") || value.starts_with("Name the cast and reusable props") || value.starts_with("Register existing artwork") || value.contains("\nRegister existing artwork") || value.starts_with("Place the scene reference") || value.starts_with("See the four panels");
+  if value.is_empty() || instruction {
    missing.push(json!({"page":field["page"],"field":field["field"]}));
   }
  }
- let known=fields.is_some_and(|fs|fs.iter().any(|f|f["role"].as_str().is_some_and(|r|r.starts_with("user.") || r=="auto.scene.lyrics")));
+ let known=fields.is_some_and(|fs|fs.iter().any(|f|f["role"].as_str().is_some_and(|r|r.starts_with("user."))));
  let complete=known && missing.is_empty() && design["dirty"]!=true;
  let reason=if !known{"Storyboard content has not been inspected".into()}else if !missing.is_empty(){format!("{} storyboard fields still need content",missing.len())}else if design["dirty"]==true{"Save pending storyboard changes".into()}else{"Storyboard fields filled; visual approval remains separate".into()};
  json!({"state":if complete{"ready"}else if known{"blocked"}else{"unknown"},"reason":reason,"missing_fields":missing})

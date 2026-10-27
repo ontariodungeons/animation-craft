@@ -40,6 +40,11 @@ pub fn call(target: &str, id: &str, mut params: Value) -> Result<Value, String> 
                 .map(|one| (one["endpoint"].as_str().unwrap_or_default().trim_start_matches("unix:").to_string(), one))
         };
         if let Some((path, feedback)) = selected {
+            let instance=Path::new(&path).file_name().and_then(|v|v.to_str()).ok_or("Missing Studio instance")?;
+            if params["_expected_instance"].as_str().is_some_and(|pin|pin!=instance) {
+                return Err("Studio instance changed; command refused without reassignment".into());
+            }
+            params["_expected_instance"]=json!(instance);
             if let Some(expected) = expected {
                 let active = feedback["active_project"]
                     .as_str()

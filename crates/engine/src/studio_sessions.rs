@@ -111,6 +111,7 @@ pub fn discover() -> Value {
             }
             match request_within(&path,"ui.feedback",json!({}),1){
    Ok(mut value)=>{value["endpoint"]=json!(format!("unix:{}",path.display()));value["instance"]=json!(path.file_name().and_then(|p|p.to_str()));if let Some(raw)=value["active_project"].as_str(){value["canonical_project"]=json!(canonical(Path::new(raw)).ok());}sessions.push(value);},
+   Err(_) if matches!(path.try_exists(),Ok(false))=>{},
    Err(error)=>errors.push(json!({"endpoint":path,"error":error,"state":if error.starts_with("stale endpoint:"){"stale endpoint; no listener"}else{"unresponsive or inaccessible; ownership unknown"}}))
   }
         }

@@ -40,6 +40,15 @@ pub fn pin(endpoint: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Open and attach this caller to the returned instance; no port choices are needed.
+pub fn open(project: Option<&str>) -> Result<Value, String> {
+    let exe=std::env::current_exe().map_err(|e|e.to_string())?;
+    let shell=exe.parent().ok_or("CLI directory missing")?.join("magicstudio-shell");
+    let live=magicstudio_engine::studio_sessions::open(&shell,project)?;
+    pin(live["endpoint"].as_str().ok_or("Opened Studio has no endpoint")?)?;
+    Ok(live)
+}
+
 /// Join an explicit pane assignment to live feedback; never infer ownership from a name or folder.
 pub fn assignment(pane: &str, discovery: &Value) -> Value {
     let pin = std::env::var_os("XDG_RUNTIME_DIR").and_then(|runtime|

@@ -59,7 +59,7 @@ impl CliArgs {
                 skip_next = false;
                 continue;
             }
-            if a == "--bridge" {
+            if a == "--bridge" || a == "--control" {
                 skip_next = true;
                 continue;
             }
@@ -118,12 +118,16 @@ impl Args {
 
     pub fn bridge_addr(&self) -> Option<String> {
         self.inner.opt("--bridge").map(|v| {
-            if v=="auto" || v.contains(':') {
+            if v == "auto" || v.contains(':') {
                 v
             } else {
                 format!("127.0.0.1:{v}")
             }
         })
+    }
+
+    pub fn control_port(&self) -> Option<String> {
+        self.inner.opt("--control")
     }
 
     pub fn pos(&self, n: usize) -> Option<&str> {
