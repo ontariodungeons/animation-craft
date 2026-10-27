@@ -75,7 +75,7 @@ pub fn cmd_app_analytics(s: &mut Session, params: &Value) -> Result<Value> {
     let usage = read_omarchy_usage();
     let project = read_project_analytics(s);
     let root = crate::workspace::workspace_root(s);
-    let complexity = read_complexity(&root, scan);
+    let complexity = crate::complexity::read(&root, scan);
 
     Ok(json!({
         "ok": true,
@@ -240,103 +240,6 @@ fn read_project_analytics(s: &Session) -> Value {
         "total_chars": total_chars,
         "estimated_tokens": estimated_tokens,
     })
-}
-
-fn read_complexity(root: &Path, scan: bool) -> Value {
-    if !scan {
-        return json!({ "available": false, "reason": "Scan disabled" });
-    }
-    let lizard_bin = resolve_craft_cli("lizard");
-    let output = std::process::Command::new(&lizard_bin)
-        .current_dir(root)
-        .args([
-            "--csv",
-            "-l",
-            "rust",
-            "-l",
-            "python",
-            "crates/engine/src",
-            "apps/mc/src",
-            "apps/magicstudio-shell/src",
-            "pipeline",
-            "scripts",
-        ])
-        .output();
-    let Ok(out) = output else {
-        return json!({ "available": false, "reason": "lizard CLI not found on PATH" });
-    };
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let mut functions = Vec::new();
-    let mut files = std::collections::HashSet::new();
-    let mut total_nloc = 0u64;
-    let mut total_tokens = 0u64;
-    let mut over_15 = 0usize;
-    let mut max_ccn = 0u64;
-
-    for line in stdout.lines() {
-        let fields = parse_csv_line(line);
-        if fields.len() < 11 {
-            continue;
-        }
-        let Ok(nloc) = fields[0].parse::<u64>() else { continue };
-        let Ok(ccn) = fields[1].parse::<u64>() else { continue };
-        let Ok(tokens) = fields[2].parse::<u64>() else { continue };
-        let Ok(params) = fields[3].parse::<u64>() else { continue };
-        let file = fields[6].clone();
-        let name = fields[7].clone();
-        let start_line = fields[9].parse::<u64>().unwrap_or(1);
-        let end_line = fields[10].parse::<u64>().unwrap_or(start_line);
-
-        files.insert(file.clone());
-        total_nloc = total_nloc.saturating_add(nloc);
-        total_tokens = total_tokens.saturating_add(tokens);
-        if ccn > 15 {
-            over_15 += 1;
-        }
-        if ccn > max_ccn {
-            max_ccn = ccn;
-        }
-        functions.push(json!({
-            "name": name,
-            "file": file,
-            "start_line": start_line,
-            "end_line": end_line,
-            "nloc": nloc,
-            "ccn": ccn,
-            "tokens": tokens,
-            "params": params,
-        }));
-    }
-    functions.sort_by_key(|f| (std::cmp::Reverse(f["ccn"].as_u64().unwrap_or(0)), std::cmp::Reverse(f["nloc"].as_u64().unwrap_or(0))));
-    let hotspots: Vec<Value> = functions.iter().take(25).cloned().collect();
-    json!({
-        "available": !functions.is_empty(),
-        "tool": "lizard",
-        "files_analyzed": files.len(),
-        "functions_analyzed": functions.len(),
-        "total_nloc": total_nloc,
-        "total_code_tokens": total_tokens,
-        "functions_over_ccn_15": over_15,
-        "max_ccn": max_ccn,
-        "hotspots": hotspots,
-    })
-}
-
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut res = Vec::new();
-    let mut cur = String::new();
-    let mut in_quotes = false;
-    for ch in line.chars() {
-        match ch {
-            '"' => in_quotes = !in_quotes,
-            ',' if !in_quotes => {
-                res.push(std::mem::take(&mut cur));
-            }
-            _ => cur.push(ch),
-        }
-    }
-    res.push(cur);
-    res
 }
 
 fn which_in_path(bin: &str) -> bool {

@@ -100,6 +100,10 @@ function analyticsRenderSurface() {
         el('small', {}, `${comp.files_analyzed ?? 0} files · ${fmtCount(comp.total_nloc)} NLOC · max CCN ${comp.max_ccn ?? 0}`),
       ),
       el('div', { class: 'learning-task' },
+        el('strong', {}, `${comp.long_files ?? 0} long files`),
+        el('small', {}, `≥ ${comp.long_file_threshold_lines ?? 600} lines · ${comp.ui_files_analyzed ?? 0} UI files · ${fmtCount(comp.total_source_lines)} lines`),
+      ),
+      el('div', { class: 'learning-task' },
         el('strong', {}, `${availTools}/${tools.length} Craft tools`),
         el('small', {}, `RSS ${(Number(host.self_rss_kb || 0) / 1024).toFixed(0)} MB · load ${host.load || '—'}`),
       ),
@@ -171,8 +175,41 @@ function analyticsRenderSurface() {
           el('code', {}, `${fmtCount(comp.total_code_tokens)} code tokens`),
           el('p', {}, `Measured by ${comp.tool || 'lizard'} without compiling`),
         ),
+        el('div', { class: 'learning-summary' },
+          el('h3', {}, 'Long Files'),
+          el('code', {}, `${comp.long_files || 0} files ≥ ${comp.long_file_threshold_lines || 600} lines`),
+          el('p', {}, `${comp.ui_files_analyzed || 0} shell UI modules scanned · ${fmtCount(comp.total_source_lines)} source lines`),
+        ),
       ),
     );
+    if (comp.longest_files?.length) {
+      surface.append(
+        el('h3', {}, 'Longest files (reading cost)'),
+        el('div', { class: 'learning-grid learning-task-grid' },
+          ...comp.longest_files.map((file, idx) => el('div', {
+            class: 'learning-summary',
+            id: `analytics-long-file-${idx}`,
+          },
+            el('h3', {}, `${file.file} · ${file.lines} lines`),
+            el('code', {}, `CCN ${file.ccn} · max ${file.max_ccn} · ${file.functions} functions`),
+          )),
+        ),
+      );
+    }
+    if (comp.largest_ccn_files?.length) {
+      surface.append(
+        el('h3', {}, 'Highest complexity files'),
+        el('div', { class: 'learning-grid learning-task-grid' },
+          ...comp.largest_ccn_files.map((file, idx) => el('div', {
+            class: 'learning-summary',
+            id: `analytics-ccn-file-${idx}`,
+          },
+            el('h3', {}, `${file.file} · CCN ${file.ccn}`),
+            el('code', {}, `${file.lines} lines · max CCN ${file.max_ccn} · ${file.functions} functions`),
+          )),
+        ),
+      );
+    }
     if (comp.hotspots?.length) {
       surface.append(
         el('div', { class: 'learning-grid learning-task-grid' },
