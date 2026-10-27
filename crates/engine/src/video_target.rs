@@ -176,15 +176,14 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     let existed=target_project_path(s,&dir,&target).is_some();
     if params["replace_scaffold"]==true {return Err(EngineError::InvalidParams("Existing projects are edited by HyperFrames; init does not replace them".into()));}
     let reused=existed;
-    let created = if target=="hyperframes" && !reused {init_hyperframes(s,&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
-    if target == "hyperframes" && !created.is_file() {
+    let created = if !reused {init_hyperframes(s,&dir,params["hyperframes_cli"].as_str())?}else{ensure_video_target_project(s, &dir, &target)?};
+    if !created.is_file() {
         return Err(EngineError::InvalidParams(format!(
             "video.init did not create an editable HyperFrames project: {}. Official initialization returned no editable project; existing audio/transcript files were preserved.", created.display()
         )));
     }
     let mut assembly=Value::Null;
     if params["assemble"]==true {
-        if target!="hyperframes" {return Err(EngineError::InvalidParams("Music-to-video assembly requires target=hyperframes".into()));}
         let hf=dir.join("hyperframes");let plan=hf.join("STORYBOARD.md");
         if !plan.is_file(){return Err(EngineError::InvalidParams("Music-to-video assembly requires derived STORYBOARD.md and completed frame files from the native storyboard; no replacement plan was invented".into()));}
         let map=params["audiomap"].as_str().map(|p|resolve_workspace_path(s,p)).unwrap_or_else(||hf.join("audiomap.json"));
@@ -214,16 +213,16 @@ pub fn cmd_video_init(s: &mut Session, params: &Value) -> Result<Value> {
     let mut status = workshop_status(s)?;
     status["native_timeline"]=native;
     status["music_assembly"]=assembly;
-    status["captions"]=if target=="hyperframes" && params["captions"]!=false {ensure_native_captions(s,&dir)?}else{Value::Null};
+    status["captions"]=if params["captions"]!=false {ensure_native_captions(s,&dir)?}else{Value::Null};
     status["initialized"] = json!(created);
     status["reused_existing_project"]=json!(reused);
     status["video_complete"]=json!(false);
-    status["song_imported"]=json!(target=="hyperframes"&&!reused&&s.song_audio.is_some());
+    status["song_imported"]=json!(!reused&&s.song_audio.is_some());
     s.video_project_path = target_project_path(s, &dir, &target);
     status["video_project_path"]=json!(s.video_project_path);
     if s.project_path.is_some() { let _ = crate::project::write_project_file(s); }
     status["initialization_scope"]=json!("Official editable project with linked song and supplied timing when available; authored visuals and rendered output are separate steps");
-    if target=="hyperframes" && !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?);}
+    if !reused {status["runtime_executable"]=json!(hyperframes_cli(params["hyperframes_cli"].as_str(),Some(&dir.join("hyperframes")))?);}
     Ok(status)
 }
 
