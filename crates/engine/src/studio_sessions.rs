@@ -152,8 +152,12 @@ pub fn open(executable: &Path, project: Option<&str>) -> Result<Value, String> {
     if let Some(path) = &project {
         if let Some(existing) = for_project(path)? {
             let endpoint = existing["endpoint"].as_str().ok_or("Studio endpoint missing")?;
-            request(Path::new(endpoint.trim_start_matches("unix:")), "ui.focus", json!({"_expected_instance":existing["instance"],"_expected_project":path}))?;
-            return Ok(existing);
+            let socket = Path::new(endpoint.trim_start_matches("unix:"));
+            match request(socket, "ui.focus", json!({"_expected_instance":existing["instance"],"_expected_project":path})) {
+                Ok(_) => return Ok(existing),
+                Err(_) if matches!(socket.try_exists(), Ok(false)) => {},
+                Err(error) => return Err(error),
+            }
         }
     }
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR missing")?;
