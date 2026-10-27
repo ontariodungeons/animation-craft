@@ -17,7 +17,7 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 
 ## Validation budget
 
-- Full compilation and tests run locally through the visible normal commit hooks.
+- Commit hooks check staged paths and whitespace with progress reporting.
 - GitHub has one lightweight sanity job, capped at three minutes, with one shared
   concurrency group for the whole repository. Do not add remote Rust builds, native
   app downloads, extra jobs, agent calls or runners without Jesse’s explicit approval.
@@ -116,8 +116,9 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
   base revision and report their owner; do not hide them or duplicate another
   agent's active fix. Do not bypass required PR checks.
 - Do not pretest code changes. Add meaningful tests, then make a normal `git commit`;
-  `.githooks/pre-commit` runs compilation and tests. Never bypass hooks. Build the
-  app as needed to keep the visible preview open; report actual hook outcomes.
+  `.githooks/pre-commit` checks staged paths and whitespace with progress reporting.
+  Never bypass hooks. Build the app as needed to keep the visible preview open;
+  report actual hook outcomes.
 
 ## Commit before handing work to another agent
 

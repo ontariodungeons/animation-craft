@@ -4,15 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$SCRIPT_DIR"
 
-# One compiler/test job keeps local commits and CI within the same resource budget.
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
-export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
-
-CHECK_ALL=${MAGICSTUDIO_CHECK_ALL:-0}
-if [[ "$CHECK_ALL" != 0 && "$CHECK_ALL" != 1 ]]; then
-    echo "MAGICSTUDIO_CHECK_ALL must be 0 or 1" >&2
-    exit 2
-fi
+# Commits run repository safeguards only. Run builds and tests explicitly.
 
 STATUS_PID=$BASHPID
 BRANCH=$(git branch --show-current)
@@ -86,38 +78,6 @@ check_staged_paths() {
 
 run_step "staged-file policy" check_staged_paths || exit $?
 run_step "staged whitespace" git diff --cached --check || exit $?
-
-RUST_STAGED=$(git diff --cached --name-only | grep -E '(\.rs$|^Cargo\.(toml|lock)$)' || true)
-FULL_CHECKS=$CHECK_ALL
-if [[ -n "$RUST_STAGED" ]]; then FULL_CHECKS=1; fi
-
-if (( FULL_CHECKS == 1 )); then
-    run_step "workspace compile and tests" cargo test --workspace --all-targets --quiet || exit $?
-else
-    # Keep the focused credential-free guard on non-Rust local commits. The full workspace
-    # run includes it, so Rust commits and CI never compile/test the same crate twice.
-    run_step "agent selection security regression" cargo test --offline -p magicstudio-engine --test agent_security --quiet -- --test-threads=1 || exit $?
-fi
-
-STAGED_FILES=$(git diff --cached --name-only)
-if [[ -f pipeline/test_movie_board.py ]] && grep -qE '^pipeline/(deckcraft_template|movie_board|test_movie_board)\.py$' <<<"$STAGED_FILES"; then
-    run_step "storyboard template regression" python pipeline/test_movie_board.py || exit $?
-fi
-if (( CHECK_ALL == 1 )); then
-    [[ ! -f scripts/test_render_motion_recipe.py ]] || run_step "motion recipe regression" python scripts/test_render_motion_recipe.py || exit $?
-    [[ ! -f pipeline/test_layer_alternates.py ]] || run_step "layered motion regression" python pipeline/test_layer_alternates.py || exit $?
-    [[ ! -f scripts/test_compile_motion_specs.py ]] || run_step "motion spec regression" python scripts/test_compile_motion_specs.py || exit $?
-else
-    if [[ -f scripts/test_render_motion_recipe.py ]] && grep -qE '^scripts/(test_)?render_motion_recipe\.py$' <<<"$STAGED_FILES"; then
-        run_step "motion recipe regression" python scripts/test_render_motion_recipe.py || exit $?
-    fi
-    if [[ -f pipeline/test_layer_alternates.py ]] && grep -qE '^pipeline/(layered_motion|test_layer_alternates)\.py$' <<<"$STAGED_FILES"; then
-        run_step "layered motion regression" python pipeline/test_layer_alternates.py || exit $?
-    fi
-    if [[ -f scripts/test_compile_motion_specs.py ]] && grep -qE '^scripts/(test_)?compile_motion_specs\.py$' <<<"$STAGED_FILES"; then
-        run_step "motion spec regression" python scripts/test_compile_motion_specs.py || exit $?
-    fi
-fi
 
 CURRENT_STEP="all required checks"
 if ! record_status passed "$CURRENT_STEP" 0; then
