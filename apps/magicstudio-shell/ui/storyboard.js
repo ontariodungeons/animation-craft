@@ -120,19 +120,26 @@ function renderStoryboardText(){
 }
 
 function updateStoryboardSaveControls(){
- const disabled=projectView.pending>0 || (!state.data?.design?.dirty && !projectView.textDrafts.size);
+ const disabled=projectView.pending>0 || !!state.data?.design?.error || (!state.data?.design?.dirty && !projectView.textDrafts.size);
  for(const id of ['sb-save-version','storyboard-save'])if($(id))$(id).disabled=disabled;
 }
 
 let storyboardSave=null;
 function saveStoryboard(){
  if(storyboardSave)return storyboardSave;
- storyboardSave=persistStoryboard().finally(()=>{storyboardSave=null;updateStoryboardSaveControls();});
+ const project=state.project;
+ storyboardSave=(async()=>{
+  let result;
+  do { result=await persistStoryboard(); }
+  while(state.project===project && projectView.textDrafts.size);
+  return result;
+ })().finally(()=>{storyboardSave=null;updateStoryboardSaveControls();});
  return storyboardSave;
 }
 
 async function persistStoryboard(){
  const project=state.project;
+ if(state.data?.design?.error)throw new Error(`Cannot save until the editable storyboard is readable: ${state.data.design.error}`);
  const edits=[...projectView.textDrafts.entries()];
  for(const [,edit] of edits)await designCommand('storyboard.edit',{...edit,save:false});
  const result=await designCommand('storyboard.save_version',state.data?.storyboard?.draft?{draft:state.data.storyboard.manifest}:{});

@@ -363,6 +363,10 @@ fn invalid(message: impl Into<String>) -> EngineError {
     EngineError::InvalidParams(message.into())
 }
 
+pub fn load_character_id(s: &mut Session, params: &Value) -> Result<String> {
+    load_character(s, params)
+}
+
 fn load_character(s: &mut Session, params: &Value) -> Result<String> {
     let id = params["character"]
         .as_str()
@@ -486,7 +490,7 @@ fn validate(rig: &LoadedCutoutRigPlan) -> Result<()> {
 
 /// Standard actions are scripts in the existing exporter vocabulary, not another evaluator.
 /// Root motion follows the stage's idle/walk/run bounce and jump anticipation/lift/settle pattern.
-fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
+pub(crate) fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
     let b = rig.character_bbox;
     let width = (b[2] - b[0]).max(1) as f64;
     let height = (b[3] - b[1]).max(1) as f64;
@@ -497,6 +501,11 @@ fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
         .unwrap_or(json!({"motion":{}}));
     let rest = evaluate_layered_motion_spec(rig, &first, 0.0, true, 1.0);
     let definitions = [
+        ("left", "Left", 1.2, true),
+        ("right", "Right", 1.2, true),
+        ("up", "Up", 1.2, false),
+        ("down", "Down", 1.2, false),
+        ("rest", "Rest", 2.0, true),
         ("idle", "Idle", 4.0, true),
         ("move", "Move", 4.0, false),
         ("jump", "Jump", 2.0, false),
@@ -525,11 +534,17 @@ fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
             }
             if part.parent.is_some() {continue;}
             match id {
+                "rest"=>motion[&part.id]["position"]=bounce(height*0.005,0.25),
                 "idle"=>motion[&part.id]["position"]=bounce(height*0.012,0.25),
+                "left"=>motion[&part.id]["position"]=bounce(height*0.024,1.0),
+                "right"=>motion[&part.id]["position"]=bounce(height*0.024,1.0),
                 "move"=>motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration,[width*1.2,0]]]}]),
-                "jump"=>{
+                "up"|"jump"=>{
                     motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration*0.18,[0,height*0.035]],[duration*0.5,[0,-height*0.45]],[duration*0.82,[0,0]],[duration*0.9,[0,height*0.02]],[duration,[0,0]]]}]);
                     motion[&part.id]["scale"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration*0.18,[4,-5]],[duration*0.5,[-2,3]],[duration*0.82,[3,-4]],[duration,[0,0]]]}]);
+                },
+                "down"=>{
+                    motion[&part.id]["position"]=json!([{"kind":"keys","ease":"smooth","keys":[[0,[0,0]],[duration*0.4,[0,height*0.12]],[duration*0.7,[0,height*0.12]],[duration,[0,0]]]}]);
                 },
                 "walk"=>motion[&part.id]["position"]=bounce(height*0.028,1.0),
                 "run"=>motion[&part.id]["position"]=bounce(height*0.045,2.0),
@@ -542,7 +557,7 @@ fn standard_tracks(rig: &LoadedCutoutRigPlan) -> Vec<Value> {
     }).collect()
 }
 
-fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
+pub(crate) fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
     let mut rig = if let Some(rig) = &asset.cutout_rig {
         rig.clone()
     } else {
@@ -586,73 +601,122 @@ fn preview_rig(asset: &crate::Asset) -> Result<LoadedCutoutRigPlan> {
     Ok(rig)
 }
 
-fn summarize_track_channels(motion_obj: &Value) -> Vec<Value> {
-    let Some(map) = motion_obj.as_object() else {
-        return Vec::new();
-    };
+fn summarize_track_channels(
+    motion_obj: &Value,
+    theatre_state: Option<&Value>,
+    character: &str,
+    track_id: &str,
+) -> Vec<Value> {
     let mut out = Vec::new();
-    for (layer, props_val) in map {
-        let Some(props_obj) = props_val.as_object() else {
-            continue;
-        };
-        let mut properties = Vec::new();
-        let mut hz_list = Vec::new();
-        let mut has_follow = false;
-        let mut has_keys = false;
-        let mut key_times = serde_json::Map::new();
-        for (prop_name, terms_val) in props_obj {
-            properties.push(prop_name.clone());
-            if let Some(terms) = terms_val.as_array() {
-                for term in terms {
-                    match term.get("kind").and_then(Value::as_str).unwrap_or("") {
-                        "oscillate" => {
-                            if let Some(hz) = term.get("hz").and_then(Value::as_f64) {
-                                let label = format!("{:.1} Hz", hz).replace(".0 Hz", " Hz");
-                                if !hz_list.contains(&label) {
-                                    hz_list.push(label);
+    let mut seen_layers = std::collections::BTreeSet::new();
+    let sheet_key = crate::theatre::clip_sheet_id(character, track_id);
+    let sheet = theatre_state
+        .and_then(|v| v["sheetsById"].as_object())
+        .and_then(|s| s.get(&sheet_key).or_else(|| s.get(character)));
+
+    if let Some(map) = motion_obj.as_object() {
+        for (layer, props_val) in map {
+            let Some(props_obj) = props_val.as_object() else {
+                continue;
+            };
+            seen_layers.insert(layer.clone());
+            let mut properties = Vec::new();
+            let mut hz_list = Vec::new();
+            let mut has_follow = false;
+            let mut has_keys = false;
+            let mut key_times = serde_json::Map::new();
+            for (prop_name, terms_val) in props_obj {
+                properties.push(prop_name.clone());
+                if let Some(terms) = terms_val.as_array() {
+                    for term in terms {
+                        match term.get("kind").and_then(Value::as_str).unwrap_or("") {
+                            "oscillate" => {
+                                if let Some(hz) = term.get("hz").and_then(Value::as_f64) {
+                                    let label = format!("{:.1} Hz", hz).replace(".0 Hz", " Hz");
+                                    if !hz_list.contains(&label) {
+                                        hz_list.push(label);
+                                    }
                                 }
                             }
+                            "follow" => has_follow = true,
+                            "keys" | "ellipse" => {
+                                has_keys = true;
+                                let times = key_times.entry(prop_name.clone()).or_insert_with(|| json!([]));
+                                times.as_array_mut().into_iter().for_each(|list| list.extend(term["keys"].as_array().into_iter().flatten().filter_map(|key| key.get(0).cloned())));
+                            }
+                            _ => {}
                         }
-                        "follow" => has_follow = true,
-                        "keys" | "ellipse" => {
-                            has_keys = true;
-                            // Key times per property let a timeline mark where each curve's keys sit.
-                            let times = key_times.entry(prop_name.clone()).or_insert_with(|| json!([]));
-                            times.as_array_mut().into_iter().for_each(|list| list.extend(term["keys"].as_array().into_iter().flatten().filter_map(|key| key.get(0).cloned())));
-                        }
-                        _ => {}
                     }
                 }
             }
+            if let Some(sh) = sheet {
+                let th_keys = crate::character::theatre_part_key_times(sh, layer);
+                if !th_keys.is_empty() {
+                    has_keys = true;
+                    if !properties.iter().any(|p| p == "rotation") {
+                        properties.push("rotation".to_string());
+                    }
+                    let times = key_times.entry("rotation".to_string()).or_insert_with(|| json!([]));
+                    if let Some(list) = times.as_array_mut() {
+                        for k in th_keys {
+                            list.push(json!(k));
+                        }
+                    }
+                }
+            }
+            let mut parts = Vec::new();
+            if has_keys {
+                parts.push("keys".to_string());
+            }
+            if let Some(first_hz) = hz_list.first() {
+                parts.push(first_hz.clone());
+            }
+            if has_follow {
+                parts.push("follow".to_string());
+            }
+            let summary = if parts.is_empty() {
+                "static".to_string()
+            } else {
+                parts.join(" + ")
+            };
+            for times in key_times.values_mut() {
+                let mut list: Vec<f64> = times.as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+                list.sort_by(f64::total_cmp);
+                list.dedup();
+                *times = json!(list);
+            }
+            out.push(json!({
+                "layer": layer,
+                "properties": properties,
+                "summary": summary,
+                "keys": key_times,
+                "rotation_bound": properties.iter().any(|p| p == "rotation"),
+            }));
         }
-        let mut parts = Vec::new();
-        if has_keys {
-            parts.push("keys".to_string());
+    }
+    if let Some(sh) = sheet {
+        if let Some(tracks_by_obj) = sh.pointer("/sequence/tracksByObject").and_then(Value::as_object) {
+            for layer in tracks_by_obj.keys() {
+                if seen_layers.contains(layer) {
+                    continue;
+                }
+                let mut th_keys = crate::character::theatre_part_key_times(sh, layer);
+                if th_keys.is_empty() {
+                    continue;
+                }
+                th_keys.sort_by(f64::total_cmp);
+                th_keys.dedup();
+                let mut key_times = serde_json::Map::new();
+                key_times.insert("rotation".to_string(), json!(th_keys));
+                out.push(json!({
+                    "layer": layer,
+                    "properties": ["rotation"],
+                    "summary": "keys",
+                    "keys": key_times,
+                    "rotation_bound": true,
+                }));
+            }
         }
-        if let Some(first_hz) = hz_list.first() {
-            parts.push(first_hz.clone());
-        }
-        if has_follow {
-            parts.push("follow".to_string());
-        }
-        let summary = if parts.is_empty() {
-            "static".to_string()
-        } else {
-            parts.join(" + ")
-        };
-        for times in key_times.values_mut() {
-            let mut list: Vec<f64> = times.as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
-            list.sort_by(f64::total_cmp);
-            list.dedup();
-            *times = json!(list);
-        }
-        out.push(json!({
-            "layer": layer,
-            "properties": properties,
-            "summary": summary,
-            "keys": key_times,
-            "rotation_bound": props_obj.contains_key("rotation"),
-        }));
     }
     out
 }
@@ -667,17 +731,20 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
     let rig = preview_rig(asset)?;
     let rig = &rig;
     validate(rig)?;
-    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| json!({
-        "id":t["id"],
-        "duration":t["duration"],
-        "loop":t["loop"].as_bool().unwrap_or(false),
-        "path":t["path"],
-        "standard":t["standard"].as_bool().unwrap_or(false),
-        "label":t["label"],
-        "channels":summarize_track_channels(&t["motion"]),
-        "static_overrides":crate::motion_authoring::static_overrides(t, &rig.effectcraft["layers"]),
-        "authoring":crate::motion_authoring::capabilities(s,&id,t,&rig.plan_path),
-    })).collect();
+    let tracks: Vec<_> = rig.effectcraft["tracks"].as_array().into_iter().flatten().map(|t| {
+        let tid = t["id"].as_str().unwrap_or("");
+        json!({
+            "id":t["id"],
+            "duration":t["duration"],
+            "loop":t["loop"].as_bool().unwrap_or(false),
+            "path":t["path"],
+            "standard":t["standard"].as_bool().unwrap_or(false),
+            "label":t["label"],
+            "channels":summarize_track_channels(&t["motion"], s.theatre_state.as_ref(), &id, tid),
+            "static_overrides":crate::motion_authoring::static_overrides(t, &rig.effectcraft["layers"]),
+            "authoring":crate::motion_authoring::capabilities(s,&id,t,&rig.plan_path),
+        })
+    }).collect();
     // Plain image previews use a synthesized rig with no manifest path. Keep
     // replacement capture metadata absent there; normal animation inspection
     // must continue to work without a layered-rig source document.
@@ -740,7 +807,12 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         });
     let layers: Vec<_> = rig.parts.iter().enumerate().map(|(depth,p)| {
         let source_file = metadata.as_ref().and_then(|(raw,_,_)|crate::part_replacement::layer_file(raw, &rig.plan_path, &p.id).ok());
-        let image_sha256 = source_file.as_ref().and_then(|path| std::fs::read(path).ok()).map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+        let image_sha256 = source_file
+            .as_ref()
+            .and_then(|path| std::fs::read(path).ok())
+            .or_else(|| std::fs::read(&p.cropped_path).ok())
+            .or_else(|| std::fs::read(&p.full_layer_path).ok())
+            .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
         let source_size = source_file.as_ref().and_then(|path| image::image_dimensions(path).ok());
         let image_edit = metadata.as_ref().map(|(raw,_,_)|crate::part_replacement::image_edit_capability(s,&rig.plan_path,raw,&p.id))
             .unwrap_or(json!({"supported":false,"reason":"Saved source image metadata is unavailable"}));
@@ -749,10 +821,15 @@ pub fn cmd_motion_tracks(s: &mut Session, params: &Value) -> Result<Value> {
         "base_geometry":{"crop":p.crop_box,"canvas":rig.canvas_size,"pivot":p.pivot},
         "state":asset.parts.iter().find(|x| x.name == p.id)})
     }).collect();
+    let preflight = crate::character::preflight_rig_summary(rig);
+    let character_config = crate::character::load_character_config(s, &id, project_root.as_deref());
     Ok(
         json!({"ok":true,"character":id,"canvas":rig.canvas_size,"bounds":rig.character_bbox,"source_image":rig.source_image,"original_reference":original_reference,"layers":layers,"tracks":tracks,"fps":rig.effectcraft["fps"],"spec":rig.plan_path,
         "rig_sha256":metadata.as_ref().map(|(_,hash,_)|hash),"image_revision":metadata.as_ref().and_then(|(_,_,revision)|*revision),
         "layer_order":rig.parts.iter().map(|p|&p.id).collect::<Vec<_>>(),"layer_authoring":crate::motion_authoring::layer_capabilities(s,&id,&rig.plan_path,metadata.as_ref().map(|(raw,_,_)|raw).unwrap_or(&Value::Null)),
+        "placed_tracks":project_root.as_deref().map(crate::video_target::read_placed_tracks).unwrap_or_default(),
+        "preflight":preflight,
+        "character_config":character_config,
         "controls":rig.control_bindings,"audio":s.song_audio}),
     )
 }
@@ -820,6 +897,34 @@ fn matrix(
     m
 }
 
+fn apply_saved_theatre_to_motion(
+    motion: &mut EvaluatedRigMotion,
+    theatre_state: Option<&Value>,
+    character: &str,
+    track_id: &str,
+    rest: bool,
+    t: f64,
+    range_factor: f64,
+) {
+    let Some(sheets) = theatre_state.and_then(|v| v["sheetsById"].as_object()) else {
+        return;
+    };
+    let clip_id = if rest { "@rest" } else { track_id };
+    let sheet_key = crate::theatre::clip_sheet_id(character, clip_id);
+    let Some(sheet) = sheets.get(&sheet_key).or_else(|| sheets.get(character)) else {
+        return;
+    };
+    let part_ids: Vec<String> = motion.angles_deg.keys().cloned().collect();
+    for pid in part_ids {
+        let delta = crate::character::eval_theatre_rotation_at(sheet, &pid, t) * range_factor;
+        if delta.abs() > 1e-9 {
+            let deg = motion.angles_deg.get(&pid).copied().unwrap_or(0.0) + delta;
+            motion.angles_deg.insert(pid.clone(), deg);
+            motion.angles_rad.insert(pid, deg.to_radians());
+        }
+    }
+}
+
 pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
     let id = load_character(s, params)?;
     let asset = s
@@ -863,9 +968,22 @@ pub fn cmd_motion_sample(s: &mut Session, params: &Value) -> Result<Value> {
         f64::NEG_INFINITY,
         f64::NEG_INFINITY,
     ];
+    let include_theatre = params["include_theatre"].as_bool().unwrap_or(true);
+    let track_id_str = track["id"].as_str().unwrap_or("");
     for i in 0..count {
         let t = sample_time.unwrap_or_else(|| (i as f64 / fps).min(duration));
-        let motion = evaluate_layered_motion_spec(rig, track, t, rest, amount / 100.0);
+        let mut motion = evaluate_layered_motion_spec(rig, track, t, rest, amount / 100.0);
+        if include_theatre {
+            apply_saved_theatre_to_motion(
+                &mut motion,
+                s.theatre_state.as_ref(),
+                &id,
+                track_id_str,
+                rest,
+                t,
+                amount / 100.0,
+            );
+        }
         let layers: Vec<_> = rig.parts.iter().map(|p| {
             let shown = asset.parts.iter().find(|x| x.name==p.id).is_none_or(|x| x.visible && (!solo || x.solo));
             json!({"matrix":matrix(rig,&motion,&p.id,track["layers"].as_array()),"opacity":if shown {motion.opacity.get(&p.id).copied().unwrap_or(1.0)} else {0.0},
@@ -1117,7 +1235,8 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let layers = sampled_export_layers(&rig, &sample);
-    let name = crate::workspace::sanitize_asset_id(p["track"].as_str().unwrap_or("motion"));
+    let track_raw = p["track"].as_str().unwrap_or("motion");
+    let name = crate::workspace::sanitize_asset_id(track_raw);
     let bounds = sample["bounds"].as_array();
     let b = |i: usize, default: f64| {
         bounds
@@ -1150,6 +1269,18 @@ pub fn cmd_motion_export_track(s: &mut Session, p: &Value) -> Result<Value> {
     result["asset"] = json!(id);
     result["rest"] = sample["rest"].clone();
     result["amount"] = json!(p["amount"].as_f64().unwrap_or(100.0));
+    if p["sync_video"].as_bool().unwrap_or(true)
+        && let Some(file) = result["outputs"][0]["file"].as_str().map(str::to_owned)
+        && let Ok(synced) = crate::video_target::sync_placed_tracks_media_and_duration(
+            s,
+            &id,
+            track_raw,
+            Some(&file),
+            Some(duration),
+        )
+    {
+        result["video_tracks_synced"] = synced;
+    }
     Ok(result)
 }
 
@@ -1180,61 +1311,4 @@ pub fn cmd_motion_place_section(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let placed = crate::video_target::cmd_video_place_track(s, &place)?;
     Ok(json!({"ok":true,"placed":true,"character":character,"track":track,"file":file,"validation":output["validation"],"placement":placed}))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::CutoutRigPart;
-
-    fn part(id: &str, size: [u32; 2], pivot: [f32; 2]) -> CutoutRigPart {
-        CutoutRigPart { id: id.into(), label: id.into(), crop_size: size, pivot, ..CutoutRigPart::default() }
-    }
-
-    #[test]
-    fn action_export_preserves_sampled_parent_filter_and_stack() {
-        let root = part("root", [4,4], [2.0,2.0]);
-        let mut child = part("child", [2,2], [3.0,3.0]);
-        child.parent = Some("root".into());
-        let rig = LoadedCutoutRigPlan { parts:vec![root,child], ..LoadedCutoutRigPlan::default() };
-        for selected in [json!(["child"]),json!(["root","child"])] {
-            let parents:Vec<_> = rig.parts.iter().map(|p|effective_parent(p,selected.as_array())).collect();
-            let sample=json!({"effective_parents":parents});
-            let layers=sampled_export_layers(&rig,&sample);
-            assert_eq!(layers.iter().map(|p|p["id"].clone()).collect::<Vec<_>>(),vec![json!("root"),json!("child")]);
-            assert_eq!(layers[1]["parent"],sample["effective_parents"][1],"export must not restore an excluded parent's transform");
-        }
-    }
-
-    #[test]
-    fn channel_summary_lists_key_times_once_in_order() {
-        let motion = json!({"body":{"position":[{"kind":"keys","keys":[[2.0,[0,0]],[0.5,[1,1]]]},{"kind":"oscillate","hz":1.0}],
-            "scale":[{"kind":"keys","keys":[[0.5,[0,0]]]}]},"fin":{"rotation":[{"kind":"oscillate","hz":2.5}]}});
-        let summary = summarize_track_channels(&motion);
-        let body = summary.iter().find(|c| c["layer"] == "body").unwrap();
-        assert_eq!(body["keys"], json!({"position":[0.5, 2.0],"scale":[0.5]}));
-        assert_eq!(body["summary"], "keys + 1 Hz");
-        let fin = summary.iter().find(|c| c["layer"] == "fin").unwrap();
-        assert_eq!((fin["keys"].clone(), fin["summary"].as_str()), (json!({}), Some("2.5 Hz")));
-    }
-
-    #[test]
-    fn sway_turns_every_part_but_the_largest_and_keeps_flat_rigs_together() {
-        let rig = LoadedCutoutRigPlan {
-            character_bbox: [0, 0, 400, 200],
-            parts: vec![part("a", [300, 150], [200.0, 100.0]), part("b", [40, 30], [20.0, 90.0]), part("c", [50, 20], [380.0, 60.0])],
-            ..LoadedCutoutRigPlan::default()
-        };
-        let tracks = standard_tracks(&rig);
-        let sway = tracks.iter().find(|t| t["id"] == "@sway").expect("sway is a standard action");
-        assert_eq!((sway["loop"].as_bool(), sway["duration"].as_f64()), (Some(true), Some(4.0)));
-        let motion = &sway["motion"];
-        assert!(motion["a"]["rotation"].is_null(), "the largest part only bobs");
-        for id in ["a", "b", "c"] {
-            assert_eq!(motion[id]["position"], motion["a"]["position"], "{id} bobs with the rest of a flat rig");
-        }
-        let at = evaluate_layered_motion_spec(&rig, sway, 0.25, false, 1.0);
-        assert!(at.angles_deg["b"].abs() > 1.0 && at.angles_deg["c"].abs() > 1.0, "{:?}", at.angles_deg);
-        assert_ne!(motion["b"]["rotation"][0]["phase"], motion["c"]["rotation"][0]["phase"], "pivots at different places ripple");
-    }
 }

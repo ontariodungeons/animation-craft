@@ -184,6 +184,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 svg { width: var(--size-18); height: var(--size-18); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Top bar */
+body.animate-only #app-bar,
+body.animate-only #app-footer {
+  display: none !important;
+}
 .bar {
   height: var(--size-48); flex: none; display: flex; align-items: center; gap: var(--size-18); padding: 0 var(--size-14);
   background: linear-gradient(var(--surface), var(--bg)); border-bottom: var(--size-1) solid var(--line);
@@ -750,6 +754,10 @@ kbd { display: inline-block; font: var(--size-10)/1 ui-monospace, monospace; bor
 .magic-assets-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--size-6); }
 #motion-asset-browser .magic-assets-grid { grid-template-columns:minmax(0,1fr); }
 .magic-asset-tile { position:relative; display:grid; grid-template-columns:var(--size-32) minmax(0,1fr); grid-template-rows:auto auto; column-gap:var(--size-6); align-items:center; padding:var(--size-5) var(--size-6); border:var(--size-1) solid var(--line); border-radius:var(--size-7); text-align:left; color:var(--muted); }
+.magic-asset-tile .asset-forget { position:absolute; top:var(--size-4); right:var(--size-4); width:var(--size-20); height:var(--size-20); border-radius:50%; background:var(--alpha-0a); color:var(--muted); display:grid; place-items:center; opacity:0; transition:opacity var(--fast) var(--ease); }
+.magic-asset-tile:hover .asset-forget, .magic-asset-tile .asset-forget:focus-visible { opacity:1; }
+.magic-asset-tile .asset-forget:hover { color:var(--rust); background:var(--alpha-0d); }
+.magic-asset-tile .asset-forget svg { width:var(--size-12); height:var(--size-12); stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
 .magic-asset-tile img, .magic-asset-tile .magic-asset-placeholder { grid-row:1 / span 2; width:var(--size-32); height:var(--size-28); object-fit:contain; border-radius:var(--size-4); background-image:linear-gradient(45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(-45deg,var(--surface-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--surface-3) 75%),linear-gradient(-45deg,transparent 75%,var(--surface-3) 75%); background-size:var(--size-10) var(--size-10); background-position:0 0,0 var(--size-5),var(--size-5) calc(-1 * var(--size-5)),calc(-1 * var(--size-5)) 0; }
 .magic-asset-tile .magic-asset-name { color:var(--text); font-size:var(--size-11-5); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .magic-asset-id { font:var(--size-10) ui-monospace,monospace; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1142,3 +1150,14 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .words-drawing-edit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); flex-basis: 100%; }
 .words-drawing-edit input[type="number"] { width: 5em; }
 .words-drawing-edit input[type="color"] { width: var(--size-30); padding: 0; }
+.motion-action { display:inline-flex; align-items:center; gap:var(--size-4); padding:var(--size-4) var(--size-7); width:auto; height:auto; }
+.motion-action svg { width:var(--size-14); height:var(--size-14); flex:none; }
+.char-magic-panel { display:flex; flex-direction:column; gap:var(--space-2); padding:var(--space-2); background:var(--surface); border:var(--size-1) solid var(--line); border-radius:var(--radius); }
+.char-magic-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--size-4); }
+.char-magic-badge { font-size:var(--text-xs); color:var(--accent); }
+.char-subhead { font-size:var(--text-xs); font-weight:600; text-transform:uppercase; color:var(--muted); }
+.char-angle-grid, .char-pose-grid, .char-sheets-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-1); }
+.char-thumb-card, .char-sheet-card { display:flex; flex-direction:column; align-items:center; gap:var(--size-2); padding:var(--space-1); background:var(--surface-2); border:var(--size-1) solid var(--line); border-radius:var(--radius-sm); font-size:var(--text-xs); color:var(--muted); }
+.char-thumb-card.is-active { border-color:var(--accent); color:var(--text); }
+.char-thumb-card img, .char-sheet-card img { width:100%; height:var(--size-46); object-fit:contain; background:var(--thumb-bg); border-radius:var(--size-4); }
+.theatre-ruler span { left:var(--tick-position,0%); }

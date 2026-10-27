@@ -36,7 +36,8 @@ function motionAuthoringPanels(meta){
   if(current())readback.textContent=JSON.stringify(result,null,2);
   if(result.ok!==true||result.character!==character||!result.rig_sha256||!result.undo)throw Error('Edit returned no hash/undo confirmation; inspect result.');
   if(!current())return;
-  motion.lastEdit={project,character,track,command:id,result};localStorage.setItem(key,JSON.stringify({undo:result.undo,hash:result.rig_sha256}));readback.textContent=JSON.stringify(result,null,2);status.textContent='Rig saved · undo available · project Save remains explicit.';
+  if(result.track&&typeof result.track==='string')motion.track=result.track;
+  motion.lastEdit={project,character,track:motion.track,command:id,result};localStorage.setItem(key,JSON.stringify({undo:result.undo,hash:result.rig_sha256}));readback.textContent=JSON.stringify(result,null,2);status.textContent='Rig saved · undo available · project Save remains explicit.';
   motion.authoringBusy=false;
   try{await animationRefresh();}catch(error){motion.lastEdit.refresh_error=String(error);status.textContent=`Rig edit succeeded; refresh failed: ${error}`;}
   }finally{motion.authoringBusy=false;for(const control of editControls)control.disabled=control.unavailable===true;}
@@ -61,8 +62,61 @@ function motionAuthoringPanels(meta){
  if(motion.lastEdit?.project===project&&motion.lastEdit.character===character){readback.textContent=JSON.stringify(motion.lastEdit,null,2);status.textContent='Rig saved · undo receipt available · project Save remains explicit.';}
  const label=field('label','Action name',action?.label||action?.id||'','text'),duration=field('duration','Action duration (seconds)',action?.duration),loop=el('input',{id:'authoring-loop',type:'checkbox','aria-label':'Loop authored action'});loop.checked=action?.loop===true;loop.defaultChecked=loop.checked;
  const actionDirty=new Set();label.input.onchange=()=>actionDirty.add('label');duration.input.onchange=()=>actionDirty.add('duration');loop.onchange=()=>actionDirty.add('loop');
- const actionApply=el('button',{id:'authoring-action-apply','data-commands':'motion.action.set',onclick:()=>{try{if(!actionDirty.size)throw Error('Change an action value first.');const p=identity();for(const k of actionDirty){if(k==='label'){if(!label.input.value.trim())throw Error('Enter an action name.');p.label=label.input.value.trim();}else if(k==='duration'){const d=Number(duration.input.value);if(!Number.isFinite(d)||d<=0||d>600)throw Error('Duration must be in (0,600].');p.duration=d;}else p.loop=loop.checked;}return run('motion.action.set',p);}catch(error){status.textContent=String(error)}}},'Save action settings');actionApply.disabled=caps.action_set!==true;
- const actionNode=el('div',{class:'animation-authoring-fields'},reason('action',caps.action_set===true),label.node,duration.node,el('label',{},loop,'Loop authored action'),actionApply);
+ const cleanTrack=(track||'action').replace(/^@/,'');
+ const defaultClipId=`${character}-${cleanTrack}`.replace(/[^a-zA-Z0-9_-]/g,'-');
+ const existingPlacement=(meta.placed_tracks||[]).find(p=>p.id===defaultClipId||(p.character===character&&String(p.track||'').replace(/^@/,'')===cleanTrack));
+ const placeScene=el('select',{id:'authoring-place-scene','aria-label':'Storyboard scene'},el('option',{value:''},'Movable timeline (or pick a Storyboard scene…)'));
+ const placeStart=field('place-start','Video start (seconds)',existingPlacement?.start??0);
+ const placeDuration=field('place-duration','Video duration (seconds)',existingPlacement?.duration??action?.duration??3);
+ const placeRate=field('place-rate','Playback rate (×)',existingPlacement?.playback_rate??1);
+ const defaultRect=Array.isArray(existingPlacement?.rect)&&existingPlacement.rect.length===4?existingPlacement.rect:[0,0,meta.canvas?.[0]||1920,meta.canvas?.[1]||1080];
+ const placeX=field('place-x','Stage X (px)',defaultRect[0]),placeY=field('place-y','Stage Y (px)',defaultRect[1]),placeW=field('place-w','Stage W (px)',defaultRect[2]),placeH=field('place-h','Stage H (px)',defaultRect[3]);
+ const placeStatus=el('p',{id:'authoring-place-status',class:'muted',role:'status'},existingPlacement?`Synced on HyperFrames Studio track #${existingPlacement.track_index}${existingPlacement.scene?` · Storyboard Scene ${existingPlacement.scene}`:''} (${existingPlacement.start}s–${(Number(existingPlacement.start)+Number(existingPlacement.duration)).toFixed(2)}s · ${existingPlacement.playback_rate??1}×)`:'Choose a Storyboard scene or start time to link this animation to the Storyboard & HyperFrames Studio.');
+ motionCommand('storyboard.toc').then(toc=>{
+  if(!current())return;
+  const chapters=(toc.chapters||[]).filter(s=>Number.isSafeInteger(s.scene)&&s.scene>0);
+  for(const s of chapters){
+   const opt=el('option',{value:String(s.scene)},`Scene ${s.scene}${s.title?` · ${s.title}`:''}${Number.isFinite(s.start)&&Number.isFinite(s.end)?` (${s.start.toFixed(1)}s–${s.end.toFixed(1)}s)`:''}`);
+   placeScene.append(opt);
+  }
+  if(existingPlacement?.scene)placeScene.value=String(existingPlacement.scene);
+ }).catch(()=>{});
+ placeScene.onchange=async()=>{
+  if(!placeScene.value)return;
+  try{
+   const s=await motionCommand('storyboard.read',{scene:Number(placeScene.value)});
+   if(!current())return;
+   if(Number.isFinite(s.start)&&Number.isFinite(s.end)&&s.end>s.start){
+    placeStart.input.value=String(s.start);
+    placeDuration.input.value=String(Number((s.end-s.start).toFixed(2)));
+    placeStatus.textContent=`Scene ${s.scene} selected (${s.start.toFixed(2)}s–${s.end.toFixed(2)}s) · ready to link to Storyboard & HyperFrames Studio.`;
+   }
+  }catch{}
+ };
+ const placeBtn=el('button',{id:'authoring-place-video',class:'start','data-commands':'video.place_track',onclick:async()=>{
+  placeBtn.disabled=true;placeStatus.textContent='Exporting & syncing animation to Storyboard and HyperFrames Studio…';
+  try{
+   const startVal=Number(placeStart.input.value);const durVal=Number(placeDuration.input.value||duration.input.value||action?.duration||3);const rateVal=Number(placeRate.input.value||1);
+   const rect=[Number(placeX.input.value||0),Number(placeY.input.value||0),Number(placeW.input.value||meta.canvas?.[0]||1920),Number(placeH.input.value||meta.canvas?.[1]||1080)];
+   if(!Number.isFinite(startVal)||startVal<0||!Number.isFinite(durVal)||durVal<=0||!Number.isFinite(rateVal)||rateVal<=0)throw Error('Enter a valid non-negative start and positive duration/rate.');
+   const sceneNum=placeScene.value?Number(placeScene.value):undefined;
+   const exported=await motionCommand('motion.export_track',{character,track:motion.track,rest:motion.rest,amount:motion.amount,duration:durVal,sync_video:true});
+   const videoFile=exported?.outputs?.[0]?.file;
+   const clipId=sceneNum?`${character}-scene-${sceneNum}-${cleanTrack}`.replace(/[^a-zA-Z0-9_-]/g,'-'):(existingPlacement?.id||defaultClipId);
+   const placeParams={id:clipId,character,track:motion.track,start:startVal,duration:durVal,playback_rate:rateVal,rect,...(videoFile?{path:videoFile}:{}),...(sceneNum?{scene:sceneNum}:{})};
+   const res=await motionCommand('video.place_track',placeParams);
+   if(sceneNum){
+    try{await motionCommand('storyboard.place_asset',{asset:character,page:sceneNum,x:100,y:100,width:220});}catch{}
+   }
+   if(!current())return;
+   motion.lastPlacement=res;
+   placeStatus.textContent=`Linked ${res.id} to${sceneNum?` Storyboard Scene ${sceneNum} &`:''} HyperFrames Studio track #${res.track_index} (${res.start}s–${(Number(res.start)+Number(res.duration)).toFixed(2)}s)`;
+   await animationRefresh();
+  }catch(error){if(current()){placeStatus.textContent=String(error);placeStatus.className='image-error';}}
+  finally{if(current())placeBtn.disabled=false;}
+ }},existingPlacement?'Update Storyboard & Studio Link':'Link to Storyboard & Studio');
+ const actionApply=el('button',{id:'authoring-action-apply','data-commands':'motion.action.set',onclick:()=>{try{const p=identity();const lbl=label.input.value.trim();const d=Number(duration.input.value);if(actionDirty.has('label')||(lbl&&lbl!==(action?.label||action?.id||'')))p.label=lbl;if(actionDirty.has('duration')||(Number.isFinite(d)&&d>0&&d!==action?.duration)){if(!Number.isFinite(d)||d<=0||d>600)throw Error('Duration must be in (0,600].');p.duration=d;placeDuration.input.value=String(d);}if(actionDirty.has('loop')||loop.checked!==(action?.loop===true))p.loop=loop.checked;if(Object.keys(p).length<=4)throw Error('Change an action value first.');return run('motion.action.set',p);}catch(error){status.textContent=String(error)}}},'Save action settings');actionApply.disabled=caps.action_set!==true;
+ const actionNode=el('div',{class:'animation-authoring-fields'},reason('action',caps.action_set===true),label.node,duration.node,el('label',{},loop,'Loop authored action'),actionApply,el('hr',{}),el('strong',{},'Storyboard & HyperFrames Studio link'),el('label',{class:'field'},'Storyboard scene',placeScene),placeStart.node,placeDuration.node,placeRate.node,el('div',{class:'motion-coordinate-row'},placeX.node,placeY.node),el('div',{class:'motion-coordinate-row'},placeW.node,placeH.node),placeBtn,placeStatus);
  const order=meta.layer_order||meta.layers.map(l=>l.id),index=part?order.indexOf(part.id):-1,layerCaps=meta.layer_authoring||{};
  const layerPicker=el('select',{id:'authoring-layer-picker','aria-label':'Layer in stacking order',onchange:e=>{motion.selected=e.target.value||null;animationControls();animationDraw();updateMagicSelection();}},el('option',{value:''},'Choose a layer…'),...order.map((id,i)=>el('option',{value:id},`${i} · ${meta.layers.find(l=>l.id===id)?.label||id}`)));layerPicker.value=part?.id||'';
  const depth=field('layer-depth','Stack depth',index<0?undefined:index,'number',[0,Math.max(0,order.length-1),1,'']);depth.input.min=0;depth.input.max=Math.max(0,order.length-1);depth.input.step=1;depth.input.disabled=!part||!layerCaps.supported;

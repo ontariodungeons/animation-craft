@@ -42,18 +42,37 @@ function updateMagicSelection() {
 }
 
 function projectAssetGrid(assets,{active=null,prefix='magic-asset'}={}) {
-  return el('div',{class:'magic-assets-grid'},assets.map(asset=>magicAssetTile(asset,{active:asset.id===active,prefix,onclick:()=>openAnimation(asset.id)})));
+  return el('div',{class:'magic-assets-grid'},assets.map(asset=>magicAssetTile(asset,{active:asset.id===active,prefix,onclick:()=>openAnimation(asset.id),onremove:async()=>{
+    try{
+      await designCommand('project.remove_asset',{id:asset.id});
+      if(state.view==='animation')await animationRefresh();
+      toast(`Removed ${asset.name||asset.id}`);
+    }catch(e){toast(String(e));}
+  }})));
 }
 
-function magicAssetTile(asset, { active = false, candidate = false, prefix='magic-asset', onclick }) {
+function magicAssetTile(asset, { active = false, candidate = false, prefix='magic-asset', onclick, onremove = null }) {
   const name = asset.name || asset.id;
   const image = /\.(png|jpe?g|webp|gif)$/i.test(asset.path || '')
     ? el('img', { src: convertFileSrc(asset.path), alt: '', draggable: 'false' })
     : el('span', { class: 'magic-asset-placeholder' }, 'PART');
+  const remove = onremove ? el('span', {
+    class: 'forget asset-forget',
+    id: `${prefix}-remove-${asset.id}`,
+    role: 'button',
+    tabindex: '0',
+    'data-commands': 'project.remove_asset',
+    'aria-label': `Remove ${name} (${asset.id})`,
+    title: `Remove ${name} from project`,
+    html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    onclick: (e) => { e.stopPropagation(); onremove(); },
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onremove(); } }
+  }) : null;
   const tile=el('button', { class: `magic-asset-tile${active ? ' active' : ''}${candidate ? ' candidate' : ''}`, id: `${prefix}-${asset.id}`,draggable:'true',
     title: candidate ? `${name} · generated candidate awaiting review` : `${name} (${asset.id}) · drag onto a storyboard page or click to animate`, onclick },
     image, el('span', { class: 'magic-asset-name' }, name),
-    candidate ? el('span', { class: 'magic-asset-badge' }, 'Candidate') : el('span', { class: 'magic-asset-id' }, asset.id));
+    candidate ? el('span', { class: 'magic-asset-badge' }, 'Candidate') : el('span', { class: 'magic-asset-id' }, asset.id),
+    remove);
   tile.addEventListener('dragstart',event=>{event.dataTransfer.setData('application/x-magicstudio-asset',asset.id);event.dataTransfer.setData('text/plain',asset.id);event.dataTransfer.effectAllowed='copy';});return tile;
 }
 
@@ -246,7 +265,7 @@ async function showStudio() {
 
 async function setView(view, action) {
   const errors = acFeedback.errors.length;
-  if (['design','animation'].includes(view) && !state.data?.design?.progression?.allowed) {
+  if (['design','animation'].includes(view) && !state.data?.design?.progression?.allowed && !state.animateOnly) {
     toast(state.data?.design?.progression?.reason || 'Complete the storyboard details or choose Proceed with this draft.');
     return false;
   }
@@ -283,7 +302,7 @@ async function setView(view, action) {
 }
 
 function updateStoryboardAccess() {
-  const allowed=state.data?.design?.progression?.allowed===true;
+  const allowed=state.data?.design?.progression?.allowed===true||state.animateOnly===true;
   for(const button of document.querySelectorAll('.tab[data-view="animation"],.tab[data-view="design"]')) {
     const canOpen=allowed;
     button.disabled=!canOpen;
@@ -342,6 +361,14 @@ async function load() {
   if (typeof setupSkillsAdd === "function") setupSkillsAdd();
   const start = await invoke("startup");
   state.identity=start.identity;
+  if (start.animate_only) {
+    state.animateOnly = true;
+    document.body.classList.add("animate-only");
+  }
+  if (start.character && typeof motion !== "undefined") {
+    motion.character = start.character;
+    motion.explicitCharacter = true;
+  }
   const identity=start.identity||{},port=identity.control_port;
   $('footer-instance').textContent=`Port ${port??'unavailable'} · ${identity.branch||'unknown build'}`;
   $('footer-instance').title=`${identity.build_id||'Unknown build'} · PID ${identity.pid??'?'} · ${identity.executable||''} · Click to copy the CLI command`;

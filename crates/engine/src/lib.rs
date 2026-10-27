@@ -25,6 +25,7 @@ pub mod opentoonz;
 pub mod synfig;
 pub(crate) mod audio_trace;
 pub mod activity;
+pub mod character;
 pub mod commands;
 pub mod command_center;
 pub mod control_bindings;

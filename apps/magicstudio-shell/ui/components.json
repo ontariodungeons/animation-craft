@@ -74,6 +74,26 @@
       "component": "workspace",
       "label": "Learning production manual"
     },
+    "view-analytics": {
+      "component": "workspace",
+      "label": "Analytics and complexity metrics"
+    },
+    "analytics-surface": {
+      "component": "surface",
+      "label": "Analytics surface",
+      "target": "view-analytics"
+    },
+    "tab-analytics": {
+      "component": "control",
+      "label": "Analytics",
+      "target": "view-analytics"
+    },
+    "analytics-refresh": {
+      "component": "control",
+      "label": "Refresh metrics",
+      "command": "app.analytics",
+      "target": "view-analytics"
+    },
     "blocks": {
       "component": "workspace",
       "label": "Song workflow",
@@ -122,6 +142,13 @@
       "look": "assets",
       "rail": "magic-parts-pane",
       "icon": "layers"
+    },
+    "magic-parts-pane-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Part artwork",
+      "indicator": "hidden",
+      "target": "magic-parts-pane"
     },
     "agent": {
       "component": "workspace",
@@ -728,6 +755,89 @@
       "label": "Rendered Blender animation",
       "indicator": "hidden"
     },
+    "blender-controls": {
+      "component": "motion-inspector",
+      "label": "Blender animation controls",
+      "indicator": "hidden"
+    },
+    "blender-status": {
+      "component": "muted",
+      "label": "Blender status",
+      "indicator": "hidden"
+    },
+    "blender-object": {
+      "component": "field",
+      "label": "Animated object",
+      "indicator": "hidden"
+    },
+    "blender-track": {
+      "component": "field",
+      "label": "Animation action",
+      "indicator": "hidden"
+    },
+    "blender-source": {
+      "component": "field",
+      "label": "Animation source",
+      "indicator": "hidden"
+    },
+    "blender-range": {
+      "component": "field",
+      "label": "Render length",
+      "indicator": "hidden"
+    },
+    "blender-resolution": {
+      "component": "field",
+      "label": "Render resolution",
+      "indicator": "hidden"
+    },
+    "blender-render": {
+      "component": "start",
+      "label": "Render preview",
+      "indicator": "hidden",
+      "command": "blender.start"
+    },
+    "blender-cancel": {
+      "component": "ghost",
+      "label": "Cancel render",
+      "indicator": "hidden",
+      "command": "blender.cancel"
+    },
+    "blender-place-job": {
+      "component": "muted",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-status": {
+      "component": "muted",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "blender-place-submit": {
+      "component": "ghost",
+      "target": "blender-placement",
+      "command": "video.place_track",
+      "indicator": "hidden"
+    },
+    "blender-place-copy": {
+      "component": "ghost",
+      "target": "blender-placement",
+      "indicator": "hidden"
+    },
+    "motion-mode-subject": {
+      "component": "motion-mode",
+      "label": "Subject",
+      "indicator": "hidden"
+    },
+    "motion-mode-composite": {
+      "component": "motion-mode",
+      "label": "Composite",
+      "indicator": "hidden"
+    },
+    "motion-mode-blender": {
+      "component": "motion-mode",
+      "label": "Blender",
+      "indicator": "hidden"
+    },
     "words-preview": {
       "component": "stage",
       "label": "Lyrics video preview",
@@ -881,6 +991,52 @@
       "label": "action apply",
       "indicator": "hidden",
       "command": "motion.action.set"
+    },
+    "authoring-place-start": {
+      "component": "control",
+      "label": "video start",
+      "indicator": "hidden"
+    },
+    "authoring-place-duration": {
+      "component": "control",
+      "label": "video duration",
+      "indicator": "hidden"
+    },
+    "authoring-place-rate": {
+      "component": "control",
+      "label": "playback rate",
+      "indicator": "hidden"
+    },
+    "authoring-place-x": {
+      "component": "control",
+      "label": "stage x",
+      "indicator": "hidden"
+    },
+    "authoring-place-y": {
+      "component": "control",
+      "label": "stage y",
+      "indicator": "hidden"
+    },
+    "authoring-place-w": {
+      "component": "control",
+      "label": "stage width",
+      "indicator": "hidden"
+    },
+    "authoring-place-h": {
+      "component": "control",
+      "label": "stage height",
+      "indicator": "hidden"
+    },
+    "authoring-place-video": {
+      "component": "ghost",
+      "label": "sync to video timeline",
+      "indicator": "hidden",
+      "command": "video.place_track"
+    },
+    "authoring-place-status": {
+      "component": "muted",
+      "label": "video placement status",
+      "indicator": "hidden"
     },
     "authoring-command": {
       "component": "animation-readback",
@@ -1129,9 +1285,118 @@
     "anim-agent-settings": {
       "component": "panel-body",
       "look": "settings",
-      "label": "Agent settings",
+      "label": "App settings",
       "indicator": "hidden",
-      "target": "magic-chat-pane"
+      "target": "magic-settings-pane"
+    },
+    "settings-toggle": {
+      "component": "ghost",
+      "label": "App & Project Settings",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "magic-settings-pane": {
+      "component": "workspace",
+      "label": "App & Project Settings",
+      "indicator": "hidden"
+    },
+    "settings-head": {
+      "component": "panel-head",
+      "look": "heading",
+      "label": "Settings \u00b7 App & Project",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-close": {
+      "component": "icon",
+      "label": "Close Settings",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-grid": {
+      "component": "workspace",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "project-settings-pane": {
+      "component": "panel-body",
+      "look": "settings",
+      "label": "Project settings",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "agent-auth-command": {
+      "component": "animation-readback",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "agent-auth-login": {
+      "component": "ghost",
+      "label": "Authenticate in Terminal",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-projects-root": {
+      "component": "field",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-project-path": {
+      "component": "field",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-project-target": {
+      "component": "field",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-target-save": {
+      "component": "ghost",
+      "label": "Apply Target",
+      "target": "magic-settings-pane",
+      "command": "workshop.set_target",
+      "indicator": "hidden"
+    },
+    "settings-project-audio": {
+      "component": "field",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "settings-audio-pick": {
+      "component": "ghost",
+      "label": "Choose audio",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
+    },
+    "btn-generate-all-sheets": {
+      "component": "ghost",
+      "label": "+ All Sheets",
+      "command": "assets.agent_sheets",
+      "indicator": "hidden"
+    },
+    "btn-generate-missing-poses": {
+      "component": "ghost",
+      "label": "+ Missing Poses",
+      "command": "assets.agent_sheets",
+      "indicator": "hidden"
+    },
+    "btn-generate-limb-sheet": {
+      "component": "ghost",
+      "label": "+ Exploded Limb Sheet",
+      "command": "assets.agent_sheets",
+      "indicator": "hidden"
+    },
+    "btn-generate-turnaround-sheet": {
+      "component": "ghost",
+      "label": "+ Turnaround / Direction",
+      "command": "assets.agent_sheets",
+      "indicator": "hidden"
+    },
+    "project-settings-status": {
+      "component": "muted",
+      "target": "magic-settings-pane",
+      "indicator": "hidden"
     },
     "footer-instance": {
       "component": "control",
@@ -1219,16 +1484,11 @@
       "label": "Animation assets",
       "indicator": "hidden"
     },
-    "new-form": {
-      "component": "panel-body",
-      "look": "form",
-      "label": "New project",
-      "target": "view-project"
-    },
-    "sb-choose-template": {
-      "component": "control",
-      "label": "Choose storyboard template",
-      "target": "view-project"
+    "song-upload": {
+      "component": "ghost",
+      "label": "Choose or change song audio",
+      "target": "song",
+      "indicator": "hidden"
     },
     "song-import-transcript": {
       "component": "ghost",
@@ -1242,27 +1502,15 @@
       "target": "song",
       "indicator": "hidden"
     },
-    "song-upload": {
+    "storyboard-discuss": {
       "component": "ghost",
-      "label": "Choose or change song audio",
-      "target": "song",
+      "label": "Discuss storyboard with Sproket",
+      "target": "storyboard",
       "indicator": "hidden"
     },
     "storyboard-check": {
       "component": "ghost",
       "label": "Check storyboard details",
-      "target": "storyboard",
-      "indicator": "hidden"
-    },
-    "storyboard-create-scenes": {
-      "component": "start",
-      "label": "Create scene pages from timing",
-      "target": "storyboard",
-      "indicator": "hidden"
-    },
-    "storyboard-discuss": {
-      "component": "ghost",
-      "label": "Discuss storyboard with Sproket",
       "target": "storyboard",
       "indicator": "hidden"
     },
@@ -1272,35 +1520,32 @@
       "target": "storyboard",
       "indicator": "hidden"
     },
-    "storyboard-template-open": {
-      "component": "control",
-      "label": "Open chosen template",
-      "target": "view-project"
+    "storyboard-create-scenes": {
+      "component": "start",
+      "label": "Create scene pages from timing",
+      "target": "storyboard",
+      "indicator": "hidden"
     },
     "storyboard-template-pick": {
       "component": "control",
       "label": "Choose storyboard template",
       "target": "view-project"
     },
-    "analytics-refresh": {
+    "storyboard-template-open": {
       "component": "control",
-      "label": "Refresh metrics",
-      "command": "app.analytics",
-      "target": "view-analytics"
+      "label": "Open chosen template",
+      "target": "view-project"
     },
-    "analytics-surface": {
-      "component": "surface",
-      "label": "Analytics surface",
-      "target": "view-analytics"
-    },
-    "tab-analytics": {
+    "sb-choose-template": {
       "component": "control",
-      "label": "Analytics",
-      "target": "view-analytics"
+      "label": "Choose storyboard template",
+      "target": "view-project"
     },
-    "view-analytics": {
-      "component": "workspace",
-      "label": "Analytics and complexity metrics"
+    "new-form": {
+      "component": "panel-body",
+      "look": "form",
+      "label": "New project",
+      "target": "view-project"
     }
   },
   "rails": {

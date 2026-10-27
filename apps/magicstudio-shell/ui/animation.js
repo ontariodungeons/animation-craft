@@ -1,7 +1,7 @@
 // The engine samples motion; this view only draws images using returned matrices.
-const motion = { project:null, mode:localStorage.getItem('animation.backendMode')==='composite'?'composite':'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
+const motion = { project:null, mode:'subject', character:null, meta:null, sample:null, images:[], time:0, playing:false, tick:0, playId:0, resizeObserver:null, zoom:1, fit:true, track:'', rest:true, amount:100, speed:1, selected:null, partsTab:'compare', photoDrafts:{}, openSections:(()=>{try{return JSON.parse(localStorage.getItem('animation.openSections')||'{}')||{};}catch{return {};}})(), loading:false, request:0, grid:localStorage.getItem("animation.grid")==="true", anchors:false, labels:false, pen:false, pathVisible:true, points:[], pathDuration:5, startSize:100, endSize:100, pathUndo:null, pathLayer:null, previewLoop:null };
 function animationFeedback(){
- return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,layer_order:motion.meta?.layer_order||null,selected_layer_depth:motion.meta?.layers?.find(l=>l.id===motion.selected)?.depth??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_export:motion.lastExport?.project===state.project?motion.lastExport:null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null};
+ return {backend:motion.mode,character:motion.character,track:motion.track,rest:motion.rest,time:motion.time,playing:motion.playing,selected_layer:motion.selected,speed:motion.speed,amount:motion.amount,duration:motion.sample?.duration??null,loop:motion.sample?.loop??null,rig_sha256:motion.meta?.rig_sha256??null,layer_order:motion.meta?.layer_order||null,selected_layer_depth:motion.meta?.layers?.find(l=>l.id===motion.selected)?.depth??null,open_sections:{...motion.openSections},refresh_error:motion.refreshError||null,last_export:motion.lastExport?.project===state.project?motion.lastExport:null,last_edit:motion.lastEdit?.project===state.project?motion.lastEdit:null,last_pose:motion.lastPose?.project===state.project?motion.lastPose:null,placed_tracks:motion.meta?.placed_tracks||[],last_placement:motion.lastPlacement||null};
 }
 // UI view preferences are project-scoped; rig/Theatre persistence remains owned by the engine.
 function animationRemember(){
@@ -24,8 +24,12 @@ function animationReset(){
  $('view-animation').replaceChildren();
 }
 const motionCommand = (id, params={}) => invoke('engine_command',{id,params});
-const motionAssetUrl = path => `${convertFileSrc(path)}${String(convertFileSrc(path)).includes('?')?'&':'?'}v=${motion.meta?.image_revision??0}`;
+const motionAssetUrl = (path, sha) => `${convertFileSrc(path)}${String(convertFileSrc(path)).includes('?')?'&':'?'}v=${sha||motion.meta?.rig_sha256||motion.meta?.image_revision||0}`;
 const MOTION_ICONS = {
+ left:'<path d="M19 12H5m6-7-7 7 7 7"/>',
+ right:'<path d="M5 12h14m-6-7 7 7-7 7"/>',
+ up:'<path d="M12 19V5m-7 6 7-7 7 7"/>',
+ down:'<path d="M12 5v14m-7-6 7 7 7-7"/>',
  idle:'<circle cx="12" cy="5" r="2"/><path d="M12 8v8m-5-5 5-3 5 3m-5 5-3 5m3-5 3 5"/>',
  move:'<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
  jump:'<path d="M12 17V3m-5 5 5-5 5 5M4 21h16"/>',
@@ -39,7 +43,8 @@ const MOTION_ICONS = {
  play:'<path d="m8 5 11 7-11 7z"/>', pause:'<path d="M8 5v14M16 5v14"/>',
  reset:'<path d="M3 10a9 9 0 1 1 2 9M3 4v6h6"/>', fit:'<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
  minus:'<path d="M5 12h14"/>', plus:'<path d="M5 12h14M12 5v14"/>', eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
- layers:'<path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/>', export:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>', step:'<path d="m5 5 10 7-10 7zM19 5v14"/>'
+ layers:'<path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/>', export:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>', step:'<path d="m5 5 10 7-10 7zM19 5v14"/>',
+ trash:'<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/>'
 };
 function motionButton(id,label,icon,fn){return el('button',{id,class:'icon',title:label,'aria-label':label,html:`<svg viewBox="0 0 24 24">${MOTION_ICONS[icon]}</svg>`,onclick:fn});}
 function motionSection(title,body,open=false,componentId=null){
@@ -61,9 +66,16 @@ function motionRange(id,label,min,max,step,value,unit,change){
  input.addEventListener('input',()=>{out.textContent=`${input.value}${unit}`;fill();change(Number(input.value));});
  const node=el('label',{class:'motion-range'},el('span',{},label,out),input);node.input=input;return node;
 }
-async function openAnimation(character){if(!theatreCanLeave())return false;motion.character=character;motion.selected=null;motion.project=null;motion.explicitCharacter=true;await setView('animation');}
+async function openAnimation(character){
+ if(!theatreCanLeave())return false;
+ if(state.view==='animation'&&motion.project===state.project&&motion.mode==='subject'){
+  if(motion.character===character&&motion.meta){animationDraw();return true;}
+  motion.character=character;motion.selected=null;updateMagicSelection();await animationLoad();return true;
+ }
+ motion.character=character;motion.selected=null;motion.project=null;motion.explicitCharacter=true;await setView('animation');
+}
 async function animationOpen(){
- if(motion.mode==='composite'){theatreRequireSaved();const view=$('view-animation');view.replaceChildren();sequenceAttach(view);return;}
+ motion.mode='subject';
  if(motion.project===state.project && motion.meta){animationDraw();return;}
  theatreRequireSaved();
  motion.project=state.project;motion.meta=null;motion.sample=null;motion.time=0;motion.rest=true;
@@ -79,15 +91,6 @@ async function animationOpen(){
  }catch(e){animationEmpty('Artwork needs attention',String(e));}
 }
 function animationEmpty(title,detail){$('motion-stage').replaceChildren(el('div',{class:'panel-empty motion'},el('strong',{},title),el('p',{class:'muted'},detail),el('button',{class:'start',onclick:()=>setView('project')},'Open Project')));}
-function motionModeSwitch(){
- return el('div',{class:'motion-modes',role:'group','aria-label':'Animation authoring and render tools'},
-  ...['subject','composite'].map(m=>el('button',{
-   class:`motion-mode${motion.mode===m?' active':''}`,id:`motion-mode-${m}`,'data-mode':m,
-   'aria-pressed':String(motion.mode===m),title:m==='subject'?'Subject authoring, parts and timeline':'Images arranged in time',
-   onclick:async()=>{if(motion.mode===m||!theatreCanLeave())return;blenderDispose();motion.project=null;motion.meta=null;motion.request++;motion.mode=m;localStorage.setItem('animation.backendMode',m);animationPause();$('view-animation').replaceChildren();await animationOpen();},
-  },m==='subject'?'Subject':'Composite')),
-  el('button',{class:'motion-mode',id:'motion-mode-blender',title:'Open Blender rendering alongside this editor',onclick:async()=>{try{await blenderAnimationOpen();}catch(error){toast(String(error));}}},'Blender render'),el('button',{class:'motion-mode',id:'motion-mode-native',title:'Saved Synfig sources and OpenToonz availability',onclick:()=>nativeAnimationOpen().catch(error=>toast(String(error)))},'Native tools'));
-}
 function animationShell(){
  theatreRequireSaved();
  const view=$('view-animation');view.replaceChildren();
@@ -95,10 +98,11 @@ function animationShell(){
  const inspector=el('aside',{id:'motion-inspector','aria-label':'Animation controls'});
  const stage=el('div',{class:'motion-stage',id:'motion-stage'},el('canvas',{id:'motion-canvas','aria-label':'Character animation canvas',tabindex:0}));
  const grid=motionButton('motion-grid','Show or hide grid','grid',()=>{motion.grid=!motion.grid;localStorage.setItem('animation.grid',String(motion.grid));grid.setAttribute('aria-pressed',String(motion.grid));animationDraw();});grid.setAttribute('aria-pressed',String(motion.grid));
- const toolbar=el('div',{class:'motion-stagebar'},motionModeSwitch(),el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
+ const toolbar=el('div',{class:'motion-stagebar'},el('span',{id:'motion-caption',class:'muted'},'Loading artwork…'),el('div',{class:'motion-tools'},
   motionButton('motion-pen','Pen · draw a motion path','pen',()=>{animationPause();motion.pen=!motion.pen;$('motion-pen').setAttribute('aria-pressed',String(motion.pen));$('motion-canvas').classList.toggle('drawing',motion.pen);$('motion-path-section')?.setAttribute('open','');}), motionButton('motion-path-visible','Show or hide the motion path','eye',()=>{motion.pathVisible=!motion.pathVisible;$('motion-path-visible').setAttribute('aria-pressed',String(motion.pathVisible));animationDraw();}), grid, motionButton('motion-fit','Fit artwork','fit',()=>{motion.fit=true;motion.zoom=1;animationDraw();}),
   el('button',{id:'motion-actual',title:'Actual size · 100%','aria-label':'Actual size',onclick:()=>{motion.fit=false;motion.zoom=1;animationDraw();}},'1:1'),
-  motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();})));
+  motionButton('motion-minus','Zoom out','minus',()=>{motion.zoom/=1.2;animationDraw();}),motionButton('motion-plus','Zoom in','plus',()=>{motion.zoom*=1.2;animationDraw();}),
+  el('button',{id:'btn-generate-all-sheets',class:'ghost','data-commands':'assets.agent_sheets',title:'Generate all missing turnaround, skeleton & pose sheets for this character',onclick:async()=>{if(!motion.character)return;try{toast(`Requesting all missing sheets for ${motion.character}…`);await motionCommand('assets.agent_sheets',{character:motion.character,kinds:['turnaround','skeleton','poses'],run:true});await animationRefresh();}catch(err){toast(String(err));}}},'+ All Sheets')));
  const transport=el('div',{class:'motion-transport'},motionButton('motion-play','Play motion','play',animationPlay),motionButton('motion-rewind','Return to start','reset',()=>{animationPause();motion.time=0;animationDraw();}),motionButton('motion-step-back','Previous frame','step',()=>animationStep(-1)),motionButton('motion-step','Next frame','step',()=>animationStep(1)),el('span',{id:'motion-time',class:'motion-time'},'0:00.000'),el('input',{id:'motion-scrub',type:'range',min:0,max:1,step:0.001,value:0,'aria-label':'Scrub motion',oninput:e=>animationSeek(Number(e.target.value))}));
  const partBar=el('div',{class:'motion-part-bar',id:'motion-part-bar',hidden:''});
  view.append(assets,el('div',{class:'motion-main'},toolbar,stage,transport,partBar),inspector);
@@ -117,7 +121,7 @@ async function animationLoad(){
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
   motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=resume&&meta.tracks?.some(t=>t.id===resume.track)?resume.track:meta.tracks?.[0]?.id||'';motion.time=resume?.time||0;
-  motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file);})));if(request!==motion.request)return;
+  motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));if(request!==motion.request)return;
   // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
   const opening=!resume&&motion.rest&&((meta.tracks||[]).find(t=>!t.standard)||(meta.tracks||[]).find(t=>t.id==='@sway'));
   if(opening){motion.track=opening.id;motion.rest=false;}
@@ -137,13 +141,65 @@ function animationControls(){
  const box=$('motion-inspector');box.replaceChildren();const meta=motion.meta;
  const authoring=motionAuthoringPanels(meta);
  const picker=el('select',{id:'motion-object','aria-label':'Animated object',title:'Choose an object',onchange:async e=>{if(!theatreCanLeave()){e.target.value=motion.character;return;}motion.character=e.target.value;motion.selected=null;updateMagicSelection();await animationLoad();}},(motion.assets||[]).map(a=>el('option',{value:a.id},a.name||a.id)));picker.value=motion.character;
+ const removeCharacterBtn=motionButton('motion-remove-asset',`Delete ${motion.character||'asset'} from project and try again`,'trash',async()=>{
+  if(!motion.character||!theatreCanLeave())return;
+  const target=motion.character;
+  try{
+   await designCommand('project.remove_asset',{id:target});
+   await animationRefresh();
+   toast(`Removed ${target} · ready to re-import or rebuild`);
+  }catch(err){toast(String(err));}
+ });
+ removeCharacterBtn.setAttribute('data-commands','project.remove_asset');
+ const rebuildRigBtn=el('button',{id:'motion-rebuild-rig',class:'ghost','data-commands':'asset.build_cutout_rig',title:'Clean background with PhotoCraft and rebuild this character rig from source',onclick:async()=>{
+  if(!motion.character)return;
+  try{
+   toast(`Rebuilding ${motion.character} rig…`);
+   await motionCommand('asset.build_cutout_rig',{asset:motion.character});
+   await animationRefresh();
+   toast(`Rebuilt ${motion.character} rig`);
+  }catch(err){toast(String(err));}
+ }},'Rebuild rig');
  const artworkDot=window.companionBoxes.dot('ready');artworkDot.title='Artwork loaded';
- $('motion-asset-browser').replaceChildren(el('div',{class:'panel-head inline'},artworkDot,picker),motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),true));
+ $('motion-asset-browser').replaceChildren(el('div',{class:'panel-head inline'},artworkDot,picker,removeCharacterBtn),rebuildRigBtn,motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),true));
  box.append(authoring.status);
  updateMagicSelection();
  const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||motion.track.startsWith('@')?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||motion.track.startsWith('@')?'':motion.track;
- const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard).map(t=>el('button',{id:`motion-action-${t.id.slice(1)}`,class:'icon motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[t.id.slice(1)] || MOTION_ICONS.play}</svg>`,'aria-pressed':String(!motion.rest&&motion.track===t.id),title:`${t.label} · scripted whole-object motion`,onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.track=t.id;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:t.id});motion.rest=false;motion.time=0;animationControls();await animationSample();await animationPlay();}})),el('button',{id:'motion-action-rest',class:'icon motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg>`,'aria-pressed':String(motion.rest),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}}));
- box.append(motionSection('Action',[actions,el('span',{class:'group-label'},'Custom tracks'),tracks,authoring.action],true));
+ const pickActionTrack=async(actionKey,fallbackId)=>{
+  if(!theatreCanLeave())return;
+  animationPause();
+  const cfg=meta.character_config;
+  const poseCfg=cfg?.poses?.[actionKey];
+  if(cfg&&poseCfg?.angle&&poseCfg.angle!==cfg.active_angle){
+   try{
+    const updated=await motionCommand('character.configure',{character:motion.character,pose:actionKey});
+    if(updated?.layers){
+     motion.meta=updated;
+     motion.images=await Promise.all((updated.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+    }
+   }catch(err){console.warn(err);}
+  }
+  const activeMeta=motion.meta||meta;
+  const authored=(activeMeta.tracks||[]).find(tr=>!tr.standard&&tr.id===actionKey);
+  const chosenId=authored?authored.id:fallbackId;
+  motion.track=chosenId;
+  motion.previewLoop=null;
+  acFeedback.report(null,null,{stage:'clip_switched',clip:chosenId});
+  motion.rest=(actionKey==='rest'&&!authored);
+  motion.time=0;
+  animationControls();
+  await animationSample();
+  await animationPlay();
+ };
+ const actions=el('div',{class:'motion-actions-grid'},(meta.tracks||[]).filter(t=>t.standard&&t.id!=='@rest').map(t=>{
+  const key=t.id.slice(1);
+  const authored=(meta.tracks||[]).find(tr=>!tr.standard&&tr.id===key);
+  const active=!motion.rest&&(motion.track===t.id||motion.track===key);
+  return el('button',{id:`motion-action-${key}`,class:'motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[key] || MOTION_ICONS.play}</svg><span class="motion-action-word">${t.label}</span>`,'aria-pressed':String(active),title:`${t.label} · ${authored?'single character animation':'scripted motion'}`,onclick:()=>pickActionTrack(key,t.id)});
+ }),el('button',{id:'motion-action-rest',class:'motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg><span class="motion-action-word">Rest</span>`,'aria-pressed':String(motion.rest||motion.track==='rest'),title:'Rest pose',onclick:async()=>{if(!theatreCanLeave())return;animationPause();motion.rest=true;motion.time=0;animationControls();await animationSample();}}));
+ const genMissingPosesBtn=el('button',{id:'btn-generate-missing-poses',class:'ghost','data-commands':'assets.agent_sheets',title:'Generate missing or asymmetric directional pose sheets on demand',onclick:async()=>{if(!motion.character)return;try{toast(`Generating missing poses for ${motion.character}…`);await motionCommand('assets.agent_sheets',{character:motion.character,kinds:['poses'],run:true});await animationRefresh();}catch(err){toast(String(err));}}},'+ Missing Poses');
+ const charMagicPanel=renderCharacterMagicPanel(meta,pickActionTrack);
+ box.append(motionSection('Action',[actions,charMagicPanel,genMissingPosesBtn,el('span',{class:'group-label'},'Custom tracks'),tracks,authoring.action],true));
  box.append(pathControls());
  const loop=el('input',{id:'motion-preview-loop',type:'checkbox',onchange:e=>{motion.previewLoop=e.target.checked;e.target.defaultChecked=e.target.checked;animationRemember();}});loop.checked=motion.previewLoop??meta.tracks.find(t=>t.id===motion.track)?.loop??false;loop.defaultChecked=loop.checked;
  box.append(motionSection('Motion & timing',[el('label',{},loop,'Loop preview'),
@@ -152,13 +208,13 @@ function animationControls(){
  const layers=el('div',{class:'motion-layers'});
  for(const l of [...meta.layers].reverse()){
   const row=el('div',{class:`motion-layer${motion.selected===l.id?' selected':''}`,id:`motion-layer-${l.id}`,title:l.id});const shown=l.state?.visible!==false;
-  row.append(el('img',{src:motionAssetUrl(l.file),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:l.id,visible:!shown});await animationRefresh();}));
+  row.append(el('img',{src:motionAssetUrl(l.file,l.image_sha256),alt:''}),el('button',{class:'motion-layer-name','aria-pressed':String(motion.selected===l.id),'aria-label':`Select part ${l.label} (${l.id})`,onclick:()=>{motion.selected=l.id;animationControls();animationDraw();updateMagicSelection();}},l.label),motionButton(`motion-visible-${l.id}`,`${shown?'Hide':'Show'} ${l.label}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:l.id,visible:!shown});await animationRefresh();}));
   row.lastChild.setAttribute('aria-pressed',String(shown));if(!shown)row.classList.add('hidden-layer');layers.append(row);
  }
  const section=motionSection('Layers',authoring.layers,true);section.id='motion-layers';
  const selected=meta.layers.find(part=>part.id===motion.selected);
  const candidate=selected?partCandidate(selected.id):null;
- const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file),alt:''}),el('span',{},part.id))));
+ const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file,part.image_sha256),alt:''}),el('span',{},part.id))));
  const compare=el('div',{class:'magic-part-compare',id:'magic-part-compare'},partsStrip);
  if(!selected)compare.append(el('p',{class:'why'},'Select a part to compare its original with a candidate.'));
  else{
@@ -166,7 +222,7 @@ function animationControls(){
   const size=(w,h)=>w&&h?` · ${w}×${h}`:'';
   const dimensionsMatch=!!candidate&&candidate.result.width===sourceSize[0]&&candidate.result.height===sourceSize[1];
   compare.append(el('div',{class:'magic-compare-grid'},
-   el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file),alt:`Original ${name}`}),el('figcaption',{},`Original${size(sourceSize[0],sourceSize[1])}`)),
+   el('figure',{class:'magic-compare-frame'},el('img',{src:motionAssetUrl(selected.file,selected.image_sha256),alt:`Original ${name}`}),el('figcaption',{},`Original${size(sourceSize[0],sourceSize[1])}`)),
    el('figure',{class:'magic-compare-frame'},candidate?el('img',{src:candidateUrl(candidate),alt:`Candidate for ${name}`}):el('div',{class:'panel-empty compare'},'No candidate yet'),
     el('figcaption',{},candidate?`${candidate.source==='photocraft'?'PhotoCraft draft':'Candidate'}${size(candidate.result.width,candidate.result.height)}`:'Candidate'))));
   const statusText=dimensionsMatch?'Sizes match · the original stays until you replace it':candidate?`Cannot replace: candidate is ${candidate.result.width}×${candidate.result.height}; ${name} needs ${sourceSize[0]||'?'}×${sourceSize[1]||'?'}`:'Generate a candidate or save an edit in PhotoCraft';
@@ -192,12 +248,17 @@ function animationControls(){
    el('button',{class:'ghost',id:'part-inspect-original',title:selected.file||'','aria-label':`Inspect original ${name}`,onclick:()=>selected.file&&openPath(selected.file)},'Original'),
    el('button',{class:'ghost',id:'part-copy-path',title:'Copy file path to clipboard','aria-label':`Copy asset path for ${name}`,onclick:()=>{if(selected.file&&navigator.clipboard)navigator.clipboard.writeText(selected.file).then(()=>toast('Copied asset path')).catch(()=>{});}},'Copy path')));
  }
- authoring.layers.append(layers);box.append(section,motionSection('Part artwork',el('div',{id:'magic-parts-slot'},partsDrawer(compare)),false,'magic-parts-pane'));
+ const genLimbSheetBtn=el('button',{id:'btn-generate-limb-sheet',class:'ghost','data-commands':'assets.agent_sheets',title:'Generate exploded skeleton & limb rig sheet for this character',onclick:async()=>{if(!motion.character)return;try{toast(`Generating exploded limb sheet for ${motion.character}…`);await motionCommand('assets.agent_sheets',{character:motion.character,kinds:['skeleton'],run:true});await animationRefresh();}catch(err){toast(String(err));}}},'+ Exploded Limb Sheet');
+ const genTurnaroundBtn=el('button',{id:'btn-generate-turnaround-sheet',class:'ghost','data-commands':'assets.agent_sheets',title:'Generate 5-view orthographic turnaround or directional sheet',onclick:async()=>{if(!motion.character)return;try{toast(`Generating turnaround sheet for ${motion.character}…`);await motionCommand('assets.agent_sheets',{character:motion.character,kinds:['turnaround'],run:true});await animationRefresh();}catch(err){toast(String(err));}}},'+ Turnaround / Direction');
+ authoring.layers.append(layers);box.append(section,motionSection('Part artwork',el('div',{id:'magic-parts-slot'},genLimbSheetBtn,partsDrawer(compare)),false,'magic-parts-pane'));
  const controls=meta.controls?.joints||[];
- box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
- box.append(motionSection('Quality checks',el('p',{class:'muted'},`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`),false));
+ box.append(motionSection('Expression & pose',[el('div',{class:'anim-part-inspector',id:'anim-selected-part-inspector','aria-label':'Selected part controls'}),genTurnaroundBtn,el('p',{class:'muted'},controls.length?'This rig exposes joint bindings.':'Standard actions move the whole object. Custom tracks add detailed acting to its layers.')],false));
+ const pf=meta.preflight||{};
+ const pfSummary=pf.total_checks?`${pf.passed_count}/${pf.total_checks} pre-flight checks passed · ${pf.sheets?.turnaround_views||0} turnaround views · ${pf.sheets?.pose_frames||0} pose frames`:`${meta.layers.length} layers · ${meta.tracks.length} motion tracks`;
+ const pfList=el('div',{class:'why'},...(pf.checks||[]).map(c=>el('div',{class:c.ok?'muted':'why'},`${c.ok?'✓':'✗'} ${c.label}`)));
+ box.append(motionSection('Quality checks',[el('p',{class:'muted'},pfSummary),pfList],false));
  const {button:exportButton,status:exportStatus}=motionExportControl();
- box.append(motionSection('Export & integrations',[exportButton,exportStatus,el('button',{id:'motion-mlt-assembly',class:'ghost',title:'Assemble an existing clip/audio timeline with MLT',onclick:()=>nativeAnimationOpen({backend:'mlt'}).catch(error=>toast(String(error)))},'MLT clip/audio assembly'),authoring.pose],false));
+ box.append(motionSection('Export & integrations',[exportButton,exportStatus,authoring.pose],false));
  const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.assets?.find(a=>a.id===motion.character)?.name||motion.character} · Subject / shared engine · ${meta.layers.length} layers / ${authoredCount} authored clips`),
@@ -227,6 +288,58 @@ function motionExportControl(){
  }},'Export track');
  return {button,status};
 }
+function renderCharacterMagicPanel(meta,pickActionTrack){
+ const cfg=meta?.character_config;
+ if(!cfg||typeof cfg!=='object')return el('div',{class:'char-magic-panel',hidden:''});
+ const angleEntries=Object.values(cfg.angles||{});
+ const poseEntries=Object.values(cfg.poses||{});
+ const switchAngle=async(angleId)=>{
+  if(!theatreCanLeave())return;
+  animationPause();
+  try{
+   const updated=await motionCommand('character.configure',{character:motion.character,angle:angleId});
+   if(updated?.layers){
+    motion.meta=updated;
+    motion.images=await Promise.all((updated.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+   }
+   animationControls();
+   await animationSample();
+  }catch(err){toast(String(err));}
+ };
+ const angleCards=el('div',{class:'char-angle-grid','aria-label':'Turnaround angles'},...angleEntries.map(a=>el('button',{
+  id:`char-angle-${a.id}`,
+  class:`char-thumb-card${cfg.active_angle===a.id?' active':''}`,
+  'aria-pressed':String(cfg.active_angle===a.id),
+  title:`Turn model to ${a.label} (${a.degrees ?? 0}°) · ${a.image||''}`,
+  onclick:()=>switchAngle(a.id)
+ },a.image_path?el('img',{src:motionAssetUrl(a.image_path,meta.rig_sha256),alt:a.label}):null,el('span',{},a.label))));
+ const poseCards=el('div',{class:'char-pose-grid','aria-label':'Generated pose & sprite frames'},...poseEntries.map(p=>el('button',{
+  id:`char-pose-${p.id}`,
+  class:`char-thumb-card${(!motion.rest&&(motion.track===p.id||motion.track===`@${p.id}`))?' active':''}`,
+  'aria-pressed':String(!motion.rest&&(motion.track===p.id||motion.track===`@${p.id}`)),
+  title:`${p.word} single animation (${p.angle||'front'}) · ${p.image||''}`,
+  onclick:()=>pickActionTrack(p.id,`@${p.id}`)
+ },p.image_path?el('img',{src:motionAssetUrl(p.image_path,meta.rig_sha256),alt:p.word}):null,el('span',{},p.word))));
+ const sheetsRow=el('div',{class:'char-sheets-row'});
+ for(const [k,label] of [['turnaround','Turnaround Sheet'],['poses','Pose Sheet'],['skeleton','Limb Sheet']]){
+  const sp=cfg.sheets?.[k];
+  if(sp){
+   sheetsRow.append(el('figure',{class:'char-sheet-card',title:sp,onclick:()=>openPath(sp)},
+    el('img',{src:motionAssetUrl(sp,meta.rig_sha256),alt:label}),
+    el('figcaption',{},label)));
+  }
+ }
+ return el('div',{class:'char-magic-panel',id:'char-magic-panel'},
+  el('div',{class:'char-magic-header'},
+   el('strong',{},`${cfg.name||motion.character}.character.magic`),
+   el('span',{class:'muted'},`Angle: ${cfg.active_angle||'front'} · Dir: ${cfg.direction||'right'}`)),
+  el('span',{class:'group-label'},'Turnaround Angles (turn model slightly for Left / Right)'),
+  angleCards,
+  el('span',{class:'group-label'},'Single Animation Pose Sheets (matches UI actions)'),
+  poseCards,
+  sheetsRow
+ );
+}
 function renderPartControlsBar(selected,controls){
  const bar=$('anim-selected-part-inspector');if(!bar)return;
  bar.replaceChildren(controls);
@@ -249,7 +362,7 @@ function partsDrawer(compare){
   const visible=motionButton(`magic-part-visible-${part.id}`,`${shown?'Hide':'Show'} ${name}`,'eye',async()=>{await motionCommand('part.set_state',{expected_project:state.project,character:motion.character,part:part.id,visible:!shown});await animationRefresh();});
   visible.setAttribute('aria-pressed',String(shown));
   return el('article',{class:`magic-part-card${picked?' active':''}${shown?'':' hidden-layer'}`,id:`magic-part-card-${part.id}`,title:`${name} (${part.id})`},
-   el('button',{class:'magic-part-card-thumb',tabindex:'-1','aria-hidden':'true',onclick:select},el('img',{src:motionAssetUrl(part.file),alt:''})),
+   el('button',{class:'magic-part-card-thumb',tabindex:'-1','aria-hidden':'true',onclick:select},el('img',{src:motionAssetUrl(part.file,part.image_sha256),alt:''})),
    el('button',{class:'magic-part-card-pick','aria-pressed':String(picked),'aria-label':`Select ${name} (${part.id})`,onclick:select},
     el('span',{class:'magic-part-card-name'},name),part.label&&part.label!==part.id?el('span',{class:'magic-part-card-id'},part.id):null,badge),
    el('div',{class:'magic-part-card-actions'},visible,
@@ -305,22 +418,27 @@ async function animationSample(){
 async function animationRefresh(){
  if(state.view!=='animation')return;
  if(motion.mode==='composite'){seqRenderInspector();seqDraw();return;}
+ if(motion.mode==='blender'){await blenderAnimationOpen();return;}
  const project=state.project,request=++motion.request;
  animationPause();
  const catalog=await motionCommand('project.list_assets');
  if(state.project!==project||request!==motion.request)return;
  motion.assets=catalog.assets||catalog.project_assets||[];
- const character=motion.assets.some(a=>a.id===motion.character)?motion.character:motion.assets[0]?.id||null;
- if(!character){Object.assign(motion,{character:null,selected:null,track:'',meta:null,sample:null,images:[]});$('motion-inspector')?.replaceChildren(motionModeSwitch());animationEmpty('Bring in your artwork','Choose an object from the Project view.');if(typeof timelineRender==='function')timelineRender();return;}
+ const character=catalog.active_asset&&motion.assets.some(a=>a.id===catalog.active_asset)?catalog.active_asset:motion.assets.some(a=>a.id===motion.character)?motion.character:motion.assets[0]?.id||null;
+ if(!character){Object.assign(motion,{character:null,selected:null,track:'',meta:null,sample:null,images:[]});$('motion-inspector')?.replaceChildren();animationEmpty('Bring in your artwork','Choose an object from the Project view.');if(typeof timelineRender==='function')timelineRender();return;}
  const changed=character!==motion.character;
  if(changed)theatreRequireSaved();
  const meta=await motionCommand('motion.tracks',{character});
- const images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label||l.id}`));img.src=motionAssetUrl(l.file);}))); 
+ const images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
  if(state.project!==project||request!==motion.request)return;
  // Publish metadata and clear its previous sample together; controls can render curves immediately.
  Object.assign(motion,{character,meta,images,sample:null});
  if(changed||!meta.layers?.some(l=>l.id===motion.selected))motion.selected=null;
- if(changed||!meta.tracks?.some(t=>t.id===motion.track)){motion.track=meta.tracks?.[0]?.id||'';motion.time=0;motion.rest=true;}
+ const cfgPose=meta.character_config?.active_pose;
+ const cfgTrack=cfgPose&&(meta.tracks?.find(t=>t.id===cfgPose||t.id===`@${cfgPose}`)?.id||null);
+ if(cfgTrack&&cfgPose!=='rest'){motion.track=cfgTrack;motion.rest=false;}
+ else if(cfgPose==='rest'){motion.rest=true;}
+ else if(changed||!meta.tracks?.some(t=>t.id===motion.track)){motion.track=meta.tracks?.[0]?.id||'';motion.time=0;motion.rest=true;}
  animationControls();await animationSample();await refreshPartDrafts();
 }
 

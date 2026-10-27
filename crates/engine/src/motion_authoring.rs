@@ -115,7 +115,7 @@ fn same_theatre(a: &Value, b: &Value) -> bool {
     a == b || (empty_theatre(a) && empty_theatre(b))
 }
 
-pub(crate) fn theatre_guard(s: &Session, character: &str, track: Option<&str>) -> Result<()> {
+pub(crate) fn theatre_guard(s: &Session, _character: &str, _track: Option<&str>) -> Result<()> {
     let disk: Value = serde_json::from_slice(&bytes(
         s.project_path.as_ref().ok_or_else(|| bad("No project"))?,
     )?)
@@ -128,31 +128,6 @@ pub(crate) fn theatre_guard(s: &Session, character: &str, track: Option<&str>) -
     }
     if !saved.is_null() && saved["definitionVersion"] != "0.4.0" {
         return Err(bad("Unsupported saved Theatre state"));
-    }
-    if let Some(sheets) = s
-        .theatre_state
-        .as_ref()
-        .and_then(|v| v["sheetsById"].as_object())
-    {
-        for (id, sheet) in sheets {
-            let relevant = id == character
-                || track.map_or_else(
-                    || id.starts_with(&format!("{character} / ")),
-                    |t| *id == crate::theatre::clip_sheet_id(character, t),
-                );
-            if relevant
-                && (sheet["sequence"]["tracksByObject"]
-                    .as_object()
-                    .is_some_and(|o| !o.is_empty())
-                    || sheet["staticOverrides"]["byObject"]
-                        .as_object()
-                        .is_some_and(|o| !o.is_empty()))
-            {
-                return Err(bad(
-                    "Relevant Theatre edits are not supported by the shared sampler; no edit or pose was produced",
-                ));
-            }
-        }
     }
     Ok(())
 }
@@ -223,6 +198,42 @@ fn pair(v: &Value, min: f64, max: f64, name: &str) -> Result<Value> {
         number(&a[1], min, max, name)?
     ]))
 }
+fn ensure_track_index(s: &Session, edit: &mut Edit, p: &Value) -> Result<(usize, String)> {
+    let id = text(p, "track")?;
+    if !id.starts_with('@') {
+        let idx = edit.raw["tracks"]
+            .as_array()
+            .and_then(|a| a.iter().position(|v| v["id"] == id))
+            .ok_or_else(|| bad("Authored action not found"))?;
+        return Ok((idx, id.to_owned()));
+    }
+    let promoted_id = id.trim_start_matches('@').to_owned();
+    if let Some(idx) = edit.raw["tracks"]
+        .as_array()
+        .and_then(|a| a.iter().position(|v| v["id"] == promoted_id))
+    {
+        return Ok((idx, promoted_id));
+    }
+    let asset = s
+        .assets
+        .get(&edit.character)
+        .ok_or_else(|| bad("Load character before promoting a standard action"))?;
+    let rig = crate::motion::preview_rig(asset)?;
+    let std_tracks = crate::motion::standard_tracks(&rig);
+    let mut template = std_tracks
+        .into_iter()
+        .find(|t| t["id"].as_str() == Some(id))
+        .ok_or_else(|| bad(format!("Standard action `{id}` not found")))?;
+    template["id"] = json!(promoted_id);
+    if let Some(obj) = template.as_object_mut() {
+        obj.remove("standard");
+    }
+    let tracks = edit.raw["tracks"]
+        .as_array_mut()
+        .ok_or_else(|| bad("Rig has no tracks array"))?;
+    tracks.push(template);
+    Ok((tracks.len() - 1, promoted_id))
+}
 fn track_index(raw: &Value, p: &Value) -> Result<usize> {
     let id = text(p, "track")?;
     if id.starts_with('@') {
@@ -274,7 +285,7 @@ pub fn part_reset(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn part_edit(s: &mut Session, p: &Value, reset: bool) -> Result<Value> {
     let mut edit = begin(s, p)?;
-    let track = track_index(&edit.raw, p)?;
+    let (track, track_id) = ensure_track_index(s, &mut edit, p)?;
     let part = text(p, "part")?;
     let layer = edit.raw["layers"]
         .as_array()
@@ -359,7 +370,9 @@ fn part_edit(s: &mut Session, p: &Value, reset: bool) -> Result<Value> {
         }
     }
     let after = serde_json::to_vec_pretty(&edit.raw).map_err(|e| bad(e.to_string()))?;
-    publish(s, &edit, after)
+    let mut res = publish(s, &edit, after)?;
+    res["track"] = json!(track_id);
+    Ok(res)
 }
 /// Global planar stacking, independent of transform parenting.
 pub fn layers_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -453,10 +466,11 @@ pub(crate) fn layer_capabilities(s: &Session, character: &str, spec: &Path, raw:
 
 pub fn action_set(s: &mut Session, p: &Value) -> Result<Value> {
     let mut edit = begin(s, p)?;
-    let i = track_index(&edit.raw, p)?;
-    theatre_guard(s, &edit.character, Some(text(p, "track")?))?;
+    let (i, track_id) = ensure_track_index(s, &mut edit, p)?;
     let track = &mut edit.raw["tracks"][i];
-    let mut changed = false;
+    let old_duration = track["duration"].as_f64().unwrap_or(1.0).max(0.1);
+    let mut new_duration_opt = None;
+    let mut changed = p["track"].as_str().is_some_and(|t| t.starts_with('@'));
     if let Some(label) = p.get("label") {
         let label = label
             .as_str()
@@ -467,29 +481,46 @@ pub fn action_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(duration) = p.get("duration") {
         let duration = number(duration, 0.1, 600., "duration")?;
-        // Duration changes do not silently discard or retime existing keyframes.
+        let retime = p["retime"].as_bool().unwrap_or(true);
+        let ratio = if (old_duration - duration).abs() > 1e-9 && old_duration > 0.0 {
+            Some(duration / old_duration)
+        } else {
+            None
+        };
         for channels in track["motion"]
-            .as_object()
+            .as_object_mut()
             .into_iter()
             .flatten()
             .map(|(_, v)| v)
         {
-            for terms in channels.as_object().into_iter().flatten().map(|(_, v)| v) {
-                for term in terms.as_array().into_iter().flatten() {
-                    if term["keys"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|k| k[0].as_f64().is_some_and(|t| t > duration))
-                    {
-                        return Err(bad(
-                            "Duration would exclude existing keys; retime them first",
-                        ));
+            for terms in channels.as_object_mut().into_iter().flatten().map(|(_, v)| v) {
+                for term in terms.as_array_mut().into_iter().flatten() {
+                    if let Some(keys) = term["keys"].as_array_mut() {
+                        if let Some(r) = ratio && retime {
+                            for k in keys.iter_mut() {
+                                if let Some(t) = k[0].as_f64() {
+                                    k[0] = json!((t * r * 1000.0).round() / 1000.0);
+                                }
+                            }
+                        } else if keys.iter().any(|k| k[0].as_f64().is_some_and(|t| t > duration)) {
+                            return Err(bad(
+                                "Duration would exclude existing keys; retime them first",
+                            ));
+                        }
+                    }
+                    if let Some(r) = ratio && retime && term["kind"] == "ellipse" {
+                        if let Some(from) = term["from"].as_f64() {
+                            term["from"] = json!((from * r * 1000.0).round() / 1000.0);
+                        }
+                        if let Some(to) = term["to"].as_f64() {
+                            term["to"] = json!((to * r * 1000.0).round() / 1000.0);
+                        }
                     }
                 }
             }
         }
         track["duration"] = json!(duration);
+        new_duration_opt = Some(duration);
         changed = true;
     }
     if let Some(value) = p.get("loop") {
@@ -500,7 +531,54 @@ pub fn action_set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("Supply label, duration or loop"));
     }
     let after = serde_json::to_vec_pretty(&edit.raw).map_err(|e| bad(e.to_string()))?;
-    publish(s, &edit, after)
+    let mut res = publish(s, &edit, after)?;
+    res["track"] = json!(track_id);
+    if let Some(new_dur) = new_duration_opt {
+        let mut theatre_updated = false;
+        if let Some(state) = s.theatre_state.as_mut()
+            && let Some(sheets) = state["sheetsById"].as_object_mut()
+        {
+            let sheet_id = crate::theatre::clip_sheet_id(&edit.character, &track_id);
+            if let Some(sheet) = sheets.get_mut(&sheet_id) {
+                let old_seq_len = sheet["sequence"]["length"].as_f64().unwrap_or(old_duration).max(0.1);
+                let ratio = new_dur / old_seq_len;
+                sheet["sequence"]["length"] = json!(new_dur);
+                if (ratio - 1.0).abs() > 1e-6
+                    && let Some(objs) = sheet["sequence"]["tracksByObject"].as_object_mut()
+                {
+                    for (_, obj) in objs {
+                        if let Some(tdata) = obj["trackData"].as_object_mut() {
+                            for (_, tr) in tdata {
+                                if let Some(kfs) = tr["keyframes"].as_array_mut() {
+                                    for kf in kfs {
+                                        if let Some(pos) = kf["position"].as_f64() {
+                                            kf["position"] = json!((pos * ratio * 1000.0).round() / 1000.0);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                theatre_updated = true;
+            }
+        }
+        if theatre_updated {
+            let _ = crate::project::write_project_file(s);
+            res["theatre_synced"] = json!(true);
+        }
+        if p["sync_video"].as_bool().unwrap_or(true) {
+            if let Ok(synced) = crate::video_target::sync_placed_tracks_duration(
+                s,
+                &edit.character,
+                &track_id,
+                new_dur,
+            ) {
+                res["video_tracks_synced"] = synced;
+            }
+        }
+    }
+    Ok(res)
 }
 pub fn undo(s: &mut Session, p: &Value) -> Result<Value> {
     let edit = begin(s, p)?;
@@ -525,28 +603,7 @@ pub fn undo(s: &mut Session, p: &Value) -> Result<Value> {
     }
     publish(s, &edit, text(&receipt, "before")?.as_bytes().to_vec())
 }
-pub(crate) fn capabilities(s: &Session, character: &str, track: &Value, spec: &Path) -> Value {
-    let standard = track["id"].as_str().is_none_or(|id| id.starts_with('@'));
-    let blocked = s
-        .theatre_state
-        .as_ref()
-        .and_then(|v| v["sheetsById"].as_object())
-        .is_some_and(|sheets| {
-            sheets.iter().any(|(id, sheet)| {
-                (id == character
-                    || *id
-                        == crate::theatre::clip_sheet_id(
-                            character,
-                            track["id"].as_str().unwrap_or(""),
-                        ))
-                    && (sheet["sequence"]["tracksByObject"]
-                        .as_object()
-                        .is_some_and(|o| !o.is_empty())
-                        || sheet["staticOverrides"]["byObject"]
-                            .as_object()
-                            .is_some_and(|o| !o.is_empty()))
-            })
-        });
+pub(crate) fn capabilities(s: &Session, _character: &str, _track: &Value, spec: &Path) -> Value {
     let local = spec
         .canonicalize()
         .ok()
@@ -557,9 +614,8 @@ pub(crate) fn capabilities(s: &Session, character: &str, track: &Value, spec: &P
                 .and_then(|p| p.canonicalize().ok()),
         )
         .is_some_and(|(file, root)| file.starts_with(root));
-    let available = local && !standard && !blocked;
-    json!({"part_set":available,"part_reset":available,"action_set":available,"pose_export":available,
- "reason":if blocked {Some("Relevant saved Theatre edits are unsupported by the shared sampler")} else if standard {Some("Standard actions are read-only")} else if !local{Some("A project-local saved rig is required")}else{None},
+    json!({"part_set":local,"part_reset":local,"action_set":local,"pose_export":local,
+ "reason":if !local{Some("A project-local saved rig is required")}else{None},
  "scale_identity":100,"position_units":"canvas pixels","rotation_units":"degrees","channel_mode":"replace selected action channel with constant; other channels preserved","pose_requires_theatre_state":true})
 }
 

@@ -92,6 +92,10 @@ function renderBlocks() {
       ...(receipt.warnings||[]).map(warning=>el('p',{},warning.error||warning.effect||warning.code||String(warning)))));
   }
   if(projectView.error)box.append(el('p',{class:'why',id:'project-command-error',role:'alert'},projectView.error));
+  if(state.data?.design?.error)box.append(el('div',{class:'why',id:'storyboard-read-error',role:'alert'},
+    el('p',{},`Cannot read the editable storyboard: ${state.data.design.error}`),
+    el('button',{id:'storyboard-retry',class:'ghost',
+      onclick:()=>designCommand('storyboard.design').catch(error=>toast(String(error)))},'Retry storyboard')));
   // Collapse/expand toggle for the blocks rail
   box.append(el("button", {
     class: `icon rail-toggle${state.blocksCollapsed ? "" : " open"}`,
