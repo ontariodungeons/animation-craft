@@ -4,8 +4,8 @@
 Runs the `lizard` CLI over the staged changes and rates each commit:
 
   IMPROVING  - staged (recent) code complexity does not exceed the base
-              (HEAD) complexity for the same files (average CCN stayed flat
-              or dropped).
+              (HEAD) complexity (sum of per-file cyclomatic-complexity
+              deltas over changed functions is <= 0).
   WORSE      - staged code complexity is higher than the base complexity.
 
 Added files (no HEAD baseline) are rated against lizard's default cyclomatic
@@ -54,7 +54,7 @@ def staged_changed_files() -> list[str]:
     return files
 
 
-def lizard_avg_ccn(content: bytes, suffix: str) -> float | None:
+def lizard_ccns(content: bytes, suffix: str) -> list[float] | None:
     with tempfile.TemporaryDirectory() as tmp:
         target = os.path.join(tmp, "lizard_target" + suffix)
         with open(target, "wb") as handle:
@@ -72,9 +72,7 @@ def lizard_avg_ccn(content: bytes, suffix: str) -> float | None:
                 if len(values) < 3:
                     continue
                 ccns.append(float(values[2]))
-        if not ccns:
-            return None
-        return sum(ccns) / len(ccns)
+        return ccns
 
 
 def main() -> int:
@@ -82,21 +80,20 @@ def main() -> int:
     pairs: list[tuple[str, float, float]] = []
     added: list[tuple[str, float]] = []
     for path in files:
-        after = lizard_avg_ccn(git_bytes(":" + path) or b"", os.path.splitext(path)[1])
-        before = lizard_avg_ccn(git_bytes("HEAD:" + path) or b"", os.path.splitext(path)[1])
-        if before is None:
-            added.append((path, after or 0.0))
-        else:
-            pairs.append((path, before, after or 0.0))
+        after_list = lizard_ccns(git_bytes(":" + path) or b"", os.path.splitext(path)[1])
+        before_list = lizard_ccns(git_bytes("HEAD:" + path) or b"", os.path.splitext(path)[1])
+        if before_list is None:
+            added.append((path, max(after_list) if after_list else 0.0))
+        elif after_list is not None:
+            pairs.append((path, sum(before_list), sum(after_list)))
 
     if pairs:
-        before_avg = sum(pair[1] for pair in pairs) / len(pairs)
-        after_avg = sum(pair[2] for pair in pairs) / len(pairs)
-        rating = "IMPROVING" if after_avg <= before_avg else "WORSE"
-        lines = [f"complexity: rating={rating} changed_files={len(pairs)} avg_ccn_before={before_avg:.2f} avg_ccn_after={after_avg:.2f}"]
-        for path, before_avg_ccn, after_avg_ccn in pairs:
-            state = "IMPROVING" if after_avg_ccn <= before_avg_ccn else "WORSE"
-            lines.append(f"  complexity: {path}: before_ccn={before_avg_ccn:.2f} after_ccn={after_avg_ccn:.2f} -> {state}")
+        delta = sum(after - before for _, before, after in pairs)
+        rating = "IMPROVING" if delta <= 0 else "WORSE"
+        lines = [f"complexity: rating={rating} changed_files={len(pairs)} ccn_delta={delta:.2f}"]
+        for path, before, after in pairs:
+            state = "IMPROVING" if after - before <= 0 else "WORSE"
+            lines.append(f"  complexity: {path}: before_ccn_sum={before:.2f} after_ccn_sum={after:.2f} -> {state}")
     elif added:
         worst = max((value for _, value in added), default=0.0)
         rating = "IMPROVING" if worst <= CCN_THRESHOLD else "WORSE"
