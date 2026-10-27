@@ -1,7 +1,7 @@
 // The page's half of the `--control` bridge (src/bridge.rs): what the CLI and MCP see and click.
 // An element's id is its DOM id, else its aria-label, else its visible text; a region is a DOM id
 // or a CSS selector.
-const CLICKABLE = "button, [role=button], [role=tab], a[href], input, select, textarea, .chip, .proj, .object, .lyric";
+const CLICKABLE = "button, [role=button], [role=tab], a[href], input, select, textarea, .chip, .object, .lyric";
 
 function visible(node) {
   const r = node.getBoundingClientRect();
@@ -101,12 +101,28 @@ window.magicBridge = {
     });
     return rows;
   },
-  click(target, instance = null) {
+  click(target, instance = null, files = null) {
     const node = find(target, instance);
     if (!visible(node) || node.disabled) throw new Error("Control is hidden or disabled");
     node.scrollIntoView({ block: "nearest" });
-    node.click();
+    if (files !== null && (!['asset-import','song-import-transcript','song-attach-original'].includes(node.id) || !Array.isArray(files) || !files.length || files.some(p=>typeof p!=='string'||!p.trim()))) throw new Error('files requires an import control and an array of file paths');
+    node.uiFiles = files;
+    try { node.click(); } finally { delete node.uiFiles; }
     return { clicked: idOf(node) };
+  },
+  drag(params) {
+    const source=find(params.source,params.instance), target=find(params.target,params.instance);
+    if(!source.draggable || !visible(source) || !visible(target))throw new Error('Choose a visible draggable asset and a visible storyboard page');
+    const x=Number(params.x), y=Number(params.y);
+    if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>1||y<0||y>1)throw new Error('x and y must be fractions from 0 to 1 within the target');
+    target.scrollIntoView({block:'nearest'});
+    const rect=target.getBoundingClientRect(), dataTransfer=new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));
+    const options={bubbles:true,cancelable:true,dataTransfer,clientX:rect.left+rect.width*x,clientY:rect.top+rect.height*y};
+    target.dispatchEvent(new DragEvent('dragover',options));
+    target.dispatchEvent(new DragEvent('drop',options));
+    source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer}));
+    return {source:idOf(source),target:idOf(target),drop_dispatched:true};
   },
   set(target, value, instance = null) {
     const node = find(target, instance);

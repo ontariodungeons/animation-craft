@@ -83,6 +83,7 @@ function footerContext() {
     return `${motion.character} · ${meta.layers.length} layers / ${clips} clips · ${track} · Selected: ${part ? part.label || part.id : 'none'}`;
   }
   if (state.view === 'studio') { const project = videoProject(); return project ? `Video project: ${project}` : 'No video project yet'; }
+  if (state.view === 'analytics') return 'Analytics · Code complexity, token spend & app status';
   const pages = state.data?.storyboard?.previews?.length || 0;
   const objects = (state.data?.assets?.assets || []).length;
   return [pages ? `Storyboard · Page ${state.page + 1} / ${pages}` : 'Storyboard · not built yet', pages ? state.pageTitles?.[state.page] : null,
@@ -97,7 +98,7 @@ function updateAppFooter() {
 }
 
 function renderAppFooter() {
-  if (!$('app-footer') || !state.data) return;
+  if (!$('app-footer')) return;
   $('footer-stages').replaceChildren(...FOOTER_STAGES.map(([id, label]) => {
     const tone = footerStageState(id);
     return el('button', { class: 'footer-stage', id: `footer-stage-${id}`, title: `${label} · ${tone === 'ok' ? 'ready' : tone === 'warn' ? 'needs work' : 'not started'}`,
@@ -106,7 +107,7 @@ function renderAppFooter() {
   const context = footerContext();
   $('footer-context').textContent = context; $('footer-context').title = context;
   const unsaved = state.view === 'animation' && typeof magicTheatre !== 'undefined' && (magicTheatre.interactionRevision > magicTheatre.savedRevision || !!magicTheatre.gestureActive);
-  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready', '', 'footer-save-state'), unsaved ? 'Unsaved edits' : 'Saved');
+  $('footer-save-state').replaceChildren(window.companionBoxes.dot(unsaved ? 'needs-attention' : 'ready', '', 'footer-save-state'), unsaved ? 'Unsaved edits' : state.project ? 'Saved' : 'Not saved');
   $('footer-save-state').title = unsaved ? 'Theatre motion has unsaved keyframes · use Save motion' : 'No unsaved motion';
   const url = serverUrl();
   // A Studio that is off is simply idle: grey, never a red problem.
@@ -305,14 +306,20 @@ async function loadSongLyrics() {
   } catch (error) { if (state.project === project) state.lyrics = null; }
 }
 
-async function attachOriginal() {
-  const path = await dialog.open({ title: "Attach the artist's original lyrics or liner notes" });
+async function attachOriginal(event) {
+  const path = event?.currentTarget?.uiFiles?.[0] || await dialog.open({ title: "Attach the artist's original lyrics or liner notes" });
   if (!path) return;
   try {
     await designCommand("workshop.add", { kind: "liner_notes", paths: [path] });
     await loadSongLyrics();
     toast("Attached to liner notes; the original file is unchanged");
   } catch (error) { toast(String(error)); }
+}
+
+async function importProjectTranscript(event) {
+  const path=event?.currentTarget?.uiFiles?.[0] || await dialog.open({title:'Import existing timed lyrics',filters:[{name:'Transcript JSON',extensions:['json']}]});
+  if(!path)return;
+  try{await designCommand('workshop.import_transcript',{path});toast('Timed lyrics imported. Review the words before creating scene pages.');}catch(error){toast(String(error));}
 }
 
 function lyricSheet(model) {
@@ -435,12 +442,20 @@ function objectCard(name, layers, stacked) {
     stack, el("span", { class: "label" }, name), el("span", { class: "count" }, `${layers.length} layer${layers.length === 1 ? "" : "s"}`));
 }
 
+async function chooseStoryboardTemplate() {
+  const path=await dialog.open({title:"Choose your storyboard template",filters:[{name:"DeckCraft template",extensions:["deckcraft","pptx"]}]});
+  if(!path)return;
+  await designCommand('storyboard.template',{path});
+  if(!state.data?.storyboard?.deck)await designCommand('storyboard.init',{empty:true});
+}
+
 function renderBlocks() {
   updateAppFooter();
+  updateStoryboardAccess();
   const s = state.data?.status;
   const box = $("blocks");
   box.replaceChildren();
-  if (!s) return;
+  if (!s) { if (state.creating) renderNewProjectBlocks(box); return; }
   const receipt=state.projectReceipt;
   if(receipt?.project===state.project && (receipt.problems?.length || receipt.warnings?.length)){
     box.append(el('div',{class:'why',id:'project-intake-problems',role:'status'},
@@ -471,13 +486,20 @@ function renderBlocks() {
   const doc = transcript.document;
   box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
     [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null,
+     el('button',{id:'song-upload','data-commands':'workshop.set_audio',onclick:async()=>{
+       const path=await dialog.open({title:'Choose song audio',filters:[{name:'Audio',extensions:['wav','mp3','flac','m4a','aac','ogg']}]});
+       if(path)try{await designCommand('workshop.set_audio',{path});toast('Audio link saved; review timing and storyboard for this recording.');}catch(error){toast(String(error));}
+     }},audio?'Change audio…':'Upload audio…'),
      songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
        ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
      songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
        [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
+        el('button',{id:'song-import-transcript','data-commands':'workshop.import_transcript',onclick:importProjectTranscript},'Import timed lyrics…'),
+        !doc?.words?.length && audio ? el('button',{id:'song-transcribe','data-commands':'audio.analyze',onclick:()=>designCommand('audio.analyze',{analyze_beats:false}).catch(error=>toast(String(error)))},'Transcribe this recording') : null,
         el("details", { class: "song-details" }, el("summary", {}, "Details"), el("div", { class: "why" }, transcript.why || ""), ...outputs.map(fileButton))])],
     songState, audio ? songPlayButton(audio.path) : null));
 
+  const template=state.data?.storyboard_template?.path||state.data?.storyboard?.template_file;
   const sb = state.data?.storyboard;
   const content = state.data?.design?.readiness;
   const missing = content?.missing_fields || [];
@@ -496,26 +518,36 @@ function renderBlocks() {
     }catch(error){toast(String(error));}
   }},label);
   box.append(block('storyboard',ICONS.animate,'Storyboard',content?.state==='ready'?'Content filled':'Needs work',ready('storyboard'),[
+    el('div',{class:'field-row'},
+      el('button',{id:'storyboard-template-pick',class:'ghost',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…'),
+      el('button',{id:'storyboard-template-open',class:'icon',disabled:!template,'aria-label':'Open template',title:template||'Choose a template first',html:$('sb-open-deck').innerHTML,onclick:()=>invoke('open_path',{path:template})})),
     el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
-    !sb?.previews?.length ? el('button',{id:'storyboard-create','data-commands':'storyboard.create',onclick:()=>designCommand('storyboard.create').catch(error=>toast(String(error)))},'Create storyboard') : null,
-    el('button',{id:'storyboard-overview',onclick:()=>openPage(1)},'Story & backgrounds'),
+    el('button',{id:'storyboard-discuss','data-drawer-toggle':'sproket',title:'Open Sproket to discuss the missing storyboard details',onclick:async()=>{
+      const input=$('agent-input');
+      if(!input.value.trim())input.value='Help me develop this storyboard. Read center.status creative_followup and the existing project assets. Ask me about the missing creative details before proposing placements or generating artwork.';
+      input.focus();
+    }},'Discuss with Sproket'),
+    el('button',{id:'storyboard-check','data-commands':'storyboard.design',onclick:()=>designCommand('storyboard.design').catch(error=>toast(String(error)))},'Check storyboard details'),
+    sb?.exists && content?.state!=='ready' ? el('button',{id:'storyboard-draft-override','data-commands':'workshop.approve_draft',title:'Allow Animation and Lyrics for this draft while keeping missing details visible',onclick:()=>designCommand('workshop.approve_draft',{approved:!state.data?.design?.progression?.draft_override,allow_incomplete:true}).catch(error=>toast(String(error)))},state.data?.design?.progression?.draft_override?'Turn off draft access':'Proceed with this draft') : null,
+    sb?.deck && sb.empty_template && ready('transcript') ? el('button',{id:'storyboard-create-scenes','data-commands':'storyboard.init',onclick:()=>designCommand('storyboard.init').catch(error=>toast(String(error)))},'Create scene pages from timing') : null,
+    sb?.previews?.length ? el('button',{id:'storyboard-overview',onclick:()=>openPage(1)},sb.page_titles?.[0] || 'First page') : null,
     el('p',{class:'why'},`${sb?.previews?.length || 0} pages · ${(sb?.page_size || []).join(' × ')} · Edit text on the page; drag assets onto it.`),
     ...missing.map(item=>el('button',{'aria-label':`Edit page ${item.page} ${item.field}`,onclick:()=>openPage(item.page)},`Page ${item.page} · ${item.field}`)),
-    el('p',{class:'why'},`${scenes.length} scenes · Project creation owns lyric timing.`),scenePicker,wordPicker,
+    ...(scenes.length ? [el('p',{class:'why'},`${scenes.length} scenes · Project creation owns lyric timing.`),scenePicker,wordPicker,
     sceneAction('storyboard-add','Add scene before word','storyboard.create',()=>({}),(scene?.words?.length || 0)<2),
     sceneAction('storyboard-trim-start','Start scene at word','storyboard.update',()=>({edge:'start'}),scene?.scene===1),
     sceneAction('storyboard-trim-end','End scene at word','storyboard.update',()=>({edge:'end'}),scene?.scene===scenes.length),
     sceneAction('storyboard-delete','Combine with previous','storyboard.delete',()=>({into:'previous'}),scene?.scene===1),
     sceneAction('storyboard-delete-next','Combine with next','storyboard.delete',()=>({into:'next'}),scene?.scene===scenes.length),
-    el('button',{id:'storyboard-undo',disabled:!state.storyboardUndo,'data-commands':'storyboard.update',onclick:async()=>{try{await designCommand('storyboard.update',{restore:state.storyboardUndo,expected_revision:contents.revision});state.storyboardUndo=null;renderBlocks();toast('Previous storyboard restored');}catch(error){toast(String(error));}}},'Undo scene change'),
-    el('button',{id:'storyboard-save',disabled:!state.data?.design?.dirty,'data-commands':'storyboard.save_version',onclick:()=>$('sb-save-version').click()},'Save new version')
+    el('button',{id:'storyboard-undo',disabled:!state.storyboardUndo,'data-commands':'storyboard.update',onclick:async()=>{try{await designCommand('storyboard.update',{restore:state.storyboardUndo,expected_revision:contents.revision});state.storyboardUndo=null;renderBlocks();toast('Previous storyboard restored');}catch(error){toast(String(error));}}},'Undo scene change')] : []),
+    sb?.deck ? el('button',{id:'storyboard-save',disabled:!state.data?.design?.dirty,'data-commands':'storyboard.save_version',onclick:()=>$('sb-save-version').click()},'Save new version') : null
   ],observed('storyboard')?.state || 'unknown'));
 
   const assets=state.data?.assets?.assets||[];
   const assetsState = observed("assets")?.state || "unknown";
   const assetFiles = (s.asset_files||[]);
   const assetsBody=[el('button',{id:'asset-import',class:'start',onclick:importProjectAsset},'Add asset'),projectAssetGrid(assets,{prefix:'asset'}),
-    el('p',{class:'why'},'Click an asset to animate it, or drag it onto a storyboard page.'),
+    el('p',{class:'why'},state.data?.design?.progression?.allowed?'Click an asset to animate it, or drag it onto a storyboard page.':'Drag assets onto the storyboard where you choose. Complete the storyboard details or proceed with a draft before animation.'),
     assetFiles.length?el('details',{},el('summary',{},`Project files (${assetFiles.length})`),...assetFiles.map(fileButton)):null];
   box.append(block('assets',ICONS.animate,'Assets',`${assets.length} assets`,ready("assets"),assetsBody, assetsState));
   box.append(block('animate',ICONS.animate,'Animate',`${assets.length} objects`,ready("animate"),
@@ -529,7 +561,7 @@ function renderBlocks() {
 function renderStoryboard() {
   updateAppFooter();
   const sb = state.data?.storyboard;
-  document.body.classList.toggle("movie-document",sb?.template==="backlot");
+  document.body.classList.toggle("movie-document",!!sb?.deck);
   const pages = sb?.previews || [];
   const chips = $("sb-chips");
   chips.replaceChildren();
@@ -537,43 +569,27 @@ function renderStoryboard() {
   cards.replaceChildren();
   $("sb-empty")?.remove();
   if(sb?.deck){
-    cards.append(el('div',{class:'why'},el('strong',{},sb.pdf_fields?'Editable PDF':'Existing storyboard document'),
+    cards.append(el('div',{class:'why'},el('strong',{},sb.pdf_fields?'Saved PDF edits awaiting DeckCraft save':'Editable DeckCraft storyboard'),
       el('p',{},sb.pdf_fields?sb.pdf:sb.deck),el('p',{},'Drag prepared project artwork onto a page and Save new version. Text fields can be edited on the page and save when you finish typing. Pictures keep the existing Save new version action.'),
       ...(sb.next_commands||[]).map(command=>el('pre',{},command))));
   }
 
-  for (const id of ["sb-prev", "sb-next", "sb-pdf", "sb-save-version"]) $(id).disabled = !pages.length;
+  for (const id of ["sb-prev", "sb-next", "sb-open-deck", "sb-save-version"]) $(id).disabled = !pages.length;
   if (!pages.length) {
     $("sb-page").textContent = "no storyboard yet";
-    const imported=state.data?.status?.stages?.find(s=>s.id==='transcript')?.done===true;
-    if(imported){
-      cards.append(el('div',{id:'sb-empty',class:'panel-empty'},el('strong',{},sb?.scene_packets_available?'Scene map available · editable deck not built':'Transcript available · storyboard not created'),el('p',{},'Your imported lyrics and timing are retained. Review them in Lyrics & notes. Storyboard generation is a separate step.'),el('button',{id:'sb-review-lyrics',class:'start','aria-label':'Review imported lyrics and timing',onclick:()=>{state.blocksCollapsed=false;state.open='lyrics';$('blocks').classList.remove('collapsed');renderBlocks();}},'Review lyrics & timing')));
-      return;
-    }
-    cards.append(el("div", {id:"sb-empty", class:"panel-empty"},
-      el("strong", {}, `Start ${$("project-name").textContent}`),
-      el("p", {}, "Add a transcript to plan the song’s scenes."),
-      el("button", {id:"sb-import-transcript", "data-commands":"workshop.import_transcript", class:"start", onclick:async () => {
-        const path = await dialog.open({title:"Import transcript", filters:[{name:"Transcript", extensions:["json"]}]});
-        if (!path) return;
-        try {
-          await motionCommand("workshop.import_transcript", {path});
-          state.data = await invoke("project_state", {path:state.project});
-          renderBlocks(); renderStoryboard();
-        } catch (e) { toast(String(e)); }
-      }}, "Add transcript")));
+    cards.append(el('div',{id:'sb-empty',class:'panel-empty'},
+      el('strong',{},'Your storyboard template'),
+      el('p',{},'Choose a DeckCraft template to start your storyboard.'),
+      el('button',{id:'sb-choose-template',class:'start',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…')));
     return;
   }
   state.page = Math.max(0, Math.min(state.page, pages.length - 1));
   const first = (sb.first_scene_page || 2) - 1;
-  const nav = sb.page_titles?.length === pages.length ? sb.page_titles.map((title,i)=>[title,i]) : sb.template === "backlot" ? [...Array.from({length:first},(_,i)=>[`Contents ${i+1}`,i]),...(sb.scene_titles||[]).map((t,i)=>[t,first+i])] : [["Lyrics", 0], ["Cast & sets", 1],
-    ...(sb.scene_titles || []).map((t, i) => [t.split(" · ").slice(0, 2).join(" · "), first + i]), ["Brief", pages.length - 1]];
-  state.pageTitles = Object.fromEntries(nav.map(([label, page]) => [page, label]));
-  const isBacklot = sb.template === "backlot";
-  const chapterCount = isBacklot ? first : 3;
+  const nav=pages.map((_,i)=>[sb.page_titles?.[i]||sb.scene_titles?.[i-first]||`Page ${i+1}`,i]);
+  state.pageTitles=Object.fromEntries(nav.map(([label,page])=>[page,label]));
   for (const [i, [label, page]] of nav.entries()) {
     const active = page === state.page;
-    const isChapter = isBacklot ? i < first : i < 2 || i === nav.length - 1;
+    const isChapter = i < first;
     chips.append(el("button", { class: `chip${active ? " active" : ""}${isChapter ? " chapter" : " scene"}`, role: "tab", "aria-selected": String(active), title: label,
       onclick: () => showPage(page) }, label));
   }
@@ -641,6 +657,14 @@ async function showStudio() {
 
 async function setView(view, action) {
   const errors = acFeedback.errors.length;
+  if (view === 'design' && !state.data?.design?.progression?.allowed) {
+    toast(state.data?.design?.progression?.reason || 'Complete the storyboard details or choose Proceed with this draft.');
+    return false;
+  }
+  if (view === 'animation' && !state.data?.design?.progression?.allowed) {
+    toast(state.data?.design?.progression?.reason || 'Complete the storyboard details or choose Proceed with this draft.');
+    return false;
+  }
   if (view === "split") view = "studio";
   if (state.view === "animation" && view !== "animation" && typeof theatreCanLeave === "function" && !theatreCanLeave()) return false;
   if (typeof animationPause === "function") animationPause();
@@ -657,6 +681,7 @@ async function setView(view, action) {
   if (view === "animation") { await invoke("studio_hide"); await animationOpen(); }
   else if (view === "design") { await invoke("studio_hide"); await wordsOpen(); }
   else if (view === "skills") { await invoke("studio_hide"); if (typeof renderSkills === "function") renderSkills(); }
+  else if (view === "analytics") { await invoke("studio_hide"); if (typeof renderAnalytics === "function") renderAnalytics(); }
   else if (view !== "project" && serverUrl()) { await new Promise(requestAnimationFrame); await showStudio(); }
   else {
     await invoke("studio_hide");
@@ -669,6 +694,15 @@ async function setView(view, action) {
   window.magicCompanions?.sync();
   if (action && feedbackSnapshot().rendered && acFeedback.errors.length === errors) {
     await acFeedback.report(null, null, {stage:"ui_navigation_applied",...action,view:state.view});
+  }
+}
+
+function updateStoryboardAccess() {
+  const allowed=state.data?.design?.progression?.allowed===true;
+  for(const button of document.querySelectorAll('.tab[data-view="animation"],.tab[data-view="design"]')) {
+    const canOpen=allowed;
+    button.disabled=!canOpen;
+    button.title=canOpen ? (state.data?.design?.progression?.draft_override?'Draft access enabled; storyboard details still need work':button.textContent.trim()) : 'Complete storyboard details, or choose Proceed with this draft in Storyboard.';
   }
 }
 
@@ -729,6 +763,7 @@ async function load() {
   $('footer-instance').textContent=`Port ${port??'unavailable'} · ${identity.branch||'unknown build'}`;
   $('footer-instance').title=`${identity.build_id||'Unknown build'} · PID ${identity.pid??'?'} · ${identity.executable||''} · Click to copy the CLI command`;
   state.studioUrl = start.studio || null;
+  if (start.new_project) return beginNewProject();
   if (!start.project) return showHome();
   await openProject(start.project, start);
 }
@@ -741,7 +776,7 @@ async function openProject(path, start = {}) {
 
 // Apply an already executed CLI/bridge transition; never dispatch Open while refreshing it.
 async function applyOpenedProject(opened, start = {}) {
-  if(opened.reused_session){toast("Focused the existing project session");return;}
+  if(opened.reused_session){toast(opened.opened_new_instance?"Opened project in a separate window":"Focused the existing project session");return;}
   const path=opened.project;
   if(!path)throw new Error('Project command did not return its canonical location');
   state.data=opened;
@@ -796,7 +831,7 @@ $("footer-instance").addEventListener("click",async()=>{const port=state.identit
 $("studio-start").addEventListener("click", toggleServer);
 $("sb-prev").addEventListener("click", () => showPage(state.page - 1));
 $("sb-next").addEventListener("click", () => showPage(state.page + 1));
-$("sb-pdf").addEventListener("click", () => state.data?.storyboard?.pdf && openPath(state.data.storyboard.pdf));
+$("sb-open-deck").addEventListener("click", () => state.data?.storyboard?.deck && openPath(state.data.storyboard.deck));
 window.addEventListener("keydown", (e) => {
   if (state.view !== "project" || e.target.closest("input, textarea")) return;
   if (e.key === "ArrowRight") showPage(state.page + 1);
@@ -834,15 +869,19 @@ function renderStoryboardText(){
 }
 
 async function designCommand(id,params={}){
- const result=await motionCommand(id,params);
- state.data=await invoke('project_state',{path:state.project});renderBlocks();renderStoryboard();
+ const result=await invoke('project_command',{project:state.project,id,params});
+ state.data=result;renderBlocks();renderStoryboard();
  if(result?._ui_engine_revision)await acFeedback.acknowledge(result._ui_engine_revision,state.project);
  return result;
 }
-async function importProjectAsset(){
- const path=await dialog.open({title:'Add artwork',filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});if(!path)return;
- const name=path.split('/').pop().replace(/\.[^.]+$/,'');
- try{await designCommand('project.add_asset',{path,kind:'image',name,character:name,load:false});state.open='animate';renderBlocks();toast('Asset added · drag it onto a scene');}catch(e){toast(String(e));}
+async function importProjectAsset(event){
+ const supplied=event?.currentTarget?.uiFiles;
+ const selected=supplied || await dialog.open({title:'Add artwork',multiple:true,filters:[{name:'Images',extensions:['png','jpg','jpeg','webp']}]});if(!selected)return;
+ const paths=Array.isArray(selected)?selected:[selected];
+ try{
+  for(const path of paths){const name=path.split('/').pop().replace(/\.[^.]+$/,'');await designCommand('project.add_asset',{path,kind:'image',name,image:name,load:false});}
+  state.open='assets';renderBlocks();toast('Assets saved · choose where to place them');
+ }catch(e){toast(String(e));}
 }
 let selectedPlacement=null;
 function renderDesignPlacements(){

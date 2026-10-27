@@ -8,6 +8,8 @@ const CROSS = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 async function showHome() {
   if (typeof theatreCanLeave === "function" && !theatreCanLeave()) return;
   if(state.project){try{await invoke("engine_command",{id:"project.close",params:{}});}catch(e){toast(String(e));throw e;}}
+  state.creating = false;
+  newProjectForm.hidden = true;
   animationReset();
   window.workshopDrawers?.close(false);
   Object.assign(agent, { loaded: false, session: null, messages: [], permissions: [], forms: [], attachments: [] });
@@ -53,30 +55,37 @@ async function renderRecent() {
 }
 
 async function openDialog() {
-  const path = await dialog.open({ title: "Open project", filters: [{ name: "Magic Studio project", extensions: ["acproj"] }] });
+  const path = await dialog.open({ title: "Open project", filters: [{ name: "Magic Studio project", extensions: ["magic"] }] });
   if (path) openProject(path);
 }
 
-// ---- New song sheet -------------------------------------------------------------------------
+// New projects use the existing workflow blocks.
+const newProjectForm = $("new-form");
 
-let productionRoot = "";
-function renderWhere() {
-  const root = $("new-root").value.trim();
-  $("new-where").textContent = root ? (root === productionRoot
-    ? `Production root: ${root}. Each song is saved in its own project/ folder.`
-    : `One-project override: ${root}. Production root stays ${productionRoot}.`) : "";
+async function beginNewProject() {
+  if (state.project) { await invoke("new_window"); return; }
+  await showHome();
+  Object.assign(state, {creating:true, open:"song", view:"project", blocksCollapsed:false});
+  document.body.classList.remove("at-home");
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-project"));
+  $("blocks").classList.remove("collapsed");
+  $("project-name").textContent = "New project";
+  $("sb-chips").replaceChildren();
+  $("sb-page").textContent = "—";
+  $("sb-cards").replaceChildren(el("div", {class:"panel-empty"}, "Upload the recording and save to start an empty storyboard."));
+  renderBlocks();
+  try { const productionRoot = await invoke("projects_root"); $("new-root").value = productionRoot; $("new-root").defaultValue = productionRoot; }
+  catch (error) { $("new-root").value = ""; toast(String(error)); }
+  $("new-name").focus();
 }
 
-async function newSheet(open = true) {
-  $("new-sheet").classList.toggle("open", open);
-  $("new-sheet").setAttribute("aria-hidden", String(!open));
-  if (!open) return;
-  try {
-    productionRoot = await invoke("projects_root");
-    $("new-root").value = productionRoot;
-  } catch (error) { $("new-root").value = ""; toast(String(error)); }
-  renderWhere();
-  $("new-name").focus();
+function renderNewProjectBlocks(box) {
+  newProjectForm.hidden = false;
+  box.append(block("song", ICONS.song, "Song", "New project", false, [newProjectForm], "missing"));
+  for (const [id, title] of [["storyboard", "Storyboard"], ["assets", "Assets"], ["animate", "Animate"]]) {
+    box.append(block(id, ICONS.animate, title, "", false,
+      [el("p", {class:"why"}, "Save the recording first. Your creative choices follow here.")], "missing"));
+  }
 }
 
 $("new-audio-pick").addEventListener("click", async () => {
@@ -86,15 +95,12 @@ $("new-audio-pick").addEventListener("click", async () => {
   if (!$("new-name").value.trim()) {
     $("new-name").value = file.split("/").pop().replace(/\.[^.]+$/, "").replace(/[._-]+/g, " ").replace(/\bcdda\b/i, "").trim();
   }
-  renderWhere();
 });
 $("new-root-pick").addEventListener("click", async () => {
-  const dir = await dialog.open({ title: "Project root for this song only (production setting unchanged)", directory: true, defaultPath: $("new-root").value || undefined });
-  if (dir) { $("new-root").value = dir; renderWhere(); }
+  const dir = await dialog.open({ title: "Folder for this project", directory: true, defaultPath: $("new-root").value || undefined });
+  if (dir) { $("new-root").value = dir; }
 });
-$("new-name").addEventListener("input", renderWhere);
-$("new-cancel").addEventListener("click", () => newSheet(false));
-$("new-sheet").addEventListener("click", (e) => { if (e.target === $("new-sheet")) newSheet(false); });
+$("new-cancel").addEventListener("click", () => showHome().catch(error => toast(String(error))));
 $("new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!$("new-audio").value) return toast("Choose the song's audio first");
@@ -102,23 +108,23 @@ $("new-form").addEventListener("submit", async (e) => {
   try {
     const action=acFeedback.actions.get(e.submitter);
     const opened = await invoke("project_create", {request:action?.request_id,control:action?.control, name: $("new-name").value, audio: $("new-audio").value, root: $("new-root").value });
-    newSheet(false);
-    $("new-form").reset();
+    state.creating = false;
+    newProjectForm.hidden = true;
+    newProjectForm.reset();
     await applyOpenedProject(opened);
     toast(opened.problems?.length ? `Project created · ${opened.problems.join('; ')}` : "Project created");
   } catch (err) { toast(String(err)); }
-  $("new-create").disabled = false;
+  newProjectForm.querySelector("#new-create").disabled = false;
 });
 
-$("home-new").addEventListener("click", () => newSheet(true));
+$("home-new").addEventListener("click", () => beginNewProject().catch(error => toast(String(error))));
 $("home-open").addEventListener("click", openDialog);
 $("brand").addEventListener("click", () => showHome().catch(error => toast(String(error))));
 $("brand").addEventListener("keydown", (e) => { if (e.key === "Enter") showHome(); });
 document.addEventListener("keydown", (e) => {
   if (!(e.ctrlKey || e.metaKey) || e.target.closest("input, textarea")) {
-    if (e.key === "Escape" && $("new-sheet").classList.contains("open")) newSheet(false);
     return;
   }
-  if (e.key === "n") { e.preventDefault(); showHome().then(() => newSheet(true)); }
+  if (e.key === "n") { e.preventDefault(); beginNewProject().catch(error => toast(String(error))); }
   if (e.key === "o") { e.preventDefault(); openDialog(); }
 });

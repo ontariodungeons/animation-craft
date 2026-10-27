@@ -29,7 +29,7 @@ than binding a project folder. Do not create a headless session when the user ex
 their open window. Never start a video studio server merely to animate.
 
 The native computer-use surface is `ui.look`, `ui.state`, `ui.elements`, `ui.click`, `ui.set`,
-`ui.key`, and engine commands. Use stable IDs and typed parameters. For a numbered `@...` target returned by `ui.components`, pass its `component_instance` as `instance` to `ui.click` or `ui.set`. Read back changed state and
+`ui.key`, and engine commands. Use stable IDs and typed parameters. For a numbered `@...` target returned by `ui.components`, pass its `component_instance` as `instance` to `ui.click` or `ui.set`; inspect again after the UI changes. The existing Add asset control accepts `mc --bridge <port> exec ui.click id=asset-import files='["/absolute/image.png"]'`; this supplies the chosen files to the same UI import handler, which invokes `mc exec project.add_asset`, saves, and leaves them unplaced. To use the existing drag/drop handler, `ui.drag source=<asset tile id> target=<storyboard page id> x=0.5 y=0.5` supplies a drop point as fractions of that page. Inspect the actual placement, then select Save new version. A dispatched drop is not a saved document. Read back changed state and
 pixels; a delivered click or successful command alone is not proof. Use `ui.eval` for diagnostics,
 not as a substitute for missing product commands. Avoid global mouse/focus automation.
 

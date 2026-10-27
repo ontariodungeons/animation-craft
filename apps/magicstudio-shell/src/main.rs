@@ -12,9 +12,11 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, W
 /// and `--open <song|lyrics|transcript|animate|agent>` to start on a given tab and block (or with the agent open).
 fn launch_options() -> Value {
     let (mut positional, mut view, mut open) = (Vec::new(), None, None);
+    let mut new_project=false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--new" => new_project=true,
             "--view" => view = args.next(),
             "--open" => open = args.next(),
             "--control" => {
@@ -23,7 +25,7 @@ fn launch_options() -> Value {
             _ => positional.push(a),
         }
     }
-    json!({"project": positional.first(), "studio": positional.get(1), "view": view, "open": open})
+    json!({"project": positional.first(), "studio": positional.get(1), "view": view, "open": open, "new_project":new_project})
 }
 
 #[derive(Default)]
@@ -67,7 +69,8 @@ pub fn state_of(s: &mut Session) -> Result<Value, String> {
     let design=s.execute("storyboard.design",json!({})).unwrap_or(json!({"placements":[]}));
     let monitoring=s.execute("center.status",json!({})).map_err(|e|e.to_string())?;
     let storyboard_contents=s.execute("storyboard.read",json!({})).unwrap_or(Value::Null);
-    Ok(json!({"storyboard_contents":storyboard_contents,"status": status, "storyboard": storyboard,"assets":assets,"design":design,"monitoring":monitoring}))
+    let storyboard_template=s.execute("storyboard.template",json!({})).map_err(|e|e.to_string())?;
+    Ok(json!({"storyboard_template":storyboard_template,"storyboard_contents":storyboard_contents,"status": status, "storyboard": storyboard,"assets":assets,"design":design,"monitoring":monitoring}))
 }
 
 /// The project's workshop state and storyboard, straight from the engine.
@@ -193,6 +196,15 @@ async fn project_open(app:tauri::AppHandle, path: String, request: Option<String
     if let Some(result)=feedback::reuse_open(&app,&json!({"path":path,"_request_id":request,"_origin":"UI control"}))?{return Ok(result);}
     feedback::guard(&app,"project.open",true)?;
     tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.open",json!({"path":path,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
+}
+
+/// File > New creates an independent window when this one already contains a document.
+#[tauri::command]
+async fn new_window() -> Result<Value,String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let exe=std::env::current_exe().map_err(|e|e.to_string())?;
+        magicstudio_engine::studio_sessions::open(&exe,None)
+    }).await.map_err(|e|e.to_string())?
 }
 
 /// New song uses the actual CLI project.intake command and preserves its complete receipt.
@@ -584,19 +596,14 @@ fn main() {
         .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, project_command, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, new_window, project_create, project_command, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
         .setup(|app| {
             #[cfg(unix)]
-            {
-                let options=launch_options();
-                let existing=if let Some(path)=options["project"].as_str(){
-                    magicstudio_engine::studio_sessions::for_project(std::path::Path::new(path))?
-                }else{
-                    magicstudio_engine::studio_sessions::discover()["sessions"].as_array().and_then(|rows|rows.iter().find(|row|row["identity"]["build_id"]==env!("MAGICSTUDIO_BUILD_ID")).cloned())
-                };
-                if let Some(existing)=existing {
+            if let Some(path)=launch_options()["project"].as_str() {
+                if let Some(existing)=magicstudio_engine::studio_sessions::for_project(std::path::Path::new(path))? {
                     if let Some(endpoint)=existing["endpoint"].as_str().and_then(|v|v.strip_prefix("unix:")) {
-                        if magicstudio_engine::studio_sessions::request(std::path::Path::new(endpoint),"ui.focus",json!({"_expected_instance":existing["instance"]})).is_ok(){app.handle().exit(0);return Ok(());}
+                        magicstudio_engine::studio_sessions::request(std::path::Path::new(endpoint),"ui.focus",json!({"_expected_instance":existing["instance"],"_expected_project":path}))?;
+                        app.handle().exit(0);return Ok(());
                     }
                 }
             }

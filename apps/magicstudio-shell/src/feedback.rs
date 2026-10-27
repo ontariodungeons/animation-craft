@@ -134,6 +134,12 @@ pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
     v["ok"] = json!(true);
     v["connection"] = json!("connected");
     v["identity"] = crate::studio_identity(app);
+    #[cfg(unix)]
+    if let Some(socket)=app.try_state::<crate::bridge::LocalSocket>() {
+        v["instance"]=json!(socket.0.file_name().and_then(|p|p.to_str()));
+        v["endpoint"]=json!(format!("unix:{}",socket.0.display()));
+    }
+
     v["writer_owner"] = json!(writer_owner);
     v["active_project"] = json!(project);
     v["project_id"] = json!(project);
@@ -272,5 +278,13 @@ pub fn reuse_open(app: &tauri::AppHandle, params: &Value) -> Result<Option<Value
             ));
         }
     }
+    if active.is_some() {
+        let exe=std::env::current_exe().map_err(|e|e.to_string())?;
+        let mut opened=magicstudio_engine::studio_sessions::open(&exe,target.to_str())?;
+        opened["reused_session"]=json!(true);
+        opened["opened_new_instance"]=json!(true);
+        return Ok(Some(opened));
+    }
+
     Ok(None)
 }

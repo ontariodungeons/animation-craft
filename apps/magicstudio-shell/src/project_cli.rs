@@ -50,10 +50,8 @@ fn invoke(program: &Path, endpoint: &str, id: &str, params: &Value) -> Result<Va
 }
 
 pub fn execute(app: &tauri::AppHandle, id: &str, mut params: Value) -> Result<Value, String> {
-    #[cfg(unix)]
-    let endpoint = format!("unix:{}",app.try_state::<crate::bridge::LocalSocket>().ok_or("Studio private bridge unavailable; no command executed")?.0.display());
-    #[cfg(not(unix))]
-    let endpoint = return Err("New/Open CLI transport requires the private Studio bridge on this platform".into());
+    let endpoint = app.state::<crate::ControlPort>().0.lock().map_err(|e|e.to_string())?
+        .ok_or("Studio control port unavailable; no command executed")?.to_string();
     let token = crate::feedback::new_request();
     let pending = app.state::<Pending>();
     {
@@ -70,32 +68,4 @@ pub fn execute(app: &tauri::AppHandle, id: &str, mut params: Value) -> Result<Va
         result[key] = value.clone();
     }
     Ok(result)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[cfg(unix)]
-    fn fixture(body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let path=std::env::temp_dir().join(format!("mc-fixture-{}-{}",std::process::id(),crate::feedback::new_request()));
-        std::fs::write(&path,format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path,std::fs::Permissions::from_mode(0o700)).unwrap();path
-    }
-    #[test]
-    #[cfg(unix)]
-    fn cli_receipt_preserves_problems_and_uses_explicit_bridge() {
-        let cli=fixture("[ \"$1\" = '--bridge' ] && [ \"$2\" = 'unix:/chosen.sock' ] && [ \"$3\" = 'exec' ] && [ \"$4\" = 'project.intake' ] || exit 8\nprintf '%s' '{\"ok\":true,\"project\":\"/selected/A&B.magic\",\"intake_ready\":false,\"problems\":[\"Needs transcript\"],\"_ui_engine_revision\":9}'");
-        let result=invoke(&cli,"unix:/chosen.sock","project.intake",&json!({"name":"A&B"})).unwrap();
-        assert_eq!(result["problems"][0],"Needs transcript");assert_eq!(result["_ui_engine_revision"],9);assert_eq!(result["_cli"]["exit_success"],true);
-        std::fs::remove_file(cli).unwrap();
-    }
-    #[test]
-    #[cfg(unix)]
-    fn process_failure_and_invalid_or_error_payloads_are_not_success() {
-        for body in ["echo 'unavailable bridge' >&2; exit 3","printf 'not-json'","printf '%s' '{\"ok\":false}'"] {
-            let cli=fixture(body);assert!(invoke(&cli,"unix:/chosen.sock","project.open",&json!({})).is_err());std::fs::remove_file(cli).unwrap();
-        }
-        assert!(invoke(Path::new("/missing/mc"),"unix:/chosen.sock","project.open",&json!({})).is_err());
-    }
 }

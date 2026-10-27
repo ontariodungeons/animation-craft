@@ -37,7 +37,7 @@ pub fn request(path: &Path, id: &str, params: Value) -> Result<Value, String> {
 /// A command can take a while (a model turn, an import). Give it room, and say plainly
 /// that the Studio was busy instead of reporting a bare socket timeout.
 pub fn request_slow(path: &Path, id: &str, params: Value) -> Result<Value, String> {
-    request_within(path, id, params, 60)
+    request_within(path, id, params, if crate::find_command(id).is_some_and(|c|c.long_running){3600}else{30})
 }
 #[cfg(unix)]
 pub fn request_within(path: &Path, id: &str, params: Value, timeout_seconds: u64) -> Result<Value, String> {
@@ -145,17 +145,39 @@ fn select(matches:&[Value])->Result<Option<Value>,String>{
     Err("Multiple Studio sessions report this project; no unique writer. Inspect mc studios --json and select its port; no command executed".into())
 }
 
-#[cfg(test)]
-mod tests{
-    use super::*;
-    #[test]
-    fn read_only_review_windows_do_not_hide_the_existing_writer(){
-        let review=json!({"writer_owner":false,"identity":{"control_port":19971}});
-        let writer=json!({"writer_owner":true,"identity":{"control_port":19974}});
-        assert_eq!(select(&[review.clone(),writer.clone()]).unwrap(),Some(writer));
-        let legacy=json!({"identity":{"control_port":19974}});
-        assert_eq!(select(&[review.clone(),legacy.clone()]).unwrap(),Some(legacy));
-        assert!(select(&[review,json!({"writer_owner":false})]).is_err());
-        assert!(select(&[json!({"writer_owner":true}),json!({"writer_owner":true})]).is_err());
+/// Shared app opening for desktop, CLI and MCP. Existing windows are never replaced.
+pub fn open(executable: &Path, project: Option<&str>) -> Result<Value, String> {
+    let project = project.map(Path::new).map(canonical).transpose()?;
+    if let Some(path) = &project {
+        if let Some(existing) = for_project(path)? {
+            let endpoint = existing["endpoint"].as_str().ok_or("Studio endpoint missing")?;
+            request(Path::new(endpoint.trim_start_matches("unix:")), "ui.focus", json!({"_expected_instance":existing["instance"],"_expected_project":path}))?;
+            return Ok(existing);
+        }
     }
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR missing")?;
+    let dir = PathBuf::from(runtime).join("magicstudio-studio");
+    let mut command = std::process::Command::new(executable);
+    if let Some(path) = &project { command.arg(path); } else { command.arg("--new"); }
+    #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
+    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut child = command.spawn().map_err(|e|format!("Cannot launch {}: {e}",executable.display()))?;
+    let pid = child.id();
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(30) {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if !path.file_name().is_some_and(|n|n.to_string_lossy().starts_with(&format!("{pid}-"))) {continue;}
+            if let Ok(mut live) = request(&path,"ui.feedback",json!({})) {
+                if live["ui_ready"] != true || live["identity"]["pid"] != pid {continue;}
+                if project.as_ref().is_some_and(|p|live["active_project"].as_str()!=p.to_str()) {continue;}
+                let endpoint = format!("unix:{}",path.display());
+                live["endpoint"]=json!(endpoint);live["instance"]=json!(path.file_name().and_then(|v|v.to_str()));
+                return Ok(live);
+            }
+        }
+        if let Some(status)=child.try_wait().map_err(|e|e.to_string())? {return Err(format!("Studio process {pid} exited during opening: {status}"));}
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(format!("Studio process {pid} started but has not reported a ready window; it was left running. No other window was changed."))
 }

@@ -1214,16 +1214,93 @@
       "target": "storyboard",
       "indicator": "hidden"
     },
-    "storyboard-create": {
-      "component": "start",
-      "label": "Create storyboard",
-      "target": "storyboard",
-      "indicator": "hidden"
-    },
     "motion-asset-browser": {
       "component": "motion-inspector",
       "label": "Animation assets",
       "indicator": "hidden"
+    },
+    "new-form": {
+      "component": "panel-body",
+      "look": "form",
+      "label": "New project",
+      "target": "view-project"
+    },
+    "sb-choose-template": {
+      "component": "control",
+      "label": "Choose storyboard template",
+      "target": "view-project"
+    },
+    "song-import-transcript": {
+      "component": "ghost",
+      "label": "Import timed lyrics",
+      "target": "song",
+      "indicator": "hidden"
+    },
+    "song-transcribe": {
+      "component": "start",
+      "label": "Transcribe this recording",
+      "target": "song",
+      "indicator": "hidden"
+    },
+    "song-upload": {
+      "component": "ghost",
+      "label": "Choose or change song audio",
+      "target": "song",
+      "indicator": "hidden"
+    },
+    "storyboard-check": {
+      "component": "ghost",
+      "label": "Check storyboard details",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-create-scenes": {
+      "component": "start",
+      "label": "Create scene pages from timing",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-discuss": {
+      "component": "ghost",
+      "label": "Discuss storyboard with Sproket",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-draft-override": {
+      "component": "ghost",
+      "label": "Proceed with this draft",
+      "target": "storyboard",
+      "indicator": "hidden"
+    },
+    "storyboard-template-open": {
+      "component": "control",
+      "label": "Open chosen template",
+      "target": "view-project"
+    },
+    "storyboard-template-pick": {
+      "component": "control",
+      "label": "Choose storyboard template",
+      "target": "view-project"
+    },
+    "analytics-refresh": {
+      "component": "control",
+      "label": "Refresh metrics",
+      "command": "app.analytics",
+      "target": "view-analytics"
+    },
+    "analytics-surface": {
+      "component": "surface",
+      "label": "Analytics surface",
+      "target": "view-analytics"
+    },
+    "tab-analytics": {
+      "component": "control",
+      "label": "Analytics",
+      "target": "view-analytics"
+    },
+    "view-analytics": {
+      "component": "workspace",
+      "label": "Analytics and complexity metrics"
     }
   },
   "rails": {
