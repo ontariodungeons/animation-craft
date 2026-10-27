@@ -1,0 +1,11 @@
+#application-settings {
+  color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 20px; width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px); overflow: auto;
+}
+#application-settings::backdrop { background: #0009; }
+#application-settings h2 { margin: 0; font-size: 18px; }
+#application-settings form { display: grid; gap: 14px; margin-top: 16px; }
+#application-settings label { display: grid; gap: 8px; }
+#application-settings input { width: 100%; box-sizing: border-box; }
+#application-settings-status { overflow-wrap: anywhere; }

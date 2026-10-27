@@ -15,6 +15,8 @@ mc commands
 
 The Omarchy menu entry is **Magic Studio**. Rebuild the shell after changing `apps/magicstudio-shell/ui/`; those files are embedded. Keep generated song projects and media on the user-selected Speedy location, outside this source repository.
 
+The native **File** menu provides New Project (`Ctrl+N`), Open (`Ctrl+O`), Save (`Ctrl+S`), Close Project (`Ctrl+W`), Application Settings (`Ctrl+,`) and guarded Quit (`Ctrl+Q`). New uses the same workflow blocks as Home. Application Settings is available without an open project and persists the production project root through the shared `project.root` command; it does not move existing projects. Agent/model settings remain separate in Sproket. The native Edit menu supplies standard text editing actions.
+
 ## CLI and MCP
 
 `mc exec <id> key=value` executes one command. `mc run <file.jsonl|->` keeps one headless session across JSONL commands with `id` and `params`. Separate `exec` calls do not share the open project.

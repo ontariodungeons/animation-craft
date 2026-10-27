@@ -38,6 +38,7 @@ fn startup(app:tauri::AppHandle) -> Value {
 
 mod bridge;
 mod feedback;
+mod menu;
 mod project_cli;
 
 /// The engine session of the open project: one for the window, shared by the page's commands and
@@ -199,7 +200,25 @@ async fn project_open(app:tauri::AppHandle, path: String, request: Option<String
 async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:String,request:Option<String>,control:Option<String>)->Result<Value,String>{
  feedback::guard(&app,"project.intake",true)?;
  let request=request.unwrap_or_else(feedback::new_request);
- tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
+ tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"prepare_only":true,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
+}
+
+/// Project workflow controls use the installed adjacent CLI, with this window as the target.
+#[tauri::command]
+async fn project_command(app:tauri::AppHandle, project:String, id:String, mut params:Value)->Result<Value,String>{
+ if !params.is_object(){return Err("Command parameters must be an object".into());}
+ if magicstudio_engine::find_command(&id).is_none(){return Err("Unknown project command".into());}
+ let active=app.state::<Engine>().with(None,|s|Ok(s.project_path.clone()))?;
+ if active.as_deref()!=Some(std::path::Path::new(&project)){return Err("The open project changed; select the intended project first".into());}
+ params["_client"]=json!("Studio project workflow");
+ tauri::async_runtime::spawn_blocking(move || {
+  let mut result=project_cli::execute(&app,&id,params)?;
+  if id!="project.save" && magicstudio_engine::find_command(&id).is_some_and(|c|c.journal) {
+   let saved=project_cli::execute(&app,"project.save",json!({"_client":"Studio project workflow"}))?;
+   result["_ui_engine_revision"]=saved["_ui_engine_revision"].clone();
+  }
+  result["project"]=json!(project);Ok(result)
+ }).await.map_err(|e|e.to_string())?
 }
 
 /// Starts (`on`) or stops the project's studio server with the engine's own commands
@@ -209,10 +228,8 @@ async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:Strin
 #[tauri::command]
 async fn studio_server(app: tauri::AppHandle, path: String, on: bool) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Engine>().with(Some(&path), |s| {
-            s.execute(if on { "video.server_start" } else { "video.server_stop" }, json!({})).map_err(|e| e.to_string())?;
-            state_of(s)
-        })
+        app.state::<Engine>().with(Some(&path), |_| Ok(()))?;
+        project_cli::execute(&app,if on {"video.server_start"} else {"video.server_stop"},json!({"_client":"Studio server control"}))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -567,7 +584,7 @@ fn main() {
         .manage(project_cli::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
-        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
+        .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, project_create, project_command, studio_server, agent_config, agent_config_save, snapshot, object_preview, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout, set_split, window_height])
         .setup(|app| {
             #[cfg(unix)]
             {
@@ -592,6 +609,7 @@ fn main() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(size.width, size.height),
             )?;
+            menu::install(&window)?;
             #[cfg(unix)]
             if let Err(e)=bridge::serve_local(app.handle().clone()){eprintln!("private UI feedback: {e}");}
             // Every resize re-applies the layout for the open tab.
