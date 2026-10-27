@@ -11,8 +11,20 @@ use serde_json::{Value, json};
 
 use crate::workspace::resolve_craft_cli;
 
-/// A file at or above this many lines is reported as a long file.
-const COMPLEXITY_LONG_FILE_LINES: u64 = 600;
+/// A file at or above this many lines is reported as a long file. The limit is
+/// configurable in code-limits.json at the repository root, which is also what
+/// the commit hook enforces.
+const COMPLEXITY_LONG_FILE_LINES: u64 = 2000;
+
+fn long_file_limit(root: &Path) -> u64 {
+    let Ok(text) = std::fs::read_to_string(root.join("code-limits.json")) else {
+        return COMPLEXITY_LONG_FILE_LINES;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return COMPLEXITY_LONG_FILE_LINES;
+    };
+    value["max_file_lines"].as_u64().unwrap_or(COMPLEXITY_LONG_FILE_LINES)
+}
 
 /// The sources worth measuring: the Rust engine and CLIs, the Python pipeline and
 /// scripts, and the shell UI's own JavaScript modules (vendor bundles are excluded).
@@ -104,6 +116,7 @@ pub fn read(root: &Path, scan: bool) -> Value {
         return json!({ "available": false, "reason": "Scan disabled" });
     }
     let lizard_bin = resolve_craft_cli("lizard");
+    let long_file_limit = long_file_limit(root);
     let targets = scan_targets(root);
     let (stdout, scan_failures) = lizard_csv(&lizard_bin, root, &targets);
     let mut functions = Vec::new();
@@ -170,7 +183,7 @@ pub fn read(root: &Path, scan: bool) -> Value {
                 "ccn": ccn,
                 "functions": functions,
                 "max_ccn": max_file_ccn,
-                "long": lines >= COMPLEXITY_LONG_FILE_LINES,
+                "long": lines >= long_file_limit,
             })
         })
         .collect();
@@ -214,7 +227,7 @@ pub fn read(root: &Path, scan: bool) -> Value {
         "functions_over_ccn_15": over_15,
         "max_ccn": max_ccn,
         "hotspots": hotspots,
-        "long_file_threshold_lines": COMPLEXITY_LONG_FILE_LINES,
+        "long_file_threshold_lines": long_file_limit,
         "long_files": long_file_count,
         "longest_files": longest_files,
         "largest_ccn_files": largest_ccn_files,

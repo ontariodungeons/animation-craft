@@ -183,6 +183,7 @@ function analyticsRenderSurface() {
       ),
     );
     if (comp.longest_files?.length) {
+      const limit = comp.long_file_threshold_lines || 2000;
       surface.append(
         el('h3', {}, 'Longest files (reading cost)'),
         el('div', { class: 'learning-grid learning-task-grid' },
@@ -190,7 +191,7 @@ function analyticsRenderSurface() {
             class: 'learning-summary',
             id: `analytics-long-file-${idx}`,
           },
-            el('h3', {}, `${file.file} · ${file.lines} lines`),
+            el('h3', {}, `${file.file} · ${file.lines} lines${file.lines > limit ? ' · FIX THIS' : ''}`),
             el('code', {}, `CCN ${file.ccn} · max ${file.max_ccn} · ${file.functions} functions`),
           )),
         ),

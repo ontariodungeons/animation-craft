@@ -80,6 +80,7 @@ run_step "staged-file policy" check_staged_paths || exit $?
 run_step "staged whitespace" git diff --cached --check || exit $?
 
 run_step "commit complexity analytics" python3 scripts/commit_complexity.py || exit $?
+run_step "long file check" python3 scripts/long_file_check.py || exit $?
 
 CURRENT_STEP="all required checks"
 if ! record_status passed "$CURRENT_STEP" 0; then
