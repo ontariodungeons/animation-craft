@@ -358,16 +358,48 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         })
         .collect();
     let server = video_server_info(&dir, target);
-    let supplied_transcript=transcripts.first().and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
-    let loaded_board=std::fs::read(dir.join("storyboard/movie-board.json")).ok().and_then(|b|serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
-    let transcript_why = if let Some(source)=loaded_board["source_transcript"].as_str(){
-        format!("Storyboard uses native output {source} directly ({} words); no transcription rerun. Archive label: {} (producer executable/version not recorded). {}",loaded_board["source_words"],Path::new(source).parent().and_then(|p|p.file_name()).and_then(|n|n.to_str()).unwrap_or("unknown"),loaded_board["timing_warning"].as_str().unwrap_or(""))
-    } else if transcripts.is_empty() {
-        "Transcribe the song to timestamp lyrics and initialize the video project.".to_string()
-    } else if let Some(tool)=supplied_transcript["source"].as_str() {
-        format!("Reused native transcript; recorded tool: {tool}; recorded model: {}. No transcription run in this import.",supplied_transcript["model"].as_str().unwrap_or("unknown"))
+    let loaded_board = std::fs::read(dir.join("storyboard/movie-board.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .unwrap_or(Value::Null);
+    let transcript_source = transcripts.first().cloned().or_else(|| {
+        loaded_board["source_transcript"].as_str().map(PathBuf::from)
+    });
+    let supplied_transcript = transcript_source
+        .as_ref()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .map(|v| if v.is_array() { json!({"words":v,"paragraphs":v}) } else { v })
+        .unwrap_or(Value::Null);
+    let mut transcript_errors = transcript_problems(&supplied_transcript);
+    if loaded_board["timing_valid"] == false {
+        transcript_errors.push(loaded_board["timing_warning"].as_str()
+            .unwrap_or("Storyboard timing has not passed validation").to_string());
+    }
+    let transcript_valid = transcript_errors.is_empty();
+    let transcript_why = if transcript_source.is_none() {
+        "Import existing timed lyrics, or transcribe the linked song.".to_string()
+    } else if !transcript_valid {
+        format!("Transcript needs repair: {}. Original inputs are retained.", transcript_errors.join("; "))
+    } else if let Some(source) = loaded_board["source_transcript"].as_str() {
+        format!(
+            "Storyboard uses native output {source} directly ({} words); no transcription rerun. Archive label: {} (producer executable/version not recorded). {}",
+            loaded_board["source_words"],
+            Path::new(source)
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown"),
+            loaded_board["timing_warning"].as_str().unwrap_or("")
+        )
+    } else if let Some(tool) = supplied_transcript["source"].as_str() {
+        format!(
+            "Reused native transcript; recorded tool: {tool}; recorded model: {}. No transcription run in this import.",
+            supplied_transcript["model"].as_str().unwrap_or("unknown")
+        )
     } else {
-        "Transcript ready; producer unknown because the supplied file did not record it.".to_string()
+        "Transcript ready; producer unknown because the supplied file did not record it."
+            .to_string()
     };
     let reference_why = match (panels.is_empty(), pdf.is_file(), approved) {
         (true, _, _) => "Add storyboard panels (split a storyboard grid or add panel images).",
@@ -409,7 +441,12 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         .collect();
     let mut transcript_outputs: Vec<Value> = transcripts.iter().map(|p| file_chip(p)).collect();
     // The target's own song analysis (audio.analyze), listed as plain files to open and review.
-    for name in ["transcript.json", "transcript.srt", "audiomap.json", "STORYBOARD.md"] {
+    for name in [
+        "transcript.json",
+        "transcript.srt",
+        "audiomap.json",
+        "STORYBOARD.md",
+    ] {
         let file = dir.join(&s.video_target).join(name);
         if file.is_file() {
             transcript_outputs.push(file_chip(&file));
@@ -421,10 +458,10 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).chain(liner.iter().map(|p| file_chip(p))).collect::<Vec<_>>(),
             "outputs": vec![target_chip],
             "brief": stage_brief(s, &dir, "song")}),
-        json!({"id": "transcript", "title": "Transcription & transcoding", "done": !transcripts.is_empty() && loaded_board["timing_valid"]!=false, "why": transcript_why,
+        json!({"id": "transcript", "title": "Transcription & transcoding", "done": transcript_valid, "why": transcript_why,
             "inputs": s.song_audio.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
             "outputs": transcript_outputs,
-            "document": transcripts.first().and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice::<Value>(&b).ok()),
+            "document": supplied_transcript, "problems": transcript_errors,
             "target": target_project, "brief": stage_brief(s, &dir, "transcript")}),
         json!({"id": "reference", "title": "Reference art", "done": !panels.is_empty() && approved, "why": reference_why,
             "inputs": panels.iter().enumerate().map(|(i, p)| {
