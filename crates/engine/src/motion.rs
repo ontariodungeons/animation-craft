@@ -726,10 +726,10 @@ fn summarize_track_channels(
 fn action_track(tracks: &[Value], action: &str, params: &Value) -> Result<Value> {
     let standard_id = format!("@{action}");
     let requested = params.get("track").and_then(Value::as_str);
-    let track = tracks.iter().find(|t| match requested {
-        Some(id) => t["id"] == id,
-        None => t["id"] == action && t["standard"] == false,
-    }).or_else(|| requested.is_none().then(|| tracks.iter().find(|t| t["id"] == standard_id)).flatten())
+    let preferred = requested.unwrap_or(action);
+    let fallback = requested.unwrap_or(&standard_id);
+    let track = tracks.iter().find(|t| t["id"] == preferred)
+        .or_else(|| tracks.iter().find(|t| t["id"] == fallback))
         .ok_or_else(|| invalid(format!("No playable track for action '{action}'")))?;
     Ok(json!({"action":action,"track":track["id"],"standard":track["standard"],
         "rest":params.get("rest").and_then(Value::as_bool).unwrap_or(action == "rest" && track["standard"] == true)}))

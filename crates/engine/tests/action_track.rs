@@ -15,6 +15,7 @@ fn resolves_actions_after_angle_reload_and_preserves_explicit_rest() {
     std::fs::write(root.join("character.magic"), json!({"active_angle":"front",
         "angles":{"front":{"id":"front"},"side":{"id":"side"}},
         "poses":{"walk":{"id":"walk","angle":"side"}}}).to_string()).unwrap();
+    std::fs::write(root.join("Test.magic"), "{\"theatre\":null}").unwrap();
     let mut s = Session {project_path:Some(root.join("Test.magic")),
         project_assets:vec![ProjectAsset {id:"subject".into(),name:"Subject".into(),kind:"cutout_rig".into(),
             path:Some(root.join("rig.json")),preset:None,parts:vec![]}], ..Session::default()};

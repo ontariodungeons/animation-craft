@@ -116,8 +116,11 @@ function animationShell(){
  setupPathPen($('motion-canvas'));
  $('motion-canvas').addEventListener('keydown',e=>{if(e.key===' '){e.preventDefault();animationPlay();}});
 }
+function animationLoadImages(meta){
+ return Promise.all(meta.layers.map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+}
 async function animationApplyMetadata(meta){
- const images=await Promise.all(meta.layers.map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+ const images=await animationLoadImages(meta);
  Object.assign(motion,{meta,images,sample:null});
 }
 async function animationLoad(){
@@ -125,7 +128,7 @@ async function animationLoad(){
  try{
   const meta=await motionCommand('motion.tracks',{character:motion.character});if(request!==motion.request)return;
   motion.meta=meta;motion.sample=null;motion.photoDrafts={};if(!meta.layers?.some(part=>part.id===motion.selected))motion.selected=null;motion.track=resume&&meta.tracks?.some(t=>t.id===resume.track)?resume.track:meta.tracks?.[0]?.id||'';motion.time=resume?.time||0;
-  motion.images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not load ${l.label}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));if(request!==motion.request)return;
+  motion.images=await animationLoadImages(meta);if(request!==motion.request)return;
   // Open moving: the rig's first authored clip, else the standard Sway, so its parts animate at once.
   const opening=!resume&&motion.rest&&meta.opening_track;
   if(opening){motion.track=opening;motion.rest=false;}
@@ -414,7 +417,7 @@ async function animationRefresh(){
  const changed=character!==motion.character;
  if(changed)theatreRequireSaved();
  const meta=await motionCommand('motion.tracks',{character});
- const images=await Promise.all((meta.layers||[]).map(l=>new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error(`Could not refresh ${l.label||l.id}`));img.src=motionAssetUrl(l.file,l.image_sha256);})));
+ const images=await animationLoadImages(meta);
  if(state.project!==project||request!==motion.request)return;
  // Publish metadata and clear its previous sample together; controls can render curves immediately.
  Object.assign(motion,{character,meta,images,sample:null});
