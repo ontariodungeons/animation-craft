@@ -171,7 +171,7 @@ function animationControls(){
  $('motion-asset-browser').replaceChildren(el('div',{class:'panel-head inline'},artworkDot,picker,removeCharacterBtn),rebuildRigBtn,motionSection('Assets',projectAssetGrid(motion.assets||[],{active:motion.character}),true));
  box.append(authoring.status);
  updateMagicSelection();
- const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=!e.target.value;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),(meta.tracks||[]).filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;
+ const tracks=el('select',{id:'motion-track','aria-label':'Motion track',title:'Choose a motion track',onchange:async e=>{if(!e.target.value)return;if(!theatreCanLeave()){e.target.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;return;}animationPause();motion.track=e.target.value;motion.previewLoop=null;acFeedback.report(null,null,{stage:'clip_switched',clip:motion.track});motion.rest=false;motion.time=0;const selected=meta.tracks.find(t=>t.id===motion.track);motion.points=[];motion.pathLayer=null;if(selected?.path?.points){motion.points=selected.path.points.map(p=>[...p]);motion.pathLayer=selected.path.layer;motion.pathDuration=selected.duration;motion.startSize=selected.path.start_size;motion.endSize=selected.path.end_size;}animationControls();await animationSample();}},el('option',{value:''},'Choose a custom track…'),meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id},t.label||t.id.replaceAll('-',' '))));tracks.value=motion.rest||meta.tracks.find(t=>t.id===motion.track)?.standard?'':motion.track;
  const pickActionTrack=async(action,overrides={},play=true)=>{
   if(!theatreCanLeave())return;
   animationPause();
@@ -184,7 +184,7 @@ function animationControls(){
    if(play)await animationPlay();
   }catch(err){toast(String(err));}
  };
- const actions=el('div',{class:'motion-actions-grid'},(meta.actions||[]).map(t=>{
+ const actions=el('div',{class:'motion-actions-grid'},meta.actions.map(t=>{
   const key=t.action;
   return el('button',{id:`motion-action-${key}`,class:'motion-action','aria-label':t.label,html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS[key] || MOTION_ICONS.play}</svg><span class="motion-action-word">${t.label}</span>`,'aria-pressed':String(!motion.rest&&motion.track===t.track),title:`${t.label} · ${t.standard?'scripted motion':'single character animation'}`,onclick:()=>pickActionTrack(key)});
  }),el('button',{id:'motion-action-rest',class:'motion-action','aria-label':'Rest pose',html:`<svg viewBox="0 0 24 24" aria-hidden="true">${MOTION_ICONS.rest}</svg><span class="motion-action-word">Rest</span>`,'aria-pressed':String(motion.rest),title:'Rest pose',onclick:()=>pickActionTrack('rest',{track:motion.track,rest:true},false)}));
@@ -205,7 +205,7 @@ function animationControls(){
  const section=motionSection('Layers',authoring.layers,true);section.id='motion-layers';
  const selected=meta.layers.find(part=>part.id===motion.selected);
  const candidate=selected?partCandidate(selected.id):null;
- const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...(meta.layers||[]).map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file,part.image_sha256),alt:''}),el('span',{},part.id))));
+ const partsStrip=el('div',{class:'magic-parts-strip','aria-label':'Parts strip'},...meta.layers.map(part=>el('button',{class:`magic-part-thumb${motion.selected===part.id?' active':''}`,id:`magic-thumb-${part.id}`,title:`Select ${part.label||part.id} (${part.id})`,onclick:()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();}},el('img',{src:motionAssetUrl(part.file,part.image_sha256),alt:''}),el('span',{},part.id))));
  const compare=el('div',{class:'magic-part-compare',id:'magic-part-compare'},partsStrip);
  if(!selected)compare.append(el('p',{class:'why'},'Select a part to compare its original with a candidate.'));
  else{
@@ -250,7 +250,7 @@ function animationControls(){
  box.append(motionSection('Quality checks',[el('p',{class:'muted'},pfSummary),pfList],false));
  const {button:exportButton,status:exportStatus}=motionExportControl();
  box.append(motionSection('Export & integrations',[exportButton,exportStatus,authoring.pose],false));
- const authoredCount=(meta.tracks||[]).filter(t=>!t.standard).length;
+ const authoredCount=meta.tracks.filter(t=>!t.standard).length;
  box.append(el('div',{class:'motion-source-context',id:'motion-source-context'},
   el('strong',{},`${motion.assets?.find(a=>a.id===motion.character)?.name||motion.character} · Subject / shared engine · ${meta.layers.length} layers / ${authoredCount} authored clips`),
   el('span',{class:'muted'},selected?`Selected: ${selected.label||selected.id}`:'Select a part in Layers or Parts & assets')
@@ -281,7 +281,7 @@ function motionExportControl(){
 }
 function renderCharacterMagicPanel(meta,pickActionTrack){
  const cfg=meta?.character_panel;
- if(!cfg||typeof cfg!=='object')return el('div',{class:'char-magic-panel',hidden:''});
+ if(!cfg)return el('div',{class:'char-magic-panel',hidden:''});
  const angleEntries=cfg.angles;
  const poseEntries=cfg.poses;
  const switchAngle=async(angleId)=>{
@@ -342,7 +342,7 @@ function renderPartControlsBar(selected,controls){
 // Compare | All parts: one tab at a time, remembered while the view is open.
 function partsDrawer(compare){
  const meta=motion.meta;
- const cards=(meta.layers||[]).map(part=>{
+ const cards=meta.layers.map(part=>{
   const shown=part.state?.visible!==false,name=part.label||part.id,picked=motion.selected===part.id;
   const candidate=partCandidate(part.id);
   const select=()=>{motion.selected=part.id;animationControls();animationDraw();updateMagicSelection();};
@@ -361,7 +361,7 @@ function partsDrawer(compare){
  const body=el('div',{class:'magic-parts-panel',role:'tabpanel'},panels[motion.partsTab]||compare);
  const tab=(key,label)=>el('button',{class:motion.partsTab===key?'active':'',role:'tab','aria-selected':String(motion.partsTab===key),id:`magic-parts-tab-${key}`,onclick:()=>{motion.partsTab=key;animationControls();}},label);
  return el('div',{class:'magic-parts-drawer'},el('div',{class:'segmented',role:'tablist','aria-label':'Parts and assets'},
-  tab('parts',`Parts (${(meta.layers||[]).length})`),tab('compare','Compare')),body);
+  tab('parts',`Parts (${meta.layers.length})`),tab('compare','Compare')),body);
 }
 // PhotoCraft edits a draft copy; the live layer only changes through part.replace_image.
 function photoCraftPartButton(part,id){
