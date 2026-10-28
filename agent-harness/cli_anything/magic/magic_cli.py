@@ -1149,6 +1149,44 @@ def mcp_cmd() -> None:
     mcp_server.run_mcp_stdio(sess, bridge=_BRIDGE)
 
 
+@cli.command("run")
+def run_cmd() -> None:
+    """Execute JSONL command batches from stdin in one persistent engine session."""
+    sess = get_session()
+    target = sess.resolve_live_target(_BRIDGE)
+    if target:
+        for line in sys.stdin:
+            text = line.strip()
+            if not text or text.startswith("#") or text.startswith("//"):
+                continue
+            item = json.loads(text)
+            cmd_id = item.get("command") or item.get("id")
+            params = item.get("params") or {}
+            res = sess.execute(cmd_id, params, bridge=_BRIDGE, dry_run=_DRY_RUN)
+            click.echo(json.dumps(res))
+    else:
+        proc = subprocess.Popen(
+            [str(backend.find_studio_shell()), "--headless", "run"],
+            stdin=sys.stdin,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+        raise SystemExit(proc.wait())
+
+
+@cli.command("doctor")
+@click.argument("extra", nargs=-1)
+@handle_error
+def doctor_top_cmd(extra: tuple[str, ...]) -> None:
+    """Check Craft CLI tools and running Studio instances (`magic doctor`)."""
+    sess = get_session()
+    res = sess.execute("app.doctor", parse_kv_args(extra), bridge=_BRIDGE)
+    discovery = backend.discover_studios()
+    res["studios"] = discovery["sessions"]
+    res["studio_errors"] = discovery["errors"]
+    emit(res)
+
+
 def _preprocess_argv(argv: list[str]) -> list[str]:
     """Normalize shorthand `magic studio <project>` into `magic studio open <project>`."""
     out = list(argv)

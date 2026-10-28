@@ -1,0 +1,32 @@
+%% Existing explicit-polygon 2D path; source-confirmed, not executed or visually accepted.
+%% Snapshot: baf70771fc0b3b13a0839a4cef8ab5bf628a512a; 2026-10-28 UTC.
+%% Sources: crates/engine/src/commands.rs; image_cmds.rs:98,145-196,217-302;
+%% motion.rs:1069-1178; project.rs:272,315; exports.rs:539-604.
+%% One mc run session retains open-project state. No live window required for these commands.
+%% No required text-LLM call in this selected path. PhotoCraft/local processing still consumes compute.
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"system-ui","actorBkg":"#e5f3f1","actorBorder":"#377b74","signalColor":"#506d79"}}}%%
+sequenceDiagram
+  autonumber
+  participant CLI as mc run · one session
+  participant E as Shared Rust engine
+  participant PC as PhotoCraft CLI
+  participant F as Project + editable files
+  Note over CLI,F: CURRENT SOURCE · not an end-to-end success receipt
+  CLI->>E: project.open path=existing.magic
+  E->>F: Read project and connected assets
+  CLI->>E: project.add_asset path=image kind=image load=true
+  Note over CLI,E: User supplies part polygons and back-to-front rig_order
+  CLI->>E: image.break_apart asset=id regions=... rig_order=...
+  loop Each explicitly selected part
+    E->>PC: run image · select.lasso / inverse / edit.clear
+    PC->>F: Write transparent part PNG
+  end
+  E->>F: Write editable rig.json + initial tracks
+  CLI->>E: project.add_asset path=rig.json kind=cutout_rig load=true
+  CLI->>E: motion.tracks character=rig
+  E-->>CLI: Existing track and part IDs
+  CLI->>E: motion.path character=rig track=id points=... duration=...
+  E->>F: Save motion track in rig.json + undo receipt
+  CLI->>E: project.save
+  E->>F: Save .magic asset references
+  Note over E,F: Parts / pivots / anatomy / quality still require review<br/>This 2D route does not require Blender
