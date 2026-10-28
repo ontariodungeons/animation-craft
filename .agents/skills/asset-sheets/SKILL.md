@@ -12,6 +12,14 @@ registered and rigged without re-layout.
 Every sheet follows **the same rules**. A sheet that breaks them is rejected by
 `pipeline/import_validator.py` (3–5 views, a side profile, stable height) and must be drawn again.
 
+## Before the first sheet
+
+Establish the roster from evidence, not from memory: read the project's registered assets and any
+`assets/sheets/` already on disk, then state which characters are past the drawing step and which
+are not. The user picks the characters and the order. Do not assume a roster, a count, or that a
+named preset means one specific character — preset tables map names to literal filenames and go
+stale the moment a file is renamed. Report what exists and confirm before drawing anything.
+
 ## Shared rules (all sheets)
 
 - Canvas **2048 × 2048 px**, PNG, sRGB.
@@ -88,8 +96,11 @@ mc exec assets.assess path=assets/sheets/<character>-turnaround-2048.png
 mc exec asset.build_cutout_rig
 ```
 
-Do not write a bespoke script for any of these steps. If a step is missing from
-`mc commands`, the command is what gets added — not a script.
+Run the steps that have a command through `mc`, and read each command's JSON before the next.
+Iterating on a static sheet is expected work: when a stage must be re-run with variations to get
+the result right, a small throwaway driver is an acceptable tool, and no sheet is finished before
+the user has seen it. A step missing from `mc commands` is a gap to report and get filled — not a
+reason to stall or to quietly substitute a different deliverable.
 
 ## Naming and prompts
 
@@ -108,6 +119,20 @@ mc exec asset.cut_sheet asset=<id>          # PhotoCraft cuts frames/parts
 mc exec assets.assess path=<sheet.png>      # clean or recreate, with reasons
 mc exec asset.build_cutout_rig              # parts + pivots from the cut sheet
 ```
+
+The handoff between those commands is one field: intake records its recommendation's
+`selectedParts`, and `asset.build_cutout_rig` passes exactly that list as `--parts` to the rig
+builder. Run intake first, or the builder guesses which parts to cut. Save the project after the
+rig builds — the rig attaches to the in-session asset and is gone on reload until it is saved.
+
+## Pitfalls
+
+- The rig attaches to the in-session asset only; `project.save` is what makes parts survive a reload.
+- `rig.from_sheet` refuses a sheet that has no `generation.json` beside it (only
+  `image.generate rig_parts=` writes one). Send image-agent sheets to `asset.build_cutout_rig` instead.
+- The app serves asset files only from its configured roots (home and removable-media trees). A
+  project anywhere else shows as `Could not load <name>` in the Animation pane — that reads like a
+  broken sheet and is actually a path problem, so check the project location before redrawing art.
 
 ## Reject and redraw when
 

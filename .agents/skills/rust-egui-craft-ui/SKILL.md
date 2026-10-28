@@ -107,5 +107,5 @@ Structure `Magic Studio` around **3 clear workflow modes** in the top `38pt` hea
 2. **Automation Registry (`AutomationRegistry`)**:
    - Every interactive widget must remain addressable via the TCP `--control` bridge (`ui.state`, `ui.click`, `ui.set`) or engine CLI commands so automated tests and agents can drive every workflow deterministically.
 3. **Visual Verification Loop (Mandatory after every UI edit)**:
-   - Build and reload the live app (`cargo build --bin animationcraft`), capture a live screenshot via `mc --bridge 9879 exec ui.screenshot path=/tmp/ui_check.png`, and inspect the rendered image with `view_file` before claiming any UI change is complete.
+   - Build the canonical app (`CARGO_BUILD_JOBS=1 cargo build -p magicstudio-shell -p mc`) and verify project/UI state through `mc` before claiming any UI change is complete.
    - Check specifically for: text truncation, cramped row spacing, overlapping labels, low contrast, and cognitive overload.

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 def main():
@@ -26,10 +27,9 @@ def main():
         for step in steps:
             if not isinstance(step, dict) or not isinstance(step.get('command'), str) or not isinstance(step.get('params', {}), dict):
                 raise ValueError('Every step needs a command string and params object')
-        directory = os.environ.get('CRAFT_CLI_DIR')
-        binary = os.environ.get('PHOTOCRAFT_CLI') or (str(Path(directory) / 'photocraft-cli') if directory else shutil.which('photocraft-cli'))
+        binary = os.environ.get('PHOTOCRAFT_CLI') or shutil.which('photocraft-cli')
         if not binary:
-            raise ValueError('PhotoCraft CLI not found; set PHOTOCRAFT_CLI or add it to PATH')
+            raise ValueError('PhotoCraft CLI not found; set PHOTOCRAFT_CLI or install via artcraft-launcher')
         args.out_dir.mkdir(parents=True, exist_ok=False)
         command = [binary, 'run', str(source)]
         for step in steps:

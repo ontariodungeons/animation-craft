@@ -140,7 +140,12 @@ def build_guided_cutout_rig(
                 "parent": p["parent"],
             })
         timed_traj = {}
-        for mr_cand in [design_share_dir / "motion_range.json", design_share_dir / f"{character_id}_motion_range.json"]:
+        for mr_cand in [
+            design_share_dir / "motion_range.json",
+            design_share_dir / f"{character_id}_motion_range.json",
+            design_share_dir / "accuracy/motion_range.json",
+            Path(_REPO_ROOT) / f"exports/pose_and_parts/{character_id}/motion_range.json",
+        ]:
             if mr_cand.is_file():
                 try:
                     timed_traj = json.loads(mr_cand.read_text(encoding="utf-8")).get("timedTrajectories", {})

@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LIMITS_FILE = ROOT / "code-limits.json"
 DEFAULT_MAX_FILE_LINES = 2000
+# Generated lock files are not source: nobody reads them to make a change.
+GENERATED_FILES = {"cargo.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "uv.lock", "poetry.lock"}
 
 
 def limits() -> dict:
@@ -63,6 +65,8 @@ def main() -> int:
     failures: list[str] = []
     warnings: list[str] = []
     for path in staged_files():
+        if Path(path).name.lower() in GENERATED_FILES:
+            continue
         after = count_lines(git_bytes(":" + path))
         before = count_lines(git_bytes("HEAD:" + path))
         if after <= max_lines:

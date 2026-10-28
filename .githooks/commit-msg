@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Every commit is its own status report (template: .gitmessage). The measured acceptance
-# line belongs to every commit message too: before -> after.
+# Every commit is its own status report (template: .gitmessage). The measured
+# acceptance line belongs to every commit message too: before -> after.
 set -euo pipefail
 msg="$1"
 if [ ! -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && ! grep -qiE '^Status: *(done|partial|blocked)\b' "$msg"; then

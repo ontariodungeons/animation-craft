@@ -2,7 +2,6 @@ import json
 import os
 import socket
 from PIL import Image
-from pipeline.jev_qa_verifier import run_jev_verified_slicer
 
 
 def send_blender_mcp_code(code: str, host: str = "127.0.0.1", port: int = 9876, timeout: float = 90.0) -> dict:
@@ -58,7 +57,6 @@ def execute_archetype_in_blender53(
     os.makedirs(os.path.dirname(os.path.abspath(out_preview_png)), exist_ok=True)
 
     slice_dir = os.path.join(out_dir, "slices")
-    sliced = run_jev_verified_slicer(image_path or "hopper", slice_dir)
 
     motion_range_summary = None
     char_hint = os.path.splitext(os.path.basename(image_path or "hopper"))[0].lower()
@@ -844,7 +842,6 @@ result = {{
     "bones": len(arm_obj.data.bones),
     "framesDir": frames_dir,
     "previewPng": OUT_PNG,
-    "jevQa": SLICED.get("jevQaReport", {{}}).get("finalJev", {{}}),
 }}
 print(json.dumps(result))
 """
@@ -861,7 +858,6 @@ print(json.dumps(result))
         "outMp4": out_mp4,
         "outPreviewPng": out_preview_png,
         "blendPath": blend_path,
-        "jevQaReport": sliced.get("jevQaReport", {}),
         "mp4Exists": os.path.exists(out_mp4) and os.path.getsize(out_mp4) > 0,
         "pngExists": os.path.exists(out_preview_png) and os.path.getsize(out_preview_png) > 0,
     }

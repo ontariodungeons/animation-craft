@@ -19,9 +19,8 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
  const number=(input,label)=>{if(!String(input.value).trim())throw Error(`Enter ${label}`);const v=Number(input.value);if(!Number.isFinite(v))throw Error(`Invalid ${label}`);return v;};
  function request(){
   const job=getJob();
-  if(!job||job.state!=='completed'||job.partial!==false)throw Error('Render a completed full action before placing it in a scene.');
+  if(!job||job.state!=='completed'||job.partial!==false)throw Error('Render a completed full action before placing it on the video timeline.');
   if(renderBusy)throw Error('Wait for the current render before placing.');
-  if(!scene)throw Error('Choose an authored scene before placing.');
   if(!/^[a-zA-Z0-9_-]+$/.test(id.input.value))throw Error('Placement ID must use letters, numbers, underscores or hyphens.');
   const t=number(start.input,'start'),d=number(duration.input,'duration'),r=number(rate.input,'playback rate'),box=rect.map(f=>number(f.input,'rectangle'));
   if(t<0||d<=0)throw Error('Start must be nonnegative and duration positive.');
@@ -30,7 +29,7 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
   if(!Number.isFinite(job.clip_seconds)||job.clip_seconds<=0)throw Error('Completed receipt has no valid clip duration.');
   if(d>job.clip_seconds/r+1e-6)throw Error(`Clip covers ${(job.clip_seconds/r).toFixed(3)}s at this playback rate; shorten the duration or lower the rate.`);
   if(!job.job||(jobParameter==='blender_job'&&(!job.character||!job.track)))throw Error('Completed receipt is missing its job or source action identity.');
-  return {id:id.input.value,[jobParameter]:job.job,scene:scene.scene,start:t,duration:d,rect:box,playback_rate:r,...(job.character&&job.track?{character:job.character,track:job.track}:{})};
+  return {id:id.input.value,[jobParameter]:job.job,...(scene?{scene:scene.scene}:{}),start:t,duration:d,rect:box,playback_rate:r,...(job.character&&job.track?{character:job.character,track:job.track}:{})};
  }
  const quote=value=>`'${String(value).replaceAll("'","'\\''")}'`;
  function update(){
@@ -43,8 +42,8 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
   }catch(error){place.disabled=copy.disabled=true;command.textContent='';if(!placing){validationError=true;message(String(error),true);}}
  }
  function sceneId(){
-  if(!scene)return;
-  const next=`${jobParameter==='blender_job'?'blender':'animation'}-scene-${scene.scene}-${getJob()?.track||getJob()?.backend||'action'}`.replace(/[^a-zA-Z0-9_-]/g,'-');
+  const tag=scene?`scene-${scene.scene}`:'timeline';
+  const next=`${jobParameter==='blender_job'?'blender':'animation'}-${tag}-${getJob()?.track||getJob()?.backend||'action'}`.replace(/[^a-zA-Z0-9_-]/g,'-');
   if(!id.input.value||id.input.value===defaultId)id.input.value=next;
   defaultId=next;
  }
@@ -62,7 +61,11 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
   update();
  }
  async function selectScene(){
-  const revision=++sceneRevision,n=Number(scenePicker.value);scene=null;update();
+  const revision=++sceneRevision;
+  if(!scenePicker.value){
+   scene=null;sceneId();message('Ready to place at any movable start time.');refresh();return;
+  }
+  const n=Number(scenePicker.value);scene=null;update();
   try{
    const value=await motionCommand('storyboard.read',{scene:n});
    if(!current()||revision!==sceneRevision)return;
@@ -74,10 +77,10 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
   try{
    const toc=await motionCommand('storyboard.toc');if(!current())return;
    const chapters=(toc.chapters||[]).filter(s=>Number.isSafeInteger(s.scene)&&s.scene>0);
-   scenePicker.replaceChildren(...chapters.map(s=>el('option',{value:String(s.scene)},s.title||`Scene ${s.scene}`)));
-   if(!chapters.length){scene=null;update();message('No authored scenes. Add storyboard scenes, then reopen Animation.',true);return;}
+   scenePicker.replaceChildren(el('option',{value:''},'Movable timeline (no scene required)'),...chapters.map(s=>el('option',{value:String(s.scene)},s.title||`Scene ${s.scene}`)));
+   if(!chapters.length){scenePicker.value='';await selectScene();return;}
    scenePicker.value=String(chapters[0].scene);await selectScene();
-  }catch(error){if(current()){scene=null;update();message(`Cannot read scenes: ${String(error)}`,true);}}
+  }catch(error){if(current()){scenePicker.replaceChildren(el('option',{value:''},'Movable timeline (no scene required)'));scenePicker.value='';await selectScene();}}
  }
  scenePicker.addEventListener('change',selectScene);
  for(const input of inputs.filter(n=>n!==scenePicker))input.addEventListener('input',()=>{message('Ready to place.');update();});
@@ -91,8 +94,8 @@ function blenderPlacementControls({project,getJob,current,jobParameter='blender_
    if(!current()||getJob()?.job!==params[jobParameter])return;
    readback.textContent=JSON.stringify(result,null,2);
    if(result.ok!==true)throw Error(result.error||'Placement command did not confirm success.');
-   if(result.id!==params.id||result[jobParameter]!==params[jobParameter]||result.scene!==params.scene||result.start!==params.start||result.duration!==params.duration||result.playback_rate!==params.playback_rate||JSON.stringify(result.canvas_rect)!==JSON.stringify(params.rect)||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
-   message(`Placed ${result.id} · scene ${params.scene} · track ${result.track_index}.`);
+   if(result.id!==params.id||result[jobParameter]!==params[jobParameter]||result.start!==params.start||result.duration!==params.duration||result.playback_rate!==params.playback_rate||JSON.stringify(result.canvas_rect)!==JSON.stringify(params.rect)||!result.media||!result.backup||!Number.isInteger(result.track_index))throw Error('Placement returned incomplete or mismatched confirmation; inspect the result before retrying.');
+   message(`Placed ${result.id} · ${params.scene?`scene ${params.scene}`:`start ${params.start}s`} · track ${result.track_index}.`);
   }catch(error){if(current()&&getJob()?.job===params[jobParameter])message(String(error),true);}
   finally{placing=false;if(current())update();}
  };

@@ -10,10 +10,14 @@ Open a `.magic` project in one persistent `mc run` session, or use its explicit 
 
 ```text
 mc --bridge PORT exec blender.start character=little_fish_layered track=swim-cruise
-mc --bridge PORT exec blender.status job=RETURNED_JOB_ID
-mc --bridge PORT exec blender.cancel job=RETURNED_JOB_ID
-mc --bridge PORT exec blender.list
+mc --bridge PORT exec animation.status job=RETURNED_JOB_ID
+mc --bridge PORT exec animation.cancel job=RETURNED_JOB_ID
+mc --bridge PORT exec animation.list
 ```
+
+`animation.status/list/cancel` are the canonical generic job commands (they cover
+Blender, Synfig, OpenToonz and MLT). `blender.status/list/cancel` remain aliases for
+existing scripts; MCP exposes only the canonical `animation.*` tools.
 
 Start returns a job ID immediately after submitting the worker. Status distinguishes
 running, cancelling, completed, failed and cancelled. Cancelling stays busy until the service and its children exit. A submitted job is not a successful render.
@@ -127,8 +131,8 @@ measurements, labels `state_source`/`telemetry_source` as `terminal_receipt`, se
 historical measurements, not a claim about a live service. Without a terminal receipt,
 the service-query error is returned; running/cancelling state is never invented.
 
-`blender.list` also works without an open project (`jobs:[]`) and always returns a global
-worker observation. `blender.status job=...` adds the same observation beside the selected
+`animation.list` also works without an open project (`jobs:[]`) and always returns a global
+worker observation. `animation.status job=...` adds the same observation beside the selected
 job; it never substitutes the global owner's metrics for that job's metrics.
 `worker_owner` is null when no active owner is observed. `worker_owner_status` distinguishes
 `idle`, `observed`, and `unavailable`; `worker_owner_error` is null or the actual query/metadata

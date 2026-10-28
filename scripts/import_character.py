@@ -51,8 +51,8 @@ def main():
     out_path = args.out or (workspace_root / 'exports' / 'pose_and_parts' / asset_id / f'{asset_id}_transparent.png')
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    photocraft_bin = shutil.which('photocraft-cli')
-    animcraft_bin = shutil.which('mc')
+    photocraft_bin = os.environ.get('PHOTOCRAFT_CLI') or shutil.which('photocraft-cli')
+    animcraft_bin = shutil.which('mc') or str(workspace_root / 'target/debug/mc')
     if not photocraft_bin:
         sys.exit("Error: 'photocraft-cli' not found in PATH.")
     if not animcraft_bin:

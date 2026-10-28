@@ -5,11 +5,11 @@ function blenderDispose(){
  if(typeof nativeAnimationDispose==='function')nativeAnimationDispose();
  clearTimeout(blenderPollTimer);blenderPollTimer=null;
  ++blenderViewRevision;blenderMediaFetch?.abort();blenderMediaFetch=null;
- const dialog=blenderDialog;blenderDialog=null;
- const video=dialog?.querySelector('video');
+ const root=blenderDialog;blenderDialog=null;
+ const video=root?.querySelector('video');
  if(video){video.pause();video.removeAttribute('src');video.load();}
  if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
- if(dialog){dialog.close();dialog.remove();}
+ if(root&&root.tagName==='DIALOG'){root.close();root.remove();}
 }
 async function blenderLoadPreview(video,path,current){
  if(blenderMediaUrl)URL.revokeObjectURL(blenderMediaUrl);blenderMediaUrl=null;
@@ -28,17 +28,15 @@ async function blenderAnimationOpen(selection={}){
  blenderDispose();
  const choice={character:selection.character??motion.character,track:selection.track??motion.track};
  const revision=++blenderViewRevision,project=state.project;
- const dialog=el('dialog',{id:'blender-render-dialog',class:'blender-render-dialog','aria-label':'Blender render controls'});
- blenderDialog=dialog;
- const current=()=>revision===blenderViewRevision&&state.project===project&&state.view==='animation'&&blenderDialog===dialog&&dialog.open;
- const close=el('button',{id:'blender-close',class:'ghost','aria-label':'Close Blender render controls',onclick:blenderDispose},'Close');
+ const view=$('view-animation');
+ view.replaceChildren();
+ blenderDialog=view;
+ const current=()=>revision===blenderViewRevision&&state.project===project&&state.view==='animation'&&motion.mode==='blender'&&blenderDialog===view;
  const controls=el('aside',{class:'motion-inspector blender-controls',id:'blender-controls','aria-label':'Blender animation controls'});
  const stage=el('div',{class:'motion-stage'});
- const status=el('span',{class:'muted',role:'status'},'Loading artwork…');
- const main=el('div',{class:'motion-main'},el('div',{class:'motion-stagebar'},status),stage);
- dialog.append(el('div',{class:'blender-render-header'},el('strong',{},'Blender render'),close),el('div',{class:'blender-render-layout'},controls,main));
- dialog.addEventListener('close',()=>{if(blenderDialog===dialog)blenderDispose();});
- document.body.append(dialog);dialog.showModal();
+ const status=el('span',{class:'muted',id:'blender-status',role:'status'},'Loading artwork…');
+ const main=el('div',{class:'motion-main'},el('div',{class:'motion-stagebar',id:'motion-stagebar'},motionModeSwitch(),status),stage);
+ view.append(controls,main);
  const video=el('video',{id:'blender-preview',controls:true,loop:true,'aria-label':'Rendered Blender animation'});
  stage.append(video);
  let latest=null,job=null,jobState=null,selectionRevision=0;
@@ -49,15 +47,16 @@ async function blenderAnimationOpen(selection={}){
   const candidates=assets.filter(a=>a.kind==='cutout_rig');
   if(!candidates.some(a=>a.id===choice.character))choice.character=candidates[0]?.id;
   if(!choice.character){report('Choose a rigged character in Project to begin.');return;}
+  motion.character=choice.character;
   const picker=el('select',{'aria-label':'Animated object',id:'blender-object'},...candidates.map(a=>el('option',{value:a.id},a.name||a.id)));
   picker.value=choice.character;
-  picker.onchange=()=>blenderAnimationOpen({character:picker.value,track:choice.track});
+  picker.onchange=()=>{motion.character=picker.value;blenderAnimationOpen({character:picker.value,track:choice.track});};
   controls.append(picker);
   const meta=await motionCommand('blender.actions',{character:choice.character});if(!current())return;
-  const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.filter(t=>!t.standard).map(t=>el('option',{value:t.id,title:t.id},(choice.character===motion.character?motion.meta?.tracks?.find(a=>a.id===t.id)?.label:null)||t.id.replaceAll('_',' ').replaceAll('-',' '))));
+  const tracks=el('select',{'aria-label':'Animation action',id:'blender-track'},...meta.tracks.map(t=>el('option',{value:t.id,title:t.id},t.label||(choice.character===motion.character?motion.meta?.tracks?.find(a=>a.id===t.id)?.label:null)||t.id.replace(/^@/,'').replaceAll('_',' ').replaceAll('-',' '))));
   if(!tracks.options.length){report('Author a motion track before migrating this rig.');return;}
   if([...tracks.options].some(option=>option.value===choice.track))tracks.value=choice.track;
-  choice.track=tracks.value;
+  choice.track=tracks.value;motion.track=tracks.value;
   const render=el('button',{class:'start',id:'blender-render'},'Render preview');
   const cancel=el('button',{class:'ghost',id:'blender-cancel',disabled:true},'Cancel render');
   const details=el('p',{class:'muted'},'Editable Blender scene and transparent clip are saved with the project.');
@@ -74,9 +73,8 @@ async function blenderAnimationOpen(selection={}){
   }
   const placement=blenderPlacementControls({project,getJob:()=>latest,current});
   const busy=value=>{placement.setBusy(value);render.disabled=value;cancel.disabled=!value;for(const input of [picker,tracks,source,range,resolution])input.disabled=value;};
-  const roundtrip=el('button',{class:'ghost',id:'blender-source-links',onclick:()=>nativeAnimationOpen({backend:'blender',source:latest?.blend||'',character:latest?.character||choice.character,track:latest?.track||tracks.value,sourceId:`blender-${latest?.character||choice.character}-${latest?.track||tracks.value}`})},'Native source / result / Save');
   controls.append(el('label',{},'Action',tracks),el('label',{},'Source',source),
-   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,roundtrip,details,placement.node);
+   el('label',{},'Length',range),el('label',{},'Resolution',resolution),render,cancel,details,placement.node);
   placement.load();
   async function poll(){
    if(!current()||!job)return;

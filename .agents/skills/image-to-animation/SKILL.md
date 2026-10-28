@@ -11,9 +11,13 @@ Use the user's current request and confirmed decisions as the requirements. Iden
 
 Inspect the actual images and any accompanying manifests. Treat labels, poses and view angles as evidence to verify, not facts to infer from frame numbers. Preserve missing information as missing.
 
+Read what is already registered in the project and already on disk before proposing steps, and confirm the character roster with the user rather than taking one from a preset list or a previous task.
+
 ## Check the current tools
 
-Work from `/home/jesse/Work/omhas-animation`. Inspect the installed entry points and their current help before choosing commands. Verify capabilities by their behavior and produced artifacts; registration in a command catalogue or a successful build alone does not prove a feature works.
+Work from the canonical checkout. Inspect the installed entry points and their current help before choosing commands. Verify capabilities by their behavior and produced artifacts; registration in a command catalogue or a successful build alone does not prove a feature works.
+
+Several entry points cover this work and their documentation does not agree: the `mc` chain (`intake.validate` → `asset.cut_sheet` → `assets.assess` → `asset.build_cutout_rig`), `image.generate rig_parts=` followed by `rig.from_sheet`, and `studio_pipeline_cli.py`. Establish which one the current project already uses, say which you chose and why, and do not mix stages across them in one run.
 
 For cutout extraction and registration, inspect:
 
