@@ -69,12 +69,6 @@ function block(id, icon, title, meta, done, body, blockState, action) {
     el("div", { class: "block-body" }, el("div", {}, el("div", { class: "block-inner" }, body))));
 }
 
-async function chooseStoryboardTemplate() {
-  const path=await dialog.open({title:"Choose your storyboard template",filters:[{name:"DeckCraft template",extensions:["deckcraft","pptx"]}]});
-  if(!path)return;
-  await designCommand('storyboard.template',{path});
-  if(!state.data?.storyboard?.deck)await designCommand('storyboard.init',{empty:true});
-}
 
 function renderBlocks() {
   updateAppFooter();
@@ -151,8 +145,8 @@ function renderBlocks() {
   }},label);
   box.append(block('storyboard',ICONS.animate,'Storyboard',content?.state==='ready'?'Content filled':'Needs work',ready('storyboard'),[
     el('div',{class:'field-row'},
-      el('button',{id:'storyboard-template-pick',class:'ghost',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…'),
-      el('button',{id:'storyboard-template-open',class:'icon',disabled:!template,'aria-label':'Open template',title:template||'Choose a template first',html:$('sb-open-deck').innerHTML,onclick:()=>invoke('open_path',{path:template})})),
+      !sb?.deck ? el('button',{id:'storyboard-create',class:'ghost','data-commands':'storyboard.init',onclick:()=>designCommand('storyboard.init',{empty:true}).catch(error=>toast(String(error)))},'Create storyboard') : null,
+      el('button',{id:'storyboard-template-open',class:'icon',disabled:!template,'aria-label':'Edit storyboard template',title:template||'Magic Studio storyboard template',html:$('sb-open-deck').innerHTML,onclick:()=>invoke('open_path',{path:template})})),
     el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
     el('button',{id:'storyboard-discuss','data-drawer-toggle':'sproket',title:'Open Sproket to discuss the missing storyboard details',onclick:async()=>{
       const input=$('agent-input');

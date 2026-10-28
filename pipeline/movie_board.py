@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an editable Backlot-style scene document through DeckCraft, headlessly."""
+"""Build the editable Magic Studio storyboard from its single DeckCraft template."""
 import argparse, json, math, shutil, subprocess, shlex, re, hashlib, sys
 from pathlib import Path
 
@@ -188,8 +188,10 @@ def build(transcript, source, out, title, scene_map, allow_timing_overrun=False,
             for panel in group['panels']:panel['line_id']=next((l['id'] for l in group['lyric_lines'] if set(panel['word_ids'])<=set(l['word_ids'])),None)
         groups.append(group)
     config=dict(title=title,transcript=str(transcript),captions=metadata.get('captions'),allow_timing_overrun=allow_timing_overrun,duration_sec=metadata['duration_sec'],recording_duration_verified=metadata.get('recording_duration_verified',False),audio=metadata.get('audio'),project=metadata.get('project'),scene_content={p['id']:dict(sections=p.get('sections',{}),notes=p.get('notes',[]),source=p.get('source'),lines=p.get('lines',[])) for p in packets})
-    if not template: raise ValueError('Select a DeckCraft storyboard template first')
-    template=Path(template).resolve()
+    canonical_template=Path(_REPO_ROOT)/'pipeline/templates/studio-template.deckcraft'
+    template=Path(template).resolve() if template else canonical_template.resolve()
+    if template!=canonical_template.resolve():
+        raise ValueError('Magic Studio uses only pipeline/templates/studio-template.deckcraft')
     schema=template_schema(template,out)
     config['scene_content'],mapping=normalize_scene_content(packets,[f['role'] for f in schema['scene']])
     # Actual saved user fields take precedence over imported notes; lyrics remain native words.
@@ -273,6 +275,6 @@ if __name__=='__main__':
     if '--doctor' in sys.argv:
         p=argparse.ArgumentParser(description='Read-only source section boundary check');p.add_argument('--doctor',required=True);p.add_argument('--source',required=True);a=p.parse_args()
         print(json.dumps(doctor(a.doctor,a.source)));raise SystemExit(0)
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--allow-timing-overrun',action='store_true');p.add_argument('--transcript',required=True);p.add_argument('--template',required=True);p.add_argument('--scene-map',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);p.add_argument('--panels');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--allow-timing-overrun',action='store_true');p.add_argument('--transcript',required=True);p.add_argument('--template',default=str(Path(_REPO_ROOT)/'pipeline/templates/studio-template.deckcraft'));p.add_argument('--scene-map',required=True);p.add_argument('--source');p.add_argument('--out',required=True);p.add_argument('--title',required=True);p.add_argument('--panels');a=p.parse_args()
     try: print(json.dumps(build(a.transcript,a.source,a.out,a.title,a.scene_map,a.allow_timing_overrun,a.panels,a.template)))
     except subprocess.CalledProcessError as e: raise SystemExit(e.stderr or e.stdout or str(e))
