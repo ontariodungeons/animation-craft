@@ -153,3 +153,9 @@ venv/
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
+
+# Tool output directories (reports and audits, not source)
+.archify/
+.codacy/
+.superpowers/
+docs/codacy-report.md
