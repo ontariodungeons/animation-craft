@@ -131,7 +131,7 @@ combined publish command, not repeated LLM arithmetic. No automatic “back to d
 Latest source compiled successfully. 25agent-drawer browser checks pass. New command tests:
 headless place+save produced separate deck/PDF; real UI drop handler worked; user's own drag/scale/save
 worked; current scene read confirms placement. Alpha exporter and HF checks passed as above.
-Pre-commit hook runs cargo check/tests. No dependency upgrades in this checkpoint.
+Run cargo check and the tests that match the change, and report the real result. No dependency upgrades in this checkpoint.
 Many unrelated UNTRACKED files were present before our work; leave them alone. Do not stage all.
 Permanent app knowledge `agent.md` must NOT mention an earlier UI. Migration rules stay HANDOFF.
 

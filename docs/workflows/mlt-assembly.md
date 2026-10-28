@@ -77,5 +77,5 @@ Native format and consumer references:
 [MLT XML](https://www.mltframework.org/docs/mltxml/),
 [avformat consumer](https://www.mltframework.org/plugins/ConsumerAvformat/).
 Generic compiler regression tests run with
-`python3 -m unittest pipeline/test_mlt_animation_worker.py`; normal commit hooks run
-the Rust suite. This is a reusable assembly/export path, not a replacement editor.
+`python3 -m unittest pipeline/test_mlt_animation_worker.py`. Run the Rust tests that
+match the change and report the real result. This is a reusable assembly/export path, not a replacement editor.

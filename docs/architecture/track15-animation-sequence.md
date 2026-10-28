@@ -20,7 +20,7 @@
 - Track 15's latest intent requires shallow-water staging: sandbar, lagoon and tide pool. Do not restore the removed underwater/deep-sea backgrounds. Keep artist lyrics unchanged.
 - No subject names or guessed anatomy in algorithms. Part IDs, hierarchy, pivots, rigid/bending behavior, expressions and limits are data. Split only the parts needed for the requested action.
 - No automatic redraw of existing successful assets, silent source/subject fallback, or repeated registration of an already registered generated image.
-- Tests and compile checks follow AGENTS.md: `cargo check --workspace` during code work; Rust tests through normal commit hooks. This documentation-only review did not run those checks.
+- Tests and compile checks follow AGENTS.md: `cargo check --workspace` during code work; run the Rust tests that match the change and report the real result. This documentation-only review did not run those checks.
 
 ## What Rizzo actually left
 

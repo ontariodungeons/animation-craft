@@ -17,7 +17,6 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 
 ## Validation budget
 
-- Commit hooks check staged paths and whitespace with progress reporting.
 - GitHub has one lightweight sanity job, capped at three minutes, with one shared
   concurrency group for the whole repository. Do not add remote Rust builds, native
   app downloads, extra jobs, agent calls or runners without Jesse’s explicit approval.
@@ -33,8 +32,8 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - Use one shared build directory, `<repository>/target`, and one compiler job on this
   machine. Do not create a separate multi-GB build cache for each task. Retire merged,
   inactive, clean checkouts and disposable build files; preserve unfinished source.
-- Run required hooks through normal commits. Report their actual running, failed or
-  passed state and failure reason. Do not pretest, bypass hooks, or call an unrun check passed.
+- Report each check you actually ran, and whether it passed, failed, or was not run.
+  Do not claim an unrun check passed.
 
 - Active agents keep their review app open and report its real PID, control port,
   branch/worktree and build identity; Claude is exempt to conserve credits. Jesse
@@ -115,10 +114,9 @@ The application is `apps/magicstudio-shell` (Tauri). Build with `cargo build -p 
 - Run checks appropriate to your changes. Identify inherited failures against the
   base revision and report their owner; do not hide them or duplicate another
   agent's active fix. Do not bypass required PR checks.
-- Do not pretest code changes. Add meaningful tests, then make a normal `git commit`;
-  `.githooks/pre-commit` checks staged paths and whitespace with progress reporting.
-  Never bypass hooks. Build the app as needed to keep the visible preview open;
-  report actual hook outcomes.
+- Add meaningful tests for the change, run the checks that match it, and make a normal
+  `git commit`. Build the app as needed to keep the visible preview open. Report the
+  real command and whether it passed, failed, or was not run.
 
 ## Commit before handing work to another agent
 

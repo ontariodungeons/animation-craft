@@ -37,7 +37,7 @@ The running Studio (pid 1280318) predates both. After it runs this build: `mc --
 ## Lyrics panel (Rizzo owns words.js, Words CSS, words engine)
 
 Committed, not yet seen in the combined Studio:
-- 9937ce4c: the left column shows each sung line in its own lettering (the line design's font, weight, slant, colour and size) on paper; click a word to pick it, Shift-click adds or drops words in that line; Look edits (lettering, colour, outline, size, tilt) apply to every picked word. Stage about two thirds of the width; film roll wider. Text stays the sheet's. Test: `apps/magicstudio-shell/tests/words-lettering.mjs` (in the pre-commit hook).
+- 9937ce4c: the left column shows each sung line in its own lettering (the line design's font, weight, slant, colour and size) on paper; click a word to pick it, Shift-click adds or drops words in that line; Look edits (lettering, colour, outline, size, tilt) apply to every picked word. Stage about two thirds of the width; film roll wider. Text stays the sheet's. Test: `apps/magicstudio-shell/tests/words-lettering.mjs`.
 - 67d41400 + sheet edit: the sung ending repeat is its own section (verse 5, second time, lines 1–2), so it gets its own design and words in the panel.
 - e5bc1512: `words.captions to=video` puts the printed lines in the video's caption track.
 

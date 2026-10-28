@@ -1,6 +1,6 @@
 # Video Project Wiring Implementation Plan
 
-> **For agentic workers:** Claim paths in the Sam ledger first (single main checkout, serialized commits). Tests run only through `.githooks/pre-commit`. Steps use checkbox (`- [ ]`) syntax. Owner: assigned by Jesse.
+> **For agentic workers:** Claim paths in the Sam ledger first (single main checkout, serialized commits). Run the tests that match the change and report the real result. Steps use checkbox (`- [ ]`) syntax. Owner: assigned by Jesse.
 
 **Goal:** One stored answer to "where is this song's video project", read the same way by engine, UI, TUI and CLI, and visible as a panel signal when it is missing.
 
@@ -41,7 +41,7 @@
 
 The original report: an agent said "no project created", or a created project was not wired into the app.
 
-- [x] Reproduced as regression tests in `crates/engine/tests/wiring_state.rs` (no manual probes; the commit hook runs them). See "Observed".
+- [x] Reproduced as regression tests in `crates/engine/tests/wiring_state.rs`. See "Observed".
 
 ### Task 1: One resolver, legacy migration on open
 

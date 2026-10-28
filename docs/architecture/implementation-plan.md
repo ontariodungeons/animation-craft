@@ -113,7 +113,7 @@ Run these gates in order. Update this checklist with commit SHAs and evidence as
 
 ### 5. Delivery
 
-- [ ] Run `cargo check --workspace` during development and required tests through normal commit hooks. Never bypass the hooks.
+- [ ] Run `cargo check --workspace` during development and the tests the change requires. Report the real command and result. Do not claim an unrun check passed.
 - [ ] Build the actual shell and CLI, verify the gates in a task-owned instance and close that instance cleanly afterward.
 - [ ] Save screenshots, measurements, test results and the CLI/TUI contract under `docs/architecture/`; update this plan with actual results and blockers.
 - [ ] Send the named TUI agent the branch/worktree, base/new SHAs, exact schema and commands, evidence and PR status. Jesse's authorization covers that handoff once the recipient is supplied.
@@ -155,7 +155,7 @@ The manifest now activates the original honey dog and orange cat, with ten decod
 
 Evidence: `live-pets-results.json`, `pet-layout-results.json`, `complete-components.json`, `final-panel-report.json`, `pets-idle-homes.png`, `pets-missing-state-red.png`, `pets-tui-attention.png`, and `pets-700.png`, all in this project's `docs/architecture/evidence/`. Tests use a clearly identified disposable project fixture; no song content or authored animation is fabricated or modified. Existing fish-and-bee motion engines are unchanged by this final activation.
 
-Remaining delivery work at this checkpoint: normal commit hooks, independent final review, and scoped PR. No merge is authorized. The TUI recipient has not been supplied; the durable contract and committed code are the handoff artifact.
+Remaining delivery work at this checkpoint: the checks the change requires, independent final review, and scoped PR. No merge is authorized. The TUI recipient has not been supplied; the durable contract and committed code are the handoff artifact.
 
 ### Independent final review
 

@@ -12,8 +12,7 @@ use serde_json::{Value, json};
 use crate::workspace::resolve_craft_cli;
 
 /// A file at or above this many lines is reported as a long file. The limit is
-/// configurable in code-limits.json at the repository root, which is also what
-/// the commit hook enforces.
+/// configurable in code-limits.json at the repository root.
 const COMPLEXITY_LONG_FILE_LINES: u64 = 2000;
 
 fn long_file_limit(root: &Path) -> u64 {

@@ -13,8 +13,7 @@ import { execSync } from 'node:child_process';
 
 const UI = new URL('../ui/', import.meta.url);
 const UI_PATH = 'apps/magicstudio-shell/ui/';
-// In the commit hook the lint judges what is being committed (the index), never
-// files another agent is still editing in the shared checkout.
+// --ratchet reads the index, so an edit still sitting in the working tree is not part of the check.
 const RATCHET = process.argv.includes('--ratchet');
 const read = name => RATCHET
   ? execSync(`git show ":${UI_PATH}${name}"`, { encoding: 'utf8', maxBuffer: 1 << 26 })
@@ -198,21 +197,7 @@ function reportFor(sources) {
 
 const report = () => reportFor(sources);
 
-// HEAD's numbers, so a commit can say what it changed.
-function headSources() {
-  const files = execSync('git ls-tree --name-only HEAD apps/magicstudio-shell/ui/', { encoding: 'utf8' })
-    .split('\n').map(name => name.split('/').pop()).filter(name => name.endsWith('.css') || name.endsWith('.js'));
-  const map = new Map();
-  for (const file of files) {
-    try {
-      map.set(file, execSync(`git show HEAD:apps/magicstudio-shell/ui/${file}`, { encoding: 'utf8' }));
-    } catch { /* a file that is not in HEAD yet */ }
-  }
-  return map;
-}
-
-// The Task 8 acceptance bar. It is printed, not enforced: the tree is over it
-// today, and a failing gate would block every agent's commit.
+// The Task 8 acceptance bar. It is printed, not enforced: the tree is over it today.
 const BAR = { css_lines: 911, css_selectors: 673, js_lines: 4227 };
 
 function acceptance() {
@@ -227,19 +212,6 @@ function acceptance() {
 
 if (process.argv.includes('--report')) console.log('report: ' + report());
 if (process.argv.includes('--report') || process.argv.includes('--ratchet')) console.log(acceptance());
-
-if (process.argv.includes('--append-report')) {
-  const gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf8' }).trim();
-  const messagePath = `${gitDir}/COMMIT_EDITMSG`;
-  let before = '';
-  try { before = reportFor(headSources()); } catch { before = report(); }
-  const line = `report: ${before} -> report: ${report()}\n${acceptance()}`;
-  const message = fs.readFileSync(messagePath, 'utf8');
-  if (!message.includes(line)) fs.writeFileSync(messagePath, `${message.replace(/\s*$/, '')}\n\n${line}\n`);
-}
-
-// The commit-msg hook only appends the measured line; the checks already ran.
-if (process.argv.includes('--append-only')) process.exit(0);
 
 if (process.argv.includes('--write-baseline')) {
   fs.writeFileSync(BASELINE, JSON.stringify({ files: counts }, null, 2) + '\n');

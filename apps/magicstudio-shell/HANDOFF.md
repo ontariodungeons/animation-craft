@@ -74,7 +74,7 @@ Coordinate overlapping files before editing; this historical handoff assigns no 
   pages), `home.js` (Home: New song, Open, recent cards), `agent.js` (agent drawer: opencode session or Herdr
   agent, permissions, questions, model, Point, paste or drop pictures), `bridge.js`, `style.css` (tokens on `:root`).
 - Build: `cargo build -p magicstudio-shell` (the `ui/` folder is embedded at build time, so rebuild after UI edits).
-  The pre-commit hook runs `cargo check` and the tests.
+  Run `cargo check` and the tests that match the change, and report the real result.
 
 ## Next: the Animation view (top bar: Home · Project | Animation | Studio; Split only while the server is on)
 

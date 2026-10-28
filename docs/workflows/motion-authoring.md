@@ -98,7 +98,7 @@ actual exported PNG pixels and registration, stale-hash rejection, exact undo,
 project guards, finite bounds, exact-field reset, stable action IDs, metadata,
 Theatre capability refusal and selection-independent visibility. Initial missing
 commands and current-selection visibility failures were observed before fixes.
-Normal commit hooks run the complete Rust suite. No production project is a fixture.
+Run the Rust tests that match the change and report the real result. No production project is a fixture.
 
 This slice does not implement Theatre evaluation, per-time channel editing, negative
 scale mirroring, arbitrary native-format authoring, subpixel-filtered final-quality

@@ -82,7 +82,7 @@ at 24 FPS. Copy its directory to a temporary bundle and create a temporary `.mag
 project for actual native checks. Never use a production song as the fixture.
 `python3 -m unittest pipeline/test_native_animation_worker.py` checks source
 freezing, dependency escape rejection, fresh sequence completeness and PNG decode.
-Normal commit hooks run engine and workspace checks/tests.
+Run the engine and workspace checks that match the change and report the real result.
 
 Real installed Synfig 1.4.5 verification on 2026-10-23: decoded 24 frames, alpha
 0–255 retained in PNGs and clip, first/middle/last circle centroids moved across

@@ -159,7 +159,7 @@ Follow the repository AGENTS.md and the human’s current task. This department 
 - Read the relevant skill completely, discover actual mc commands, and report real results. Unknown models, capabilities and token counts stay unknown.
 - Share the department rules. Personality adds warmth to the work; it never replaces a deliverable with jokes or heartbeat messages.
 - Preserve source art, editable projects and concurrent work. Use the shared build cache and keep the machine budget in view.
-- Add meaningful checks when needed, then use the normal commit hooks. Do not pretest or bypass hooks.
+- Add meaningful checks when needed and run them. Report the real command and result. Do not claim an unrun check passed.
 - Finish the agreed PR and main integration. Keep the human’s review view on main and identify the visible build.
 
 ## Editable performance

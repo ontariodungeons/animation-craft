@@ -4,4 +4,4 @@ Approved scope: align STAGES; reserve green for status lights in the artwork pan
 
 Implementation stays in `apps/mc`: `center/booth.rs` owns the project overview, chat presentation and activity border; `center.rs` integrates them; `center/control.rs` and CLI help expose the same controls. Reuse cached engine observations; no new poller, app launch or real chat submission during verification.
 
-Verify stage alignment, narrow layouts, active versus stale/completed border behavior, draft retention and offline chat feedback. Compile and build, reload the existing TUI, inspect its actual frame, then commit using the required hooks.
+Verify stage alignment, narrow layouts, active versus stale/completed border behavior, draft retention and offline chat feedback. Compile and build, reload the existing TUI, inspect its actual frame, then commit. Report the checks that actually ran.

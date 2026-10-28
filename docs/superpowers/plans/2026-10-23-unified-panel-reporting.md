@@ -1,6 +1,6 @@
 # Unified Panel Reporting Implementation Plan
 
-> **For agentic workers:** Each task names its owner. Claim your paths in the Sam ledger before editing (single main checkout, serialized commits). Tests run only through the pre-commit hook. Steps use checkbox (`- [ ]`) syntax.
+> **For agentic workers:** Each task names its owner. Claim your paths in the Sam ledger before editing (single main checkout, serialized commits). Run the tests that match the change and report the real result. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Every UI panel carries one standard record with a few flags, so the TUI and CLI read (and check) the whole UI generically: no per-switch commands, no DOM scraping, no per-panel Rust code.
 
@@ -28,12 +28,12 @@ You are one of several agents in ONE shared checkout. This file is the contract.
 
 - Do only your task number. Claim its paths in `design/coordination/handoff-ledger.md` (C35) before editing.
 - Commit with `git commit --only <your paths>`. Never stage, revert, stash or merge files you did not write.
-- Tests run only through `.githooks/pre-commit`. Write the failing test first; let the hook run it.
+- Write the failing test first, then run it and report the real result.
 - Use the names in "The contract" and "The style contract" exactly. Do not invent fields, classes, tokens or commands.
 - No per-panel or per-character logic: code loops over panels and looks.
 - No silent fallbacks: a missing registry, look or Studio is reported, never drawn as a default.
 - If the plan is wrong or a step fails, stop and report `file:line` to the coordinator (Claude, pane wG:pS). Do not improvise.
-- **No manual test runs.** Never run `node tests/…`, `cargo test` or probes by hand. To run tests, commit: the pre-commit hook runs them. If the hook fails, fix and commit again.
+- Run the test that matches the change and report the real command and result. Do not claim an unrun check passed.
 - Report each commit SHA to the coordinator in one line.
 
 ```mermaid
@@ -66,18 +66,18 @@ The design is locked by a ratchet, not by a big-bang rewrite. Any commit that to
 | # | Owner | Delivers | Paths (claim in ledger) | Waits on |
 |---|---|---|---|---|
 | 1 | Rizzo | Boxes survive a project switch | `ui/companion-boxes.js`, `ui/companions.js`, `ui/app.js:224-230`, `tests/companions.mjs` | — |
-| 2 | Beaker | Panel record + change-only revision + unconfigured list in `ui.feedback` | `ui/companion-boxes.js`, `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs`, `.githooks/pre-commit` | 1 |
+| 2 | Beaker | Panel record + change-only revision + unconfigured list in `ui.feedback` | `ui/companion-boxes.js`, `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs` | 1 |
 | 3 | Rizzo | Rust `panels` types; `studios.rs` on a `Studio` struct | `crates/engine/src/panels.rs`, `crates/engine/src/lib.rs`, `crates/engine/tests/panels.rs`, `apps/mc/src/studios.rs` | — |
 | 4 | Rizzo | `mc panels [--json\|--check]` reading `components.json` from disk | `apps/mc/src/main.rs`, `apps/mc/src/panels.rs`, `apps/magicstudio-shell/src/bridge.rs` | 2, 3 |
 | 5 | Gonzo | TUI panel rows + "Unconfigured UI" row, redraw on revision | `apps/mc/src/center/panels.rs` (new), `apps/mc/src/center.rs` | 3 |
 | 6 | Rizzo | Per-pet timer + cooldown | `ui/companions.js`, `tests/companions.mjs` | 1 |
-| 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline in the hook | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
+| 7 | Beaker | One `dot()`, one panel component, colour tokens, `ui-lint` baseline | `ui/style.css`, `ui/*.js` call sites, `tests/ui-lint.mjs`, `tests/ui-lint.baseline.json` | 2 |
 
 | 8 | Beaker | `components.json` (one entry per element) + one `style.css`; no inline styling; looks/density as token sets | `ui/components.json`, `ui/style.css`, `ui/app.js` `el()`, inline-style sites, `tests/ui-lint.mjs`, `tests/panels.mjs` | 7 |
 | 9 | Gonzo | TUI theme: colours and styles only in `theme.rs`, palette read from `style.css` | `apps/mc/src/theme.rs` (new), `apps/mc/src/center*.rs`, `apps/mc/src/logo.rs` | 5, 8 |
 | 10 | Statler | Words / lyrics (Design > Words, Song sub-sections) onto the contract; land unmerged `5c4be84`, `550162d` | `ui/words.js`, Song region of `ui/app.js`, Design tab in `ui/index.html`, `crates/engine/src/words.rs` | 8 (UI part) |
 
-`ui/` and `tests/` are under `apps/magicstudio-shell/`. Shared files (`companion-boxes.js`, `.githooks/pre-commit`) change in the order above, one owner at a time.
+`ui/` and `tests/` are under `apps/magicstudio-shell/`. Shared files (`companion-boxes.js`) change in the order above, one owner at a time.
 
 Companion plan: `docs/superpowers/plans/2026-10-23-magic-studio-wiring-refactor.md` (video project path). Its Task 3 reports wiring as a panel through this contract, so it starts after Task 2 here.
 
@@ -196,7 +196,7 @@ The panel record carries `look` from the entry. The TUI signal colours come from
 - [ ] Tests in `panels.mjs`: `panels() shape matches contract`; `revision unchanged when nothing changed` (call panels() twice, and flag() with the same value); `revision bumps once per real change`; `unconfigured lists clickable without data-box-id ancestor`; `child of registered panel is configured`; `panel() refuses flag with no handler` (exact message from the contract).
 - [ ] Implement. Remove the registry methods that have no callers after this change (`fact`, `observe`, `resolve`, `markUnavailable` — grep first; keep any with a caller).
 - [ ] `feedbackSnapshot()` sends `panels: companionBoxes.panels()` (keep `boxes` until Task 4 lands, then delete it).
-- [ ] Add `node apps/magicstudio-shell/tests/panels.mjs` and `node apps/magicstudio-shell/tests/companions.mjs` to `.githooks/pre-commit` next to `agent-selection.mjs`.
+- [ ] Run `node apps/magicstudio-shell/tests/panels.mjs` and `node apps/magicstudio-shell/tests/companions.mjs` and report the real result.
 - [ ] Commit `feat(ui): panels report flags and unconfigured controls through feedback (#23)`.
 
 ### Task 3 (Rizzo): Engine `panels` types + `Studio` struct
@@ -245,7 +245,7 @@ The panel record carries `look` from the entry. The TUI signal colours come from
 
 **Produces:** `dot(state, variant?)` is the only indicator builder; CSS `.dot[data-signal="0|1|2|3"]` + `[data-variant="pulse|ring|hollow"]` (shape only), size via `--dot-size`; tokens `--signal-0..3`, plus `--danger`, `--info`, `--surface-3` (for `#212631`) in `:root`. Panel component classes `.panel-head`, `.panel-empty`, `.panel-status` replace `.agent-head .block-head .magic-pane-head .motion-object-head .sb-head .song-section-head .theatre-head`, `.home-empty .magic-compare-empty .motion-empty .sb-empty .studio-empty .theatre-empty`, `.agent-status .magic-part-status .footer-status`; size/density differences become modifiers (`.panel-head.compact`), not new families. Duplicate rules (`.magic-pane-head` ×2, `.motion-object-head` ×2, `.sb-empty` ×4, `.agent-toggle` ×2) merge.
 
-- [ ] `ui-lint.mjs` counts: hex literals outside `:root`; `class: 'dot ` / `className = \`dot` outside `companion-boxes.js`; retired class names in CSS/JS. Fails when any count exceeds `ui-lint.baseline.json`. Start baseline at today's counts; add to `.githooks/pre-commit`.
+- [ ] `ui-lint.mjs` counts: hex literals outside `:root`; `class: 'dot ` / `className = \`dot` outside `companion-boxes.js`; retired class names in CSS/JS. Fails when any count exceeds `ui-lint.baseline.json`. Start baseline at today's counts.
 - [ ] Migrate family by family (dot → head → empty → status), lowering the baseline in the same commit each time. Visual check of each view with the live-window screenshot recipe before each commit.
 - [ ] Final baseline: retired names 0, hand-built dots 0, hex outside `:root` 0.
 - [ ] Commits `refactor(ui): one indicator …`, `refactor(ui): one panel head …`, etc. (#23).

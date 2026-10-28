@@ -151,7 +151,7 @@ Storyboards and media commands operate in the selected project. `video.init targ
 | Tool resolution | `crates/engine/src/workspace.rs` |
 | Current Studio interaction contract | `apps/magicstudio-shell/agent.md` |
 
-Read `AGENTS.md` before changes. Run `cargo check --workspace`; normal commit hooks run workspace checks/tests. Commit explicit owned paths; no generated media, credentials or local agent configuration. Source history is recovered through Git, not duplicated application trees in this checkout.
+Read `AGENTS.md` before changes. Run `cargo check --workspace` and the checks that match the change, and report what actually ran. Commit explicit owned paths; no generated media, credentials or local agent configuration. Source history is recovered through Git, not duplicated application trees in this checkout.
 
 Shared audio intake retains the official HyperFrames audio project and deterministically binds native timed words into `compositions/captions.html` using the versioned official caption-highlight template. `video.init captions=true` is idempotent: unchanged input preserves caption-source edits and `caption-overrides.json`; changed timing conflicts rather than overwriting an edited source. Initial five-word groups are provisional, not semantic/listening approval. `project.intake hyperframes_cli=/absolute/path` uses the same operation; its audio extraction skips optional beat analysis (`audio.analyze analyze_beats=false`) because captions do not require librosa.
 

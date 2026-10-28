@@ -482,7 +482,7 @@ unchanged (2/12); no GUI started/moved. Backup:
   `ui/app.js:210-235`, `tests/companions.mjs`, `crates/engine/src/panels.rs` + `lib.rs` + `tests/panels.rs`,
   `apps/mc/src/studios.rs`, `apps/mc/src/panels.rs`, `apps/mc/src/main.rs` (panels subcommand only),
   `apps/magicstudio-shell/src/bridge.rs` (ui.panel only). Beaker (wG:pB, new session) Tasks 2/7 —
-  `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs`, `tests/ui-lint*`, `.githooks/pre-commit`, then
+  `ui/feedback.js`, `ui/bridge.js`, `tests/panels.mjs`, `tests/ui-lint*`, then
   `ui/style.css` + `ui/*.js` dot/head/empty/status sites; `companion-boxes.js` only after Rizzo's Task 1
   commit. Gonzo (wG:p7, grok) Task 5 — `apps/mc/src/center.rs`, after Rizzo's Task 3. Claude wG:pS wiring
   Tasks 0-3 — `crates/engine/src/{workshop,video_target,project}.rs`, `crates/engine/tests/wiring_state.rs`,

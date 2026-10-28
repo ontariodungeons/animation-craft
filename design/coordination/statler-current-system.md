@@ -25,6 +25,6 @@ Scooter all Animation controls, export/pose/native dialogs. Waldorf native rende
 ## Next
 1. Read current main UI/commands and your two final commits; send concise committed handoff for5c4be84/550162d (behavior, files, checks, limits), no repeat research.
 2. Continue usable Words/Artwork integration against actual library contracts, coordinate mapped source/instance interfaces with Fozzie. A compose file alone is NOT round trip.
-3. Keep tasks concrete; no repeated visual audits or project-specific tests. Jesse judges visuals. Normal commit hooks; no bypass. Save small coherent commits and send SHA promptly.
+3. Keep tasks concrete; no repeated visual audits or project-specific tests. Jesse judges visuals. Run the checks that match the task and report the real result. Save small coherent commits and send SHA promptly.
 
 Issues: https://github.com/ontariodungeons/animation-craft/issues/26 (Words/Artwork), #23 native tools, #24 Backstage.

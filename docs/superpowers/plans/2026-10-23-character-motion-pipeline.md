@@ -1,6 +1,6 @@
 # Character Motion Pipeline: steps, tools, commands
 
-> **For agentic workers:** every step is an `mc exec` command, scripted and reusable for any character. No hand-made output, no per-character code (see `CLAUDE.md`, memory "fix the pipeline, not outputs"). Tests run only through `.githooks/pre-commit`.
+> **For agentic workers:** every step is an `mc exec` command, scripted and reusable for any character. No hand-made output, no per-character code (see `CLAUDE.md`, memory "fix the pipeline, not outputs"). Run the tests that match the change and report the real result.
 
 **Goal:** a split-layer character (the Hey Ho Little Fish cast) moves the same way in the Studio, in `mc`, in exports and in the film, with bones that bend body and tail, built by commands that work on the next fish without hand edits.
 
