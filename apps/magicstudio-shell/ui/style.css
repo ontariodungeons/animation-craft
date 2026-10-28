@@ -1190,3 +1190,14 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 .char-thumb-card.is-active { border-color:var(--accent); color:var(--text); }
 .char-thumb-card img, .char-sheet-card img { width:100%; height:var(--size-46); object-fit:contain; background:var(--thumb-bg); border-radius:var(--size-4); }
 .theatre-ruler span { left:var(--tick-position,0%); }
+
+/* Analytics keeps architecture and evidence inside the existing tab. */
+#view-analytics .analytics-grid { grid-template-columns: repeat(auto-fit,minmax(min(100%,240px),1fr)); }
+#view-analytics .analytics-architecture { min-width: 0; }
+#view-analytics .analytics-diagram { display: block; width: 100%; height: clamp(360px,65vh,760px); border: thin solid var(--line); border-radius: var(--radius); background: var(--surface); }
+#view-analytics .analytics-provenance, #view-analytics .analytics-command-group { margin-block: var(--space-3); padding: var(--space-3); border: thin solid var(--line); border-radius: var(--radius); }
+#view-analytics summary { cursor: pointer; color: var(--text); }
+#view-analytics code, #view-analytics pre { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); }
+#view-analytics .learning-summary { min-width: 0; }
+#view-analytics .learning-bar { flex-wrap: wrap; gap: var(--space-3); }
+#view-analytics #analytics-command-search { width: 100%; box-sizing: border-box; }

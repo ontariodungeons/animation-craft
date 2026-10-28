@@ -90,8 +90,24 @@
     },
     "analytics-refresh": {
       "component": "control",
-      "label": "Refresh metrics",
+      "label": "Refresh data",
       "command": "app.analytics",
+      "target": "view-analytics"
+    },
+    "analytics-scan": {
+      "component": "control",
+      "label": "Refresh scan",
+      "command": "app.analytics",
+      "target": "view-analytics"
+    },
+    "analytics-diagram-select": {
+      "component": "control",
+      "label": "Architecture reference",
+      "target": "view-analytics"
+    },
+    "analytics-command-search": {
+      "component": "control",
+      "label": "Find current command",
       "target": "view-analytics"
     },
     "blocks": {

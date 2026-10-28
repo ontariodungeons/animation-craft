@@ -111,9 +111,77 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 
 /// Measure the repository's complexity and reading cost.
 pub fn read(root: &Path, scan: bool) -> Value {
+    let cache = root.join("target/analytics/lizard.json");
+    let revision = source_revision(root);
+    let dirty = source_dirty(root);
+    let previous = std::fs::read(&cache).ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(|v| v["available"] == true && v["source_root"] == root.to_string_lossy().as_ref());
     if !scan {
-        return json!({ "available": false, "reason": "Scan disabled" });
+        return previous.map(|value| cached_result(value, &revision, dirty)).unwrap_or_else(||
+            json!({"available":false,"tool":"lizard","state":"not_measured","reason":"No saved scan. Refresh scan to measure code.","source_root":root,"current_revision":revision}));
     }
+    let mut result = measure(root);
+    result["tool"] = json!("lizard");
+    let executable = resolve_craft_cli("lizard");
+    let executable_path = if Path::new(&executable).is_file() {Some(std::path::PathBuf::from(&executable))} else {
+        std::env::var_os("PATH").and_then(|paths|std::env::split_paths(&paths).map(|path|path.join(&executable)).find(|path|path.is_file()))
+    };
+    result["tool_path"] = json!(executable_path);
+    result["tool_version"] = json!(std::process::Command::new(&executable).arg("--version").output().ok().filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).trim().to_string()));
+    result["targets"] = json!(scan_targets(root));
+    result["source_root"] = json!(root);
+    result["source_revision"] = json!(revision);
+    result["source_dirty"] = json!(dirty);
+    result["measured_at_unix_secs"] = json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|v|v.as_secs()));
+    result["cached"] = json!(false);
+    result["state"] = json!(if result["available"] == true {"measured"} else {"error"});
+    if result["available"] != true {
+        let error = "Lizard returned no measurements; check tool availability and scan_failures.";
+        if let Some(value) = previous {
+            let mut saved = cached_result(value, &revision, dirty);
+            saved["last_error"] = json!(error);
+            saved["scan_failures"] = result["scan_failures"].clone();
+            return saved;
+        }
+        result["reason"] = json!(error);
+        return result;
+    }
+    let save = || -> std::io::Result<()> {
+        std::fs::create_dir_all(cache.parent().expect("cache has parent"))?;
+        // A unique temporary file prevents concurrent scans from truncating the saved result.
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|v|v.as_nanos()).unwrap_or(0);
+        let temporary = cache.with_extension(format!("{}-{stamp}.tmp",std::process::id()));
+        let bytes = serde_json::to_vec(&result).map_err(std::io::Error::other)?;
+        std::fs::write(&temporary, bytes)?;
+        if let Err(error) = std::fs::rename(&temporary, &cache) {let _=std::fs::remove_file(temporary);return Err(error);}
+        Ok(())
+    };
+    if let Err(error) = save() {result["cache_error"] = json!(error.to_string());}
+    result
+}
+
+fn source_revision(root: &Path) -> Option<String> {
+    std::process::Command::new("git").args(["rev-parse","HEAD"]).current_dir(root).output().ok()
+        .filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+fn source_dirty(root: &Path) -> Option<bool> {
+    std::process::Command::new("git").args(["status","--porcelain","--untracked-files=normal","--",
+        "crates/engine/src","apps/mc/src","apps/magicstudio-shell/src","apps/magicstudio-shell/ui","pipeline","scripts","code-limits.json"])
+        .current_dir(root).output().ok().filter(|o|o.status.success()).map(|o|!o.stdout.is_empty())
+}
+
+fn cached_result(mut value: Value, revision: &Option<String>, dirty: Option<bool>) -> Value {
+    value["cached"] = json!(true);
+    value["current_revision"] = json!(revision);
+    value["state"] = json!(if revision.is_none() || dirty.is_none() || dirty == Some(true) || value["source_dirty"] != false {
+        "worktree_unverified"
+    } else if value["source_revision"] != json!(revision) {"stale"} else {"saved"});
+    value
+}
+
+fn measure(root: &Path) -> Value {
     let lizard_bin = resolve_craft_cli("lizard");
     let long_file_limit = long_file_limit(root);
     let targets = scan_targets(root);

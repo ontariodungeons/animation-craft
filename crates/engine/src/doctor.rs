@@ -69,7 +69,7 @@ pub fn cmd_app_analytics(s: &mut Session, params: &Value) -> Result<Value> {
     let scan = params
         .get("scan")
         .and_then(Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
     let doctor = cmd_app_doctor(s, &json!({ "clean": false }))?;
     let host = read_host_telemetry();
     let usage = read_omarchy_usage();
@@ -85,6 +85,9 @@ pub fn cmd_app_analytics(s: &mut Session, params: &Value) -> Result<Value> {
         "usage": usage,
         "project": project,
         "complexity": complexity,
+        "sampled_at_unix_secs": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|v|v.as_secs()),
+        "sources": {"host":"/proc","usage":"Omarchy local usage records","project":"Project session and .agent chat log; estimated tokens = characters / 4"},
+        "commands": crate::workshop::cmd_query_list(s, &json!({}))?,
     }))
 }
 
@@ -97,20 +100,18 @@ fn read_host_telemetry() -> Value {
                 .find(|l| l.starts_with("VmRSS:"))
                 .and_then(|l| l.split_whitespace().nth(1))
                 .and_then(|v| v.parse::<u64>().ok())
-        })
-        .unwrap_or(0);
+        });
     let load = std::fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| s.split_whitespace().take(3).collect::<Vec<_>>().join(" ").into())
-        .unwrap_or_default();
-    let mut mem_total_kb = 0u64;
-    let mut mem_avail_kb = 0u64;
+        .and_then(|s| s.split_whitespace().take(3).collect::<Vec<_>>().join(" ").into());
+    let mut mem_total_kb: Option<u64> = None;
+    let mut mem_avail_kb: Option<u64> = None;
     if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
         for line in meminfo.lines() {
             if let Some(rest) = line.strip_prefix("MemTotal:") {
-                mem_total_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                mem_total_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok());
             } else if let Some(rest) = line.strip_prefix("MemAvailable:") {
-                mem_avail_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                mem_avail_kb = rest.split_whitespace().next().and_then(|v| v.parse().ok());
             }
         }
     }
@@ -119,7 +120,7 @@ fn read_host_telemetry() -> Value {
         "self_rss_kb": self_rss_kb,
         "load": load,
         "mem_total_kb": mem_total_kb,
-        "mem_used_kb": mem_total_kb.saturating_sub(mem_avail_kb),
+        "mem_used_kb": mem_total_kb.zip(mem_avail_kb).map(|(total,available)|total.saturating_sub(available)),
     })
 }
 

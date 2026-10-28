@@ -744,8 +744,8 @@ pub fn build() -> Vec<CommandSpec> {
         ),
         query!(
             "app.analytics",
-            "Analytics: Code Complexity & Status",
-            "{\"scan\": true}",
+            "Analytics: Saved Code Measurements & Status",
+            "{\"scan\": false}",
             cmd_app_analytics
         ),
         query!(

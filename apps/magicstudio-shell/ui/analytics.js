@@ -1,250 +1,121 @@
-// Analytics view: code complexity (lizard), Omarchy & project token spend, and app/tool health.
-const analyticsState = { data: null, section: 'overview', loading: false, error: null };
-const ANALYTICS_SECTIONS = [
-  ['overview', 'Overview'],
-  ['tokens', 'Token Spend'],
-  ['complexity', 'Code Complexity'],
-  ['health', 'App & Tool Health'],
+// Analytics reads saved measurements on entry. Scanning is an explicit action, never a timer.
+const analyticsState = { data: null, section: 'overview', loading: false, error: null, diagram: 'creator', commandFilter: '' };
+const ANALYTICS_SECTIONS = [['overview','Overview'],['complexity','Code Complexity'],['tokens','Recorded Usage'],['health','App & Tool Health'],['commands','Command Reference']];
+// Existing Archify exports, packaged byte-for-byte. They are references, not live system models.
+const ANALYTICS_DIAGRAMS = [
+  {id:'creator',file:'creator-view.html',title:'Creator’s loop',source:'Existing Magic Studio creator workflow · saved 27 Oct 2026',revision:null},
+  {id:'openmontage',file:'openmontage-evidence.html',title:'OpenMontage pipeline',source:'calesthio/OpenMontage · evidence-linked reference',revision:'3cd5700b977bcd63644a3118cc1783df1cb002c8'},
 ];
-
-function fmtCount(n) {
-  const num = Number(n || 0);
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}k`;
-  return String(num);
+function fmtCount(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  return Number(value).toLocaleString(undefined,{maximumFractionDigits:1});
 }
-
-async function renderAnalytics(scan = true) {
-  const root = $('view-analytics');
-  if (!root) return;
-  analyticsMount();
-  analyticsState.loading = true;
-  analyticsState.error = null;
-  const msg = $('analytics-message');
-  if (msg) msg.textContent = scan ? 'Scanning code complexity & reading token telemetry…' : 'Reading telemetry…';
-  try {
-    analyticsState.data = await invoke('engine_command', { id: 'app.analytics', params: { scan } });
-    analyticsState.loading = false;
+function analyticsTime(seconds) {return seconds == null ? 'time unavailable' : new Date(seconds*1000).toLocaleString();}
+function analyticsCard(title,value,description) {return el('div',{class:'learning-summary'},el('h3',{},title),el('strong',{},value),el('p',{},description));}
+function analyticsGrid(...cards) {return el('div',{class:'learning-grid analytics-grid'},...cards);}
+function analyticsCode(comp,key) {return comp.available === true ? fmtCount(comp[key]) : '—';}
+function analyticsMemory(kb) {return kb == null ? '—' : `${fmtCount(Number(kb)/1024)} MB`;}
+async function renderAnalytics(scan = false) {
+  if (!$('view-analytics') || analyticsState.loading) return;
+  analyticsMount();analyticsState.loading=true;analyticsState.error=null;
+  $('analytics-refresh').disabled=true;$('analytics-scan').disabled=true;
+  $('analytics-message').textContent=scan?'Running Lizard on local source…':'Reading saved scan and recorded telemetry…';
+  try {analyticsState.data=await invoke('engine_command',{id:'app.analytics',params:{scan}});}
+  catch(error){analyticsState.error=String(error);}
+  finally {
+    analyticsState.loading=false;$('analytics-refresh').disabled=false;$('analytics-scan').disabled=false;
     analyticsRenderSurface();
-  } catch (e) {
-    analyticsState.loading = false;
-    analyticsState.error = String(e);
-    if (msg) msg.textContent = analyticsState.error;
   }
 }
-
 function analyticsMount() {
-  const root = $('view-analytics');
-  if (!root || $('analytics-layout')) return;
-  const nav = el('nav', { class: 'learning-categories', 'aria-label': 'Analytics sections' },
-    ...ANALYTICS_SECTIONS.map(([id, label]) => el('button', {
-      id: `analytics-nav-${id}`,
-      class: 'ghost',
-      title: `Show ${label}`,
-      onclick: () => { analyticsState.section = id; analyticsRenderSurface(); },
-    }, label))
-  );
-  const rail = el('aside', { class: 'learning-rail', id: 'analytics-rail', 'aria-label': 'Analytics navigation' },
-    el('h2', {}, 'Analytics'),
-    nav,
-    el('div', { id: 'analytics-rail-summary', class: 'learning-task-list' }),
-  );
-  const refreshBtn = el('button', {
-    id: 'analytics-refresh',
-    class: 'start',
-    title: 'Refresh token usage, host telemetry and run Lizard complexity scan',
-    'data-commands': 'app.analytics',
-    onclick: () => renderAnalytics(true),
-  }, 'Refresh metrics');
-  const main = el('main', { class: 'learning-main', id: 'analytics-main' },
-    el('header', { class: 'learning-bar', id: 'analytics-bar' },
-      el('span', { class: 'learning-breadcrumb', id: 'analytics-breadcrumb' }, 'Analytics · Overview'),
-      el('div', { class: 'learning-actions' }, refreshBtn),
-    ),
-    el('p', { class: 'learning-message', id: 'analytics-message' }, ''),
-    el('div', { class: 'learning-surface', id: 'analytics-surface' }),
-  );
-  root.replaceChildren(el('div', { class: 'learning-layout', id: 'analytics-layout' }, rail, main));
+  if ($('analytics-layout')) return;
+  const nav=el('nav',{class:'learning-categories','aria-label':'Analytics sections'},...ANALYTICS_SECTIONS.map(([id,label])=>el('button',{
+    id:`analytics-nav-${id}`,class:'ghost',onclick:()=>{analyticsState.section=id;analyticsRenderSurface();},
+  },label)));
+  const rail=el('aside',{class:'learning-rail','aria-label':'Analytics navigation'},el('h2',{},'Analytics'),nav,el('div',{id:'analytics-rail-summary',class:'learning-task-list'}));
+  const actions=el('div',{class:'learning-actions'},
+    el('button',{id:'analytics-refresh',class:'ghost',title:'Read saved scan and current telemetry without running Lizard','data-commands':'app.analytics',onclick:()=>renderAnalytics(false)},'Refresh data'),
+    el('button',{id:'analytics-scan',class:'start',title:'Explicitly measure local Rust, Python and shell JavaScript with Lizard','data-commands':'app.analytics',onclick:()=>renderAnalytics(true)},'Refresh scan'));
+  const main=el('main',{class:'learning-main',id:'analytics-main'},
+    el('header',{class:'learning-bar'},el('h2',{id:'analytics-breadcrumb',class:'learning-breadcrumb'},'Analytics'),actions),
+    el('p',{id:'analytics-message',class:'learning-message',role:'status'}),el('div',{id:'analytics-surface',class:'learning-surface'}));
+  $('view-analytics').replaceChildren(el('div',{class:'learning-layout',id:'analytics-layout'},rail,main));
 }
-
+function analyticsDiagram(surface) {
+  const selected=ANALYTICS_DIAGRAMS.find(item=>item.id===analyticsState.diagram)||ANALYTICS_DIAGRAMS[0];
+  const picker=el('select',{id:'analytics-diagram-select','aria-label':'Architecture reference',onchange:event=>{analyticsState.diagram=event.target.value;analyticsRenderSurface();}},
+    ...ANALYTICS_DIAGRAMS.map(item=>el('option',{value:item.id},item.title)));
+  picker.value=selected.id;
+  surface.append(el('section',{class:'analytics-architecture','aria-label':'Architecture reference'},
+    el('div',{class:'learning-bar'},el('h2',{},'How the work fits together'),picker),
+    el('p',{class:'muted'},selected.source+(selected.revision?` · revision ${selected.revision}`:'')),
+    el('iframe',{id:'analytics-diagram-frame',class:'analytics-diagram',title:selected.title,
+      src:`analytics-diagrams/${selected.file}?theme=dark&embed=1`,sandbox:'allow-scripts',
+      onerror:()=>{$('analytics-diagram-status').textContent='Diagram could not load. The source reference is shown above.';}}),
+    el('p',{id:'analytics-diagram-status',class:'muted'},'Saved Archify reference. Measurements below describe this Magic Studio source; they are not measurements of the diagram’s boxes.')));
+}
 function analyticsRenderSurface() {
-  const surface = $('analytics-surface');
-  if (!surface) return;
-  const d = analyticsState.data || {};
-  const usage = d.usage || {};
-  const totals = usage.totals || {};
-  const proj = d.project || {};
-  const comp = d.complexity || {};
-  const host = d.host || {};
-  const tools = d.tools || [];
-
-  ANALYTICS_SECTIONS.forEach(([id, label]) => {
-    const btn = $(`analytics-nav-${id}`);
-    if (btn) btn.classList.toggle('active', analyticsState.section === id);
-    if (btn && analyticsState.section === id) {
-      const bc = $('analytics-breadcrumb');
-      if (bc) bc.textContent = `Analytics · ${label}`;
-    }
-  });
-
-  const railSummary = $('analytics-rail-summary');
-  if (railSummary) {
-    const availTools = tools.filter(t => t.available).length;
-    railSummary.replaceChildren(
-      el('div', { class: 'learning-task' },
-        el('strong', {}, `${fmtCount(totals.today_tokens)} tokens today`),
-        el('small', {}, `${totals.today_prompts || 0} prompts · ${fmtCount(proj.estimated_tokens)} in project`),
-      ),
-      el('div', { class: 'learning-task' },
-        el('strong', {}, `${comp.functions_over_ccn_15 ?? 0} CCN > 15 hotspots`),
-        el('small', {}, `${comp.files_analyzed ?? 0} files · ${fmtCount(comp.total_nloc)} NLOC · max CCN ${comp.max_ccn ?? 0}`),
-      ),
-      el('div', { class: 'learning-task' },
-        el('strong', {}, `${comp.long_files ?? 0} long files`),
-        el('small', {}, `≥ ${comp.long_file_threshold_lines ?? 600} lines · ${comp.ui_files_analyzed ?? 0} UI files · ${fmtCount(comp.total_source_lines)} lines`),
-      ),
-      el('div', { class: 'learning-task' },
-        el('strong', {}, `${availTools}/${tools.length} Craft tools`),
-        el('small', {}, `RSS ${(Number(host.self_rss_kb || 0) / 1024).toFixed(0)} MB · load ${host.load || '—'}`),
-      ),
-    );
-  }
-
-  const msg = $('analytics-message');
-  if (msg) {
-    msg.textContent = analyticsState.error || `Live telemetry from /proc, Omarchy agent state, and ${comp.tool || 'lizard'} static analysis.`;
-  }
-
+  const surface=$('analytics-surface');if(!surface)return;
+  const d=analyticsState.data||{},comp=d.complexity||{},usage=d.usage||{},totals=usage.available?usage.totals||{}:{},host=d.host||{},project=d.project||{};
+  const section=analyticsState.section;
+  for(const [id,label] of ANALYTICS_SECTIONS){const button=$(`analytics-nav-${id}`);button.classList.toggle('active',id===section);button.setAttribute('aria-pressed',String(id===section));if(id===section)$('analytics-breadcrumb').textContent=`Analytics · ${label}`;}
+  $('analytics-message').textContent=analyticsState.error?`Could not refresh: ${analyticsState.error}. Previous results, if any, remain below.`:
+    `Read ${analyticsTime(d.sampled_at_unix_secs)} · no background scans or polling`;
+  $('analytics-rail-summary').replaceChildren(el('p',{class:'muted'},comp.available?`${analyticsCode(comp,'files_analyzed')} measured files · ${comp.cached?'saved scan':'last explicit scan'}`:'Code has not been measured here.'),
+    el('p',{class:'muted'},'Current CLI: mc. The proposed magic CLI is pending.'));
   surface.replaceChildren();
-  const sec = analyticsState.section;
-
-  if (sec === 'overview' || sec === 'tokens') {
-    surface.append(
-      el('h2', {}, 'Token Spend & Agent Activity'),
-      el('div', { class: 'learning-grid' },
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Project Session (.agent)'),
-          el('code', {}, `${fmtCount(proj.estimated_tokens)} est. tokens`),
-          el('p', {}, `${proj.total_turns || 0} chat turns (${proj.user_turns || 0} user / ${proj.assistant_turns || 0} assistant) · ${proj.assets_count || 0} connected assets`),
-        ),
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Today Across Agents'),
-          el('code', {}, `${fmtCount(totals.today_tokens)} tokens`),
-          el('p', {}, `${totals.today_prompts || 0} prompts today across ${usage.agents?.length || 0} active agents`),
-        ),
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Cumulative Recorded Usage'),
-          el('code', {}, `${fmtCount(totals.total_tokens)} total`),
-          el('p', {}, `Input: ${fmtCount(totals.input_tokens)} · Output: ${fmtCount(totals.output_tokens)} · Cache Read: ${fmtCount(totals.cache_read_tokens)}`),
-        ),
-      ),
-    );
-    if (usage.agents?.length) {
-      surface.append(
-        el('div', { class: 'learning-grid learning-task-grid' },
-          ...usage.agents.map(ag => {
-            const topModels = (ag.models || []).slice(0, 3).map(m => `${m.model}: ${fmtCount(m.total_tokens)}`).join(' · ');
-            return el('div', { class: 'learning-summary', id: `analytics-agent-${ag.id}` },
-              el('h3', {}, `${ag.name || ag.id}${ag.tier ? ` (${ag.tier})` : ''}`),
-              el('code', {}, `Today: ${fmtCount(ag.today_tokens)} (${ag.today_prompts} prompts) · Total: ${fmtCount(ag.total_tokens)}`),
-              el('p', {}, `In ${fmtCount(ag.input_tokens)} · Out ${fmtCount(ag.output_tokens)} · Cache ${fmtCount(ag.cache_read_tokens)}`),
-              topModels ? el('small', { class: 'muted' }, topModels) : null,
-            );
-          }),
-        ),
-      );
-    }
+  if(section==='overview')analyticsDiagram(surface);
+  if(section==='overview'||section==='complexity')analyticsComplexity(surface,comp,section);
+  if(section==='overview'||section==='tokens') {
+    surface.append(el('h2',{},'Recorded usage · not billing'),analyticsGrid(
+      analyticsCard('Today’s recorded tokens',fmtCount(totals.today_tokens),usage.available?`${fmtCount(totals.today_prompts)} prompts · Omarchy local records`:'Omarchy usage records unavailable.'),
+      analyticsCard('Cumulative recorded tokens',fmtCount(totals.total_tokens),`Input ${fmtCount(totals.input_tokens)} · output ${fmtCount(totals.output_tokens)} · cache ${fmtCount(totals.cache_read_tokens)}`),
+      analyticsCard('Project chat estimate',project.project?fmtCount(project.estimated_tokens):'—',project.project?`${fmtCount(project.total_turns)} turns · ${fmtCount(project.assets_count)} assets · characters ÷ 4; not provider usage`:'No project selected.')));
+    if(section==='tokens')for(const agent of usage.agents||[])surface.append(analyticsCard(agent.name||agent.id,`${fmtCount(agent.today_tokens)} tokens today`,
+      `${fmtCount(agent.total_prompts)} total prompts · ${fmtCount(agent.total_sessions)} sessions · ${(agent.models||[]).map(model=>`${model.model}: ${fmtCount(model.total_tokens)}`).join(' · ')}`));
   }
-
-  if (sec === 'overview' || sec === 'complexity') {
-    surface.append(
-      el('h2', {}, 'Code Complexity (Lizard)'),
-      el('div', { class: 'learning-grid' },
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Source Footprint'),
-          el('code', {}, `${fmtCount(comp.total_nloc)} NLOC`),
-          el('p', {}, `${comp.files_analyzed || 0} source files · ${comp.functions_analyzed || 0} functions (Rust + Python)`),
-        ),
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Cyclomatic Hotspots'),
-          el('code', {}, `${comp.functions_over_ccn_15 || 0} functions > CCN 15`),
-          el('p', {}, `Highest CCN: ${comp.max_ccn || 0} · Threshold: 15`),
-        ),
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Lexer Token Volume'),
-          el('code', {}, `${fmtCount(comp.total_code_tokens)} code tokens`),
-          el('p', {}, `Measured by ${comp.tool || 'lizard'} without compiling`),
-        ),
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Long Files'),
-          el('code', {}, `${comp.long_files || 0} files ≥ ${comp.long_file_threshold_lines || 600} lines`),
-          el('p', {}, `${comp.ui_files_analyzed || 0} shell UI modules scanned · ${fmtCount(comp.total_source_lines)} source lines`),
-        ),
-      ),
-    );
-    if (comp.longest_files?.length) {
-      const limit = comp.long_file_threshold_lines || 2000;
-      surface.append(
-        el('h3', {}, 'Longest files (reading cost)'),
-        el('div', { class: 'learning-grid learning-task-grid' },
-          ...comp.longest_files.map((file, idx) => el('div', {
-            class: 'learning-summary',
-            id: `analytics-long-file-${idx}`,
-          },
-            el('h3', {}, `${file.file} · ${file.lines} lines${file.lines > limit ? ' · FIX THIS' : ''}`),
-            el('code', {}, `CCN ${file.ccn} · max ${file.max_ccn} · ${file.functions} functions`),
-          )),
-        ),
-      );
-    }
-    if (comp.largest_ccn_files?.length) {
-      surface.append(
-        el('h3', {}, 'Highest complexity files'),
-        el('div', { class: 'learning-grid learning-task-grid' },
-          ...comp.largest_ccn_files.map((file, idx) => el('div', {
-            class: 'learning-summary',
-            id: `analytics-ccn-file-${idx}`,
-          },
-            el('h3', {}, `${file.file} · CCN ${file.ccn}`),
-            el('code', {}, `${file.lines} lines · max CCN ${file.max_ccn} · ${file.functions} functions`),
-          )),
-        ),
-      );
-    }
-    if (comp.hotspots?.length) {
-      surface.append(
-        el('div', { class: 'learning-grid learning-task-grid' },
-          ...comp.hotspots.slice(0, sec === 'complexity' ? 24 : 9).map((fn, idx) => el('div', {
-            class: 'learning-summary',
-            id: `analytics-hotspot-${idx}`,
-          },
-            el('h3', {}, `${fn.name} (CCN ${fn.ccn})`),
-            el('code', {}, `${fn.file}:${fn.start_line}-${fn.end_line}`),
-            el('p', {}, `${fn.nloc} NLOC · ${fn.tokens} tokens · ${fn.params} params`),
-          )),
-        ),
-      );
-    }
+  if(section==='overview'||section==='health') {
+    surface.append(el('h2',{},'Host and tool observations'),analyticsGrid(
+      analyticsCard('This process',analyticsMemory(host.self_rss_kb),`PID ${host.pid??'—'} · source /proc`),
+      analyticsCard('System RAM',analyticsMemory(host.mem_used_kb),`Total ${analyticsMemory(host.mem_total_kb)} · load ${host.load||'unavailable'}`)));
+    if(section==='health')surface.append(analyticsGrid(...(d.tools||[]).map(tool=>analyticsCard(tool.tool,tool.available?'Executable found':'Not found',tool.resolved+' · path check only'))),
+      el('p',{class:'muted'},'Executable presence is not a successful run. Codacy findings and CodeGraph measurements are not connected to this view.'));
   }
-
-  if (sec === 'overview' || sec === 'health') {
-    const usedGb = (Number(host.mem_used_kb || 0) / 1048576).toFixed(1);
-    const totalGb = (Number(host.mem_total_kb || 0) / 1048576).toFixed(1);
-    const selfMb = (Number(host.self_rss_kb || 0) / 1024).toFixed(1);
-    surface.append(
-      el('h2', {}, 'App Status & Craft Tool Health'),
-      el('div', { class: 'learning-grid' },
-        el('div', { class: 'learning-summary' },
-          el('h3', {}, 'Engine Process'),
-          el('code', {}, `PID ${host.pid || '?'} · ${selfMb} MB RSS`),
-          el('p', {}, `Host load: ${host.load || '—'} · System RAM: ${usedGb} GB / ${totalGb} GB`),
-        ),
-        ...tools.map(t => el('div', { class: 'learning-summary', id: `analytics-tool-${t.tool}` },
-          el('h3', {}, t.tool),
-          el('code', {}, t.available ? 'Available' : 'Missing'),
-          el('p', {}, t.resolved || ''),
-        )),
-      ),
-    );
+  if(section==='commands')analyticsCommands(surface,d.commands);
+}
+function analyticsComplexity(surface,comp,section) {
+  surface.append(el('h2',{},'Code measurements · Lizard'));
+  if(!comp.available){surface.append(el('p',{class:'panel-empty'},comp.reason||'No saved scan. Use Refresh scan to measure local source.'));return;}
+  const stateLabel={measured:'Explicit scan',saved:'Saved scan',stale:'Saved scan · revision changed',worktree_unverified:'Saved scan · worktree changes not verified'}[comp.state]||'Saved measurement';
+  surface.append(el('p',{class:'muted'},`${stateLabel} · ${analyticsTime(comp.measured_at_unix_secs)} · ${comp.tool||'lizard'}${comp.tool_version?' '+comp.tool_version:''}`),
+    el('details',{class:'analytics-provenance'},el('summary',{},'Measurement source and coverage'),
+      el('code',{},`${comp.source_root||'Source root unavailable'}\nrevision ${comp.source_revision||'unavailable'}\nWorktree at scan: ${comp.source_dirty===true?'changed':comp.source_dirty===false?'clean':'unknown'}\n${comp.tool_path||'Tool path unavailable'}\nTargets: ${(comp.targets||[]).join(', ')}`)),
+    analyticsGrid(analyticsCard('Functions over CCN 15',analyticsCode(comp,'functions_over_ccn_15'),`Max CCN ${analyticsCode(comp,'max_ccn')} · ${analyticsCode(comp,'functions_analyzed')} functions`),
+      analyticsCard('Source size',analyticsCode(comp,'total_source_lines'),`${analyticsCode(comp,'files_analyzed')} files · ${analyticsCode(comp,'total_nloc')} NLOC`),
+      analyticsCard('Long files',analyticsCode(comp,'long_files'),`Threshold ${fmtCount(comp.long_file_threshold_lines)} lines · ${analyticsCode(comp,'ui_files_analyzed')} UI modules`)));
+  if(comp.last_error||comp.cache_error)surface.append(el('p',{role:'status'},comp.last_error||`Measured, but could not save scan: ${comp.cache_error}`));
+  if(comp.scan_failures?.length)surface.append(el('p',{role:'status'},`Partial coverage / failed targets: ${comp.scan_failures.join(', ')}`));
+  if(section!=='complexity')return;
+  for(const [key,title] of [['longest_files','Longest measured files'],['largest_ccn_files','Highest complexity files']]) {
+    surface.append(el('h3',{},title),analyticsGrid(...(comp[key]||[]).map((file,index)=>el('div',{class:'learning-summary',id:`analytics-${key}-${index}`},
+      el('h3',{},file.file),el('code',{},`${fmtCount(file.lines)} lines · CCN ${fmtCount(file.ccn)} · max ${fmtCount(file.max_ccn)} · ${fmtCount(file.functions)} functions`)))));
   }
+  surface.append(el('h3',{},'Function hotspots'),analyticsGrid(...(comp.hotspots||[]).slice(0,24).map((fn,index)=>el('div',{class:'learning-summary',id:`analytics-hotspot-${index}`},
+    el('h3',{},`${fn.name} · CCN ${fmtCount(fn.ccn)}`),el('code',{},`${fn.file}:${fn.start_line}–${fn.end_line}`),el('p',{},`${fmtCount(fn.nloc)} NLOC · ${fmtCount(fn.tokens)} code tokens · ${fmtCount(fn.params)} parameters`)))));
+}
+function analyticsCommands(surface,catalog) {
+  surface.append(el('h2',{},'Current command reference'),el('p',{class:'muted'},'Read directly from the shared engine command.list metadata. These are mc commands. Future magic names and automatic Archify generation are pending; no workflow edges are inferred from command names.'));
+  if(!catalog?.commands){surface.append(el('p',{class:'panel-empty'},'Command metadata unavailable. Refresh data to read it.'));return;}
+  const input=el('input',{id:'analytics-command-search',type:'search',placeholder:'Find a command or feature','aria-label':'Find current command',value:analyticsState.commandFilter,
+    oninput:event=>{analyticsState.commandFilter=event.target.value;analyticsCommandRows(catalog.commands);}});
+  surface.append(input,el('div',{id:'analytics-command-list'}));analyticsCommandRows(catalog.commands);
+}
+function analyticsCommandRows(commands) {
+  const root=$('analytics-command-list');if(!root)return;
+  const filter=analyticsState.commandFilter.toLowerCase();const selected=commands.filter(command=>`${command.id} ${command.label} ${command.params}`.toLowerCase().includes(filter));
+  const groups=new Map();for(const command of selected){const key=command.menu?.[0]||command.id.split('.')[0];if(!groups.has(key))groups.set(key,[]);groups.get(key).push(command);}
+  root.replaceChildren(el('p',{class:'muted'},`${selected.length} of ${commands.length} commands · parameter descriptions are examples, not required/optional schemas`));
+  for(const [name,items]of groups)root.append(el('details',{class:'analytics-command-group'},el('summary',{},`${name} · ${items.length}`),
+    ...items.map(command=>el('article',{class:'learning-summary'},el('h3',{},command.label),el('code',{},`mc exec ${command.id} [key=value ...]`),
+      el('p',{},`Menu: ${(command.menu||[]).join(' / ')||'no menu placement'} · Shortcut: ${command.shortcut||'none'}`),el('pre',{},command.params)))));
 }
