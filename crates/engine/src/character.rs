@@ -88,8 +88,7 @@ pub fn load_character_config(s: &Session, id: &str, project_root: Option<&Path>)
 }
 
 pub(crate) fn animation_panel(cfg: &Value) -> Value {
-    if cfg.is_null() { return Value::Null; }
-    json!({"name":cfg["name"],"active_angle":cfg["active_angle"].as_str().unwrap_or("front"),
+    json!({"available":cfg.is_object(),"name":cfg["name"],"active_angle":cfg["active_angle"].as_str().unwrap_or("front"),
         "direction":cfg["direction"].as_str().unwrap_or("right"),"sheets":cfg["sheets"],
         "angles":cfg["angles"].as_object().map(|m| m.values().cloned().collect::<Vec<_>>()).unwrap_or_default(),
         "poses":cfg["poses"].as_object().map(|m| m.values().cloned().map(|mut p| {

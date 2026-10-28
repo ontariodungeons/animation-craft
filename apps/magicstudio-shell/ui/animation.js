@@ -281,7 +281,7 @@ function motionExportControl(){
 }
 function renderCharacterMagicPanel(meta,pickActionTrack){
  const cfg=meta?.character_panel;
- if(!cfg)return el('div',{class:'char-magic-panel',hidden:''});
+ if(!cfg.available)return el('div',{class:'char-magic-panel',hidden:''});
  const angleEntries=cfg.angles;
  const poseEntries=cfg.poses;
  const switchAngle=async(angleId)=>{
