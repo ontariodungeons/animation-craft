@@ -418,7 +418,7 @@ def project_list(extra: tuple[str, ...]) -> None:
     """List recent `.magic` projects and their readiness."""
     sess = get_session()
     kv = parse_kv_args(extra)
-    emit(sess.execute("project.catalog", kv, bridge=_BRIDGE))
+    emit(sess.execute("project.catalog", kv, bridge=_BRIDGE, dry_run=_DRY_RUN))
 
 
 @project.command("save")

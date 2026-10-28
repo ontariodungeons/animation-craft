@@ -133,6 +133,8 @@ READ_ONLY_COMMANDS = {
 def is_read_only_command(cmd_id: str, params: dict[str, Any] | None = None) -> bool:
     """Return True if `cmd_id` with `params` is a pure read-only query."""
     p = params or {}
+    if cmd_id == "project.catalog":
+        return not isinstance(p.get("forget"), str)
     if cmd_id in READ_ONLY_COMMANDS:
         return True
     if cmd_id == "project.root":
@@ -412,6 +414,8 @@ class Session:
             )
 
         # 5. Headless engine execution
+        if is_dry and cmd_id == "project.catalog" and not is_read_only_command(cmd_id, req):
+            return {"ok": True, "dry_run": True, "command": cmd_id, "params": req}
         if is_dry and not is_read_only_command(cmd_id, req):
             return backend.execute_headless(cmd_id, req, dry_run=True)
 
