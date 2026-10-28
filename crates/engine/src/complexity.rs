@@ -35,9 +35,6 @@ fn scan_targets(root: &Path) -> Vec<String> {
         "pipeline".to_string(),
         "scripts".to_string(),
     ];
-    if root.join("apps/mc/src").exists() {
-        targets.push("apps/mc/src".to_string());
-    }
     let ui_dir = root.join("apps/magicstudio-shell/ui");
     let Ok(entries) = std::fs::read_dir(ui_dir) else {
         return targets;
