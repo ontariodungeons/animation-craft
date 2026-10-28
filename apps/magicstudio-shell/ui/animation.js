@@ -301,13 +301,15 @@ function renderCharacterMagicPanel(meta,pickActionTrack){
   title:`Turn model to ${a.label} (${a.degrees ?? 0}°) · ${a.image||''}`,
   onclick:()=>switchAngle(a.id)
  },a.image_path?el('img',{src:motionAssetUrl(a.image_path,meta.rig_sha256),alt:a.label}):null,el('span',{},a.label))));
- const poseCards=el('div',{class:'char-pose-grid','aria-label':'Generated pose & sprite frames'},...poseEntries.map(p=>el('button',{
+ const poseCards=el('div',{class:'char-pose-grid','aria-label':'Generated pose & sprite frames'},...poseEntries.map(p=>{
+  const active=!motion.rest&&p.track_ids.includes(motion.track);
+  return el('button',{
   id:`char-pose-${p.id}`,
-  class:`char-thumb-card${(!motion.rest&&p.track_ids.includes(motion.track))?' active':''}`,
-  'aria-pressed':String(!motion.rest&&p.track_ids.includes(motion.track)),
+  class:`char-thumb-card${active?' active':''}`,
+  'aria-pressed':String(active),
   title:`${p.word} single animation (${p.angle||'front'}) · ${p.image||''}`,
   onclick:()=>pickActionTrack(p.id)
- },p.image_path?el('img',{src:motionAssetUrl(p.image_path,meta.rig_sha256),alt:p.word}):null,el('span',{},p.word))));
+ },p.image_path?el('img',{src:motionAssetUrl(p.image_path,meta.rig_sha256),alt:p.word}):null,el('span',{},p.word));}));
  const sheetsRow=el('div',{class:'char-sheets-row'});
  for(const [k,label] of [['turnaround','Turnaround Sheet'],['poses','Pose Sheet'],['skeleton','Limb Sheet']]){
   const sp=cfg.sheets?.[k];
