@@ -8,7 +8,7 @@ from pipeline.layered_motion import channel,oscillate_at
 project,spec_path,character=sys.argv[1:]
 raw=json.loads(Path(spec_path).read_text()); spec={**raw,'layers':{l['id']:l for l in raw['layers']}}
 cmds=[{'id':'project.open','params':{'path':project}}]+[{'id':'motion.sample','params':{'character':character,'track':t['id'],'fps':raw['fps']}} for t in raw['tracks']]
-r=subprocess.run(['./target/debug/mc','run','-'],input='\n'.join(map(json.dumps,cmds)),capture_output=True,text=True,check=True)
+r=subprocess.run(['magic','run','-'],input='\n'.join(map(json.dumps,cmds)),capture_output=True,text=True,check=True)
 results=[json.loads(x)['result'] for x in r.stdout.splitlines()][1:]
 checked=0;worst=0
 for track,result in zip(raw['tracks'],results):

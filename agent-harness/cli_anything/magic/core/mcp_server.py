@@ -51,12 +51,134 @@ def _infer_schema(example: Any) -> dict[str, Any]:
     return {}
 
 
+BRIDGE_UI_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "app_open",
+        "cmd_id": "app.open",
+        "description": (
+            "Open a Magic Studio project in its own window, or a new blank window when "
+            "project is omitted. Attaches this session to the live window."
+        ),
+        "properties": {
+            "project": {"type": "string", "description": "Optional existing .magic file"},
+        },
+    },
+    {
+        "name": "ui_state",
+        "cmd_id": "ui.state",
+        "description": "Read live Studio window state (project, view, animation subject, track, playhead).",
+        "properties": {},
+    },
+    {
+        "name": "ui_elements",
+        "cmd_id": "ui.elements",
+        "description": "List visible clickable elements in the live Studio window with IDs, labels, and bounding boxes.",
+        "properties": {
+            "region": {"type": "string", "description": "Optional CSS selector region filter"},
+        },
+    },
+    {
+        "name": "ui_click",
+        "cmd_id": "ui.click",
+        "description": "Click a visible UI element in the live Studio window by ID or aria label.",
+        "properties": {
+            "id": {"type": "string", "description": "Element ID or aria-label"},
+            "target": {"type": "string", "description": "Alternative target ID"},
+            "instance": {"type": "number", "description": "Zero-based index when IDs repeat"},
+            "files": {"type": "array", "items": {"type": "string"}, "description": "Optional file paths for file inputs"},
+        },
+    },
+    {
+        "name": "ui_set",
+        "cmd_id": "ui.set",
+        "description": "Set an input, textarea, or select control value in the live Studio window.",
+        "properties": {
+            "id": {"type": "string", "description": "Element ID"},
+            "target": {"type": "string", "description": "Alternative target ID"},
+            "value": {"type": "string", "description": "Value to set"},
+            "instance": {"type": "number", "description": "Zero-based index when IDs repeat"},
+        },
+    },
+    {
+        "name": "ui_key",
+        "cmd_id": "ui.key",
+        "description": "Send a key press to the live Studio window.",
+        "properties": {
+            "key": {"type": "string", "description": "Key name (e.g. Enter, Escape, Space)"},
+            "id": {"type": "string", "description": "Optional target element ID"},
+            "instance": {"type": "number", "description": "Zero-based index when IDs repeat"},
+        },
+    },
+    {
+        "name": "ui_drag",
+        "cmd_id": "ui.drag",
+        "description": "Drag a control or canvas point in the live Studio window.",
+        "properties": {
+            "id": {"type": "string", "description": "Optional element ID"},
+            "from": {"type": "array", "items": {"type": "number"}},
+            "to": {"type": "array", "items": {"type": "number"}},
+        },
+    },
+    {
+        "name": "ui_look",
+        "cmd_id": "ui.look",
+        "description": (
+            "See the live Magic Studio window in one call: optionally click an element "
+            "first, then return a PNG image of the window plus app state and clickable IDs."
+        ),
+        "properties": {
+            "region": {"type": "string"},
+            "click": {"type": "string"},
+            "max_side": {"type": "number"},
+            "pad": {"type": "number"},
+        },
+    },
+    {
+        "name": "ui_screenshot",
+        "cmd_id": "ui.screenshot",
+        "description": "Save a PNG screenshot of the live Studio window.",
+        "properties": {
+            "output": {"type": "string", "description": "Optional output PNG path"},
+        },
+    },
+    {
+        "name": "ui_focus",
+        "cmd_id": "ui.focus",
+        "description": "Bring the bound Magic Studio window to the front.",
+        "properties": {},
+    },
+    {
+        "name": "ui_eval",
+        "cmd_id": "ui.eval",
+        "description": "Evaluate JavaScript in the project webview.",
+        "properties": {
+            "js": {"type": "string", "description": "JavaScript code to evaluate"},
+        },
+    },
+    {
+        "name": "ui_unconfigured",
+        "cmd_id": "ui.unconfigured",
+        "description": "List unconfigured UI controls in the live Studio window.",
+        "properties": {},
+    },
+    {
+        "name": "app_quit",
+        "cmd_id": "app.quit",
+        "description": "Quit the live Magic Studio window bound to this session.",
+        "properties": {},
+    },
+]
+
+
 def build_mcp_tools() -> list[dict[str, Any]]:
-    """Build the MCP tool list from the live engine command registry."""
+    """Build the MCP tool list from the live engine command registry plus bridge UI controls."""
     specs = backend.list_engine_commands()
     tools: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
     for spec in specs:
         cmd_id = spec["id"]
+        tool_name = cmd_id.replace(".", "_")
+        seen_names.add(tool_name)
         props: dict[str, Any] = {}
         try:
             described = json.loads(spec.get("params") or "{}")
@@ -74,7 +196,7 @@ def build_mcp_tools() -> list[dict[str, Any]]:
         }
         tools.append(
             {
-                "name": cmd_id.replace(".", "_"),
+                "name": tool_name,
                 "description": f"{spec['label']} ({spec.get('params', '{}')})",
                 "inputSchema": {
                     "type": "object",
@@ -84,55 +206,21 @@ def build_mcp_tools() -> list[dict[str, Any]]:
             }
         )
 
-    tools.append(
-        {
-            "name": "app_open",
-            "description": (
-                "Open a Magic Studio project in its own window, or a new blank window when "
-                "project is omitted. Attaches this session to the live window."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "description": "Optional existing .magic file",
-                    }
+    for btool in BRIDGE_UI_TOOLS:
+        if btool["name"] in seen_names:
+            continue
+        seen_names.add(btool["name"])
+        tools.append(
+            {
+                "name": btool["name"],
+                "description": btool["description"],
+                "inputSchema": {
+                    "type": "object",
+                    "properties": dict(btool["properties"]),
+                    "additionalProperties": True,
                 },
-                "additionalProperties": False,
-            },
-        }
-    )
-    tools.append(
-        {
-            "name": "ui_look",
-            "description": (
-                "See the live Magic Studio window in one call: optionally click an element "
-                "first, then return a PNG image of the window plus app state and clickable IDs."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "region": {"type": "string"},
-                    "click": {"type": "string"},
-                    "max_side": {"type": "number"},
-                    "pad": {"type": "number"},
-                },
-                "additionalProperties": False,
-            },
-        }
-    )
-    tools.append(
-        {
-            "name": "app_quit",
-            "description": "Quit the live Magic Studio window bound to this session.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        }
-    )
+            }
+        )
     return tools
 
 
@@ -165,6 +253,9 @@ def run_mcp_stdio(session: Session, bridge: str | None = None) -> None:
     id_lookup = {s["id"].replace(".", "_"): s["id"] for s in specs}
     for s in specs:
         id_lookup[s["id"]] = s["id"]
+    for btool in BRIDGE_UI_TOOLS:
+        id_lookup[btool["name"]] = btool["cmd_id"]
+        id_lookup[btool["cmd_id"]] = btool["cmd_id"]
 
     stop_after_reply = False
     for line in sys.stdin:

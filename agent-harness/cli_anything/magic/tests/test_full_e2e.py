@@ -151,6 +151,175 @@ class TestCLISubprocess:
         assert replies[0]["result"]["protocolVersion"] == "2026-07-28"
         assert replies[0]["result"]["serverInfo"]["name"] == "magic"
         tools = replies[1]["result"]["tools"]
-        assert any(t["name"] == "project_open" for t in tools)
+        tool_names = {t["name"] for t in tools}
+        assert "project_open" in tool_names
+        assert {"ui_look", "ui_click", "ui_set", "ui_key", "ui_state"}.issubset(tool_names)
         status_payload = json.loads(replies[2]["result"]["content"][0]["text"])
         assert Path(status_payload["project_dir"]).resolve() == proj.parent.resolve()
+
+    def test_cli_live_bridge_mutation_does_not_overwrite_project_file(self, tmp_path: Path) -> None:
+        """Finding 1 (E2E): One-shot CLI `magic project add-asset` over a live bridge must not overwrite newer .magic data."""
+        import socket
+        import threading
+
+        env = self._isolated_env(tmp_path)
+        proj = tmp_path / "LiveCli.magic"
+        self._run(["--json", "project", "new", "-o", str(proj), "--name", "LiveCli"], env_extra=env)
+
+        sock_path = tmp_path / "live-cli.sock"
+
+        def bridge_server() -> None:
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            srv.bind(str(sock_path))
+            srv.listen(2)
+            try:
+                conn, _ = srv.accept()
+                with conn:
+                    raw = conn.makefile("r", encoding="utf-8").readline()
+                    req = json.loads(raw)
+                    disk_doc = json.loads(proj.read_text(encoding="utf-8"))
+                    disk_doc.setdefault("assets", []).append(
+                        {"id": "bridge-written-asset", "path": req["params"]["path"]}
+                    )
+                    proj.write_text(json.dumps(disk_doc, indent=2), encoding="utf-8")
+                    conn.sendall(
+                        (
+                            json.dumps(
+                                {
+                                    "ok": True,
+                                    "result": {
+                                        "id": "bridge-written-asset",
+                                        "path": req["params"]["path"],
+                                    },
+                                }
+                            )
+                            + "\n"
+                        ).encode("utf-8")
+                    )
+            finally:
+                srv.close()
+
+        t = threading.Thread(target=bridge_server, daemon=True)
+        t.start()
+
+        res = self._run(
+            [
+                "--json",
+                "--bridge",
+                f"unix:{sock_path}",
+                "project",
+                "add-asset",
+                "sprites/bee.png",
+                "--kind",
+                "image",
+            ],
+            env_extra=env,
+        )
+        t.join(timeout=2.0)
+        assert res.returncode == 0
+        saved_doc = json.loads(proj.read_text(encoding="utf-8"))
+        assert len(saved_doc.get("assets", [])) == 1
+        assert saved_doc["assets"][0]["id"] == "bridge-written-asset"
+
+    def test_dry_run_project_save_o_does_not_create_file(self, tmp_path: Path) -> None:
+        """Finding 2: `magic --dry-run project save -o <temp-path>` must not create the file."""
+        env = self._isolated_env(tmp_path)
+        proj = tmp_path / "Base.magic"
+        self._run(["--json", "project", "new", "-o", str(proj), "--name", "Base"], env_extra=env)
+
+        save_as_target = tmp_path / "ShouldNotBeCreated.magic"
+        res = self._run(
+            ["--json", "--dry-run", "project", "save", "-o", str(save_as_target)],
+            env_extra=env,
+        )
+        assert res.returncode == 0
+        payload = json.loads(res.stdout)
+        assert payload.get("dry_run") is True
+        assert not save_as_target.exists()
+
+    def test_magic_run_headless_and_live_bridge(self, tmp_path: Path) -> None:
+        """Finding 3: `magic run` must execute JSONL batches in both headless and live sessions."""
+        import socket
+        import threading
+
+        env = self._isolated_env(tmp_path)
+        proj = tmp_path / "BatchRun.magic"
+        self._run(["--json", "project", "new", "-o", str(proj), "--name", "BatchRun"], env_extra=env)
+
+        batch_lines = (
+            json.dumps({"command": "workshop.status", "params": {}})
+            + "\n"
+            + json.dumps({"command": "workshop.set_target", "params": {"target": "remotion"}})
+            + "\n"
+        )
+        headless_res = self._run(["run", "-"], env_extra=env, input_text=batch_lines)
+        assert headless_res.returncode == 0
+        replies = [json.loads(line) for line in headless_res.stdout.strip().splitlines()]
+        assert len(replies) == 2
+        assert replies[0]["ok"] is True
+        assert replies[1]["ok"] is True
+        saved_doc = json.loads(proj.read_text(encoding="utf-8"))
+        assert saved_doc["workshop"]["target"] == "remotion"
+
+        # Now test `magic run` routed to a live bridge socket
+        sock_path = tmp_path / "live-batch.sock"
+
+        def batch_bridge() -> None:
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            srv.bind(str(sock_path))
+            srv.listen(4)
+            try:
+                for _ in range(2):
+                    conn, _ = srv.accept()
+                    with conn:
+                        raw = conn.makefile("r", encoding="utf-8").readline()
+                        req = json.loads(raw)
+                        conn.sendall(
+                            (
+                                json.dumps(
+                                    {"ok": True, "result": {"live_cmd": req["id"]}}
+                                )
+                                + "\n"
+                            ).encode("utf-8")
+                        )
+            finally:
+                srv.close()
+
+        t = threading.Thread(target=batch_bridge, daemon=True)
+        t.start()
+
+        live_res = self._run(
+            ["--bridge", f"unix:{sock_path}", "run", "-"],
+            env_extra=env,
+            input_text=batch_lines,
+        )
+        t.join(timeout=2.0)
+        assert live_res.returncode == 0
+        live_replies = [json.loads(line) for line in live_res.stdout.strip().splitlines()]
+        assert len(live_replies) == 2
+        assert live_replies[0]["result"]["live_cmd"] == "workshop.status"
+        assert live_replies[1]["result"]["live_cmd"] == "workshop.set_target"
+
+    def test_headless_save_error_propagates_nonzero(self, tmp_path: Path) -> None:
+        """Finding 4: Automatic project write failures must propagate and exit non-zero."""
+        env = self._isolated_env(tmp_path)
+        proj_dir = tmp_path / "ro_proj"
+        proj_dir.mkdir()
+        proj = proj_dir / "ReadOnly.magic"
+        self._run(["--json", "project", "new", "-o", str(proj), "--name", "ReadOnly"], env_extra=env)
+
+        # Make the .magic file and parent dir read-only so write_project_file fails
+        proj.chmod(0o444)
+        proj_dir.chmod(0o555)
+        try:
+            res = self._run(
+                ["--json", "exec", "workshop.set_target", "target=remotion"],
+                check=False,
+                env_extra=env,
+            )
+            assert res.returncode != 0
+            combined = res.stdout + res.stderr
+            assert "Permission denied" in combined or "os error 13" in combined
+        finally:
+            proj_dir.chmod(0o755)
+            proj.chmod(0o644)

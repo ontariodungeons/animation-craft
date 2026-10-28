@@ -1,4 +1,4 @@
-//! `--control <port>`: the TCP JSON-lines bridge that `mc --bridge <port>` and its
+//! `--control <port>`: the TCP JSON-lines bridge that `magic --bridge <port>` and its
 //! MCP server use to drive this window. One request per line, `{"id": "...", "params": {...}}`;
 //! one reply per line, `{"ok": true, "id", "result"}` or `{"ok": false, "id", "error"}`.
 //!
@@ -80,6 +80,17 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
     }
     #[cfg(unix)]
     if let Some(expected)=params["_expected_instance"].as_str(){let socket=app.state::<LocalSocket>();if socket.0.file_name().and_then(|p|p.to_str())!=Some(expected){return Err("Studio instance changed; explicit reattach required".into());}}
+    if params.get("_dry_run").and_then(Value::as_bool) == Some(true)
+        && !crate::is_read_only_command(id, params)
+    {
+        return Ok(json!({
+            "ok": true,
+            "dry_run": true,
+            "route": "bridge",
+            "command": id,
+            "params": params,
+        }));
+    }
     if id=="project.open"{if let Some(result)=crate::feedback::reuse_open(app,params)?{return Ok(result);}}
 
     if matches!(id,"project.open"|"project.new"|"project.close"|"project.intake"|"app.quit"){
@@ -126,7 +137,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
         }
         _ => {
             if id == "project.save" {
-                let _ = eval(app, "if (typeof saveStoryboard === 'function' && (projectView.textDrafts.size || state.data?.design?.dirty)) await saveStoryboard(); return true;");
+                eval(app, "if (typeof saveStoryboard === 'function' && (projectView.textDrafts.size || state.data?.design?.dirty)) await saveStoryboard(); return true;")?;
             }
             crate::feedback::guard(app,id,ui_project_request)?;
             let mut supplied=params.clone();

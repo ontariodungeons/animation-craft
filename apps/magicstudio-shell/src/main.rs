@@ -614,11 +614,12 @@ fn run_headless() -> i32 {
     }
     let mut s = Session::user_session();
     if args.first().map(String::as_str) == Some("run") {
+        let dry_run = args.iter().any(|a| a == "--dry-run");
         let stdin = std::io::stdin();
         let mut failed = 0;
         for (n, line) in stdin.lock().lines().map_while(Result::ok).enumerate() {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
                 continue;
             }
             let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
@@ -626,9 +627,12 @@ fn run_headless() -> i32 {
                 failed += 1;
                 continue;
             };
-            let id = v["id"].as_str().unwrap_or("");
+            let id = v["id"]
+                .as_str()
+                .or_else(|| v["command"].as_str())
+                .unwrap_or("");
             let params = v.get("params").cloned().unwrap_or_else(|| json!({}));
-            match headless_dispatch(&mut s, id, params, false) {
+            match headless_dispatch(&mut s, id, params, dry_run) {
                 Ok(r) => println!("{}", json!({"line": n + 1, "id": id, "ok": true, "result": r})),
                 Err(e) => {
                     println!("{}", json!({"line": n + 1, "id": id, "ok": false, "error": e}));
@@ -679,7 +683,78 @@ fn run_headless() -> i32 {
     }
 }
 
+pub(crate) fn is_read_only_command(id: &str, params: &Value) -> bool {
+    match id {
+        "project.open"
+        | "project.attach"
+        | "project.identity"
+        | "project.catalog"
+        | "project.list_assets"
+        | "project.search"
+        | "workshop.status"
+        | "workshop.files"
+        | "workshop.storyboard"
+        | "storyboard.read"
+        | "storyboard.design"
+        | "storyboard.backgrounds"
+        | "storyboard.toc"
+        | "storyboard.template"
+        | "storyboard.doctor"
+        | "character.assets"
+        | "assets.assess"
+        | "assets.fixlist"
+        | "motion.tracks"
+        | "motion.clips"
+        | "motion.sample"
+        | "motion.theatre.read"
+        | "validate.motion"
+        | "animation.sources"
+        | "animation.status"
+        | "animation.list"
+        | "blender.actions"
+        | "blender.status"
+        | "blender.list"
+        | "synfig.discover"
+        | "opentoonz.discover"
+        | "mlt.discover"
+        | "song.lyrics"
+        | "words.align"
+        | "words.read"
+        | "words.studio_track"
+        | "words.effects"
+        | "words.track"
+        | "skills.list"
+        | "skills.info"
+        | "crew.list"
+        | "agent.session"
+        | "agent.models"
+        | "command.list"
+        | "studio.cues"
+        | "vision.analyze"
+        | "ui.state"
+        | "ui.feedback"
+        | "ui.elements"
+        | "ui.components"
+        | "ui.controls"
+        | "ui.unconfigured" => true,
+        "project.root" => params.get("root").is_none_or(Value::is_null),
+        "skills.limits" => {
+            params.get("max_words").is_none_or(Value::is_null)
+                && params.get("max_steps").is_none_or(Value::is_null)
+        }
+        "skills.diagram" => params.get("render").and_then(Value::as_bool) != Some(true),
+        "agent.log" => params.get("refresh").and_then(Value::as_bool) != Some(true),
+        "app.analytics" => params.get("scan").and_then(Value::as_bool) != Some(true),
+        "app.doctor" => params.get("clean").and_then(Value::as_bool) != Some(true),
+        _ => false,
+    }
+}
+
 fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool) -> Result<Value, String> {
+    let is_dry = dry_run || params.get("_dry_run").and_then(Value::as_bool) == Some(true);
+    if let Some(obj) = params.as_object_mut() {
+        obj.remove("_dry_run");
+    }
     if matches!(id, "project.open" | "project.identity" | "project.attach")
         && params["path"].is_null()
         && params["project"].is_string()
@@ -701,6 +776,18 @@ fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool
                 .map_err(|e| e.to_string())?;
         }
     }
+    if is_dry && !is_read_only_command(id, &params) {
+        if magicstudio_engine::find_command(id).is_none() {
+            return Err(format!("Unknown engine command: {id}"));
+        }
+        return Ok(json!({
+            "ok": true,
+            "dry_run": true,
+            "command": id,
+            "params": params,
+            "project": s.project_path,
+        }));
+    }
     if s.assets.is_empty() && !s.project_assets.is_empty() && !id.starts_with("project.") {
         let wanted = params["asset"]
             .as_str()
@@ -718,12 +805,12 @@ fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool
         }
     }
     let out = s.execute(id, params).map_err(|e| e.to_string())?;
-    if !dry_run
+    if !is_dry
         && magicstudio_engine::find_command(id).is_some_and(|c| c.journal)
         && s.edits_since_save > 0
         && s.project_path.is_some()
     {
-        let _ = magicstudio_engine::project::write_project_file(s);
+        magicstudio_engine::project::write_project_file(s).map_err(|e| e.to_string())?;
     }
     Ok(out)
 }

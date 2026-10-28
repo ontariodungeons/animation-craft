@@ -231,8 +231,16 @@ def execute_headless(
     return json.loads(out)
 
 
+LEGACY_COMMAND_PREFIXES = ("backstage.", "booth.", "center.", "sprocket.")
+
+
+def find_studio_shell() -> str:
+    """Alias for `find_magicstudio_shell()`."""
+    return find_magicstudio_shell()
+
+
 def list_engine_commands() -> list[dict[str, Any]]:
-    """Return all registered engine commands from `magicstudio-shell --headless commands`."""
+    """Return all active registered engine commands from `magicstudio-shell --headless commands`."""
     shell_bin = find_magicstudio_shell()
     proc = subprocess.run(
         [shell_bin, "--headless", "commands"],
@@ -240,7 +248,12 @@ def list_engine_commands() -> list[dict[str, Any]]:
         text=True,
         check=True,
     )
-    return json.loads(proc.stdout)
+    commands = json.loads(proc.stdout)
+    return [
+        c
+        for c in commands
+        if not str(c.get("id", "")).startswith(LEGACY_COMMAND_PREFIXES)
+    ]
 
 
 def open_studio_window(

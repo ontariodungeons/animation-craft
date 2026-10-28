@@ -74,6 +74,82 @@ def active_studio_pin_file() -> Path | None:
     return base / "active-studio"
 
 
+READ_ONLY_COMMANDS = {
+    "project.open",
+    "project.attach",
+    "project.identity",
+    "project.catalog",
+    "project.list_assets",
+    "project.search",
+    "workshop.status",
+    "workshop.files",
+    "workshop.storyboard",
+    "storyboard.read",
+    "storyboard.design",
+    "storyboard.backgrounds",
+    "storyboard.toc",
+    "storyboard.template",
+    "storyboard.doctor",
+    "character.assets",
+    "assets.assess",
+    "assets.fixlist",
+    "motion.tracks",
+    "motion.clips",
+    "motion.sample",
+    "motion.theatre.read",
+    "validate.motion",
+    "animation.sources",
+    "animation.status",
+    "animation.list",
+    "blender.actions",
+    "blender.status",
+    "blender.list",
+    "synfig.discover",
+    "opentoonz.discover",
+    "mlt.discover",
+    "song.lyrics",
+    "words.align",
+    "words.read",
+    "words.studio_track",
+    "words.effects",
+    "words.track",
+    "skills.list",
+    "skills.info",
+    "crew.list",
+    "agent.session",
+    "agent.models",
+    "command.list",
+    "studio.cues",
+    "vision.analyze",
+    "ui.state",
+    "ui.feedback",
+    "ui.elements",
+    "ui.components",
+    "ui.controls",
+    "ui.unconfigured",
+}
+
+
+def is_read_only_command(cmd_id: str, params: dict[str, Any] | None = None) -> bool:
+    """Return True if `cmd_id` with `params` is a pure read-only query."""
+    p = params or {}
+    if cmd_id in READ_ONLY_COMMANDS:
+        return True
+    if cmd_id == "project.root":
+        return p.get("root") is None
+    if cmd_id == "skills.limits":
+        return p.get("max_words") is None and p.get("max_steps") is None
+    if cmd_id == "skills.diagram":
+        return p.get("render") is not True
+    if cmd_id == "agent.log":
+        return p.get("refresh") is not True
+    if cmd_id == "app.analytics":
+        return p.get("scan") is not True
+    if cmd_id == "app.doctor":
+        return p.get("clean") is not True
+    return False
+
+
 class Session:
     """Stateful CLI-Anything session for Magic Studio."""
 
@@ -84,8 +160,6 @@ class Session:
         self.studio_instance: str | None = None
         self.project_data: dict[str, Any] | None = None
         self._modified: bool = False
-        self._undo_stack: list[dict[str, Any]] = []
-        self._redo_stack: list[dict[str, Any]] = []
         self.load_session()
 
     def load_session(self) -> None:
@@ -107,7 +181,11 @@ class Session:
                 self.project_data = None
 
     def save_session(self) -> None:
-        """Persist current session binding and any modified `.magic` project data."""
+        """Persist current session binding (`session.json` and `active-studio` pin).
+
+        Never writes `self.project_data` back to the `.magic` file; project files are
+        owned exclusively by the Rust engine (`project.save` and headless dispatch).
+        """
         state = {
             "project_path": self.project_path,
             "studio_endpoint": self.studio_endpoint,
@@ -124,9 +202,6 @@ class Session:
                     pin_file.write_text(f"project:{self.project_path}\n", encoding="utf-8")
             except OSError:
                 pass
-        if self._modified and self.project_path and self.project_data is not None:
-            _locked_save_json(self.project_path, self.project_data)
-            self._modified = False
 
     def has_project(self) -> bool:
         """Return True if a project path or in-memory project document is bound."""
@@ -163,8 +238,6 @@ class Session:
         self.studio_instance = None
         self.project_data = None
         self._modified = False
-        self._undo_stack.clear()
-        self._redo_stack.clear()
         if self.session_file.is_file():
             try:
                 self.session_file.unlink()
@@ -177,41 +250,42 @@ class Session:
             except OSError:
                 pass
 
-    def snapshot(self) -> None:
-        """Snapshot in-memory `.magic` JSON state for local session undo/redo."""
-        if self.project_data is not None:
-            self._undo_stack.append(copy.deepcopy(self.project_data))
-            self._redo_stack.clear()
-            self._modified = True
+    def resolve_live_target(self, bridge: str | None = None) -> str | None:
+        """Return the live Studio bridge endpoint for this session if one is active, else None."""
+        if bridge:
+            return bridge
+        if self.project_path:
+            p = Path(self.project_path)
+            if p.exists():
+                live = backend.studio_for_project(str(p.resolve()))
+                if live:
+                    return str(live["endpoint"])
+        if self.studio_endpoint:
+            sock_path = self.studio_endpoint.removeprefix("unix:")
+            if self.studio_endpoint.startswith("unix:") and not Path(sock_path).exists():
+                raise RuntimeError(
+                    "This agent's assigned Studio is unavailable; no other window was selected. "
+                    "Run `magic studio list` or `magic studio <project>` to reconnect."
+                )
+            return self.studio_endpoint
+        return None
 
     def undo(self, domain: str | None = None, **kwargs: Any) -> dict[str, Any]:
-        """Undo within a specific engine domain (no cross-domain ledger) or in-memory snapshot."""
-        if domain:
-            cmd_map = {
-                "motion": "motion.edit.undo",
-                "path": "motion.undo_path",
-                "part": "part.undo_image",
-                "skills": "skills.undo",
-            }
-            cmd_id = cmd_map.get(domain, domain)
-            return self.execute(cmd_id, dict(kwargs))
-        if not self._undo_stack:
-            raise RuntimeError("Nothing to undo in local project state")
-        if self.project_data is not None:
-            self._redo_stack.append(copy.deepcopy(self.project_data))
-        self.project_data = self._undo_stack.pop()
-        self._modified = True
-        return {"ok": True, "undone": True, "project": self.project_path}
-
-    def redo(self) -> dict[str, Any]:
-        """Redo an in-memory `.magic` project state change."""
-        if not self._redo_stack:
-            raise RuntimeError("Nothing to redo in local project state")
-        if self.project_data is not None:
-            self._undo_stack.append(copy.deepcopy(self.project_data))
-        self.project_data = self._redo_stack.pop()
-        self._modified = True
-        return {"ok": True, "redone": True, "project": self.project_path}
+        """Undo within a specific engine domain (no cross-domain ledger)."""
+        if not domain:
+            raise ValueError(
+                "Specify an engine undo domain (--domain motion|path|part|skills|storyboard) "
+                "and its receipt token."
+            )
+        cmd_map = {
+            "motion": "motion.edit.undo",
+            "path": "motion.undo_path",
+            "part": "part.undo_image",
+            "skills": "skills.undo",
+            "storyboard": "storyboard.update",
+        }
+        cmd_id = cmd_map.get(domain, domain)
+        return self.execute(cmd_id, dict(kwargs))
 
     def execute(
         self,
@@ -232,14 +306,33 @@ class Session:
         5. Headless engine execution (`magicstudio-shell --headless`).
         """
         req = dict(params or {})
+        is_dry = dry_run or bool(req.pop("_dry_run", False))
 
         # 1. Explicit bridge override
         if bridge:
+            if is_dry and not is_read_only_command(cmd_id, req):
+                return {
+                    "ok": True,
+                    "dry_run": True,
+                    "route": "bridge",
+                    "endpoint": bridge,
+                    "command": cmd_id,
+                    "params": req,
+                }
             return backend.call_bridge(bridge, cmd_id, req)
 
         # 2. UI-only commands always target a live Studio window
         if cmd_id.startswith("ui.") or cmd_id == "app.quit":
             target = self.studio_endpoint or "auto"
+            if is_dry and not is_read_only_command(cmd_id, req):
+                return {
+                    "ok": True,
+                    "dry_run": True,
+                    "route": "bridge",
+                    "endpoint": target,
+                    "command": cmd_id,
+                    "params": req,
+                }
             return backend.call_bridge(
                 target,
                 cmd_id,
@@ -272,6 +365,16 @@ class Session:
                 canonical = str(p.resolve())
                 live = backend.studio_for_project(canonical)
                 if live:
+                    if is_dry and not is_read_only_command(cmd_id, req):
+                        return {
+                            "ok": True,
+                            "dry_run": True,
+                            "route": "bridge",
+                            "endpoint": live["endpoint"],
+                            "command": cmd_id,
+                            "params": req,
+                            "project": canonical,
+                        }
                     if cmd_id == "project.open":
                         self.bind_studio(live)
                     return backend.call_bridge(
@@ -285,11 +388,21 @@ class Session:
         # 4. Bound Studio endpoint
         if self.studio_endpoint and cmd_id not in {"project.new", "project.intake"}:
             sock_path = self.studio_endpoint.removeprefix("unix:")
-            if not Path(sock_path).exists():
+            if self.studio_endpoint.startswith("unix:") and not Path(sock_path).exists():
                 raise RuntimeError(
                     "This agent's assigned Studio is unavailable; no other window was selected. "
                     "Run `magic studio list` or `magic studio <project>` to reconnect."
                 )
+            if is_dry and not is_read_only_command(cmd_id, req):
+                return {
+                    "ok": True,
+                    "dry_run": True,
+                    "route": "bridge",
+                    "endpoint": self.studio_endpoint,
+                    "command": cmd_id,
+                    "params": req,
+                    "project": self.project_path,
+                }
             return backend.call_bridge(
                 self.studio_endpoint,
                 cmd_id,
@@ -299,7 +412,10 @@ class Session:
             )
 
         # 5. Headless engine execution
-        res = backend.execute_headless(cmd_id, req, dry_run=dry_run)
+        if is_dry and not is_read_only_command(cmd_id, req):
+            return backend.execute_headless(cmd_id, req, dry_run=True)
+
+        res = backend.execute_headless(cmd_id, req, dry_run=is_dry)
         if self.project_path and Path(self.project_path).is_file():
             try:
                 self.project_data = json.loads(
