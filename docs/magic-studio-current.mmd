@@ -1,0 +1,34 @@
+%% Current source architecture with the unified `magic` CLI-Anything harness.
+%% Sources: agent-harness/cli_anything/magic/magic_cli.py;
+%% apps/magicstudio-shell/src/main.rs; apps/magicstudio-shell/src/bridge.rs;
+%% crates/engine/src/commands.rs; docs/functionality-inventory.xlsx.
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"system-ui","primaryColor":"#e5f3f1","primaryTextColor":"#163b38","primaryBorderColor":"#377b74","lineColor":"#506d79"}}}%%
+flowchart TB
+  subgraph UI["Magic Studio · native Tauri UI"]
+    P["Project workflow + New / Open"]
+    V["Animation · Lyrics · Studio (hyperframes/index.html)<br/>Learning · Analytics · assistants"]
+    M["Native File / Edit menu"]
+  end
+  MAGIC["magic CLI & magic mcp<br/>CLI-Anything Click + ReplSkin harness"]
+  subgraph E["Shared Rust command registry · same implementation"]
+    LIVE["Window's live engine session"]
+    HEADLESS["Headless engine session (magicstudio-shell --headless)"]
+  end
+  subgraph TOOLS["External work · only commands that need it"]
+    CRAFT["PhotoCraft · DeckCraft<br/>other installed Craft CLIs"]
+    PIPE["Existing Python pipelines<br/>native render / export tools"]
+  end
+  FILES["Saved .magic project<br/>editable rig / DeckCraft files · hyperframes/index.html"]
+  P -->|"magic studio <project> / Unix socket"| MAGIC
+  MAGIC -->|"bound live Studio / ui.*"| LIVE
+  MAGIC -->|"bound headless session"| HEADLESS
+  V -->|"Tauri engine_command"| LIVE
+  M -->|"existing frontend actions / guarded close"| P
+  LIVE --> CRAFT
+  HEADLESS --> CRAFT
+  LIVE --> PIPE
+  HEADLESS --> PIPE
+  LIVE -->|"flush UI draft + save"| FILES
+  HEADLESS -->|"auto-save / register"| FILES
+  CRAFT -->|"native file outputs"| FILES
+  PIPE -->|"rigs / renders / exports"| FILES

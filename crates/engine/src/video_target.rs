@@ -13,13 +13,24 @@ use crate::workshop::{
 use crate::workspace::{resolve_workspace_path, run_tool_in};
 
 pub(crate) fn target_project_path(_: &Session, dir: &Path, target: &str) -> Option<PathBuf> {
-    let config=dir.join("hyperframes/hyperframes.json");
-    (target=="hyperframes" && config.is_file() && dir.join("hyperframes/index.html").is_file()).then_some(config)
+    if target != "hyperframes" {
+        return None;
+    }
+    let hf = dir.join("hyperframes");
+    let config = hf.join("hyperframes.json");
+    let index = hf.join("index.html");
+    if index.is_file() {
+        Some(if config.is_file() { config } else { index })
+    } else {
+        None
+    }
 }
 
 pub(crate) fn target_project_chip(s: &Session, dir: &Path, target: &str) -> Value {
-    let path=dir.join("hyperframes/hyperframes.json");
-    json!({"name":"hyperframes/hyperframes.json","path":path,"exists":target_project_path(s,dir,target).is_some(),"target":"hyperframes"})
+    let found = target_project_path(s, dir, target);
+    let path = found.clone().unwrap_or_else(|| dir.join("hyperframes/index.html"));
+    let name = path.strip_prefix(dir).unwrap_or(&path).to_string_lossy().into_owned();
+    json!({"name": name, "path": path, "exists": found.is_some(), "target": "hyperframes"})
 }
 
 fn native_preview(dir: &Path, flags: &[String], executable: Option<&str>) -> Result<Value> {
@@ -34,7 +45,7 @@ fn native_preview(dir: &Path, flags: &[String], executable: Option<&str>) -> Res
 }
 
 pub(crate) fn video_server_info(dir: &Path, _: &str) -> Value {
-    if !dir.join("hyperframes/hyperframes.json").is_file(){return json!({"running":false,"target":"hyperframes","state":"not-created"});}
+    if !dir.join("hyperframes/index.html").is_file(){return json!({"running":false,"target":"hyperframes","state":"not-created"});}
     match native_preview(dir,&["--status".into()],None) {
         Ok(native)=>json!({"running":native["state"]=="running" && native["ready"]==true,"target":"hyperframes","port":native["port"],"url":native["studioUrl"],"pid":native["pid"],"managed":true,"native":native}),
         Err(error)=>json!({"running":null,"target":"hyperframes","state":"unavailable","error":error.to_string()})

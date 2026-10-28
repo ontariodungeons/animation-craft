@@ -401,7 +401,7 @@ pub fn cmd_opentoonz_start(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer();
     let stuff=stuff_dir();
-    let helper=std::env::current_exe().ok().map(|p|p.with_file_name("mc")).filter(|p|executable(p));
+    let helper=std::env::current_exe().ok().and_then(|p|[p.with_file_name("magic"),p.with_file_name("mc")].into_iter().find(|c|executable(c)));
     let ffmpeg=find_executable("ffmpeg",std::env::var_os("PATH"));
     let mut missing=Vec::new();
     if let Err(error)=&tool { missing.push(error.to_string()); }

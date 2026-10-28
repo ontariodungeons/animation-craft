@@ -125,6 +125,9 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
             Ok(json!({"ok":true,"status":"close_requested","exited":false,"verification":"Check endpoint/process exit after this response; no force kill or silent discard."}))
         }
         _ => {
+            if id == "project.save" {
+                let _ = eval(app, "if (typeof saveStoryboard === 'function' && (projectView.textDrafts.size || state.data?.design?.dirty)) await saveStoryboard(); return true;");
+            }
             crate::feedback::guard(app,id,ui_project_request)?;
             let mut supplied=params.clone();
             if supplied.is_object(){if supplied.get("_origin").is_none(){supplied["_origin"]=json!("CLI/MCP bridge");}}

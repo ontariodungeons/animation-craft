@@ -591,7 +591,147 @@ fn studio_hide(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn run_headless() -> i32 {
+    use std::io::BufRead;
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    if args.first().map(String::as_str) == Some("commands") {
+        let specs: Vec<Value> = magicstudio_engine::command_specs()
+            .iter()
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "label": s.label,
+                    "shortcut": s.shortcut,
+                    "menu": s.menu,
+                    "params": s.params,
+                    "journal": s.journal,
+                    "long_running": s.long_running,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&specs).unwrap_or_default());
+        return 0;
+    }
+    let mut s = Session::user_session();
+    if args.first().map(String::as_str) == Some("run") {
+        let stdin = std::io::stdin();
+        let mut failed = 0;
+        for (n, line) in stdin.lock().lines().map_while(Result::ok).enumerate() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+                println!("{}", json!({"line": n + 1, "ok": false, "error": "invalid json"}));
+                failed += 1;
+                continue;
+            };
+            let id = v["id"].as_str().unwrap_or("");
+            let params = v.get("params").cloned().unwrap_or_else(|| json!({}));
+            match headless_dispatch(&mut s, id, params, false) {
+                Ok(r) => println!("{}", json!({"line": n + 1, "id": id, "ok": true, "result": r})),
+                Err(e) => {
+                    println!("{}", json!({"line": n + 1, "id": id, "ok": false, "error": e}));
+                    failed += 1;
+                }
+            }
+        }
+        return if failed == 0 { 0 } else { 1 };
+    }
+    let (id, param_start) = if args.first().map(String::as_str) == Some("exec") {
+        (args.get(1).map(String::as_str).unwrap_or(""), 2)
+    } else {
+        (args.first().map(String::as_str).unwrap_or(""), 1)
+    };
+    if id.is_empty() {
+        eprintln!("magicstudio-shell --headless <command_id> [params_json | key=value ...]");
+        return 2;
+    }
+    let mut params = json!({});
+    let mut dry_run = false;
+    for arg in args.iter().skip(param_start) {
+        if arg == "--dry-run" {
+            dry_run = true;
+            continue;
+        }
+        if arg.starts_with('{')
+            && let Ok(v) = serde_json::from_str::<Value>(arg)
+        {
+            params = v;
+            continue;
+        }
+        if let Some((k, v)) = arg.split_once('=')
+            && let Some(obj) = params.as_object_mut()
+        {
+            let parsed = serde_json::from_str::<Value>(v).unwrap_or_else(|_| json!(v));
+            obj.insert(k.to_string(), parsed);
+        }
+    }
+    match headless_dispatch(&mut s, id, params, dry_run) {
+        Ok(v) => {
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            if v.get("ok").and_then(Value::as_bool) == Some(false) { 1 } else { 0 }
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
+fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool) -> Result<Value, String> {
+    if matches!(id, "project.open" | "project.identity" | "project.attach")
+        && params["path"].is_null()
+        && params["project"].is_string()
+    {
+        params["path"] = params["project"].clone();
+    }
+    if !matches!(
+        id,
+        "project.open" | "project.new" | "project.intake" | "project.attach" | "project.migrate" | "project.identity"
+    ) && let Some(target) = params["project"].as_str()
+    {
+        let identity = s
+            .execute("project.identity", json!({"path": target}))
+            .map_err(|e| e.to_string())?;
+        if let Some(project) = identity["project"].as_str()
+            && s.project_path.as_deref() != Some(std::path::Path::new(project))
+        {
+            s.execute("project.attach", json!({"path": project}))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    if s.assets.is_empty() && !s.project_assets.is_empty() && !id.starts_with("project.") {
+        let wanted = params["asset"]
+            .as_str()
+            .or_else(|| params["character"].as_str())
+            .map(str::to_owned)
+            .or_else(|| {
+                s.project_assets
+                    .iter()
+                    .find(|a| matches!(a.kind.as_str(), "character" | "cutout_rig"))
+                    .or_else(|| s.project_assets.first())
+                    .map(|a| a.id.clone())
+            });
+        if let Some(aid) = wanted {
+            let _ = s.execute("project.load_asset", json!({"id": aid}));
+        }
+    }
+    let out = s.execute(id, params).map_err(|e| e.to_string())?;
+    if !dry_run
+        && magicstudio_engine::find_command(id).is_some_and(|c| c.journal)
+        && s.edits_since_save > 0
+        && s.project_path.is_some()
+    {
+        let _ = magicstudio_engine::project::write_project_file(s);
+    }
+    Ok(out)
+}
+
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--headless") {
+        std::process::exit(run_headless());
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(View::default())

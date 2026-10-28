@@ -483,6 +483,7 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
     ];
     let complete = stages.iter().take(3).all(|st| st["done"] == json!(true));
     let studio_info = studio(&dir);
+    let effective_video_project = s.video_project_path.clone().or_else(|| active_target_path.clone());
     Ok(json!({
         "ok": true,
         "project_dir": dir,
@@ -492,9 +493,8 @@ pub(crate) fn workshop_status(s: &Session) -> Result<Value> {
         "video_server": server,
         "asset_files": assets.iter().map(|p| file_chip(p)).collect::<Vec<_>>(),
         "studio": {"name": studio_info.name, "intent": studio_info.intent, "source": studio_info.source},
-        // One answer: the project video.init (or set_target) stored. A file that merely sits in the folder is not it.
-        "video_project_path": s.video_project_path,
-        "video_project_exists": s.video_project_path.as_ref().is_some_and(|p| p.exists()),
+        "video_project_path": effective_video_project,
+        "video_project_exists": effective_video_project.as_ref().is_some_and(|p| p.exists()),
         "stages": stages
     }))
 }

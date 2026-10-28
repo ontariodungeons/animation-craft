@@ -400,6 +400,6 @@ pub(crate) fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',
 
 pub(crate) fn cli_program()->String{
  std::env::current_exe().ok().and_then(|p|{
-  if p.file_name().is_some_and(|v|v == "mc"){Some(p)}else{p.parent().map(|p|p.join("mc")).filter(|p|p.is_file())}
- }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"mc".into())
+  if p.file_name().is_some_and(|v|v == "magic" || v == "mc"){Some(p)}else{p.parent().and_then(|d|d.join("magic").is_file().then(||d.join("magic")).or_else(||d.join("mc").is_file().then(||d.join("mc"))))}
+ }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"magic".into())
 }

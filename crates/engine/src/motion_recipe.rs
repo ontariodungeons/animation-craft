@@ -16,10 +16,11 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
         .ok_or_else(|| EngineError::InvalidParams("studio must be the selected Studio port".into()))?;
     let directory = project.parent().ok_or_else(|| EngineError::InvalidParams("project has no parent".into()))?.join("animation");
     let root = crate::workspace::workspace_root(s);
-    let mc = std::env::current_exe()?.with_file_name("mc");
-    if !mc.is_file() {
-        return Err(EngineError::InvalidParams("Build mc beside this executable before running a recipe".into()));
-    }
+    let exe = std::env::current_exe()?;
+    let mc = [exe.with_file_name("magic"), exe.with_file_name("mc")]
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| EngineError::InvalidParams("Build magic beside this executable before running a recipe".into()))?;
     let request = p["_request_id"].as_str().map(str::to_owned).unwrap_or_else(|| format!("motion-recipe-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()));
     let context = json!({"_request_id": request, "_origin": "motion.recipe"});
     let _context = crate::activity::enter("motion.recipe", &context);

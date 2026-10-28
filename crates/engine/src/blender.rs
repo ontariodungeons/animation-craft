@@ -472,12 +472,11 @@ pub fn cmd_blender_start(s: &mut Session, p: &Value) -> Result<Value> {
         {
             motion.remove("fps");
         }
-        let executable = std::env::current_exe()?.with_file_name("mc");
-        if !executable.is_file() {
-            return Err(invalid(
-                "Install mc beside Magic Studio to prepare legacy animations",
-            ));
-        }
+        let exe = std::env::current_exe()?;
+        let executable = [exe.with_file_name("magic"), exe.with_file_name("mc")]
+            .into_iter()
+            .find(|p| p.is_file())
+            .ok_or_else(|| invalid("Install magic beside Magic Studio to prepare legacy animations"))?;
         request["mc"] = json!(executable);
     }
     submit(s, p, request, "blender")

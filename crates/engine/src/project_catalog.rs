@@ -123,9 +123,10 @@ fn readiness(path: &Path) -> Value {
         .as_str()
         .is_some_and(|a| !a.is_empty() && (dir.join(a).is_file() || Path::new(a).is_file()));
     let transcript = dir.join("transcript.json").is_file() || dir.join("lyrics/words.json").is_file();
-    let editor_ready = doc["workshop"]["video_project"]
-        .as_str()
-        .is_some_and(|v| !v.is_empty() && (dir.join(v).is_dir() || Path::new(v).is_dir()));
+    let editor_ready = dir.join("hyperframes/index.html").is_file()
+        || doc["workshop"]["video_project"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty() && (dir.join(v).exists() || Path::new(v).exists()));
     let next = if !audio {
         "Choose existing song audio"
     } else if !transcript {

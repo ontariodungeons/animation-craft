@@ -1,8 +1,9 @@
 // Analytics reads saved measurements on entry. Scanning is an explicit action, never a timer.
-const analyticsState = { data: null, section: 'overview', loading: false, error: null, diagram: 'creator', commandFilter: '' };
+const analyticsState = { data: null, section: 'overview', loading: false, error: null, diagram: 'magic-cli', commandFilter: '' };
 const ANALYTICS_SECTIONS = [['overview','Overview'],['complexity','Code Complexity'],['tokens','Recorded Usage'],['health','App & Tool Health'],['commands','Command Reference']];
 // Existing Archify exports, packaged byte-for-byte. They are references, not live system models.
 const ANALYTICS_DIAGRAMS = [
+  {id:'magic-cli',file:'magic-cli-architecture.html',title:'Magic CLI & Studio architecture',source:'CLI-Anything magic harness · unified live Studio & headless engine routing',revision:null},
   {id:'creator',file:'creator-view.html',title:'Creator’s loop',source:'Existing Magic Studio creator workflow · saved 27 Oct 2026',revision:null},
   {id:'openmontage',file:'openmontage-evidence.html',title:'OpenMontage pipeline',source:'calesthio/OpenMontage · evidence-linked reference',revision:'3cd5700b977bcd63644a3118cc1783df1cb002c8'},
 ];
@@ -101,7 +102,7 @@ function analyticsRailReport(comp) {
     el('dl',{class:'analytics-numbers'},...metrics.flatMap(([label,key])=>[el('dt',{},label),el('dd',{},analyticsCode(comp,key))])),
     comp.available?el('small',{title:comp.source_revision||'Source revision unavailable'},`Lizard ${comp.tool_version||'version unknown'} · ${(comp.source_revision||'revision unavailable').slice(0,12)}`):null,
     comp.last_error||comp.cache_error?el('small',{role:'status'},comp.last_error||comp.cache_error):null,
-    el('small',{},'Current CLI: mc · magic pending'));
+    el('small',{},'Current CLI: magic (CLI-Anything harness)'));
 }
 function analyticsComplexity(surface,comp,section) {
   surface.append(el('h2',{},'Code measurements · Lizard'));
@@ -124,7 +125,7 @@ function analyticsComplexity(surface,comp,section) {
     el('h3',{},`${fn.name} · CCN ${fmtCount(fn.ccn)}`),el('code',{},`${fn.file}:${fn.start_line}–${fn.end_line}`),el('p',{},`${fmtCount(fn.nloc)} NLOC · ${fmtCount(fn.tokens)} code tokens · ${fmtCount(fn.params)} parameters`)))));
 }
 function analyticsCommands(surface,catalog) {
-  surface.append(el('h2',{},'Current command reference'),el('p',{class:'muted'},'Read directly from the shared engine command.list metadata. These are mc commands. Future magic names and automatic Archify generation are pending; no workflow edges are inferred from command names.'));
+  surface.append(el('h2',{},'Current command reference'),el('p',{class:'muted'},'Read directly from the shared engine command.list metadata. Executed through the magic CLI and magic mcp over the bound live Studio session or headless engine.'));
   if(!catalog?.commands){surface.append(el('p',{class:'panel-empty'},'Command metadata unavailable. Refresh data to read it.'));return;}
   const input=el('input',{id:'analytics-command-search',type:'search',placeholder:'Find a command or feature','aria-label':'Find current command',value:analyticsState.commandFilter,
     oninput:event=>{analyticsState.commandFilter=event.target.value;analyticsCommandRows(catalog.commands);}});
@@ -136,6 +137,6 @@ function analyticsCommandRows(commands) {
   const groups=new Map();for(const command of selected){const key=command.menu?.[0]||command.id.split('.')[0];if(!groups.has(key))groups.set(key,[]);groups.get(key).push(command);}
   root.replaceChildren(el('p',{class:'muted'},`${selected.length} of ${commands.length} commands · parameter descriptions are examples, not required/optional schemas`));
   for(const [name,items]of groups)root.append(el('details',{class:'analytics-command-group'},el('summary',{},`${name} · ${items.length}`),
-    ...items.map(command=>el('article',{class:'learning-summary'},el('h3',{},command.label),el('code',{},`mc exec ${command.id} [key=value ...]`),
+    ...items.map(command=>el('article',{class:'learning-summary'},el('h3',{},command.label),el('code',{},`magic exec ${command.id} [key=value ...]`),
       el('p',{},`Menu: ${(command.menu||[]).join(' / ')||'no menu placement'} · Shortcut: ${command.shortcut||'none'}`),el('pre',{},command.params)))));
 }

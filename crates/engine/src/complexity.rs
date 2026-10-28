@@ -30,11 +30,14 @@ fn long_file_limit(root: &Path) -> u64 {
 fn scan_targets(root: &Path) -> Vec<String> {
     let mut targets: Vec<String> = vec![
         "crates/engine/src".to_string(),
-        "apps/mc/src".to_string(),
+        "agent-harness/cli_anything/magic".to_string(),
         "apps/magicstudio-shell/src".to_string(),
         "pipeline".to_string(),
         "scripts".to_string(),
     ];
+    if root.join("apps/mc/src").exists() {
+        targets.push("apps/mc/src".to_string());
+    }
     let ui_dir = root.join("apps/magicstudio-shell/ui");
     let Ok(entries) = std::fs::read_dir(ui_dir) else {
         return targets;
@@ -168,7 +171,7 @@ fn source_revision(root: &Path) -> Option<String> {
 
 fn source_dirty(root: &Path) -> Option<bool> {
     std::process::Command::new("git").args(["status","--porcelain","--untracked-files=normal","--",
-        "crates/engine/src","apps/mc/src","apps/magicstudio-shell/src","apps/magicstudio-shell/ui","pipeline","scripts","code-limits.json"])
+        "crates/engine/src","agent-harness/cli_anything/magic","apps/magicstudio-shell/src","apps/magicstudio-shell/ui","pipeline","scripts","code-limits.json"])
         .current_dir(root).output().ok().filter(|o|o.status.success()).map(|o|!o.stdout.is_empty())
 }
 

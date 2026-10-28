@@ -1,0 +1,21 @@
+%% IMPLEMENTED: CLI-Anything Click / ReplSkin harness (`magic` and `magic mcp`).
+%% Package: agent-harness/cli_anything/magic/ (entry point: `magic`).
+%% Shared engine boundary: crates/engine/src/commands.rs and apps/magicstudio-shell/src/main.rs.
+%% Unified session context: `magic studio <project>` or `magic project open <project>` binds the session;
+%% all subsequent commands route to the live Studio Unix socket or headless engine without per-call `--bridge` flags.
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"system-ui","primaryColor":"#e5f3f1","primaryTextColor":"#163b38","primaryBorderColor":"#377b74","lineColor":"#506d79"}}}%%
+flowchart TB
+  TITLE["IMPLEMENTED · magic CLI & magic mcp<br/>CLI-Anything Click + ReplSkin harness"]
+  PARSER["Click command groups + ReplSkin<br/>studio · project · storyboard · character · motion · video · ui · exec · mcp"]
+  CTX["Bound Session Context (session.json)<br/>Explicit project + live Studio socket or headless mode"]
+  LIVE["Live Studio Window (Tauri)<br/>Unix socket bridge + saveStoryboard draft flush"]
+  HEADLESS["Headless Engine<br/>magicstudio-shell --headless + auto-save .magic"]
+  SAVED["Saved .magic projects<br/>Editable rigs · DeckCraft · hyperframes/index.html website"]
+  TITLE --> PARSER
+  PARSER --> CTX
+  CTX -->|"live Studio bound"| LIVE
+  CTX -->|"headless session"| HEADLESS
+  LIVE -->|"flush UI draft + save"| SAVED
+  HEADLESS -->|"auto-save mutations"| SAVED
+  classDef existing fill:#e5f3f1,stroke:#377b74,color:#163b38;
+  class TITLE,PARSER,CTX,LIVE,HEADLESS,SAVED existing;

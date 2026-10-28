@@ -33,6 +33,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     }
 
     let tools: Vec<Value> = [
+        "magic",
         "hyperframes",
         "photocraft-cli",
         "effectcraft-cli",

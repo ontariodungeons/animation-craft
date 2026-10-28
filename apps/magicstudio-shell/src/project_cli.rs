@@ -24,11 +24,25 @@ pub fn is_ui_request(app: &tauri::AppHandle, id: &str, params: &Value) -> bool {
 
 fn program() -> Result<PathBuf, String> {
     let shell = std::env::current_exe().map_err(|e| e.to_string())?;
-    let adjacent = shell.parent().ok_or("Studio executable directory unavailable")?.join("mc");
-    if !adjacent.is_file() {
-        return Err(format!("New/Open require the CLI beside Studio: {}. Build/install mc with the shell; no direct-engine fallback was used.", adjacent.display()));
+    let dir = shell.parent().ok_or("Studio executable directory unavailable")?;
+    for name in ["magic", "mc"] {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
     }
-    Ok(adjacent)
+    if let Some(path_env) = std::env::var_os("PATH") {
+        for name in ["magic", "mc"] {
+            if let Some(found) = std::env::split_paths(&path_env)
+                .map(|p| p.join(name))
+                .find(|p| p.is_file())
+            {
+                return Ok(found);
+            }
+        }
+    }
+    let expected = dir.join("magic");
+    Err(format!("New/Open require the CLI beside Studio: {}. Build/install magic with the shell; no direct-engine fallback was used.", expected.display()))
 }
 
 fn invoke(program: &Path, endpoint: &str, id: &str, params: &Value) -> Result<Value, String> {
