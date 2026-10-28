@@ -177,20 +177,6 @@ pub(crate) fn panel_spans(scene_list: &[Value], panels: usize) -> Vec<Vec<(f64, 
     spans
 }
 
-/// The transcript's scenes and each panel's spans, or None before transcription.
-pub(crate) fn storyboard_timing(dir: &Path, panels: usize) -> Option<(Vec<Value>, Vec<Vec<(f64, f64)>>)> {
-    let scene_list = match caption_scenes(dir) {
-        Some(list) => list,
-        None => {
-            let transcript = transcript_files(dir).into_iter().next()?;
-            let doc = crate::workshop::transcript_document(&transcript).ok()?;
-            scenes(&doc, song_seconds(dir))
-        }
-    };
-    let spans = panel_spans(&scene_list, panels);
-    Some((scene_list, spans))
-}
-
 /// A scene's source document (`storyboard/scene-N.md`).
 #[derive(Default, Clone)]
 pub(crate) struct SceneDoc {
