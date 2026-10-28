@@ -1,0 +1,65 @@
+{
+  "status": "design proposal; CLI syntax not implemented",
+  "source_template": "magic-studio-timeline.figcraft",
+  "surfaces": [
+    "Magic menu",
+    "Current project menu",
+    "Find an action"
+  ],
+  "actions": [
+    {
+      "group": "Create & open",
+      "label": "New project\u2026",
+      "shortcut": "Ctrl N",
+      "proposed_cli": "magic project new"
+    },
+    {
+      "group": "Create & open",
+      "label": "Open project\u2026",
+      "shortcut": "Ctrl O",
+      "proposed_cli": "magic project open"
+    },
+    {
+      "group": "Create & open",
+      "label": "Recent projects",
+      "shortcut": "",
+      "proposed_cli": "magic project list"
+    },
+    {
+      "group": "Current project",
+      "label": "Save project",
+      "shortcut": "Ctrl S",
+      "proposed_cli": "magic project save"
+    },
+    {
+      "group": "Current project",
+      "label": "Open editable storyboard",
+      "shortcut": "",
+      "proposed_cli": "magic storyboard open"
+    },
+    {
+      "group": "Current project",
+      "label": "Reveal project folder",
+      "shortcut": "",
+      "proposed_cli": "magic project reveal"
+    },
+    {
+      "group": "Current project",
+      "label": "Close project",
+      "shortcut": "Ctrl W",
+      "proposed_cli": "magic project close"
+    },
+    {
+      "group": "Magic Studio",
+      "label": "Settings\u2026",
+      "shortcut": "Ctrl ,",
+      "proposed_cli": "magic settings"
+    },
+    {
+      "group": "Magic Studio",
+      "label": "Quit Magic Studio",
+      "shortcut": "Ctrl Q",
+      "proposed_cli": "magic app quit"
+    }
+  ]
+}

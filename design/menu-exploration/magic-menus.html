@@ -1,0 +1,100 @@
+<div id="magic-menu-study">
+  <style>
+    #magic-menu-study{--ms-bg:light-dark(#f3f5f6,#0b1017);--ms-panel:light-dark(#ffffff,#141c28);--ms-raised:light-dark(#e9eef0,#1c2a3b);--ms-ink:light-dark(#19303b,#e9eef6);--ms-muted:light-dark(#536975,#9cafc6);--ms-line:light-dark(#d1dce0,#2b3b50);--ms-teal:light-dark(#007d6b,#35e1c0);--ms-gold:light-dark(#8b660e,#ffd078);font-family:system-ui,sans-serif;color:var(--ms-ink)}
+    #magic-menu-study .ms-window{background:var(--ms-bg);min-height:700px;position:relative;border:1px solid var(--ms-line);border-radius:12px;overflow:hidden;font-size:13px}
+    #magic-menu-study .ms-header{height:58px;display:flex;align-items:center;gap:20px;padding:0 20px;border-bottom:1px solid var(--ms-line);background:var(--ms-bg)}
+    #magic-menu-study button,#magic-menu-study input{font:inherit;color:inherit}
+    #magic-menu-study .ms-trigger{border:0;background:transparent;padding:9px 0;display:flex;align-items:center;gap:8px;white-space:nowrap}
+    #magic-menu-study .ms-brand{font-weight:600;color:var(--ms-teal)}
+    #magic-menu-study .ms-spark{color:var(--ms-gold)}
+    #magic-menu-study .ms-project{color:var(--ms-muted)}
+    #magic-menu-study .ms-tabs{display:flex;gap:20px;margin-left:auto;align-items:center;color:var(--ms-muted)}
+    #magic-menu-study .ms-current{color:var(--ms-ink);padding:20px 0 17px;border-bottom:2px solid var(--ms-teal)}
+    #magic-menu-study .ms-search-trigger{display:flex;gap:8px;align-items:center;border:1px solid var(--ms-line);border-radius:7px;padding:6px 9px;background:var(--ms-panel)}
+    #magic-menu-study .ms-work{display:grid;grid-template-columns:172px 1fr;min-height:586px}
+    #magic-menu-study .ms-rail{padding:28px 20px;border-right:1px solid var(--ms-line);color:var(--ms-muted)}
+    #magic-menu-study .ms-rail div{padding:12px 0;display:flex;gap:10px;align-items:center}
+    #magic-menu-study .ms-rail .ms-selected{color:var(--ms-teal)}
+    #magic-menu-study .ms-canvas{padding:32px;display:grid;place-content:center;gap:14px}
+    #magic-menu-study .ms-board{width:240px;min-height:320px;background:var(--ms-panel);border:1px solid var(--ms-line);padding:20px;border-radius:5px;display:grid;gap:14px}
+    #magic-menu-study .ms-scene{aspect-ratio:16/9;display:grid;place-items:center;background:var(--ms-raised);color:var(--ms-muted);border-radius:3px}
+    #magic-menu-study .ms-board-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    #magic-menu-study .ms-board-grid span{border:1px solid var(--ms-line);min-height:48px}
+    #magic-menu-study .ms-caption{color:var(--ms-muted)}
+    #magic-menu-study .ms-overlay{position:absolute;top:65px;left:16px;width:300px;background:var(--ms-panel);border:1px solid var(--ms-line);border-top:2px solid var(--ms-gold);border-radius:var(--ms-menu-radius,10px);padding:8px;box-shadow:0 14px 40px color-mix(in srgb,var(--ms-ink) 14%,transparent);z-index:2}
+    #magic-menu-study [data-surface="project"] .ms-overlay{left:180px;width:320px}
+    #magic-menu-study [data-surface="search"] .ms-overlay{top:88px;left:50%;transform:translateX(-50%);width:min(520px,calc(100% - 40px));box-sizing:border-box}
+    #magic-menu-study .ms-group{padding:10px 12px 5px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ms-muted)}
+    #magic-menu-study .ms-row{display:flex;align-items:center;gap:10px;width:100%;padding:var(--ms-row-pad,10px) 12px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:inherit}
+    #magic-menu-study .ms-row:hover,#magic-menu-study .ms-row.ms-active{background:var(--ms-raised);color:var(--ms-teal)}
+    #magic-menu-study .ms-row span{flex:1}
+    #magic-menu-study .ms-row kbd{font-size:11px;color:var(--ms-muted);font-family:inherit}
+    #magic-menu-study .ms-row[disabled]{opacity:.45}
+    #magic-menu-study .ms-divider{border:0;border-top:1px solid var(--ms-line);margin:6px 8px}
+    #magic-menu-study .ms-menu-head{padding:9px 12px 12px;display:flex;gap:10px;align-items:center;color:var(--ms-muted);border-bottom:1px solid var(--ms-line)}
+    #magic-menu-study .ms-search{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--ms-line)}
+    #magic-menu-study .ms-search input{border:0;background:transparent;outline-offset:5px;width:100%;padding:4px 0}
+    #magic-menu-study .ms-empty{padding:20px;color:var(--ms-muted)}
+    #magic-menu-study .ms-bottom{display:flex;justify-content:space-between;gap:12px;padding:12px 20px;background:var(--ms-panel);border-top:1px solid var(--ms-line);font-size:11px;color:var(--ms-muted)}
+    #magic-menu-study .ms-command{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding:14px 4px 20px;color:var(--ms-muted);font-size:12px;min-height:52px;box-sizing:border-box}
+    #magic-menu-study .ms-command code{color:var(--ms-ink)}
+    @media(max-width:650px){#magic-menu-study .ms-header{gap:12px;padding:0 12px}#magic-menu-study .ms-tabs>span{display:none}#magic-menu-study .ms-project{max-width:130px;overflow:hidden;text-overflow:ellipsis}#magic-menu-study .ms-work{grid-template-columns:1fr}#magic-menu-study .ms-rail{display:none}#magic-menu-study .ms-canvas{opacity:.5}#magic-menu-study [data-surface="project"] .ms-overlay{left:12px;width:calc(100% - 24px);box-sizing:border-box}#magic-menu-study .ms-overlay{max-width:calc(100% - 32px);box-sizing:border-box}#magic-menu-study .ms-search-trigger kbd{display:none}}
+  </style>
+  <div class="viz-carousel" aria-label="Unified Magic Studio menu examples">
+    <section data-variant="Magic menu" data-surface="app" aria-label="Magic application menu example"></section>
+    <section data-variant="Project menu" data-surface="project" aria-label="Current-project menu example" hidden></section>
+    <section data-variant="Find an action" data-surface="search" aria-label="Searchable action menu example" hidden></section>
+  </div>
+  <script>
+    (()=>{
+      const root=document.getElementById('magic-menu-study');
+      const actions=[
+        {id:'new',label:'New project…',icon:'file-plus-2',key:'Ctrl N',group:'Create & open',cli:'magic project new'},
+        {id:'open',label:'Open project…',icon:'folder-open',key:'Ctrl O',group:'Create & open',cli:'magic project open'},
+        {id:'recent',label:'Recent projects',icon:'history',key:'',group:'Create & open',cli:'magic project list'},
+        {id:'save',label:'Save project',icon:'save',key:'Ctrl S',group:'Current project',cli:'magic project save'},
+        {id:'storyboard',label:'Open editable storyboard',icon:'panels-top-left',key:'',group:'Current project',cli:'magic storyboard open'},
+        {id:'folder',label:'Reveal project folder',icon:'folder',key:'',group:'Current project',cli:'magic project reveal'},
+        {id:'close',label:'Close project',icon:'panel-top-close',key:'Ctrl W',group:'Current project',cli:'magic project close'},
+        {id:'settings',label:'Settings…',icon:'settings-2',key:'Ctrl ,',group:'Magic Studio',cli:'magic settings'},
+        {id:'quit',label:'Quit Magic Studio',icon:'power',key:'Ctrl Q',group:'Magic Studio',cli:'magic app quit'}
+      ];
+      const icon=name=>`<i data-lucide="${name}" aria-hidden="true"></i>`;
+      for(const section of root.querySelectorAll('[data-surface]')){
+        const mode=section.dataset.surface;
+        section.innerHTML=`<div class="ms-window"><div class="ms-header"><button type="button" class="ms-trigger ms-brand cursor-interaction" aria-label="Toggle Magic menu">Magic <span class="ms-spark">✧</span></button><button type="button" class="ms-trigger ms-project cursor-interaction">${icon('folder')} Three Times Around ${icon('chevron-down')}</button><div class="ms-tabs"><span class="ms-current">Project</span><span>Animation</span><span>Studio</span><button type="button" class="ms-search-trigger cursor-interaction" aria-label="Find an action">${icon('search')}<kbd>Ctrl K</kbd></button></div></div><div class="ms-work"><div class="ms-rail"><div>${icon('music-2')} Song</div><div class="ms-selected">${icon('panels-top-left')} Storyboard</div><div>${icon('layers')} Assets</div><div>${icon('clapperboard')} Animate</div></div><div class="ms-canvas"><div class="ms-board"><span>Scene 02</span><div class="ms-scene">${icon('sailboat')}</div><span class="ms-caption">Lyrics & scene timing</span><div class="ms-board-grid"><span></span><span></span><span></span><span></span></div></div></div></div><div class="ms-overlay"></div><div class="ms-bottom"><span>Design study · not a live app</span><span>Three Times Around</span></div></div><div class="ms-command" aria-live="polite"><span>Proposed CLI vocabulary</span><code>Choose an action</code></div>`;
+        const overlay=section.querySelector('.ms-overlay');
+        if(mode==='search')overlay.innerHTML=`<label class="ms-search">${icon('search')}<input aria-label="Search available actions" placeholder="Find an action…" value="story"></label><div class="ms-results"></div>`;
+        if(mode==='project')overlay.innerHTML=`<div class="ms-menu-head">${icon('folder')} Three Times Around</div><div class="ms-results"></div>`;
+        if(mode==='app')overlay.innerHTML='<div class="ms-results"></div>';
+        const results=overlay.querySelector('.ms-results');
+        const draw=(query='')=>{
+          results.replaceChildren();let last='';
+          const pool=mode==='project'?actions.filter(a=>a.group==='Current project'):actions;
+          const matches=pool.filter(a=>(a.label+' '+a.group).toLowerCase().includes(query.toLowerCase()));
+          for(const action of matches){
+            if(!query&&action.group!==last){const label=document.createElement('div');label.className='ms-group';label.textContent=action.group;results.append(label);last=action.group;}
+            const button=document.createElement('button');button.type='button';button.className='ms-row cursor-interaction';
+            button.innerHTML=`${icon(action.icon)}<span>${action.label}</span><kbd>${action.key}</kbd>`;
+            button.addEventListener('click',()=>{results.querySelectorAll('.ms-active').forEach(b=>b.classList.remove('ms-active'));button.classList.add('ms-active');section.querySelector('.ms-command span').textContent=action.label+' · proposed CLI equivalent';section.querySelector('.ms-command code').textContent=action.cli;});
+            results.append(button);
+          }
+          if(!matches.length){const empty=document.createElement('div');empty.className='ms-empty';empty.textContent='No matching actions';results.append(empty);}
+          if(globalThis.lucide)lucide.createIcons();
+        };
+        draw(mode==='search'?'story':'');
+        const input=overlay.querySelector('input');if(input)input.addEventListener('input',()=>draw(input.value));
+        section.querySelector('.ms-brand').addEventListener('click',()=>{overlay.hidden=!overlay.hidden;});
+        section.querySelector('.ms-project').addEventListener('click',()=>{overlay.hidden=false;});
+        section.querySelector('.ms-search-trigger').addEventListener('click',()=>{overlay.hidden=false;if(input)input.focus();});
+        section.addEventListener('keydown',e=>{if(e.key==='Escape'){overlay.hidden=true;section.querySelector('.ms-brand').focus();}});
+      }
+      if(globalThis.Tweak){
+        const settings={radius:10,density:'Comfortable'};
+        const tweak=new Tweak({container:root,onChange:()=>{root.style.setProperty('--ms-menu-radius',settings.radius+'px');root.style.setProperty('--ms-row-pad',settings.density==='Compact'?'7px':'10px');}});
+        tweak.addSlider(settings,'radius',{label:'Menu corners',min:4,max:18,step:1,unit:'px'});
+        tweak.addSelect(settings,'density',{label:'Menu spacing',options:['Compact','Comfortable']});
+      }
+    })();
+  </script>
+</div>
