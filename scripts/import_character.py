@@ -52,11 +52,11 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     photocraft_bin = os.environ.get('PHOTOCRAFT_CLI') or shutil.which('photocraft-cli')
-    animcraft_bin = shutil.which('mc') or str(workspace_root / 'target/debug/mc')
+    animcraft_bin = shutil.which('magic-cli')
     if not photocraft_bin:
         sys.exit("Error: 'photocraft-cli' not found in PATH.")
     if not animcraft_bin:
-        sys.exit("Error: 'mc' not found in PATH.")
+        sys.exit("Error: 'magic-cli' not found in PATH.")
 
     print(f"\n[1/3] Segmenting subject with photocraft-cli: {source.name}...")
     pc_cmd = [

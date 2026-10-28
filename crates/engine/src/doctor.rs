@@ -1,4 +1,4 @@
-//! `doctor` subcommand (`mc doctor` / `app.doctor`):
+//! `doctor` subcommand (`magic-cli app doctor` / `app.doctor`):
 //! lightweight local check of external CLI tool availability and stale `.video-server.json` state.
 //! Never scans `/proc` to police or kill external processes.
 
@@ -33,7 +33,7 @@ pub fn cmd_app_doctor(s: &mut Session, params: &Value) -> Result<Value> {
     }
 
     let tools: Vec<Value> = [
-        "magic",
+        "magic-cli",
         "hyperframes",
         "photocraft-cli",
         "effectcraft-cli",

@@ -76,7 +76,7 @@ fn startup(app:tauri::AppHandle) -> Value {
 mod bridge;
 mod feedback;
 mod menu;
-mod project_cli;
+mod project_dispatch;
 
 /// The engine session of the open project: one for the window, shared by the page's commands and
 /// the `--control` bridge (the CLI and MCP), like the session of the older UI.
@@ -214,14 +214,14 @@ fn projects_root() -> Result<String, String> {
     magicstudio_engine::project_settings::root().map(|p|p.to_string_lossy().into_owned()).map_err(|e|e.to_string())
 }
 
-/// Run the adjacent mc against this Studio's private bridge. The engine stays in
+/// Dispatch directly through this Studio's guarded command path. The engine stays in
 /// this window; the initiating frontend applies the returned state and acknowledges its revision.
 #[tauri::command]
 async fn project_open(app:tauri::AppHandle, path: String, request: Option<String>, control:Option<String>) -> Result<Value, String> {
     let request=request.unwrap_or_else(feedback::new_request);
     if let Some(result)=feedback::reuse_open(&app,&json!({"path":path,"_request_id":request,"_origin":"UI control"}))?{return Ok(result);}
     feedback::guard(&app,"project.open",true)?;
-    tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.open",json!({"path":path,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || project_dispatch::execute(&app,"project.open",json!({"path":path,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
 }
 
 /// File > New creates an independent window when this one already contains a document.
@@ -233,12 +233,12 @@ async fn new_window() -> Result<Value,String> {
     }).await.map_err(|e|e.to_string())?
 }
 
-/// New song uses the actual CLI project.intake command and preserves its complete receipt.
+/// New song uses the shared project.intake command and preserves its complete receipt.
 #[tauri::command]
 async fn project_create(app:tauri::AppHandle,name:String,audio:String,root:String,request:Option<String>,control:Option<String>)->Result<Value,String>{
  feedback::guard(&app,"project.intake",true)?;
  let request=request.unwrap_or_else(feedback::new_request);
- tauri::async_runtime::spawn_blocking(move || project_cli::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"prepare_only":true,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
+ tauri::async_runtime::spawn_blocking(move || project_dispatch::execute(&app,"project.intake",json!({"root":root,"name":name,"audio":audio,"prepare_only":true,"_client":"Studio user (unverified label)","_request_id":request,"_control":control}))).await.map_err(|e|e.to_string())?
 }
 
 fn project_needs_auto_save(app: &tauri::AppHandle, project: &str, id: &str) -> Result<bool, String> {
@@ -252,7 +252,7 @@ fn project_needs_auto_save(app: &tauri::AppHandle, project: &str, id: &str) -> R
  })
 }
 
-/// Project workflow controls use the installed adjacent CLI, with this window as the target.
+/// Project workflow controls share guarded dispatch with CLI and MCP callers.
 #[tauri::command]
 async fn project_command(app:tauri::AppHandle, project:String, id:String, mut params:Value)->Result<Value,String>{
  if !params.is_object(){return Err("Command parameters must be an object".into());}
@@ -261,9 +261,9 @@ async fn project_command(app:tauri::AppHandle, project:String, id:String, mut pa
  if active.as_deref()!=Some(std::path::Path::new(&project)){return Err("The open project changed; select the intended project first".into());}
  params["_client"]=json!("Studio project workflow");
  tauri::async_runtime::spawn_blocking(move || {
-  let mut result=project_cli::execute(&app,&id,params)?;
+  let mut result=project_dispatch::execute(&app,&id,params)?;
   if project_needs_auto_save(&app,&project,&id)? {
-   let saved=project_cli::execute(&app,"project.save",json!({"_client":"Studio project workflow"}))?;
+   let saved=project_dispatch::execute(&app,"project.save",json!({"_client":"Studio project workflow"}))?;
    result["_ui_engine_revision"]=saved["_ui_engine_revision"].clone();
   }
   result["project"]=json!(project);Ok(result)
@@ -595,20 +595,7 @@ fn run_headless() -> i32 {
     use std::io::BufRead;
     let args: Vec<String> = std::env::args().skip(2).collect();
     if args.first().map(String::as_str) == Some("commands") {
-        let specs: Vec<Value> = magicstudio_engine::command_specs()
-            .iter()
-            .map(|s| {
-                json!({
-                    "id": s.id,
-                    "label": s.label,
-                    "shortcut": s.shortcut,
-                    "menu": s.menu,
-                    "params": s.params,
-                    "journal": s.journal,
-                    "long_running": s.long_running,
-                })
-            })
-            .collect();
+        let specs: Vec<Value> = magicstudio_engine::command_specs().iter().map(|s| s.describe()).collect();
         println!("{}", serde_json::to_string_pretty(&specs).unwrap_or_default());
         return 0;
     }
@@ -683,72 +670,6 @@ fn run_headless() -> i32 {
     }
 }
 
-pub(crate) fn is_read_only_command(id: &str, params: &Value) -> bool {
-    match id {
-        "project.open"
-        | "project.attach"
-        | "project.identity"
-        | "project.catalog"
-        | "project.list_assets"
-        | "project.search"
-        | "workshop.status"
-        | "workshop.files"
-        | "workshop.storyboard"
-        | "storyboard.read"
-        | "storyboard.design"
-        | "storyboard.backgrounds"
-        | "storyboard.toc"
-        | "storyboard.template"
-        | "storyboard.doctor"
-        | "character.assets"
-        | "assets.assess"
-        | "assets.fixlist"
-        | "motion.tracks"
-        | "motion.clips"
-        | "motion.sample"
-        | "motion.theatre.read"
-        | "validate.motion"
-        | "animation.sources"
-        | "animation.status"
-        | "animation.list"
-        | "blender.actions"
-        | "blender.status"
-        | "blender.list"
-        | "synfig.discover"
-        | "opentoonz.discover"
-        | "mlt.discover"
-        | "song.lyrics"
-        | "words.align"
-        | "words.read"
-        | "words.studio_track"
-        | "words.effects"
-        | "words.track"
-        | "skills.list"
-        | "skills.info"
-        | "crew.list"
-        | "agent.session"
-        | "agent.models"
-        | "command.list"
-        | "studio.cues"
-        | "vision.analyze"
-        | "ui.state"
-        | "ui.feedback"
-        | "ui.elements"
-        | "ui.components"
-        | "ui.controls"
-        | "ui.unconfigured" => true,
-        "project.root" => params.get("root").is_none_or(Value::is_null),
-        "skills.limits" => {
-            params.get("max_words").is_none_or(Value::is_null)
-                && params.get("max_steps").is_none_or(Value::is_null)
-        }
-        "skills.diagram" => params.get("render").and_then(Value::as_bool) != Some(true),
-        "agent.log" => params.get("refresh").and_then(Value::as_bool) != Some(true),
-        "app.analytics" => params.get("scan").and_then(Value::as_bool) != Some(true),
-        "app.doctor" => params.get("clean").and_then(Value::as_bool) != Some(true),
-        _ => false,
-    }
-}
 
 fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool) -> Result<Value, String> {
     let is_dry = dry_run || params.get("_dry_run").and_then(Value::as_bool) == Some(true);
@@ -776,7 +697,7 @@ fn headless_dispatch(s: &mut Session, id: &str, mut params: Value, dry_run: bool
                 .map_err(|e| e.to_string())?;
         }
     }
-    if is_dry && !is_read_only_command(id, &params) {
+    if is_dry && !magicstudio_engine::commands::is_read_only_command(id, &params) {
         if magicstudio_engine::find_command(id).is_none() {
             return Err(format!("Unknown engine command: {id}"));
         }
@@ -825,7 +746,7 @@ fn main() {
         .manage(DrawerHeight::default())
         .manage(ControlPort::default())
         .manage(Engine::default())
-        .manage(project_cli::Pending::default())
+        .manage(project_dispatch::Pending::default())
         .manage(feedback::Feedback::default())
         .manage(bridge::Pending::default())
         .invoke_handler(tauri::generate_handler![startup, feedback::ui_report, engine_command, project_state, recent_projects, recent_forget, projects_root, project_open, new_window, project_create, project_command, agent_config, agent_config_save, snapshot, open_path, save_attachment, bridge::bridge_reply, studio_show, studio_hide, drawer_layout])

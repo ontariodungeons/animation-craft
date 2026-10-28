@@ -143,7 +143,7 @@ fn select(matches:&[Value])->Result<Option<Value>,String>{
     // Older builds lack the owner field. An explicit read-only attachment cannot be the writer.
     let possible=matches.iter().filter(|s|s["writer_owner"]!=false).collect::<Vec<_>>();
     if writers.is_empty()&&possible.len()==1{return Ok(Some(possible[0].clone()));}
-    Err("Multiple Studio sessions report this project; no unique writer. Inspect mc studios --json and select its port; no command executed".into())
+    Err("Multiple Studio sessions report this project; no unique writer. Inspect magic-cli studio list and select the intended project; no command executed".into())
 }
 
 /// Shared app opening for desktop, CLI and MCP. Existing windows are never replaced.

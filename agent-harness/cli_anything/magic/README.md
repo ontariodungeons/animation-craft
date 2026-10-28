@@ -1,91 +1,15 @@
-# Magic Studio CLI (`magic` / `magic`)
+# Magic Studio CLI
 
-Unified CLI-Anything harness and MCP server for Magic Studio (`magicstudio-shell`), driving headless `.magic` projects and live GUI windows with one command hierarchy.
+`magic` opens the GUI. `magic-cli --help` describes terminal commands. `magic-cli mcp` starts the MCP stdio server. No REPL.
 
-## Prerequisites
+Read [the Magic skill](skills/SKILL.md) for command discovery, project/window targeting and MCP configuration, and [the architecture](../../../MAGIC.md) for ownership boundaries.
 
-- Magic Studio native app (`magicstudio-shell`):
-  `CARGO_BUILD_JOBS=1 cargo build -p magicstudio-shell`
-- Python 3.10+ with `click` and `prompt-toolkit`
-
-## Installation
+For a source checkout, build and register Magic itself:
 
 ```bash
-cd /run/media/jesse/Speedy/Work/omhas-animation/agent-harness
-pip install -e .
+cargo build -p magicstudio-shell
+uv pip install --python .venv/bin/python -e agent-harness
+python3 scripts/install_magic.py
 ```
 
-This installs both `magic` and `magic` into your `PATH`.
-
-## Usage
-
-### Interactive REPL (Default)
-
-```bash
-magic
-```
-
-### Launching or Attaching to Magic Studio GUI
-
-```bash
-# Launch a new blank Studio window and bind the session
-magic studio new
-
-# Open or focus an existing project in Magic Studio and bind the session
-magic studio "Bumble Bee.magic"
-
-# List open Studio windows
-magic studio list
-```
-
-### Unified Headless & Live Project Operations
-
-Once a project or Studio window is selected (`magic studio <project>` or `magic project open <project>`), all subsequent commands automatically target the live Studio window if the project is open in Magic Studio, or run headlessly and auto-save to `<project>.magic`:
-
-```bash
-# Create or open a project
-magic project new -o /tmp/demo/Song.magic --name "Song"
-magic project open /tmp/demo/Song.magic
-magic project info
-magic project save
-magic project reveal
-magic project close
-
-# Storyboard operations
-magic storyboard read
-magic storyboard edit scene 1 "Hero enters stage left"
-magic storyboard open
-magic storyboard render
-
-# Character & Motion operations
-magic character list
-magic motion tracks character=hopper
-magic motion clips character=hopper
-
-# Video Studio (HyperFrames website / Remotion)
-magic video status
-magic video snapshot sec=1.0 out=/tmp/frame.png
-
-# Live Window UI Controls (CLI-Anything)
-magic ui state
-magic ui feedback
-magic ui elements
-magic ui click id=tab-studio
-magic ui look output=/tmp/studio-look.png
-magic app quit
-```
-
-### MCP Server (`magic mcp`)
-
-Register `magic` with args `["mcp"]` in your MCP client configuration:
-
-```json
-{
-  "mcpServers": {
-    "magic": {
-      "command": "magic",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+Run these from the repository root with its virtual environment prepared. The installer uses this checkout's Python environment, copies the built native shell, and installs `magic`, `magic-cli` and a desktop entry under `~/.local`. It does not install ArtCraft or register MCP servers automatically. Installed users should inspect command paths and errors before changing their installation.

@@ -8,7 +8,7 @@ files the video renders with, found through fontconfig), centred, split into two
 nothing leaves the frame. A hero with a stroke draws it on under or beside itself on its sung beat.
 
   lyrics_layout.py --recipe R --input I        prints {"designs": {animation_id: {line_id: design}}}
-  lyrics_layout.py --recipe R --bridge PORT --mc MC [--apply]
+  lyrics_layout.py --recipe R --project PROJECT --magic-cli CLI [--apply]
                                                reads, saves (and applies) through a running Studio
 """
 import argparse, json, re, subprocess, sys
@@ -129,14 +129,14 @@ def designs(recipe, animations):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--recipe", required=True); ap.add_argument("--input"); ap.add_argument("--bridge"); ap.add_argument("--mc", default="mc")
+    ap.add_argument("--recipe", required=True); ap.add_argument("--input"); ap.add_argument("--project"); ap.add_argument("--magic-cli", default="magic-cli")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
     recipe = json.load(open(a.recipe))
     if a.input:
         print(json.dumps({"designs": designs(recipe, json.load(open(a.input))["animations"])}))
         return
-    mc = lambda *args: json.loads(subprocess.run([a.mc, "--bridge", a.bridge, "exec", *args], capture_output=True, text=True, check=True).stdout)
+    mc = lambda *args: json.loads(subprocess.run([a.magic_cli, *(["--project", a.project] if a.project else []), "exec", *args], capture_output=True, text=True, check=True).stdout)
     doc = mc("words.read")["document"]
     times = {c["word_id"]: c["start"] for s in mc("words.studio_track")["sections"] for c in s["clips"]}
     anims = [{**x, "section": x["scope"]["section"], "words": [dict(w, start=times.get(w["word_id"], w["start"])) for w in x["words"]]} for x in doc["animations"]]

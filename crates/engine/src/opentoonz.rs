@@ -392,8 +392,8 @@ pub fn cmd_opentoonz_start(s: &mut Session, p: &Value) -> Result<Value> {
     let bundle=p["bundle"].as_str().map(|v|crate::workspace::resolve_workspace_path(s,v)).or_else(||project_root(&scene)).or_else(||scene.parent().map(Path::to_path_buf)).ok_or_else(||invalid("bundle required"))?.canonicalize()?;
     if !scene.starts_with(&bundle){return Err(invalid("scene must be inside bundle"));}
     if ["fps","width","height"].iter().any(|k|p.get(*k).is_some()){return Err(invalid("Use saved scene fps/size; overrides unsupported"));}
-    let mc=&readiness["prerequisites"]["mc"]["path"];
-    let mut request=p.clone();request["scene"]=json!(scene);request["bundle"]=json!(bundle);request["stuff"]=json!(stuff);request["tcomposer"]=json!(tool);request["mc"]=json!(mc);request["ffmpeg"]=readiness["prerequisites"]["ffmpeg"]["path"].clone();
+    let mc=&readiness["prerequisites"]["magic_cli"]["path"];
+    let mut request=p.clone();request["scene"]=json!(scene);request["bundle"]=json!(bundle);request["stuff"]=json!(stuff);request["tcomposer"]=json!(tool);request["magic_cli"]=json!(mc);request["ffmpeg"]=readiness["prerequisites"]["ffmpeg"]["path"].clone();
     crate::blender::submit(s,p,request,"opentoonz")
 }
 
@@ -401,12 +401,12 @@ pub fn cmd_opentoonz_start(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     let tool = tcomposer();
     let stuff=stuff_dir();
-    let helper=std::env::current_exe().ok().and_then(|p|[p.with_file_name("magic"),p.with_file_name("mc")].into_iter().find(|c|executable(c)));
+    let helper=std::env::current_exe().ok().and_then(|p|[p.with_file_name("magic-cli")].into_iter().find(|c|executable(c)));
     let ffmpeg=find_executable("ffmpeg",std::env::var_os("PATH"));
     let mut missing=Vec::new();
     if let Err(error)=&tool { missing.push(error.to_string()); }
     if stuff.is_none() { missing.push("Readable nonempty OpenToonz stuff directory required; check OPENTOONZ_STUFF (invalid overrides do not fall back)".into()); }
-    if helper.is_none() { missing.push("Executable mc must be installed beside the caller for bounded native preparation".into()); }
+    if helper.is_none() { missing.push("Executable magic-cli must be installed beside the caller for bounded native preparation".into()); }
     if ffmpeg.is_none() { missing.push("FFmpeg executable not found on PATH; required for alpha encoding".into()); }
     let renderer_error=tool.as_ref().ok().and_then(|tool|renderer_error(tool,std::time::Duration::from_secs(5)));
     if let Some(error)=&renderer_error {missing.push(error.clone());}
@@ -414,7 +414,7 @@ pub fn cmd_opentoonz_discover(s: &mut Session, p: &Value) -> Result<Value> {
     let python_error=if python_checked {pillow_error()}else{None};
     if let Some(error)=&python_error {missing.push(error.clone());}
     let render_reason=(!missing.is_empty()).then(||missing.join("; "));
-    let prerequisites=json!({"renderer":{"checked":tool.is_ok(),"available":if tool.is_ok(){json!(renderer_error.is_none())}else{Value::Null},"error":renderer_error,"private_library_dir":tool.as_ref().ok().and_then(|tool|private_libraries(tool))},"resources":{"available":stuff.is_some(),"path":stuff},"mc":{"path":helper,"available":helper.is_some()},"ffmpeg":{"path":ffmpeg,"available":ffmpeg.is_some()},
+    let prerequisites=json!({"renderer":{"checked":tool.is_ok(),"available":if tool.is_ok(){json!(renderer_error.is_none())}else{Value::Null},"error":renderer_error,"private_library_dir":tool.as_ref().ok().and_then(|tool|private_libraries(tool))},"resources":{"available":stuff.is_some(),"path":stuff},"magic_cli":{"path":helper,"available":helper.is_some()},"ffmpeg":{"path":ffmpeg,"available":ffmpeg.is_some()},
         "python_pillow":{"path":"/usr/bin/python3","checked":python_checked,"available":if python_checked {json!(python_error.is_none())}else{Value::Null},"error":python_error}});
     let mut result = json!({"backend":"opentoonz","available":tool.is_ok(),"render_capable":render_reason.is_none(),"render_reason":render_reason,"prerequisites":prerequisites,"native_render_verified":Value::Null,"tcomposer":tool.as_ref().ok(),
         "tcomposer_sha256":match &tool { Ok(path) => json!(sha256_file(path)?), Err(_) => Value::Null },

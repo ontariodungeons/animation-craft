@@ -315,7 +315,7 @@ def normalize_and_reorder_sheet(
                         "file": wl_rel,
                         "mirroredFallback": True,
                         "generateAsymmetricCmd": (
-                            f"mc exec image.generate provider=codex character={character_id} "
+                            f"magic-cli exec image.generate provider=codex character={character_id} "
                             f"poses='[\"walking left profile view\"]'"
                         ),
                     }
@@ -339,11 +339,11 @@ def normalize_and_reorder_sheet(
         "mirroredSlots": mirrored_slots,
         "onDemandCommands": {
             "missingPoses": (
-                f"mc exec image.generate provider=codex character={character_id} "
+                f"magic-cli exec image.generate provider=codex character={character_id} "
                 f"poses='{json.dumps(missing_slots + mirrored_slots)}'"
             ) if (missing_slots or mirrored_slots) else None,
-            "turnaround": f"mc exec assets.agent_sheets character={character_id} kinds='[\"turnaround\"]'",
-            "explodedLimbs": f"mc exec assets.agent_sheets character={character_id} kinds='[\"skeleton\"]'",
+            "turnaround": f"magic-cli exec assets.agent_sheets character={character_id} kinds='[\"turnaround\"]'",
+            "explodedLimbs": f"magic-cli exec assets.agent_sheets character={character_id} kinds='[\"skeleton\"]'",
         },
         "frames": normalized_frames,
     }

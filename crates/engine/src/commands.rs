@@ -90,6 +90,80 @@ pub struct CommandSpec {
     pub long_running: bool,
 }
 
+impl CommandSpec {
+    pub fn describe(&self) -> Value {
+        serde_json::json!({"id":self.id,"label":self.label,"menu":self.menu,
+            "shortcut":self.shortcut,"params":self.params,"journal":self.journal,
+            "long_running":self.long_running})
+    }
+}
+
+pub fn is_read_only_command(id: &str, params: &Value) -> bool {
+    match id {
+        "project.catalog" => params.get("forget").is_none_or(Value::is_null),
+        "project.attach"
+        | "project.identity"
+        | "project.list_assets"
+        | "project.search"
+        | "workshop.status"
+        | "workshop.files"
+        | "workshop.storyboard"
+        | "storyboard.read"
+        | "storyboard.design"
+        | "storyboard.backgrounds"
+        | "storyboard.toc"
+        | "storyboard.template"
+        | "storyboard.doctor"
+        | "character.assets"
+        | "assets.assess"
+        | "assets.fixlist"
+        | "motion.tracks"
+        | "motion.clips"
+        | "motion.sample"
+        | "motion.theatre.read"
+        | "validate.motion"
+        | "animation.sources"
+        | "animation.status"
+        | "animation.list"
+        | "blender.actions"
+        | "blender.status"
+        | "blender.list"
+        | "synfig.discover"
+        | "opentoonz.discover"
+        | "mlt.discover"
+        | "song.lyrics"
+        | "words.align"
+        | "words.read"
+        | "words.studio_track"
+        | "words.effects"
+        | "words.track"
+        | "skills.list"
+        | "skills.info"
+        | "crew.list"
+        | "agent.session"
+        | "agent.models"
+        | "command.list"
+        | "studio.cues"
+        | "vision.analyze"
+        | "ui.state"
+        | "ui.feedback"
+        | "ui.elements"
+        | "ui.components"
+        | "ui.controls"
+        | "ui.unconfigured" => true,
+        "project.root" => params.get("root").is_none_or(Value::is_null),
+        "skills.limits" => {
+            params.get("max_words").is_none_or(Value::is_null)
+                && params.get("max_steps").is_none_or(Value::is_null)
+        }
+        "skills.diagram" => params.get("render").and_then(Value::as_bool) != Some(true),
+        "agent.log" => params.get("refresh").and_then(Value::as_bool) != Some(true),
+        "app.analytics" => params.get("scan").and_then(Value::as_bool) != Some(true),
+        "app.doctor" => params.get("clean").and_then(Value::as_bool) != Some(true),
+        _ => false,
+    }
+}
+
 const fn is_long_running_id(id: &str) -> bool {
     matches!(
         id.as_bytes(),
@@ -101,7 +175,6 @@ const fn is_long_running_id(id: &str) -> bool {
             | b"synfig.start"
             | b"motion.pose.export"
             | b"motion.export_track"
-            | b"motion.recipe"
             | b"motion.place_section"
             | b"rig.from_sheet"
             | b"words.design"
@@ -249,6 +322,18 @@ pub fn build() -> Vec<CommandSpec> {
         query!("booth.events", "Recent Activity Receipts (alias of backstage.events)", "{\"after\":0,\"limit\":20,\"project\":\"optional absolute project filter\"}", crate::activity::events),
         query!("booth.status", "Backstage (alias of backstage.status)", "{\"trace\":false}", crate::command_center::status),
         query!("center.events", "Recent Activity Receipts (alias of backstage.events)", "{\"after\":0,\"limit\":20,\"project\":\"optional absolute project filter\"}", crate::activity::events),
+        query!("ui.state", "Live window state", "{}", crate::command_center::requires_ui),
+        query!("ui.elements", "Visible controls", "{\"region\":\"optional CSS selector\"}", crate::command_center::requires_ui),
+        query!("ui.unconfigured", "Unconfigured controls", "{}", crate::command_center::requires_ui),
+        cmd!("ui.click", "Click a control", [], None, "{\"id\":\"element ID\",\"instance\":0,\"files\":[]}", always, crate::command_center::requires_ui),
+        cmd!("ui.set", "Set a control", [], None, "{\"id\":\"element ID\",\"value\":\"value\",\"instance\":0}", always, crate::command_center::requires_ui),
+        cmd!("ui.key", "Press a key", [], None, "{\"key\":\"key name\",\"id\":\"optional element ID\"}", always, crate::command_center::requires_ui),
+        cmd!("ui.drag", "Drag a control", [], None, "{\"id\":\"optional element ID\",\"from\":[],\"to\":[]}", always, crate::command_center::requires_ui),
+        cmd!("ui.look", "Capture window and state", [], None, "{\"output\":\"optional PNG path\",\"region\":\"optional CSS selector\",\"click\":\"optional element ID\"}", always, crate::command_center::requires_ui),
+        cmd!("ui.screenshot", "Capture window", [], None, "{\"output\":\"optional PNG path\"}", always, crate::command_center::requires_ui),
+        cmd!("ui.focus", "Focus window", [], None, "{}", always, crate::command_center::requires_ui),
+        cmd!("ui.eval", "Evaluate window JavaScript", [], None, "{\"js\":\"JavaScript body\"}", always, crate::command_center::requires_ui),
+        cmd!("app.quit", "Guarded window close", [], None, "{}", always, crate::command_center::requires_ui),
         query!("ui.feedback", "Live Studio Feedback", "{\"project\":\"optional canonical project path\"}", crate::command_center::requires_ui),
         query!("ui.components", "Rendered Studio Components", "{\"region\":\"#view-project\",\"filter\":\"optional ID filter\",\"limit\":30}", crate::command_center::requires_ui),
         query!("ui.controls", "Studio control telemetry", "{\"region\":\"optional region\",\"offset\":0,\"limit\":64}", crate::command_center::requires_ui),
@@ -259,8 +344,6 @@ pub fn build() -> Vec<CommandSpec> {
         cmd!("project.intake", "New / Resume Project Intake", ["File"], None, "{\"path\":\"optional explicit .magic override\",\"root\":\"optional per-request root override; defaults to project.root\",\"name\":\"song name\",\"audio\":\"optional existing audio; analyzed only without valid existing timing\",\"transcript\":\"optional existing JSON\",\"captions\":\"optional original SRT\",\"audiomap\":\"optional existing audiomap.json\",\"materials\":[\"optional notes/reference file\"],\"skills\":[{\"id\":\"skill id\",\"name\":\"display name\",\"description\":\"what it does\",\"status\":\"researching|implemented|not_implemented\",\"source\":\"url or reference\",\"implemented_at\":[\"command ids\"],\"implemented_in\":[\"file paths\"],\"integration_notes\":\"where it plugs in\"}],\"resume\":false,\"replace_transcript\":false,\"hyperframes_cli\":\"optional absolute official executable; otherwise HYPERFRAMES_CLI or PATH\"}", always, crate::command_center::intake),
         cmd!("motion.layers.set", "Set planar layer stacking", ["Animation"], None,
             "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"expected_rig_sha256\":\"current hash\",\"part\":\"alternative to order: part ID\",\"depth\":0,\"order\":[\"back-part\",\"front-part\"]}", always, crate::motion_authoring::layers_set),
-        cmd!("motion.recipe", "Compile, render and place a song animation batch", [], None,
-            "{\"path\":\"song .magic path; use headless mc exec, without --bridge\",\"studio\":19971,\"scene\":\"optional scene filename stem; omitted runs all scenes\",\"rerender\":false,\"place\":true}", always, crate::motion_recipe::run),
         cmd!("motion.part.set", "Set saved action part channels", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"authored action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"motion.tracks hash\",\"position\":[0,0],\"scale\":[100,100],\"rotation\":0,\"pivot\":[0,0]}", always, crate::motion_authoring::part_set),
         cmd!("motion.part.reset", "Reset explicit saved part fields", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"action id\",\"part\":\"part id\",\"expected_rig_sha256\":\"hash\",\"fields\":[\"position\",\"scale\",\"rotation\"]}", always, crate::motion_authoring::part_reset),
         cmd!("motion.action.set", "Edit authored action metadata", ["Animation"], None, "{\"expected_project\":\"selected .magic\",\"character\":\"asset id\",\"track\":\"stable action id\",\"expected_rig_sha256\":\"hash\",\"label\":\"Action name\",\"duration\":3,\"loop\":false}", always, crate::motion_authoring::action_set),

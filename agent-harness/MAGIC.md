@@ -1,59 +1,24 @@
-# Agent Harness: Magic Studio (`magic` / `magic`)
+# Magic Studio command architecture
 
-## 1. Architecture Analysis
+`magic` launches the native Tauri application. `magic-cli` is its CLI-Anything Click adapter; no arguments print help. `magic-cli mcp` runs the official Python MCP SDK stdio server. There is no REPL, install banner, `mc` compatibility executable or aggregate Craft MCP server.
 
-Magic Studio (`magicstudio-shell`) separates its native Tauri presentation from its Rust command registry (`magicstudio-engine`).
-- **Backend Engine**: `magicstudio-engine` (`Session::execute(id, params)`), exposed both:
-  - **Headlessly** via `magicstudio-shell --headless <command_id> <params_json>`
-  - **Live in an open Studio window** via the window's private Unix domain socket (`$XDG_RUNTIME_DIR/magicstudio-studio/<pid>-<nonce>.sock`) and optional `--control <port>` TCP JSON-lines bridge.
-- **Data Model**:
-  - `.magic` project files (`format: "magicstudio.project"`, `version: 1`)
-  - `.deckcraft` native storyboard decks (`storyboard/*.deckcraft`) and rendered page PNGs (`storyboard/.preview/page-*.png`)
-  - `assets/characters/<id>/character.magic` + `rig.json` + `parts/*.png`
-  - `hyperframes/index.html` — a website inside the project directory that works directly in the Studio app without requiring a separate project name or `hyperframes.json`.
-- **Undo / Redo System (Domain-Local Only — No Cross-Domain Ledger)**:
-  - Each domain maintains its own truthful undo stack:
-    - `motion.edit.undo` (Theatre keyframe edits)
-    - `motion.undo_path` (authored motion paths)
-    - `part.undo_image` (part raster replacements)
-    - `storyboard.update restore=<entry>` (storyboard history entries)
-    - `skills.undo` (skill changes)
+The source of command IDs, labels, parameter documentation, journaling and long-running metadata is `crates/engine/src/commands.rs`. The CLI derives its natural `domain verb` hierarchy from `command.list`; it does not maintain a second dispatch table. MCP exposes `command_list` and `command_run` with engine-defined parameters, plus explicit window opening. The SDK owns the protocol and negotiation; there is no hand-written JSON-RPC loop or fabricated protocol version.
 
-## 2. Unified Session & Context Routing
+Both adapters use `core/session.py` for project/window binding. A selected live project uses its private Unix socket and expected project/instance guards. An unopened project uses the native shell's internal engine entry point, which attaches it, executes `Session::execute` and saves mutations. The transport is automatic. A pinned window that closes or changes projects is an error, not a fallback to a different writer. Explicit project selection is the only rebind path. Session binding writes are locked; Python does not create or save project documents.
 
-The agent never chooses between a UI route and a headless route per operation:
-1. **`magic studio new` / `magic studio <project>`**:
-   - Opens or focuses the Magic Studio window (`magicstudio-shell`), waits for `ui_ready == true`, and pins the live Studio endpoint (`unix:<socket>`) in the active session file.
-2. **`magic project open <project>` / `magic project new <path>`**:
-   - If an open Studio window already owns that `.magic` project, binds to that window's `unix:<socket>` and focuses it.
-   - Otherwise, binds the canonical `.magic` path in the session file (`_locked_save_json`) and runs headlessly with auto-save (`--dry-run` suppresses saving).
-3. **Subsequent Commands (`magic storyboard ...`, `magic character ...`, `magic motion ...`, `magic video ...`, `magic ui ...`, `magic exec ...`)**:
-   - Automatically check if the bound `.magic` project is open in a live Studio window; if so, dispatch over that window's socket so the visible UI updates immediately.
-   - If bound to a live Studio window that has closed or switched projects, refuse with an explicit error — **never** silently fall back to another window or headless state.
-   - Otherwise execute headlessly against the `.magic` file and auto-save mutations.
+UI project actions enter `apps/magicstudio-shell/src/project_dispatch.rs` directly. It retains the correlation token, pending-operation guard, project-state checks, native ownership, draft flushing, revision acknowledgements and initiating frontend refresh. The former subprocess round trip through the CLI and a TCP port is removed. The socket adapter uses that same guarded application dispatch. Window-specific `ui.*` operations are declared in the application registry and implemented by the shell; they fail honestly without a window.
 
-## 3. Command Map
+Other installed apps are independent. Use their documented CLIs directly when their work is needed. Existing Magic domain operations that coordinate project assets remain Magic operations; do not duplicate app capabilities or add generic Craft wrappers.
 
-| Group | Commands | Engine / UI Mapping |
-|-------|----------|---------------------|
-| `studio` | `new`, `open`, `list`, `status`, `unpin`, `quit` | `studio_sessions::open`, `ui.feedback`, `app.quit` |
-| `project` | `new`, `open`, `list`, `save`, `close`, `reveal`, `info`, `profiles`, `add-asset`, `list-assets` | `project.new`, `project.open`, `project.catalog`, `project.save`, `project.close`, `workshop.status`, `project.add_asset`, `project.list_assets` |
-| `storyboard` | `create`, `read`, `update`, `delete`, `edit`, `open`, `build`, `render`, `doctor` | `storyboard.create/read/update/delete`, `workshop.storyboard`, `workshop.build_storyboard`, `storyboard.render`, `storyboard.doctor` |
-| `character` | `list`, `import`, `configure`, `cut-sheet`, `build-rig` | `character.assets`, `character.import`, `character.configure`, `asset.cut_sheet`, `asset.build_cutout_rig` |
-| `motion` | `tracks`, `clips`, `sample`, `keyframe`, `undo`, `path`, `undo-path`, `recipe` | `motion.tracks`, `motion.clips`, `motion.sample`, `motion.edit.keyframe`, `motion.edit.undo`, `motion.path`, `motion.undo_path`, `motion.recipe` |
-| `video` | `init`, `status`, `snapshot`, `render`, `place-track` | `video.init`, `workshop.status`, `video.snapshot`, `video.render`, `video.place_track` |
-| `ui` | `state`, `feedback`, `elements`, `components`, `controls`, `click`, `set`, `key`, `drag`, `look`, `screenshot`, `focus`, `eval` | `ui.*` live window controls |
-| `session` | `status`, `undo`, `clear` | Session state inspection and domain-specific undo |
-| `export` | `presets`, `render` | `export.layered_motion`, `video.render`, `storyboard.render` |
-| `mcp` | `stdio` (default) | Built-in MCP stdio server (`2024-11-05`, `2025-03-26`, `2026-07-28`) |
-| `settings` | `root` | `project.root` |
+The former `motion.recipe` engine command only spawned two scripts and required users to pick a port. Run the existing compiler and recipe renderer directly instead:
 
-## 4. Rendering & Preview Assessment
+```bash
+python3 scripts/compile_motion_specs.py /absolute/project/animation
+python3 scripts/render_motion_recipe.py /absolute/project/animation/recipe/04-render-clips.jsonl --project /absolute/project/Example.magic --place /absolute/project/animation/recipe/05-place-in-video.jsonl
+```
 
-- **Headless Previews**:
-  - Storyboard pages render via DeckCraft to `storyboard/.preview/page-*.png` (`storyboard.render`).
-  - Cutout rigs and motion clips render via EffectCraft (`export.layered_motion`) and HyperFrames (`video.snapshot`, `video.render`).
-  - HyperFrames studio projects work as a website (`hyperframes/index.html`) inside the project folder without needing `hyperframes.json` or a separate project name.
-- **Live Window Previews**:
-  - `magic ui look` and `magic ui screenshot` capture the actual WebKit viewport PNG and DOM element layout from the open `magicstudio-shell` window.
-  - `magic project save` flushes any pending UI storyboard text drafts (`saveStoryboard()`) before persisting `<project>.magic`.
+The renderer uses installed `magic-cli` and project selection, preserving its receipts, input hashes and output checks. Core render and placement operations remain in the shared registry.
+
+See [the packaged Magic skill](cli_anything/magic/skills/SKILL.md) for executable usage and MCP configuration. The matching repo skill is `.agents/skills/magic/SKILL.md`. Historical architecture/handoff documents describe retired implementations and must not be used to restore them.
+
+References: [CLI-Anything HARNESS](https://github.com/HKUDS/CLI-Anything/blob/main/cli-anything-plugin/HARNESS.md), [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture), [official Python SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v1.x), [PhotoCraft's discovery/execution adapter](https://github.com/storytold/photocraft/blob/main/crates/automation/src/server.rs). PhotoCraft is a reference only, not a dependency or integration target for this refactor.

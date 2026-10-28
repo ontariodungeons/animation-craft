@@ -37,7 +37,6 @@ pub mod mesh_geometry;
 pub mod motion;
 pub mod mlt;
 pub mod motion_authoring;
-pub mod motion_recipe;
 pub mod theatre;
 pub mod parts;
 pub mod part_replacement;

@@ -9,11 +9,12 @@ setup(
     },
     install_requires=[
         "click>=8.0.0",
-        "prompt-toolkit>=3.0.0",
+        "mcp>=1.28,<2",
     ],
     entry_points={
         "console_scripts": [
-            "magic=cli_anything.magic.magic_cli:main",
+            "magic=cli_anything.magic.gui:main",
+            "magic-cli=cli_anything.magic.magic_cli:main",
         ],
     },
     python_requires=">=3.10",

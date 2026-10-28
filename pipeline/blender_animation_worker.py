@@ -222,7 +222,7 @@ def main():
                     raise RuntimeError('Requested ' + key + ' does not match saved scene provenance')
         else:
             write_json(job/'progress.json', {'state': 'preparing'})
-            subprocess.run([request['mc'], 'exec', 'blender.prepare', 'request=' + str(request_path)], check=True)
+            subprocess.run([request['magic_cli'], 'exec', 'blender.prepare', 'request=' + str(request_path)], check=True)
             prepared = json.loads((job/'sample.json').read_text())
             import_motion(prepared)
             scene = bpy.context.scene

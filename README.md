@@ -19,24 +19,9 @@ The native **File** menu provides New Project (`Ctrl+N`), Open (`Ctrl+O`), Save 
 
 ## CLI and MCP
 
-`magic` is the CLI-Anything Click + ReplSkin harness for Magic Studio (`agent-harness/cli_anything/magic/`). It provides first-class domain command groups (`magic studio`, `magic project`, `magic storyboard`, `magic character`, `magic part`, `magic image`, `magic motion`, `magic animation`, `magic audio`, `magic words`, `magic video`, `magic skills`, `magic crew`, `magic agent`, `magic analytics`, `magic ui`, `magic export`, `magic session`, `magic app`) plus `magic exec <id> [key=value ...]` and `magic run [file.jsonl|-]`.
+`magic` opens the native application. `magic-cli` prints terminal help; `magic-cli mcp` serves the same Magic operations over MCP. Commands are derived from the application registry, and project/window selection handles transport automatically. There is no REPL or `mc` compatibility entry point.
 
-Session state is persisted in `$XDG_RUNTIME_DIR/magicstudio/` (scoped per `HERDR_PANE_ID` when running inside Herdr). After `magic project open <project.magic>` or `magic studio <project.magic>`, subsequent commands automatically target the live Studio window if open, or execute headlessly via `magicstudio-shell --headless` and persist to the `.magic` file.
-
-Register one Magic Studio MCP server per client: command `magic`, args `["mcp"]`. To target an explicit Studio bridge port or socket:
-
-```bash
-magic --bridge <port> ui state
-magic --bridge <port> mcp
-```
-
-A Studio window must have been started with `magicstudio-shell --control <port>` (or discovered via `$XDG_RUNTIME_DIR/magicstudio-studio/*.sock`) for that bridge to exist. Before restarting Studio, inspect pending/dirty state via `magic ui feedback` and preserve unsaved work.
-
-### Open independent project windows
-
-`magic studio new` (or `magic app open`) opens a fresh project window and binds the session to its ready instance. `magic studio <project.magic>` opens that document in its own window, or focuses its existing window. The application allocates an available control endpoint automatically; no workspace or port choice is required. File > New/Open preserve the current document in its window. File > Close closes only that document; Quit closes only that window after the existing unsaved-work guard.
-
-MCP `app_open` uses the same opening operation and attaches that MCP session to the returned instance. An attached MCP session retains its instance and project identity; a stopped or changed target is an error, never a reason to select another window. Existing explicit `--bridge` endpoints remain available for inspection.
+See [the Magic skill](agent-harness/cli_anything/magic/skills/SKILL.md) for verified syntax and MCP configuration, [the architecture](agent-harness/MAGIC.md) for the shared dispatch contract, and [source installation](agent-harness/cli_anything/magic/README.md). This contract supersedes historical CLI handoff documents. Do not restore the previous command tables or UI-to-CLI subprocess routing.
 
 ## Design every lyric line
 
@@ -72,7 +57,7 @@ Discover contracts from `magic commands workshop` and `magic commands project`. 
 
 For a fresh song, run `magic exec project.intake path=/absolute/song/project/Song.magic transcript=/absolute/words.json captions=/absolute/song.srt audiomap=/absolute/audiomap.json`; omit optional inputs you do not have. Inspect `intake_ready`, `storyboard_ready`, `steps`, `problems` and `next_commands` in the response. `ok:true` means the request was handled. Inspect the saved project with `magic --project /absolute/song/project/Song.magic video status` and `magic --project /absolute/song/project/Song.magic storyboard init`. The latter preserves an existing editable document. Workshop validates the actual transcript bytes, including a native storyboard's source, before marking transcription complete; a missing, malformed or invalid transcript remains incomplete after reopen. A starting storyboard still needs creative authoring and visual review.
 
-New song opens directly in the existing Project workflow and its colored status lights; the retired popup and its handlers are removed. Home and Ctrl+N share `beginNewProject`. Saving the chosen audio invokes `project.intake prepare_only=true`: the upstream music-to-video setup runs `hyperframes init --example blank --skill hyperframes --audio <recording> --skip-transcribe --non-interactive`, its native timeline confirms the audio track, and `hyperframes preview` starts the embedded Studio server. The storyboard starts with the canonical Magic Studio DeckCraft template (`storyboard.template` inspects its path); transcription, scene creation and artwork placement remain explicit actions. HyperFrames is the sole Studio target. Add assets registers generic images; drag them onto the page only where you choose. The existing Transcription block accepts timed lyrics or an explicitly selected audio transcription. `audio.analyze` sends the original recording to the installed `hyperframes transcribe --model large-v3` (override with `model=...`), then uses native SRT export; optional music analysis uses `hyperframes audio --only sections,onsets,moments --json` and retains its raw result in `hyperframes/audio-analysis.json`; it does not first transcode the song. Creating scene pages from that timing is another explicit action. Project controls invoke the adjacent `magic` executable on the window’s selected control port. The normal CLI `project.intake` chain remains available for deliberately automated intake.
+New song opens directly in the existing Project workflow and its colored status lights; the retired popup and its handlers are removed. Home and Ctrl+N share `beginNewProject`. Saving the chosen audio invokes `project.intake prepare_only=true`: the upstream music-to-video setup runs `hyperframes init --example blank --skill hyperframes --audio <recording> --skip-transcribe --non-interactive`, its native timeline confirms the audio track, and `hyperframes preview` starts the embedded Studio server. The storyboard starts with the canonical Magic Studio DeckCraft template (`storyboard.template` inspects its path); transcription, scene creation and artwork placement remain explicit actions. HyperFrames is the sole Studio target. Add assets registers generic images; drag them onto the page only where you choose. The existing Transcription block accepts timed lyrics or an explicitly selected audio transcription. `audio.analyze` sends the original recording to the installed `hyperframes transcribe --model large-v3` (override with `model=...`), then uses native SRT export; optional music analysis uses `hyperframes audio --only sections,onsets,moments --json` and retains its raw result in `hyperframes/audio-analysis.json`; it does not first transcode the song. Creating scene pages from that timing is another explicit action. Project controls call the shared guarded application dispatch directly. The normal CLI `project.intake` chain remains available for deliberately automated intake.
 
 `storyboard.design` reports the existing content check and the named fields still needing work. Animation and Lyrics UI access follows that check. **Proceed with this draft** invokes `workshop.approve_draft approved=true allow_incomplete=true`; it permits access for the current document while retaining the missing-field report. Editing the document or changing its audio reference invalidates that document-specific override. Live app behavior and saved native output remain distinct from creative approval or a completed video.
 
@@ -85,7 +70,7 @@ Storyboards and media commands operate in the selected project. `video.init targ
 | Area | Source |
 |---|---|
 | Studio UI and transport | `apps/magicstudio-shell/ui/`, `apps/magicstudio-shell/src/` |
-| CLI-Anything `magic` harness & MCP | `agent-harness/cli_anything/magic/` |
+| CLI-Anything `magic-cli` harness & MCP | `agent-harness/cli_anything/magic/` |
 | Command contracts/dispatch | `crates/engine/src/commands.rs`, `lib.rs` |
 | Project persistence | `crates/engine/src/project.rs` |
 | Workshop/transcript | `crates/engine/src/workshop.rs` |

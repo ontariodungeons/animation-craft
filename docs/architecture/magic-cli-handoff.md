@@ -1,3 +1,5 @@
+> Magic Studio entry-point and command architecture: [current contract](../../agent-harness/MAGIC.md). `magic` opens the GUI; `magic-cli` and `magic-cli mcp` share the application registry. Do not restore retired `mc`, REPL or duplicated routing from historical instructions.
+
 # Magic CLI & MCP Handoff to Bunzen (`mc` Deletion)
 
 - **Branch**: `main`

@@ -205,7 +205,7 @@ pub fn guard(app: &tauri::AppHandle, id: &str, ui_origin: bool) -> Result<(), St
         || v["errors"].as_array().is_none_or(|a| !a.is_empty())
     {
         return Err(format!(
-            "{id} blocked: unsaved, pending or unknown Studio state. Review edits in Studio and save them; query `mc exec ui.feedback` before retrying. No project was replaced or app closed."
+            "{id} blocked: unsaved, pending or unknown Studio state. Review edits in Studio and save them; query `magic-cli exec ui.feedback` before retrying. No project was replaced or app closed."
         ));
     }
     Ok(())

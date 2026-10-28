@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Magic Studio
+Comment=Character animation and song video studio
+Exec=magic %f
+Icon=ai.storyteller.magicstudio
+Terminal=false
+Categories=Graphics;AudioVideo;
+StartupWMClass=ai.storyteller.magicstudio

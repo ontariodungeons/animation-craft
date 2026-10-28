@@ -1,3 +1,5 @@
+> Magic Studio entry-point and command architecture: [current contract](agent-harness/MAGIC.md). `magic` opens the GUI; `magic-cli` and `magic-cli mcp` share the application registry. Do not restore retired `mc`, REPL or duplicated routing from historical instructions.
+
 # OpenMontage - Agent Guide
 
 Start here. This is the complete operating guide and agent contract for OpenMontage.

@@ -274,7 +274,7 @@ def render_opentoonz(request, request_path):
     helper_request=job/'opentoonz-request.json';write_json(helper_request,prepared)
     env=dict(os.environ,OPENTOONZ_TCOMPOSER=request['tcomposer'],OPENTOONZ_STUFF=str(stuff),QT_QPA_PLATFORM='offscreen')
     write_json(job/'progress.json',{'state':'rendering'})
-    subprocess.run([request['mc'],'exec','opentoonz.render','request='+str(helper_request)],env=env,check=True)
+    subprocess.run([request['magic_cli'],'exec','opentoonz.render','request='+str(helper_request)],env=env,check=True)
     native=json.loads((job/'opentoonz-manifest.json').read_text())
     if any(sha256(snapshot/v['path'])!=v['sha256'] for v in manifest):
         raise ValueError('Frozen source bundle changed during native rendering')

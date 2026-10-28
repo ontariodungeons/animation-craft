@@ -1,4 +1,4 @@
-//! `--control <port>`: the TCP JSON-lines bridge that `magic --bridge <port>` and its
+//! `--control <port>`: the TCP JSON-lines bridge that `magic-cli --bridge <port>` and its
 //! MCP server use to drive this window. One request per line, `{"id": "...", "params": {...}}`;
 //! one reply per line, `{"ok": true, "id", "result"}` or `{"ok": false, "id", "error"}`.
 //!
@@ -71,7 +71,7 @@ fn output(app: &AppHandle, params: &Value, name: &str) -> Result<std::path::Path
 
 pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value, String> {
     let none = Value::Null;
-    let ui_project_request = crate::project_cli::is_ui_request(app,id,params);
+    let ui_project_request = crate::project_dispatch::is_ui_request(app,id,params);
     if let Some(expected)=params["_expected_project"].as_str(){
         let expected=magicstudio_engine::studio_sessions::canonical(std::path::Path::new(expected))?;
         // Read-only observation must not wait for the operation it is observing.
@@ -81,7 +81,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
     #[cfg(unix)]
     if let Some(expected)=params["_expected_instance"].as_str(){let socket=app.state::<LocalSocket>();if socket.0.file_name().and_then(|p|p.to_str())!=Some(expected){return Err("Studio instance changed; explicit reattach required".into());}}
     if params.get("_dry_run").and_then(Value::as_bool) == Some(true)
-        && !crate::is_read_only_command(id, params)
+        && !magicstudio_engine::commands::is_read_only_command(id, params)
     {
         return Ok(json!({
             "ok": true,
@@ -150,7 +150,7 @@ pub(crate) fn handle(app: &AppHandle, id: &str, params: &Value) -> Result<Value,
             if magicstudio_engine::find_command(id).is_some_and(|c|!c.journal){return Ok(result);}
             let revision=crate::feedback::command_finished(app,id,&result,request_id.as_deref());
             if result.is_object(){result["_ui_engine_revision"]=json!(revision);}
-            // This command came from the UI's CLI subprocess. Its awaiting handler renders once;
+            // This command came directly from the UI. Its awaiting handler renders once;
             // refreshing here would call Open while that same transition is still in flight.
             if ui_project_request {return Ok(result);}
             // The page shows the change (and follows a project opened or created from outside).

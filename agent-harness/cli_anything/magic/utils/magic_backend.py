@@ -5,7 +5,7 @@ Handles:
 2. Discovering live Studio instances via `$XDG_RUNTIME_DIR/magicstudio-studio/*.sock` (`ui.feedback`).
 3. Communicating with a live Studio window over its Unix domain socket or `--control` TCP port.
 4. Executing headless engine commands via `magicstudio-shell --headless` (with no dependency on `mc`).
-5. Launching or focusing a Studio window (`magic studio new` / `magic studio <project>`) and waiting for `ui_ready == true`.
+5. Launching or focusing a Studio window (`magic-cli studio open [project]`) and waiting for `ui_ready == true`.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,16 @@ def find_magicstudio_shell() -> str:
         return str(Path(env_override).resolve())
 
     candidates = [
-        REPO_ROOT / "target" / "debug" / "magicstudio-shell",
+        Path(sys.argv[0]).absolute().parent / "magicstudio-shell",
         Path.home() / ".local" / "share" / "magic-studio" / "bin" / "magicstudio-shell",
         Path.home() / ".local" / "bin" / "magicstudio-shell",
     ]
     for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+
+    candidates.append(REPO_ROOT / "target" / "debug" / "magicstudio-shell")
+    for candidate in candidates[-1:]:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate.resolve())
 
@@ -51,9 +57,12 @@ def find_magicstudio_shell() -> str:
 def studio_socket_dir() -> Path | None:
     """Return the runtime directory holding live Studio Unix sockets."""
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if not runtime:
-        return None
-    return Path(runtime) / "magicstudio-studio"
+    if not runtime and sys.platform == "linux":
+        # MCP clients may sanitize the environment; the per-user runtime remains valid.
+        fallback = Path(f"/run/user/{os.getuid()}")
+        if fallback.is_dir() and fallback.stat().st_uid == os.getuid():
+            runtime = str(fallback)
+    return Path(runtime) / "magicstudio-studio" if runtime else None
 
 
 def _send_jsonl_line(sock: socket.socket, cmd_id: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -176,9 +185,9 @@ def call_bridge(
     """Send a command to an explicit or discovered Studio bridge endpoint."""
     req_params = dict(params or {})
     if expected_project:
-        req_params.setdefault("_expected_project", str(Path(expected_project).resolve()))
+        req_params["_expected_project"] = str(Path(expected_project).resolve())
     if expected_instance:
-        req_params.setdefault("_expected_instance", expected_instance)
+        req_params["_expected_instance"] = expected_instance
 
     if endpoint == "auto":
         req_proj = req_params.get("_expected_project") or req_params.get("project")
@@ -187,7 +196,7 @@ def call_bridge(
             if live:
                 return call_unix_socket(live["endpoint"], cmd_id, req_params)
         discovery = discover_studios()
-        sessions = discovery["sessions"]
+        sessions = [] if req_proj else discovery["sessions"]
         if len(sessions) == 1:
             return call_unix_socket(sessions[0]["endpoint"], cmd_id, req_params)
         if not sessions:
@@ -231,29 +240,9 @@ def execute_headless(
     return json.loads(out)
 
 
-LEGACY_COMMAND_PREFIXES = ("backstage.", "booth.", "center.", "sprocket.")
-
-
-def find_studio_shell() -> str:
-    """Alias for `find_magicstudio_shell()`."""
-    return find_magicstudio_shell()
-
-
 def list_engine_commands() -> list[dict[str, Any]]:
-    """Return all active registered engine commands from `magicstudio-shell --headless commands`."""
-    shell_bin = find_magicstudio_shell()
-    proc = subprocess.run(
-        [shell_bin, "--headless", "commands"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    commands = json.loads(proc.stdout)
-    return [
-        c
-        for c in commands
-        if not str(c.get("id", "")).startswith(LEGACY_COMMAND_PREFIXES)
-    ]
+    """The engine registry is the only command catalogue."""
+    return execute_headless("command.list")["commands"]
 
 
 def open_studio_window(

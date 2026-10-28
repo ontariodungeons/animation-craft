@@ -281,7 +281,7 @@ pub fn intake(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if !video_ready {next_commands.push(json!({"command":"video.init","params":{"target":"hyperframes","hyperframes_cli":p["hyperframes_cli"]},"reason":"Correct the reported native video/caption handoff failure; existing timing and deck are preserved"}));}
     }
-    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready&&video_ready,"video_ready":video_ready,"video":video,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"mc commands project.intake","next_commands":next_commands,"next_command":format!("{} center {}",shell_quote(&cli_program()),shell_quote(&format!("project={}",path.display())))});
+    let result = json!({"ok":true,"warnings":warnings,"location":location,"intake_ready":problems.is_empty()&&valid&&storyboard_ready&&video_ready,"video_ready":video_ready,"video":video,"storyboard_ready":storyboard_ready,"storyboard":storyboard,"studio_verified":false,"project":path,"steps":steps,"problems":problems,"received":received,"visual_review":"pending","transcript_valid":valid && !steps.iter().any(|v|v["command"]=="workshop.import_transcript"&&v["status"]=="failed"),"manual":"magic-cli commands project.intake","next_commands":next_commands,"next_command":format!("{} --project {} commands",shell_quote(&cli_program()),shell_quote(&path.to_string_lossy()))});
     write_state(dir, &result)?;
     s.execute("project.save", json!({}))?;
     if !keep_owner{s.project_owner=None;}
@@ -394,12 +394,12 @@ pub fn status(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-pub fn requires_ui(_: &mut Session,_:&Value)->Result<Value>{Err(EngineError::InvalidParams("Use the canonical Studio connection: mc exec ui.feedback; no UI exists in a headless engine session".into()))}
+pub fn requires_ui(_: &mut Session,_:&Value)->Result<Value>{Err(EngineError::InvalidParams("Use the canonical Studio connection: magic-cli exec ui.feedback; no UI exists in a headless engine session".into()))}
 
 pub(crate) fn shell_quote(value:&str)->String{format!("'{}'",value.replace('\'',"'\\''"))}
 
-pub(crate) fn cli_program()->String{
- std::env::current_exe().ok().and_then(|p|{
-  if p.file_name().is_some_and(|v|v == "magic" || v == "mc"){Some(p)}else{p.parent().and_then(|d|d.join("magic").is_file().then(||d.join("magic")).or_else(||d.join("mc").is_file().then(||d.join("mc"))))}
- }).map(|p|p.to_string_lossy().into_owned()).unwrap_or_else(||"magic".into())
+pub(crate) fn cli_program()->String {
+ std::env::current_exe().ok().map(|p|p.with_file_name("magic-cli"))
+  .filter(|p|p.is_file()).map(|p|p.to_string_lossy().into_owned())
+  .unwrap_or_else(||"magic-cli".into())
 }

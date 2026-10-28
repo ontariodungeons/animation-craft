@@ -363,14 +363,14 @@ fn archive(s:&Session)->Result<()> {
 fn bounded_task_cli() -> Result<std::path::PathBuf> {
     let exe=std::env::current_exe()?;
     let folder=exe.parent().ok_or_else(||invalid("Cannot locate the installed magic CLI"))?;
-    for name in ["magic", "mc"] {
+    for name in ["magic-cli"] {
         let candidate=folder.join(name);
         let candidate=if candidate.is_file(){candidate}else{folder.parent().unwrap_or(folder).join(name)};
         if let Ok(resolved) = fs::canonicalize(&candidate) {
             return Ok(resolved);
         }
     }
-    let expected = folder.join("magic");
+    let expected = folder.join("magic-cli");
     Err(invalid(format!("Bounded task needs the matching installed CLI at {}; no alternative installed",expected.display())))
 }
 pub fn cmd_agent_log(s:&mut Session,_p:&Value)->Result<Value> {Ok(log_read(s))}
