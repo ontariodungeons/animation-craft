@@ -1201,3 +1201,14 @@ body:has(#view-design.active) #magic-parts-pane { display: none; }
 #view-analytics .learning-summary { min-width: 0; }
 #view-analytics .learning-bar { flex-wrap: wrap; gap: var(--space-3); }
 #view-analytics #analytics-command-search { width: 100%; box-sizing: border-box; }
+
+/* The existing Analytics rail stays visible as its main content scrolls. */
+#view-analytics .analytics-rail-report { display: grid; gap: var(--space-1); min-width: 0; border-top: thin solid var(--line); padding-top: var(--space-3); }
+#view-analytics .analytics-rail-report h3, #view-analytics .analytics-rail-report p { margin: 0; }
+#view-analytics .analytics-rail-report small { color: var(--muted); overflow-wrap: anywhere; }
+#view-analytics .analytics-numbers { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: var(--space-1) var(--space-2); margin: var(--space-2) 0; }
+#view-analytics .analytics-numbers dt { color: var(--muted); overflow-wrap: anywhere; }
+#view-analytics .analytics-numbers dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+#view-analytics .analytics-rail-report meter { width: 100%; height: var(--space-3); accent-color: var(--amber); }
+#view-analytics .analytics-scan-state[data-state=partial], #view-analytics .analytics-scan-state[data-state=stale], #view-analytics .analytics-scan-state[data-state=worktree_unverified] { color: var(--amber); }
+#view-analytics .learning-categories button { white-space: normal; overflow-wrap: anywhere; }

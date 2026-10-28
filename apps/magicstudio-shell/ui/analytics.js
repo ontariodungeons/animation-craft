@@ -61,8 +61,7 @@ function analyticsRenderSurface() {
   for(const [id,label] of ANALYTICS_SECTIONS){const button=$(`analytics-nav-${id}`);button.classList.toggle('active',id===section);button.setAttribute('aria-pressed',String(id===section));if(id===section)$('analytics-breadcrumb').textContent=`Analytics · ${label}`;}
   $('analytics-message').textContent=analyticsState.error?`Could not refresh: ${analyticsState.error}. Previous results, if any, remain below.`:
     `Read ${analyticsTime(d.sampled_at_unix_secs)} · no background scans or polling`;
-  $('analytics-rail-summary').replaceChildren(el('p',{class:'muted'},comp.available?`${analyticsCode(comp,'files_analyzed')} measured files · ${comp.cached?'saved scan':'last explicit scan'}`:'Code has not been measured here.'),
-    el('p',{class:'muted'},'Current CLI: mc. The proposed magic CLI is pending.'));
+  $('analytics-rail-summary').replaceChildren(analyticsRailReport(comp));
   surface.replaceChildren();
   if(section==='overview')analyticsDiagram(surface);
   if(section==='overview'||section==='complexity')analyticsComplexity(surface,comp,section);
@@ -83,10 +82,31 @@ function analyticsRenderSurface() {
   }
   if(section==='commands')analyticsCommands(surface,d.commands);
 }
+function analyticsScanLabel(comp) {
+  if (!comp.available) return 'Not measured';
+  return {measured:'Explicit scan',saved:'Saved scan',stale:'Saved scan · revision changed',worktree_unverified:'Saved scan · worktree changes not verified'}[comp.state]||'Saved measurement';
+}
+function analyticsRailReport(comp) {
+  const metrics=[['Files','files_analyzed'],['Functions','functions_analyzed'],['CCN > 15','functions_over_ccn_15'],['Max CCN','max_ccn'],['Long files','long_files'],['Source lines','total_source_lines']];
+  const failed=comp.scan_failures?.length||0;
+  const total=comp.available?Number(comp.functions_analyzed):0;
+  const hotspots=comp.available?Number(comp.functions_over_ccn_15):0;
+  const ratio=total>0&&Number.isFinite(hotspots)?`${fmtCount(hotspots)} / ${fmtCount(total)} functions exceed CCN 15`:null;
+  return el('section',{class:'analytics-rail-report','aria-label':'Last code scan report'},
+    el('h3',{},'Last code scan'),
+    el('p',{class:'analytics-scan-state',role:'status','data-state':failed?'partial':comp.state||'not_measured'},analyticsScanLabel(comp)+(failed?` · partial (${failed} failed target${failed===1?'':'s'})`:'')),
+    el('small',{},comp.available?analyticsTime(comp.measured_at_unix_secs):(comp.reason||'Use Refresh scan to measure code.')),
+    ratio?el('meter',{min:0,max:total,value:hotspots,'aria-label':ratio,title:ratio}):null,
+    ratio?el('small',{},ratio):null,
+    el('dl',{class:'analytics-numbers'},...metrics.flatMap(([label,key])=>[el('dt',{},label),el('dd',{},analyticsCode(comp,key))])),
+    comp.available?el('small',{title:comp.source_revision||'Source revision unavailable'},`Lizard ${comp.tool_version||'version unknown'} · ${(comp.source_revision||'revision unavailable').slice(0,12)}`):null,
+    comp.last_error||comp.cache_error?el('small',{role:'status'},comp.last_error||comp.cache_error):null,
+    el('small',{},'Current CLI: mc · magic pending'));
+}
 function analyticsComplexity(surface,comp,section) {
   surface.append(el('h2',{},'Code measurements · Lizard'));
   if(!comp.available){surface.append(el('p',{class:'panel-empty'},comp.reason||'No saved scan. Use Refresh scan to measure local source.'));return;}
-  const stateLabel={measured:'Explicit scan',saved:'Saved scan',stale:'Saved scan · revision changed',worktree_unverified:'Saved scan · worktree changes not verified'}[comp.state]||'Saved measurement';
+  const stateLabel=analyticsScanLabel(comp);
   surface.append(el('p',{class:'muted'},`${stateLabel} · ${analyticsTime(comp.measured_at_unix_secs)} · ${comp.tool||'lizard'}${comp.tool_version?' '+comp.tool_version:''}`),
     el('details',{class:'analytics-provenance'},el('summary',{},'Measurement source and coverage'),
       el('code',{},`${comp.source_root||'Source root unavailable'}\nrevision ${comp.source_revision||'unavailable'}\nWorktree at scan: ${comp.source_dirty===true?'changed':comp.source_dirty===false?'clean':'unknown'}\n${comp.tool_path||'Tool path unavailable'}\nTargets: ${(comp.targets||[]).join(', ')}`)),
