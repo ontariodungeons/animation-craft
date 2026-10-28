@@ -132,9 +132,9 @@ function renderBlocks() {
        const path=await dialog.open({title:'Choose song audio',filters:[{name:'Audio',extensions:['wav','mp3','flac','m4a','aac','ogg']}]});
        if(path)try{await designCommand('workshop.set_audio',{path});toast('Audio link saved; review timing and storyboard for this recording.');}catch(error){toast(String(error));}
      }},audio?'Change audio…':'Upload audio…'),
-     songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : "from transcript",
+     songSection("lyrics", "Lyrics & notes", state.lyrics?.source === "canonical" ? `${state.lyrics.line_count} lines · ${state.lyrics.sections.length} sections` : doc?.words?.length ? "from transcript" : "",
        ready("lyrics"), lyricsState, lyricsBody(state.lyrics, doc, liner, audio?.path)),
-     songSection("transcript", "Transcription", transcriptSummary(doc, ready("transcript")), ready("transcript"), transcriptState,
+     songSection("transcript", "Transcription", doc?.words?.length ? transcriptSummary(doc, ready("transcript")) : "", ready("transcript"), transcriptState,
        [doc?.words?.length ? el("button", { id: "song-open-transcript", onclick: () => lyricReaderOpen(state.lyrics, doc, audio?.path, true) }, "Open transcript") : null,
         el('button',{id:'song-import-transcript','data-commands':'workshop.import_transcript',onclick:importProjectTranscript},'Import timed lyrics…'),
         !doc?.words?.length && audio ? el('button',{id:'song-transcribe','data-commands':'audio.analyze',onclick:()=>designCommand('audio.analyze',{analyze_beats:false}).catch(error=>toast(String(error)))},'Transcribe this recording') : null,
