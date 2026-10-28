@@ -58,11 +58,13 @@
         <form class="panel-body" data-look="form" id="new-form" aria-label="New song project" hidden>
           <label class="field-row">Name<input class="field" id="new-name" placeholder="Bumble Bee" autocomplete="off" required /></label>
           <label class="field-row">Audio
-            <span class="field-row"><input class="field" id="new-audio" placeholder="Choose audio or paste its full path" required />
+            <span class="field-row"><input class="field" id="new-audio" placeholder="Audio file…" required />
               <button type="button" class="ghost" id="new-audio-pick" title="Choose the audio file">Choose…</button></span></label>
+          <details class="project-location"><summary>Project folder</summary>
           <label class="field-row">Folder
             <span class="field-row"><input class="field" id="new-root" readonly required />
               <button type="button" class="ghost" id="new-root-pick" title="Choose where the project folder goes">Choose…</button></span></label>
+          </details>
           <div class="field-row">
             <button type="button" class="ghost" id="new-cancel">Cancel</button>
             <button type="submit" class="start" id="new-create" data-commands="project.intake">Create</button>

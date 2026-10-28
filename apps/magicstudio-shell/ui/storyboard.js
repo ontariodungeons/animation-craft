@@ -14,11 +14,8 @@ function renderStoryboard() {
   if (!pages.length) {
     cards.replaceChildren();
     delete cards.dataset.document;
-    $("sb-page").textContent = "no storyboard yet";
-    cards.append(el('div',{id:'sb-empty',class:'panel-empty'},
-      el('strong',{},'Your storyboard template'),
-      el('p',{},'Choose a DeckCraft template to start your storyboard.'),
-      el('button',{id:'sb-choose-template',class:'start',onclick:()=>chooseStoryboardTemplate().catch(error=>toast(String(error)))},'Choose template…')));
+    $("sb-page").textContent = "Storyboard";
+    cards.append(projectSetupCard());
     return;
   }
   state.page = Math.max(0, Math.min(state.page, pages.length - 1));

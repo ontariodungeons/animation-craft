@@ -72,7 +72,7 @@ async function beginNewProject() {
   $("project-name").textContent = "New project";
   $("sb-chips").replaceChildren();
   $("sb-page").textContent = "—";
-  $("sb-cards").replaceChildren(el("div", {class:"panel-empty"}, "Upload the recording and save to start an empty storyboard."));
+  $("sb-cards").replaceChildren(projectSetupCard(true));
   renderBlocks();
   try { const productionRoot = await invoke("projects_root"); $("new-root").value = productionRoot; $("new-root").defaultValue = productionRoot; }
   catch (error) { $("new-root").value = ""; toast(String(error)); }
@@ -84,7 +84,7 @@ function renderNewProjectBlocks(box) {
   box.append(block("song", ICONS.song, "Song", "New project", false, [newProjectForm], "missing"));
   for (const [id, title] of [["storyboard", "Storyboard"], ["assets", "Assets"], ["animate", "Animate"]]) {
     box.append(block(id, ICONS.animate, title, "", false,
-      [el("p", {class:"why"}, "Save the recording first. Your creative choices follow here.")], "missing"));
+      [el("span", {class:"why"}, "After recording")], "missing"));
   }
 }
 

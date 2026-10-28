@@ -108,6 +108,9 @@ function lyricsBody(lyrics, doc, liner, songPath) {
   const model = lyricModel(lyrics, doc);
   const original = lyrics?.original;
   const name = (path) => String(path).split("/").pop();
+  if (!model.sections.length && !original && !liner.length) {
+    return [el('button',{id:'song-attach-original',class:'ghost',title:'Attach the original lyric sheet',onclick:attachOriginal},'Attach lyric sheet…')];
+  }
   return [
     el("p", { class: "lyric-source" }, model.canonical
       ? `${lyrics.artist ? `${lyrics.artist} · ` : ""}the artist's lyric sheet${lyrics.timing ? " · timing from the recording" : ""}`

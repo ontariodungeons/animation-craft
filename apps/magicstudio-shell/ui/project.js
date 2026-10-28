@@ -70,6 +70,20 @@ function block(id, icon, title, meta, done, body, blockState, action) {
 }
 
 
+function projectSetupCard(creating=false) {
+  const preview=el('div',{class:'project-setup-preview','aria-hidden':'true'},
+    el('div',{class:'project-setup-sheet'},el('span',{class:'project-setup-art',html:ICONS.animate}),
+      el('span',{class:'project-setup-line'}),el('div',{class:'project-setup-fields'},...Array.from({length:4},()=>el('span')))));
+  const steps=el('ol',{class:'project-setup-steps','aria-label':'Project workflow'},
+    ...[['song','Recording'],['lyrics','Lyrics'],['animate','Storyboard']].map(([icon,label])=>
+      el('li',{},el('span',{class:'ico',html:ICONS[icon],'aria-hidden':'true'}),el('span',{},label))));
+  return el('div',{id:'sb-empty',class:'panel-empty project-setup'},preview,
+    el('strong',{},creating?'Start with your song':'Your storyboard'),
+    el('p',{},creating?'Add a recording in the Song panel.':'One editable DeckCraft template.'),steps,
+    creating?null:el('button',{id:'sb-create-storyboard',class:'start','data-commands':'storyboard.init',
+      onclick:()=>designCommand('storyboard.init',{empty:true}).catch(error=>toast(String(error)))},'Create storyboard'));
+}
+
 function renderBlocks() {
   updateAppFooter();
   updateStoryboardAccess();
@@ -79,11 +93,13 @@ function renderBlocks() {
   if (!s) { if (state.creating) renderNewProjectBlocks(box); return; }
   const receipt=state.projectReceipt;
   if(receipt?.project===state.project && (receipt.problems?.length || receipt.warnings?.length)){
-    box.append(el('div',{class:'why',id:'project-intake-problems',role:'status'},
-      el('strong',{},receipt.intake_ready===false?'Intake needs attention':'Project notices'),
-      el('p',{},receipt.project),
-      ...(receipt.problems||[]).map(problem=>el('p',{},String(problem))),
-      ...(receipt.warnings||[]).map(warning=>el('p',{},warning.error||warning.effect||warning.code||String(warning)))));
+    box.append(el('details',{class:'project-notice',id:'project-intake-problems'},
+      el('summary',{},el('span',{class:'project-notice-dot','aria-hidden':'true'}),
+        el('strong',{},receipt.intake_ready===false?'Setup needs attention':'Project notices'),
+        el('span',{class:'ico',html:ICONS.chev,'aria-hidden':'true'})),
+      el('div',{class:'project-notice-body'},el('p',{class:'project-path'},receipt.project),
+        ...(receipt.problems||[]).map(problem=>el('p',{},String(problem))),
+        ...(receipt.warnings||[]).map(warning=>el('p',{},warning.error||warning.effect||warning.code||String(warning))))));
   }
   if(projectView.error)box.append(el('p',{class:'why',id:'project-command-error',role:'alert'},projectView.error));
   if(state.data?.design?.error)box.append(el('div',{class:'why',id:'storyboard-read-error',role:'alert'},
@@ -111,7 +127,7 @@ function renderBlocks() {
   const transcriptState = observed("transcript")?.state || "unknown";
   const doc = transcript.document;
   box.append(block("song", ICONS.song, "Song", audio?.name, ready("song"),
-    [el("div", { class: "why" }, song.why || ""), audio ? fileButton(audio) : null,
+    [audio ? fileButton(audio) : null,
      el('button',{id:'song-upload','data-commands':'workshop.set_audio',onclick:async()=>{
        const path=await dialog.open({title:'Choose song audio',filters:[{name:'Audio',extensions:['wav','mp3','flac','m4a','aac','ogg']}]});
        if(path)try{await designCommand('workshop.set_audio',{path});toast('Audio link saved; review timing and storyboard for this recording.');}catch(error){toast(String(error));}
@@ -147,7 +163,7 @@ function renderBlocks() {
     el('div',{class:'field-row'},
       !sb?.deck ? el('button',{id:'storyboard-create',class:'ghost','data-commands':'storyboard.init',onclick:()=>designCommand('storyboard.init',{empty:true}).catch(error=>toast(String(error)))},'Create storyboard') : null,
       el('button',{id:'storyboard-template-open',class:'icon',disabled:!template,'aria-label':'Edit storyboard template',title:template||'Magic Studio storyboard template',html:$('sb-open-deck').innerHTML,onclick:()=>invoke('open_path',{path:template})})),
-    el('p',{class:'why',role:'status'},content?.reason || 'Storyboard content has not been inspected'),
+    sb?.deck ? el('p',{class:'why',role:'status'},content?.reason || 'Storyboard needs review') : null,
     el('button',{id:'storyboard-discuss','data-drawer-toggle':'sproket',title:'Open Sproket to discuss the missing storyboard details',onclick:async()=>{
       const input=$('agent-input');
       if(!input.value.trim())input.value='Help me develop this storyboard. Read center.status creative_followup and the existing project assets. Ask me about the missing creative details before proposing placements or generating artwork.';
